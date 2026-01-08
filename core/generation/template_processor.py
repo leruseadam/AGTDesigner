@@ -1873,7 +1873,7 @@ class TemplateProcessor:
             
             # Set ProductVendor to actual vendor/supplier for classic types
             # Get vendor from record, not from product_brand
-            vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
+            vendor_val = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor', '')
             if vendor_val and str(vendor_val).lower() != 'nan':
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
@@ -4209,10 +4209,10 @@ class TemplateProcessor:
                         from src.core.generation.unified_font_sizing import get_font_size
                         vendor_font_size = get_font_size(marker_data['content'], 'vendor', self.template_type, self.scale_factor)
                         set_run_font_size(run, vendor_font_size)
-                        # Set vendor text to italic and light gray color
+                        # Set vendor text to italic and gray color
                         run.font.italic = True
                         from docx.shared import RGBColor
-                        run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                        run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                         run.font.color.theme_color = None  # Clear any theme color
                     continue
                 elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
@@ -6295,11 +6295,11 @@ class TemplateProcessor:
                 
                 # Set vendor color to light gray (#CCCCCC)
                 from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 
                 # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
@@ -6417,11 +6417,11 @@ class TemplateProcessor:
                 
                 # Set vendor color to light gray (#CCCCCC)
                 from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 
                 # Ensure the color is applied by setting it explicitly
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size

@@ -111,7 +111,7 @@ CLASSIC_TYPES = {
     "flower", "bud",
     
     # Pre-roll types  
-    "pre-roll", "infused pre-roll", "preroll",
+    "pre-roll", "infused pre-roll", "preroll", "blunt", "flavored blunt",
     
     # Concentrate types (all variations)
     "concentrate", "solventless concentrate",
@@ -132,7 +132,9 @@ VALID_CLASSIC_LINEAGES = {
 # Excluded product types and patterns
 EXCLUDED_PRODUCT_TYPES = [
     "Samples - Educational", 
-    "Sample - Vendor"
+    "Sample - Vendor",
+    "X-DEACTIVATED 1",
+    "X-DEACTIVATED 2"
 ]
 
 # Product name patterns to exclude

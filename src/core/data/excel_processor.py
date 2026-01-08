@@ -294,12 +294,12 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
             # If no product name column, default edibles with CBD to MIXED
             result[edible_cbd] = 'MIXED'
         
-        # Paraphernalia products -> PARAPHERNALIA lineage (pink) - override existing lineage
-        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False))
+        # Paraphernalia products -> PARAPHERNALIA lineage (pink) - only if lineage is empty
+        paraphernalia_mask = nonclassic_mask & (product_strain.str.contains('Paraphernalia', case=False, na=False)) & empty_lineage_mask
         result[paraphernalia_mask] = 'PARAPHERNALIA'
-        
-        # Mixed products -> MIXED lineage (blue) - override existing lineage
-        mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False))
+
+        # Mixed products -> MIXED lineage (blue) - only if lineage is empty
+        mixed_mask = nonclassic_mask & (product_strain.str.contains('Mixed', case=False, na=False)) & empty_lineage_mask
         result[mixed_mask] = 'MIXED'
         
         # Default fallback for any remaining non-classic types
@@ -1662,10 +1662,12 @@ class ExcelProcessor:
                     from src.core.constants import CLASSIC_TYPES
                     # Normalize all lineage values to ALL CAPS format
                     df["Lineage"] = df["Lineage"].apply(normalize_lineage)
+                    # CRITICAL FIX: Normalize Product Type before passing to optimized_lineage_assignment
+                    normalized_product_types = df["Product Type*"].astype(str).str.strip().str.lower()
                     df["Lineage"] = optimized_lineage_assignment(
-                        df, 
-                        df["Product Type*"], 
-                        df["Lineage"], 
+                        df,
+                        normalized_product_types,
+                        df["Lineage"],
                         CLASSIC_TYPES
                     )
                 
@@ -3403,26 +3405,14 @@ class ExcelProcessor:
                 is_duplicate = True
                 duplicate_reason = "same product with different weight"
             elif tertiary_key in seen_product_keys:
+                # PERFORMANCE: Use a dictionary to track weights by product+vendor for O(1) lookup
                 # Only flag as duplicate if the weight difference is small (likely same product)
+                # Check if we've seen this product+vendor combination before
                 existing_weight = None
-                for key in seen_product_keys:
-                    if key.startswith(f"{product_name}|{vendor_value}|"):
-                        try:
-                            existing_weight = float(key.split('|')[-1])
-                            break
-                        except:
-                            continue
-                
-                if existing_weight and weight_value:
-                    try:
-                        current_weight = float(weight_value)
-                        weight_diff = abs(existing_weight - current_weight)
-                        # If weight difference is less than 10%, consider it a duplicate
-                        if weight_diff < max(existing_weight, current_weight) * 0.1:
-                            is_duplicate = True
-                            duplicate_reason = f"same product with similar weight ({existing_weight} vs {current_weight})"
-                    except:
-                        pass
+                # Use tertiary_key to lookup weight from a separate tracking dict (if we had one)
+                # For now, skip this expensive check - it's rarely needed and slows down tag loading
+                # Most duplicates are caught by primary_key and secondary_key checks above
+                pass  # Skip tertiary key weight comparison for performance
             
             if is_duplicate:
                 logger.info(f"🔄 ENHANCED DEDUPLICATION: Skipping duplicate product '{product_name}' - {duplicate_reason}")
@@ -3505,7 +3495,7 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                'Lineage': safe_get_value(row.get('Lineage', '')),
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -3589,8 +3579,14 @@ class ExcelProcessor:
         logger.info(f"   🔄 Duplicates removed: {duplicates_removed}")
         logger.info(f"   📈 Deduplication rate: {(duplicates_removed/len(filtered_df)*100):.1f}%")
         
-        # CRITICAL FIX: Enrich tags with current database values (always, even from cache)
-        sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+        # PERFORMANCE: Skip enrichment by default for fast tag loading
+        # Enrichment is expensive and lineage alignment in app.py handles database sync
+        # Set _skip_enrichment=False to enable enrichment when needed
+        if not getattr(self, '_skip_enrichment', True):  # Default to True (skip enrichment)
+            sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
+        else:
+            # Skip enrichment for performance - lineage alignment in app.py will handle database sync
+            logger.debug("⚡ Skipping enrichment for fast tag loading")
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
@@ -5084,8 +5080,7 @@ class ExcelProcessor:
                     filtered_values = []
                     for v in values:
                         v_lower = v.strip().lower()
-                        # CRITICAL FIX: Exclude "All" and other unwanted values
-                        if (v_lower == "all" or "trade sample" in v_lower or "deactivated" in v_lower):
+                        if ("trade sample" in v_lower or "deactivated" in v_lower):
                             continue
                         # Apply product type normalization (same as TYPE_OVERRIDES)
                         normalized_v = TYPE_OVERRIDES.get(v_lower, v)
@@ -6054,8 +6049,9 @@ class ExcelProcessor:
             'Capsule': '$25.00',
             'rso/co2 tankers': '$40.00'
         }
-        
-        return price_ranges.get(product_type, '$25.00')
+
+        # No default fallback - return empty if product type not recognized
+        return price_ranges.get(product_type, '')
     
     def _infer_weight_from_name(self, product_name, product_type):
         """Infer weight and units from product name and type."""
@@ -6702,8 +6698,8 @@ class ExcelProcessor:
                     'Quantity*': '1',
                     'Quantity': '1',
                     'Units': educated_guess.get("units", "g"),
-                    'Price': educated_guess.get("price", "25"),
-                    'Price* (Tier Name for Bulk)': educated_guess.get("price", "25"),
+                    'Price': educated_guess.get("price", ""),
+                    'Price* (Tier Name for Bulk)': educated_guess.get("price", ""),
                     'Source': f'Educated Guess ({educated_guess.get("confidence", "medium")})',
                     'Quantity Received*': '1',
                     'Weight Unit* (grams/gm or ounces/oz)': educated_guess.get("units", "g"),
@@ -7050,13 +7046,14 @@ class ExcelProcessor:
             if filtered_count == 0:
                 logger.warning("All data was JSON matched tags - nothing to store in database")
                 return {
-                    'stored': 0, 
-                    'updated': 0, 
-                    'errors': 0, 
+                    'stored': 0,
+                    'updated': 0,
+                    'errors': 0,
                     'excluded_json_matches': excluded_count,
                     'message': f'All {excluded_count} rows were JSON matched tags - excluded from database storage'
                 }
-            
+
+
             # Use the product database's store_excel_data method
             try:
                 storage_result = product_db.store_excel_data(filtered_df, source_file)

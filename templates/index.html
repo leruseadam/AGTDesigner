@@ -342,12 +342,74 @@
         alert('Please refresh the page and try again.');
       };
     }
+
+    // Debug helper function - call from console: window.forceShowStoreModal()
+    window.forceShowStoreModal = function() {
+      console.log('🔧 Forcing store modal to show via debug helper...');
+      showStoreSelectionModal(true);
+    };
+
+    // Debug helper - simulate first load by clearing all store data and reloading
+    window.simulateFirstLoad = function() {
+      console.log('🔄 Simulating first load - clearing all store data...');
+
+      // Clear client-side storage
+      window.storeConfirmed = false;
+      sessionStorage.clear();
+      localStorage.clear();
+
+      // Clear server-side session
+      fetch('/api/clear-store', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin'
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('✅ Server store cleared:', data);
+        console.log('🔄 Reloading page to show first-time experience...');
+        // Reload page after clearing to show modal
+        setTimeout(() => {
+          window.location.href = window.location.pathname + '?force_store_modal=true';
+        }, 500);
+      })
+      .catch(error => {
+        console.error('❌ Error clearing store:', error);
+        // Reload anyway with force flag
+        window.location.href = window.location.pathname + '?force_store_modal=true';
+      });
+    };
     
-    function showStoreSelectionModal() {
+    // Helper to force show store modal immediately
+    window.forceShowStoreModalNow = function() {
+      console.log('🔧 Force showing store modal immediately...');
+      // Clear all flags
+      window.storeConfirmed = false;
+      sessionStorage.removeItem('store_just_selected');
+      sessionStorage.removeItem('selected_store');
+      sessionStorage.removeItem('store_selected_timestamp');
+      // Show modal
+      if (typeof showStoreSelectionModal === 'function') {
+        showStoreSelectionModal(true);
+      } else {
+        console.error('showStoreSelectionModal function not available');
+      }
+    };
+
+    function showStoreSelectionModal(forceClear = false) {
       try {
         console.log('=== SHOWING STORE SELECTION MODAL ===');
+        console.log('forceClear:', forceClear);
         console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
-        
+
+        // If forceClear is true, clear all session flags first
+        if (forceClear) {
+          console.log('🧹 Clearing all store session flags...');
+          window.storeConfirmed = false;
+          sessionStorage.removeItem('store_just_selected');
+          sessionStorage.removeItem('selected_store');
+        }
+
         const modalElement = document.getElementById('storeSelectionModal');
         console.log('Modal element found:', modalElement !== null);
         if (!modalElement) {
@@ -356,11 +418,14 @@
           return;
         }
         
+        // CRITICAL: Ensure modal is visible (remove any hidden states)
+        modalElement.style.visibility = 'visible';
+        modalElement.style.display = 'block';
+        
         // Check if Bootstrap is available
         if (typeof bootstrap === 'undefined') {
           console.error('❌ Bootstrap not available, using fallback method');
           // Fallback: Show modal manually if Bootstrap isn't loaded
-          modalElement.style.display = 'block';
           modalElement.classList.add('show');
           modalElement.setAttribute('aria-hidden', 'false');
           modalElement.setAttribute('aria-modal', 'true');
@@ -371,7 +436,7 @@
           if (!document.querySelector('.modal-backdrop')) {
             const backdrop = document.createElement('div');
             backdrop.className = 'modal-backdrop fade show';
-            backdrop.style.zIndex = '1040';
+            backdrop.style.zIndex = '10000';
             document.body.appendChild(backdrop);
           }
           
@@ -403,10 +468,12 @@
         try {
           const modalElement = document.getElementById('storeSelectionModal');
           if (modalElement) {
+            modalElement.style.visibility = 'visible';
             modalElement.style.display = 'block';
             modalElement.classList.add('show');
             modalElement.setAttribute('aria-hidden', 'false');
             document.body.classList.add('modal-open');
+            document.body.style.overflow = 'hidden';
             console.log('✅ Modal shown using error fallback');
           }
         } catch (fallbackError) {
@@ -554,25 +621,9 @@
     }
     
     function checkStoreRequired(onStoreConfirmed) {
-      // CRITICAL FIX: Don't check again if store was already confirmed
-      // This prevents the modal from reappearing after uploads or page reloads
-      // SIMPLE FIX: If store was just confirmed in this session, skip the check
-      // This prevents modal from showing twice after selecting a store
-      if (window.storeConfirmed) {
-        console.log('✅ Store already confirmed in this session, skipping check');
-        // CRITICAL FIX: Even if store is already confirmed, still call the callback to ensure TagManager initializes
-        if (typeof onStoreConfirmed === 'function') {
-          console.log('🔄 Store already confirmed - calling callback to ensure TagManager initializes');
-          setTimeout(() => {
-            try {
-              onStoreConfirmed();
-            } catch (initError) {
-              console.error('❌ Error in onStoreConfirmed callback:', initError);
-            }
-          }, 100);
-        }
-        return;
-      }
+      // Backend handles IP-based persistence (12 hour expiration)
+      // Frontend simply trusts the backend's /api/check-store-required response
+      // No frontend caching - always check with backend to get accurate IP-based store status
 
       // Prevent multiple simultaneous calls
       if (window.checkingStoreRequired) {
@@ -582,28 +633,40 @@
       window.checkingStoreRequired = true;
       
       console.log('=== CHECKING STORE REQUIREMENT ===');
-      
+
       const modalElement = document.getElementById('storeSelectionModal');
       const mainContent = document.getElementById('mainContent');
-      
+
       console.log('Modal element exists:', modalElement !== null);
-      
+
       if (!modalElement) {
         console.error('❌ Modal element not found! Retrying in 500ms...');
         window.checkingStoreRequired = false;
         setTimeout(checkStoreRequired, 500);
         return;
       }
-      
-      // Keep both hidden while checking backend
+
+      // Check for force_store_modal URL parameter
+      const urlParams = new URLSearchParams(window.location.search);
+      const forceModal = urlParams.get('force_store_modal') === 'true';
+
+      console.log('URL search params:', window.location.search);
+      console.log('force_store_modal parameter:', urlParams.get('force_store_modal'));
+      console.log('forceModal boolean:', forceModal);
+
+      if (forceModal) {
+        console.log('🔧 Force store modal flag detected - showing modal immediately');
+        showStoreSelectionModal(true); // Pass true to force clear session flags
+        window.checkingStoreRequired = false;
+        return;
+      }
+
+      // CRITICAL: Always check backend first - sessionStorage may be stale after server restart
+      // Don't trust client-side storage alone
       if (modalElement) {
         modalElement.style.display = 'none';
       }
-      if (mainContent) {
-        mainContent.style.pointerEvents = 'none';
-        mainContent.classList.add('store-selection-disabled');
-      }
-      
+
       console.log('Fetching store status from backend...');
       const cacheBust = `ts=${Date.now()}`;
       
@@ -611,9 +674,14 @@
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
-      fetch(`/api/check-store-required?${cacheBust}`, {
+      fetch(`/api/check-store-required?${cacheBust}&_=${Date.now()}`, {
         credentials: 'same-origin',
         cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        },
         signal: controller.signal
       })
         .then(response => {
@@ -648,6 +716,14 @@
           if (!data) return; // Skip if error was handled (timeout)
           console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
           console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
+          console.log('DEBUG INFO:', data.debug || 'no debug info');
+          
+          // CRITICAL: Check requires_store flag first
+          if (data.requires_store === true) {
+            console.log('🔴 REQUIRES_STORE IS TRUE - Modal should show!');
+          } else {
+            console.log('🟢 REQUIRES_STORE IS FALSE - Modal should NOT show');
+          }
           
           // Clear logic: show content if user has a store, otherwise show modal
           const userHasStore = (data.success && !data.requires_store && data.store);
@@ -655,6 +731,7 @@
           
           // CRITICAL FIX: Ensure we have a valid store before proceeding
           const hasValidStore = userHasStore && data.store && data.store.trim() !== '';
+          console.log('HAS VALID STORE?', hasValidStore);
           
           if (hasValidStore) {
             // USER HAS STORE - Show content, hide modal
@@ -686,8 +763,8 @@
               mainContent.style.visibility = 'visible';
               mainContent.style.pointerEvents = '';
               mainContent.classList.remove('store-selection-disabled');
-              mainContent.classList.add('store-selected');
-              setTimeout(() => mainContent.classList.add('loaded'), 100);
+              // Add both classes immediately to prevent opacity:0 flicker
+              mainContent.classList.add('store-selected', 'loaded');
             }
             
             // Clear blocking flag if it exists
@@ -762,14 +839,26 @@
               store: data.store,
               userHasStore: userHasStore
             });
-            
+
+            // CRITICAL: Clear stale sessionStorage when backend says no store
+            // This handles the case where server restarted but browser has old sessionStorage
+            sessionStorage.removeItem('store_just_selected');
+            sessionStorage.removeItem('selected_store');
+            sessionStorage.removeItem('store_selected_timestamp');
+            window.storeConfirmed = false;
+            console.log('🧹 Cleared stale sessionStorage flags');
+
             // CRITICAL FIX: Set blocking flag BEFORE showing modal
             window.STORE_MODAL_BLOCKING = true;
             
             if (modalElement) {
+              console.log('🔴 SHOWING MODAL - Setting display and classes...');
               modalElement.style.display = 'block';
+              modalElement.style.visibility = 'visible';
+              modalElement.style.opacity = '1';
               modalElement.classList.add('show');
               modalElement.setAttribute('aria-hidden', 'false');
+              modalElement.setAttribute('aria-modal', 'true');
               document.body.classList.add('modal-open');
               document.body.style.overflow = 'hidden';
               
@@ -780,22 +869,59 @@
                 backdrop.className = 'modal-backdrop fade show';
                 backdrop.style.zIndex = '1040';
                 document.body.appendChild(backdrop);
+                console.log('✅ Added modal backdrop');
               }
               
               // CRITICAL FIX: Try to show modal using Bootstrap if available
               if (typeof bootstrap !== 'undefined') {
                 try {
+                  console.log('🔴 Using Bootstrap to show modal...');
                   const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement, {
                     backdrop: 'static',
                     keyboard: false
                   });
                   modalInstance.show();
+                  console.log('✅ Bootstrap modal.show() called');
                 } catch (bootstrapError) {
                   console.warn('⚠️ Bootstrap modal show failed, using fallback:', bootstrapError);
+                  // Fallback: ensure modal is visible
+                  modalElement.style.display = 'block';
+                  modalElement.style.visibility = 'visible';
+                  modalElement.style.zIndex = '9999';
                 }
+              } else {
+                console.warn('⚠️ Bootstrap not available, using manual display');
+                // Ensure modal is visible without Bootstrap
+                modalElement.style.display = 'block';
+                modalElement.style.visibility = 'visible';
+                modalElement.style.zIndex = '9999';
               }
+              
+              // Double-check modal is visible after a short delay
+              setTimeout(() => {
+                const isVisible = modalElement.offsetParent !== null || 
+                                 modalElement.style.display !== 'none' ||
+                                 modalElement.classList.contains('show');
+                console.log('🔍 Modal visibility check:', {
+                  offsetParent: modalElement.offsetParent !== null,
+                  display: modalElement.style.display,
+                  hasShowClass: modalElement.classList.contains('show'),
+                  isVisible: isVisible
+                });
+                if (!isVisible) {
+                  console.error('❌ Modal is not visible! Forcing display...');
+                  modalElement.style.display = 'block';
+                  modalElement.style.visibility = 'visible';
+                  modalElement.style.opacity = '1';
+                  modalElement.style.zIndex = '9999';
+                  modalElement.classList.add('show');
+                }
+              }, 100);
             } else {
               console.error('❌ Modal element not found when trying to show store selection modal');
+              console.error('❌ Attempting to find modal element...');
+              const foundModal = document.getElementById('storeSelectionModal');
+              console.error('❌ Found modal element:', foundModal !== null);
             }
             
             if (mainContent) {
@@ -938,8 +1064,23 @@
           }),
           // Defer analytics - load after page is interactive
           Promise.resolve({ error: 'Deferred' }),
-          // Only load available tags immediately (critical for UI)
-          fetchWithTimeout('/api/web/available-tags', 10000).catch(e => { console.error('Available tags failed:', e); return []; })
+          // Only load available tags immediately (critical for UI) - but only if a file is uploaded
+          (() => {
+            // Check if a file is uploaded before fetching tags
+            const fileInfoText = document.getElementById('fileInfoText');
+            const hasFile = fileInfoText && fileInfoText.textContent.trim() !== 'No file uploaded' && fileInfoText.textContent.trim() !== '';
+            const uploadedFilename = sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path');
+            
+            if (!hasFile && !uploadedFilename) {
+              console.log('⚠️ No file uploaded - skipping tag load');
+              return Promise.resolve([]);
+            }
+            
+            return fetchWithTimeout('/api/web/available-tags?fast_load=1', 5000).catch(e => { 
+              console.error('Available tags failed:', e); 
+              return []; 
+            });
+          })()
         ])
         .then((results) => {
           console.log('All promises settled:', results);
@@ -3477,6 +3618,7 @@
         background-color: #212529 !important;
         color: white !important;
         border-color: #495057;
+        text-align: center !important;
       }
       
       /* Force white text in table body - ALL SELECTORS */
@@ -3782,6 +3924,7 @@
       color: white;
       border: none;
       font-weight: 600;
+      text-align: center !important;
     }
     
     .database-modal .table tbody tr {
@@ -3956,6 +4099,7 @@
       color: #ffffff;
       font-weight: 600;
       white-space: nowrap;
+      text-align: center !important;
       padding-top: 0.4rem;
       padding-bottom: 0.4rem;
     }
@@ -4060,6 +4204,7 @@
       background: rgba(22, 33, 62, 0.8);
       border: 1px solid rgba(0, 212, 170, 0.3);
       color: #ffffff;
+      font-size: 1.2rem;
     }
 
     #databaseEditorModal .form-control:focus {
@@ -4184,6 +4329,7 @@
               font-weight: 600;
               color: #495057;
               border-bottom: 2px solid #e9ecef;
+              text-align: center !important;
             }
             
             .strain-row {
@@ -4347,6 +4493,7 @@
       font-weight: 600;
       color: #2d3436;
       padding: 1rem;
+      text-align: center !important;
     }
     
     .enhanced-lineage-editor .table tbody tr {
@@ -4749,7 +4896,7 @@
     }
     
     .filter-label {
-      font-size: 11px;
+      font-size: 15px;
       font-weight: 700;
       color: rgba(255, 255, 255, 0.95);
       margin-bottom: 6px;
@@ -4808,7 +4955,7 @@
     #highCbdFilter,
     #templateSelect {
       background-color: rgba(44, 34, 58, 0.85) !important;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%2300d4aa' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
       background-repeat: no-repeat !important;
       background-position: right 16px center !important;
       background-size: 18px 18px !important;
@@ -4820,7 +4967,7 @@
       border-radius: 14px !important;
       font-size: 18px !important;
       font-weight: 700 !important;
-      color: #fff !important;
+      color: #00d4aa !important;
       text-align: left !important;
       padding: 1rem 48px 1rem 1.25rem !important;
       line-height: 1.5 !important;
@@ -4828,6 +4975,9 @@
       overflow: visible !important;
       text-overflow: clip !important;
       white-space: nowrap !important;
+      text-indent: 0 !important;
+      -webkit-text-align-last: left !important;
+      -moz-text-align-last: left !important;
       -webkit-appearance: none !important;
       -moz-appearance: none !important;
       appearance: none !important;
@@ -4841,7 +4991,7 @@
     }
 
 
-    /* Only apply focus/active color change to filters, NOT #templateSelect */
+    /* Apply focus/active color change to all filters including templateSelect */
     .filter-select:focus,
     .filter-select:active,
     #vendorFilter:focus,
@@ -4857,18 +5007,12 @@
     #dohFilter:focus,
     #dohFilter:active,
     #highCbdFilter:focus,
-    #highCbdFilter:active {
+    #highCbdFilter:active,
+    #templateSelect:focus,
+    #templateSelect:active {
       background-color: rgba(44, 34, 58, 0.95) !important;
       border-color: rgba(160, 132, 232, 0.8) !important;
       box-shadow: 0 0 0 3px rgba(160, 132, 232, 0.3), 0 6px 16px rgba(0, 0, 0, 0.4) !important;
-      outline: none !important;
-    }
-
-    #templateSelect:focus,
-    #templateSelect:active {
-      background-color: rgba(44, 34, 58, 0.85) !important;
-      border-color: #00d4aa !important;
-      box-shadow: none !important;
       outline: none !important;
     }
 
@@ -4878,15 +5022,23 @@
     #lineageFilter:hover,
     #weightFilter:hover,
     #dohFilter:hover,
-    #highCbdFilter:hover {
+    #highCbdFilter:hover,
+    #templateSelect:hover {
       background-color: rgba(255, 255, 255, 0.25) !important;
       border-color: rgba(160, 132, 232, 0.7) !important;
     }
 
-    /* Template select keeps same color on hover - no change */
-    #templateSelect:hover {
-      background-color: rgba(44, 34, 58, 0.85) !important;
-      border-color: #00d4aa !important;
+    /* Center the template dropdown in its container */
+    .control-section {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+    }
+
+    /* Center the template label */
+    .control-section .filter-label {
+      text-align: center !important;
+      width: 100% !important;
     }
 
     .filter-select option {
@@ -4921,12 +5073,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      opacity: 1;
-      visibility: visible;
       transition: opacity 0.5s ease-out;
-      /* Prevent any size changes during loading */
-      min-width: 100%;
-      min-height: 100%;
     }
     
     /* CRITICAL FIX: Add lava background behind app loading splash */
@@ -4957,19 +5104,12 @@
       overflow: hidden;
       background: rgba(22, 33, 62, 0.95);
       border: 1px solid rgba(0, 212, 170, 0.2);
-      box-shadow:
+      box-shadow: 
         0 20px 40px rgba(0, 0, 0, 0.3),
         0 0 0 1px rgba(0, 212, 170, 0.1);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
-      transform: translateX(0) scale(1);
-      /* Prevent container from resizing */
-      min-width: 600px;
-      min-height: 400px;
-      max-width: 600px;
-      max-height: 400px;
-      flex-shrink: 0;
-      flex-grow: 0;
+      transform: translateX(0);
     }
 
     .app-loading-content {
@@ -5261,12 +5401,17 @@
 
     .main-content.store-selected {
       display: block !important;
-      opacity: 0;
+      opacity: 1; /* Default to visible to prevent flickering */
+    }
+
+    .main-content.store-selected:not(.loaded) {
+      opacity: 0; /* Only fade in on first load */
       transition: opacity 0.5s ease-in;
     }
 
     .main-content.store-selected.loaded {
       opacity: 1;
+      transition: none; /* No transition once loaded to prevent flicker */
     }
     
     /* Store modal backdrop - ensure it's visible and ON TOP */
@@ -5344,7 +5489,7 @@
       flex-direction: column !important;
       height: var(--center-panel-height) !important;
       min-height: var(--center-panel-height) !important;
-      overflow-y: auto !important;
+      overflow-y: hidden !important;
       overflow-x: hidden !important;
     }
 
@@ -5620,7 +5765,7 @@
                   <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
                     <!-- File Path Display (Above buttons) -->
                     <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px !important; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
                         {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
                       </span>
                     </div>
@@ -5660,48 +5805,44 @@
                   <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="margin-left: 0.5rem;">
                     <div class="filter-group">
                       <label for="vendorFilter" class="filter-label">VENDOR</label>
-                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
-                        <option value="All">All</option>
+                      <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: center !important; text-align-last: center !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="brandFilter" class="filter-label">BRAND</label>
-                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
-                        <option value="All">All</option>
+                      <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: center !important; text-align-last: center !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
-                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important; width: 100% !important;">
-                        <option value="All">All</option>
+                      <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: center !important; text-align-last: center !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
-                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 14px !important; line-height: 1.4 !important; width: 100% !important; min-width: 280px !important;">
-                        <option value="All">All</option>
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 12px !important; line-height: 1.4 !important; width: 100% !important; min-width: 280px !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
-                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
-                        <option value="All">All</option>
+                      <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
-                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 14px !important; line-height: 1.4 !important; min-width: 280px !important;">
-                        <option value="All">All</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="Pending">Pending</option>
-                        <option value="Unknown">Unknown</option>
+                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 12px !important; line-height: 1.4 !important; min-width: 280px !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                     <div class="filter-group">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
-                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 1.25rem !important; font-size: 16px !important; line-height: 1.5 !important;">
-                        <option value="All">All</option>
+                      <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important;">
+                        <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
                   </div>
@@ -5717,6 +5858,7 @@
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">CURRENT INVENTORY</h5>
+                  <span class="badge badge-modern" id="availableTagsCount">(0)</span>
                 </div>
                 <div class="search-input-container">
                   <input type="text" id="availableTagsSearch" class="form-control form-control-modern" placeholder="Search available tags...">
@@ -5758,7 +5900,7 @@
               <!-- Template Section -->
               <div class="control-section mb-2">
                 <label for="templateSelect" class="filter-label">TEMPLATE</label>
-                <select id="templateSelect" class="form-select filter-select" aria-label="Template">
+                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 54px 1rem 42px !important; font-size: 18px !important; line-height: 1.5 !important; width: auto !important; min-width: 250px !important; max-width: none !important; margin: 0 auto !important; display: block !important; overflow: visible !important; text-align: center !important; text-align-last: center !important;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
@@ -5767,7 +5909,7 @@
                   <option value="inventory">Inventory</option>
                 </select>
 
-                <button id="generateBtn" class="btn-generate-themed mt-2" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 85% !important; max-width: 85% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 0 auto !important; display: block !important;">
+                <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 70% !important; max-width: 70% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 1.5rem auto 0 auto !important; display: block !important;">
                   Generate Tags
                 </button>
 
@@ -5925,7 +6067,7 @@
   <!-- Modals -->
   
   <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 9999 !important;">
+  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 10001 !important;">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
       <div class="modal-content glass-card">
         <div class="modal-header border-0" style="padding: 1.6rem 1.8rem 1rem;">
@@ -6009,6 +6151,23 @@
     (function() {
       console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
       
+      // CRITICAL: Ensure store modal is hidden initially to prevent flash over loading splash
+      const modalElement = document.getElementById('storeSelectionModal');
+      if (modalElement) {
+        modalElement.style.display = 'none';
+        modalElement.style.visibility = 'hidden';
+        modalElement.classList.remove('show');
+      }
+      
+      // CRITICAL: Don't clear sessionStorage on page load - trust backend session
+      // Backend session is the source of truth, sessionStorage is just for frontend validation
+      const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
+      if (sessionTimestamp) {
+        const timestamp = parseInt(sessionTimestamp, 10);
+        const age = Date.now() - timestamp;
+        console.log('✅ sessionStorage exists (age:', age, 'ms) - will validate with backend');
+      }
+      
       // CRITICAL: Hide main content initially until we know store status
       const mainContent = document.getElementById('mainContent');
       if (mainContent) {
@@ -6017,19 +6176,34 @@
       }
       
       // Always check backend for store selection (don't rely on sessionStorage)
-      const cacheBust = `ts=${Date.now()}`;
+      // CRITICAL: Add force_store_modal parameter to ensure fresh check
+      const cacheBust = `ts=${Date.now()}&force_store_modal=false`;
       fetch(`/api/check-store-required?${cacheBust}`, {
         method: 'GET',
         credentials: 'same-origin',
-        cache: 'no-store'
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
       })
       .then(response => response.json())
       .then(data => {
         console.log('Backend store check response:', data);
+        console.log('🔍 Early check - requires_store:', data.requires_store, 'store:', data.store);
         
-        // Backend returns 'requires_store', not 'required'
-        const requiresStore = data.requires_store === true || data.required === true;
-        const storeName = data?.store || null;
+        // CRITICAL: Backend returns 'requires_store' - if true, we MUST show modal
+        // Only trust store if requires_store is explicitly false AND store exists
+        const requiresStore = data.requires_store === true;
+        const hasValidStore = data.requires_store === false && data.store && data.store.trim() !== '';
+        const storeName = hasValidStore ? data.store : null;
+        
+        console.log('🔍 Early check decision:', {
+          requiresStore: requiresStore,
+          hasValidStore: hasValidStore,
+          storeName: storeName
+        });
         
         const forceShowModal = () => {
           console.log('🔄 Forcing store modal to display...');
@@ -6037,6 +6211,15 @@
           window.STORE_MODAL_BLOCKING = true;
 
           const attemptShow = () => {
+            // CRITICAL: Wait for loading splash to be hidden before showing modal
+            const loadingSplash = document.getElementById('appLoadingSplash');
+            if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
+              // Loading splash is still visible, wait a bit longer
+              console.log('⏳ Waiting for loading splash to hide before showing store modal...');
+              setTimeout(attemptShow, 200);
+              return;
+            }
+            
             if (typeof window.showStoreSelectionModal === 'function') {
               window.showStoreSelectionModal();
             } else {
@@ -6046,6 +6229,7 @@
                   const modalInstance = (typeof bootstrap !== 'undefined')
                     ? bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: 'static', keyboard: false })
                     : null;
+                  modalElement.style.visibility = 'visible';
                   modalElement.style.display = 'block';
                   modalElement.classList.add('show');
                   modalElement.setAttribute('aria-hidden', 'false');
@@ -6055,7 +6239,7 @@
                     const backdrop = document.createElement('div');
                     backdrop.id = 'storeModalBackdrop';
                     backdrop.className = 'modal-backdrop fade show';
-                    backdrop.style.zIndex = '9998';
+                    backdrop.style.zIndex = '10000';
                     document.body.appendChild(backdrop);
                   }
                   if (modalInstance) {
@@ -6089,16 +6273,51 @@
           }
         };
         
-        if (requiresStore || !storeName) {
-          console.log('❗ No store selected in backend - showing modal');
+        // CRITICAL: Check BOTH backend AND sessionStorage
+        // Even if backend has a store, if sessionStorage doesn't match, show modal
+        const sessionStore = sessionStorage.getItem('selected_store');
+        const sessionJustSelected = sessionStorage.getItem('store_just_selected') === 'true';
+        const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
+        
+        // CRITICAL FIX: Trust backend session - if backend says store is valid, use it
+        // Only check sessionStorage as a secondary validation, not a blocker
+        // Backend session is the source of truth
+        let sessionStoreValid = true; // Default to valid if backend says so
+        if (sessionStore && sessionJustSelected && sessionTimestamp) {
+          const timestamp = parseInt(sessionTimestamp, 10);
+          const age = Date.now() - timestamp;
+          // Only invalidate if sessionStorage is very old (more than 24 hours) AND doesn't match backend
+          sessionStoreValid = (age < 86400000) || (sessionStore === storeName); // 24 hours or matches backend
+          console.log('🔍 sessionStorage check:', {
+            sessionStore,
+            sessionJustSelected,
+            sessionAge: age,
+            sessionStoreValid,
+            backendStore: storeName
+          });
+        }
+        
+        // CRITICAL FIX: Trust backend - if backend says store is valid, show content
+        // Only show modal if backend explicitly requires it
+        if (requiresStore || (!hasValidStore && !sessionStore)) {
+          console.log('❗ No valid store match - showing modal');
+          console.log('❗ Details:', {
+            requiresStore,
+            hasValidStore,
+            backendStore: data.store,
+            sessionStore,
+            sessionStoreValid,
+            storesMatch: sessionStore === storeName
+          });
           forceShowModal();
           return;
         }
 
-        console.log('✅ Store available from backend:', storeName, '- showing content');
+        console.log('✅ Valid store match (backend + sessionStorage):', storeName, '- showing content');
+        // Ensure sessionStorage is set (should already be, but ensure it)
         sessionStorage.setItem('selected_store', storeName);
-        sessionStorage.removeItem('store_just_selected');
-        sessionStorage.removeItem('store_selected_timestamp');
+        sessionStorage.setItem('store_just_selected', 'true');
+        sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
 
         window.STORE_MODAL_BLOCKING = false;
 
@@ -6238,6 +6457,7 @@
               <span class="badge bg-secondary text-light">Taylor Rowland</span>
               <span class="badge bg-secondary text-light">Madison Ostman</span>
               <span class="badge bg-secondary text-light">Brett Hulet</span>
+              <span class="badge bg-secondary text-light">Loni Gareth</span>
               <span class="badge bg-secondary text-light">Ryan Fleming</span>
               <span class="badge bg-secondary text-light">Jason Ruiz</span>
               <span class="badge bg-secondary text-light">Chris Campagnano</span>
@@ -7838,52 +8058,72 @@
         }
       });
       
-      // DOH FILTER FUNCTIONALITY - Make the DOH dropdown in filter bar work
+      // CRITICAL FIX: Setup ALL filter event listeners to trigger search when changed
       setTimeout(() => {
-        console.log('Setting up DOH filter functionality...');
-        const dohFilter = document.getElementById('dohFilter');
-        if (dohFilter) {
-          console.log('DOH filter found, adding event listener...');
-          
-          // Add change event listener
-          dohFilter.addEventListener('change', function() {
-            const selectedValue = this.value;
-            console.log('DOH filter changed to:', selectedValue);
-            
-            // Add visual feedback
-            const filterLabel = document.querySelector('label[for="dohFilter"]');
-            if (filterLabel && selectedValue !== 'All') {
-              filterLabel.style.color = '#ff6600';
-              filterLabel.style.fontWeight = 'bold';
-              filterLabel.innerHTML = `DOH COMPLIANCE (${selectedValue})`;
-            } else if (filterLabel) {
-              filterLabel.style.color = '';
-              filterLabel.style.fontWeight = '';
-              filterLabel.innerHTML = 'DOH COMPLIANCE';
-            }
-            
-            // You can add actual filtering logic here
-            console.log('DOH filter is now set to:', selectedValue);
-            
-            // Show confirmation message
-            if (selectedValue !== 'All') {
-              const confirmDiv = document.createElement('div');
-              confirmDiv.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #28a745; color: white; padding: 15px; border-radius: 5px; z-index: 10000; font-weight: bold;';
-              confirmDiv.innerHTML = `✅ DOH Filter Applied: ${selectedValue}`;
-              document.body.appendChild(confirmDiv);
-              
-              setTimeout(() => {
-                if (confirmDiv.parentNode) {
-                  confirmDiv.remove();
+        console.log('🔧 Setting up filter event listeners...');
+
+        // Debounce timer to prevent rapid-fire searches
+        let filterDebounceTimer = null;
+
+        // List of all filter IDs that should trigger search on change
+        const filterIds = [
+          'brandFilter',
+          'productTypeFilter',
+          'lineageFilter',
+          'weightFilter',
+          'dohFilter',
+          'highCbdFilter'
+          // Note: vendorFilter is handled separately because it's in a different context
+        ];
+
+        // Attach event listeners to each filter
+        filterIds.forEach(filterId => {
+          const filterElement = document.getElementById(filterId);
+          if (filterElement) {
+            // Remove any existing listeners to prevent duplicates
+            const newFilter = filterElement.cloneNode(true);
+            filterElement.parentNode.replaceChild(newFilter, filterElement);
+
+            // Add the event listener to trigger search
+            newFilter.addEventListener('change', function() {
+              const selectedValue = this.value;
+              console.log(`📊 ${filterId} changed to:`, selectedValue);
+
+              // Visual feedback for DOH filter
+              if (filterId === 'dohFilter') {
+                const filterLabel = document.querySelector('label[for="dohFilter"]');
+                if (filterLabel && selectedValue !== 'All') {
+                  filterLabel.style.color = '#ff6600';
+                  filterLabel.style.fontWeight = 'bold';
+                  filterLabel.innerHTML = `DOH COMPLIANCE (${selectedValue})`;
+                } else if (filterLabel) {
+                  filterLabel.style.color = '';
+                  filterLabel.style.fontWeight = '';
+                  filterLabel.innerHTML = 'DOH COMPLIANCE';
                 }
-              }, 3000);
-            }
-          });
-          
-          console.log('DOH filter is now functional!');
-        } else {
-          console.error('DOH filter element not found');
-        }
+              }
+
+              // CRITICAL: Debounced search to prevent rapid-fire when changing multiple filters
+              clearTimeout(filterDebounceTimer);
+              filterDebounceTimer = setTimeout(() => {
+                const productSearchInput = document.getElementById('productSearch');
+                if (productSearchInput && window.searchProducts && window.selectedVendor) {
+                  // Re-run search with current search term and new filters
+                  console.log(`🔍 Triggering search after ${filterId} change`);
+                  window.searchProducts(productSearchInput.value || '');
+                } else {
+                  console.log(`⚠️ Search not triggered - vendor: ${window.selectedVendor}, searchProducts: ${typeof window.searchProducts}`);
+                }
+              }, 300); // Wait 300ms after last filter change before searching
+            });
+
+            console.log(`✅ ${filterId} event listener attached`);
+          } else {
+            console.warn(`⚠️ ${filterId} element not found`);
+          }
+        });
+
+        console.log('✅ All filter event listeners setup complete!');
       }, 1000);
 
       // Store check handled by backend template rendering
@@ -8747,7 +8987,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-view').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
-        fetch('/api/web/available-tags').then(r => r.json())
+        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
         const totalProducts = availableTags.length;
@@ -9171,7 +9411,25 @@
         matchCount.textContent = matchResult.matched_count || 0;
         
         // Populate matched products list with note about where they were added
-        if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+        // Use json_matched_tags to get properly formatted product names like Excel tags
+        const matchedTags = matchResult.json_matched_tags || [];
+        if (matchedTags.length > 0) {
+          matchedProductsList.innerHTML = `
+            <div class="alert alert-success mb-3">
+              <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
+              <br>Please review the available tags and select the items you need.
+            </div>
+            <div class="mb-2"><strong>Matched Products:</strong></div>
+            ${matchedTags
+              .map(tag => {
+                // Use the formatted Product Name* field which matches Excel tag format
+                const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || 'Unknown Product';
+                return `<div class="mb-1">• ${productName}</div>`;
+              })
+              .join('')}
+          `;
+        } else if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+          // Fallback to matched_names if json_matched_tags not available
           matchedProductsList.innerHTML = `
             <div class="alert alert-success mb-3">
               <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
@@ -10733,7 +10991,7 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
         fetch('/api/database-analytics').then(r => r.json()).catch(() => ({})),
-        fetch('/api/web/available-tags').then(r => r.json())
+        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
       ])
       .then(([stats, vendorStats, analytics, availableTags]) => {
           const totalProducts = availableTags.length;

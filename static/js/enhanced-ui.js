@@ -1153,14 +1153,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Scale the entire app to fit within the viewport
-// DISABLED FOR DESKTOP VIEWPORTS
 (function() {
-  // CRITICAL FIX: Disable all scaling for desktop viewports
-  if (window.innerWidth >= 1200) {
-    console.log('Desktop viewport - disabling applyGlobalZoom');
-    return;
-  }
-
   // Brute-force global zoom/transform fallback that always shows a change
   function applyGlobalZoom(scale) {
     const s = Math.max(0.6, Math.min(1, Number(scale) || 1));
@@ -1208,33 +1201,10 @@ document.addEventListener('DOMContentLoaded', function() {
   function scaleAppToFit() {
     // Prevent multiple simultaneous calls
     if (isScaling) return;
-
+    
     const main = document.getElementById('mainContent');
     const page = document.body;
     if (!main || !page) return;
-
-    // CRITICAL FIX: Disable auto-scaling to prevent unwanted zoom
-    // Only scale if viewport is significantly smaller (mobile/tablet sized)
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    console.log(`Viewport: ${viewportWidth}x${viewportHeight}, Baseline: ${BASELINE_WIDTH}x${BASELINE_HEIGHT}`);
-
-    // Disable scaling for desktop viewports (>1200px width)
-    if (viewportWidth >= 1200) {
-      console.log('Desktop viewport detected - disabling auto-scale to prevent zoom');
-      // Reset any existing transforms
-      const html = document.documentElement;
-      const body = document.body;
-      html.style.removeProperty('zoom');
-      body.style.removeProperty('zoom');
-      body.style.removeProperty('transform');
-      body.style.removeProperty('-webkit-transform');
-      body.style.removeProperty('width');
-      body.style.removeProperty('height');
-      html.removeAttribute('data-app-scale');
-      isScaling = false;
-      return;
-    }
 
     isScaling = true;
 
@@ -1420,23 +1390,6 @@ document.addEventListener('DOMContentLoaded', function() {
 window.setAppScale = function(s) {
   const n = Number(s);
   if (!isFinite(n)) return;
-
-  // CRITICAL FIX: Disable manual scaling for desktop viewports
-  if (window.innerWidth >= 1200) {
-    console.log('Desktop viewport - ignoring setAppScale call');
-    // Reset any existing transforms
-    const html = document.documentElement;
-    const body = document.body;
-    html.style.removeProperty('zoom');
-    body.style.removeProperty('zoom');
-    body.style.removeProperty('transform');
-    body.style.removeProperty('-webkit-transform');
-    body.style.removeProperty('width');
-    body.style.removeProperty('height');
-    html.removeAttribute('data-app-scale');
-    return;
-  }
-
   (function(){
     const html = document.documentElement;
     const body = document.body;
@@ -1481,19 +1434,3 @@ function showToast(type, message) {
     }, 3000);
 }
 
-
-// CRITICAL FIX: Reset scaling on page load for desktop viewports
-(function() {
-  if (window.innerWidth >= 1200) {
-    console.log('Page load: Desktop viewport detected - resetting any cached scaling');
-    const html = document.documentElement;
-    const body = document.body;
-    html.style.removeProperty('zoom');
-    body.style.removeProperty('zoom');
-    body.style.removeProperty('transform');
-    body.style.removeProperty('-webkit-transform');
-    body.style.removeProperty('width');
-    body.style.removeProperty('height');
-    html.removeAttribute('data-app-scale');
-  }
-})();
