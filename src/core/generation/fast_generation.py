@@ -64,7 +64,8 @@ class FastGenerationEngine:
                 for r in records
             ],
             'template': template_type,
-            'scale': scale_factor
+            'scale': scale_factor,
+            'cache_version': CACHE_VERSION  # Include cache version to invalidate old caches
         }
         cache_str = json.dumps(cache_data, sort_keys=True)
         return hashlib.md5(cache_str.encode()).hexdigest()
