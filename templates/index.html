@@ -96,6 +96,16 @@
       // This ensures the selection always works even if there's a mismatch
       console.log('Processing store selection:', storeValue);
       
+      // CRITICAL FIX: Add timeout to prevent hanging
+      const fetchTimeout = setTimeout(() => {
+        console.error('❌ Store selection fetch timed out after 10 seconds');
+        // Restore modal and show error
+        if (modalBody && modalBody.dataset.originalContent) {
+          modalBody.innerHTML = modalBody.dataset.originalContent;
+        }
+        alert('Store selection timed out. The store may still have been set. Please refresh the page.');
+      }, 10000); // 10 second timeout
+      
       // Set the store via API
       fetch('/api/set-store', {
         method: 'POST',
@@ -106,6 +116,7 @@
         body: JSON.stringify({ store: storeValue })
       })
       .then(response => {
+        clearTimeout(fetchTimeout);
         console.log('✅ Fetch completed - Response status:', response.status);
         if (!response.ok) {
           console.error('❌ Response not OK:', response.status, response.statusText);
@@ -170,8 +181,22 @@
 
           // CRITICAL FIX: Reload the page so backend + frontend state stay in sync
           console.log('🔄 Reloading page to apply store change...');
-          setTimeout(() => {
+          
+          // CRITICAL FIX: Force reload after timeout even if something hangs
+          const reloadTimeout = setTimeout(() => {
+            console.warn('⚠️ Force reloading after 2 seconds (backup reload)');
             window.location.reload();
+          }, 2000);
+          
+          setTimeout(() => {
+            clearTimeout(reloadTimeout);
+            try {
+              window.location.reload();
+            } catch (reloadError) {
+              console.error('❌ Error reloading page:', reloadError);
+              // Fallback: force reload using location.href
+              window.location.href = window.location.href;
+            }
           }, 500);
         } else {
           console.error('❌ Error setting store:', data.error || 'Unknown error');
@@ -185,6 +210,7 @@
         }
       })
       .catch(error => {
+        clearTimeout(fetchTimeout);
         console.error('❌ Fetch error:', error);
         console.error('Error stack:', error.stack);
         
@@ -193,7 +219,17 @@
           modalBody.innerHTML = modalBody.dataset.originalContent;
         }
         
-        alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
+        // CRITICAL FIX: Even on error, try to reload if store was set in sessionStorage
+        // Sometimes the store is set even if the response fails
+        const storedStore = sessionStorage.getItem('selected_store');
+        if (storedStore === storeValue) {
+          console.log('⚠️ Fetch failed but store appears to be set - reloading anyway');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        } else {
+          alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
+        }
       });
     };
     
