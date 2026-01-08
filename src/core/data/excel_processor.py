@@ -3591,6 +3591,32 @@ class ExcelProcessor:
                             logger.debug(f"Found vendor '{vendor_value}' in column '{col_name}' for product '{product_name}'")
                             break
             
+            # CRITICAL DEBUG: Log vendor extraction issues (first 10 products only)
+            if not hasattr(self, '_vendor_debug_count'):
+                self._vendor_debug_count = 0
+                self._vendor_columns_found = []
+            
+            if self._vendor_debug_count < 10:
+                # Check what vendor columns actually exist in the DataFrame
+                if not hasattr(self, '_vendor_columns_logged'):
+                    vendor_cols_in_df = [col for col in self.df.columns if 'vendor' in str(col).lower() or 'supplier' in str(col).lower()]
+                    if vendor_cols_in_df:
+                        logger.info(f"✅ Found vendor columns in Excel: {vendor_cols_in_df}")
+                        self._vendor_columns_found = vendor_cols_in_df
+                    else:
+                        logger.warning(f"❌ NO vendor columns found in Excel file! Available columns: {list(self.df.columns)[:20]}...")
+                    self._vendor_columns_logged = True
+                
+                # Log missing vendor for first 10 products
+                if not vendor_value:
+                    vendor_cols_in_row = [col for col in row.index if 'vendor' in str(col).lower() or 'supplier' in str(col).lower()]
+                    logger.warning(f"⚠️ Missing vendor for product '{product_name}'. Vendor columns in row: {vendor_cols_in_row}")
+                    if vendor_cols_in_row:
+                        for vcol in vendor_cols_in_row:
+                            raw_val = row.get(vcol, '')
+                            logger.warning(f"   - Column '{vcol}' value: '{raw_val}' (type: {type(raw_val).__name__})")
+                    self._vendor_debug_count += 1
+            
             # CRITICAL: Vendor MUST come from Excel data columns, never from product name
             # If vendor is missing, the Excel file doesn't have vendor columns populated
             # Do NOT extract from product name - that's unreliable and causes data quality issues
