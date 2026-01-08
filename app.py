@@ -7141,17 +7141,13 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
         logging.info(f"🔄 Forcing lineage alignment due to recent lineage update (timestamp: {lineage_update_timestamp})")
         skip_if_aligned = False  # Force alignment to get fresh sovereign_lineage from database
     
-    # PERFORMANCE: Skip alignment if tags already have ALL database lineage fields INCLUDING sovereign_lineage
-    # CRITICAL: Must check for sovereign_lineage too, otherwise cached tags won't get updated sovereign values
-    # CRITICAL FIX: Only skip if sovereign_lineage has an actual value (not null, not empty string)
-    # This ensures that lineage updates from the database are always applied
+    # PERFORMANCE: Skip alignment if tags already have canonical_lineage/currentLineage
+    # This prevents expensive database queries when tags already have lineage data
     if skip_if_aligned and not force_overwrite:
-        tags_with_full_lineage = sum(1 for t in tags if isinstance(t, dict) and
-                                      (t.get('canonical_lineage') or t.get('currentLineage')) and
-                                      t.get('sovereign_lineage') and  # Changed: must have actual value, not just field
-                                      str(t.get('sovereign_lineage')).strip() not in ['', 'None', 'null', 'nan'])
-        if tags_with_full_lineage >= len(tags) * 0.9:  # 90%+ already have FULL lineage including sovereign
-            logging.debug(f"⚡ Skipping lineage alignment - {tags_with_full_lineage}/{len(tags)} tags already have full lineage")
+        tags_with_lineage = sum(1 for t in tags if isinstance(t, dict) and
+                                (t.get('canonical_lineage') or t.get('currentLineage')))
+        if tags_with_lineage >= len(tags) * 0.9:  # 90%+ already have lineage
+            logging.debug(f"⚡ Skipping lineage alignment - {tags_with_lineage}/{len(tags)} tags already have lineage")
             return tags
     
     try:
@@ -7169,11 +7165,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
                 if force_overwrite:
                     product_names.append(t.get('Product Name*'))
                 else:
-                    # CRITICAL FIX: Align if missing canonical_lineage/currentLineage OR missing valid sovereign_lineage
-                    # This ensures updated sovereign_lineage values from database are applied
-                    has_canonical = t.get('canonical_lineage') or t.get('currentLineage')
-                    has_sovereign = t.get('sovereign_lineage') and str(t.get('sovereign_lineage')).strip() not in ['', 'None', 'null', 'nan']
-                    if not has_canonical or not has_sovereign:
+                    # Only align if missing canonical_lineage/currentLineage (performance optimization)
+                    # The sovereign_lineage will be set from COALESCE query even if not explicitly in DB
+                    if not (t.get('canonical_lineage') or t.get('currentLineage')):
                         product_names.append(t.get('Product Name*'))
         
         if not product_names:
