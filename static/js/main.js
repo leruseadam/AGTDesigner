@@ -17283,74 +17283,76 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // CRITICAL FIX: Add safeguard to ensure tags always load after page refresh
     // Check after 5 seconds if tags are loaded, and retry if not
-    setTimeout(() => {
-        if (window.TagManager && window.TagManager.state) {
-            const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
-            const isInitialized = window.TagManager.state.initialized;
-            const isChecking = window.TagManager._checkingExistingData;
+    // CRITICAL: Only run once - use a flag to prevent repeated checks
+    if (!window._safeguardChecked) {
+        window._safeguardChecked = true;
+        setTimeout(() => {
+            if (window.TagManager && window.TagManager.state) {
+                const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
+                const isInitialized = window.TagManager.state.initialized;
+                const isChecking = window.TagManager._checkingExistingData;
+                const isFetching = window.TagManager._fetchingAvailableTags;
 
-            // Check if tags are actually rendered in the DOM (more reliable than just checking cache)
-            const availableContainer = document.getElementById('availableTags');
-            const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
+                // Check if tags are actually rendered in the DOM (more reliable than just checking cache)
+                const availableContainer = document.getElementById('availableTags');
+                const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-            if (!hasTags && !hasRenderedTags && isInitialized && !isChecking) {
-                console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no rendered tags found, attempting retry...');
-                // Reset flags to allow retry
-                window.TagManager._checkingExistingData = false;
-                window.TagManager._fetchingAvailableTags = false;
-                window.TagManager.state.initialDataAttempts = 0;
-                // Try to load tags
-                if (typeof window.TagManager.checkForExistingData === 'function') {
-                    window.TagManager.checkForExistingData().catch(err => {
-                        console.error('Safeguard retry failed:', err);
-                        // Last resort: try force reload to bypass all flags
-                        if (typeof window.TagManager.forceReloadTags === 'function') {
-                            console.log('🔄 SAFEGUARD: Attempting force reload as last resort...');
-                            window.TagManager.forceReloadTags().catch(e => {
-                                console.error('Safeguard force reload also failed:', e);
-                            });
-                        } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
-                            window.TagManager.fetchAndUpdateAvailableTags(true).catch(e => {
-                                console.error('Safeguard direct fetch also failed:', e);
-                            });
-                        }
-                    });
+                // CRITICAL: Only retry if tags are truly missing AND not currently being fetched/checked
+                if (!hasTags && !hasRenderedTags && isInitialized && !isChecking && !isFetching) {
+                    console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no rendered tags found, attempting retry...');
+                    // Reset flags to allow retry
+                    window.TagManager._checkingExistingData = false;
+                    window.TagManager._fetchingAvailableTags = false;
+                    window.TagManager.state.initialDataAttempts = 0;
+                    // Try to load tags
+                    if (typeof window.TagManager.checkForExistingData === 'function') {
+                        window.TagManager.checkForExistingData().catch(err => {
+                            console.error('Safeguard retry failed:', err);
+                        });
+                    }
+                } else if (hasTags || hasRenderedTags) {
+                    console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
+                } else if (isChecking || isFetching) {
+                    console.log('✅ SAFEGUARD: Tags are currently being loaded, skipping retry');
                 }
-            } else if (hasTags || hasRenderedTags) {
-                console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
             }
-        }
-    }, 5000);
-    
-    // Additional safeguard after 10 seconds
-    setTimeout(() => {
-        if (window.TagManager && window.TagManager.state) {
-            const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
-            const availableContainer = document.getElementById('availableTags');
-            const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
+        }, 5000);
+        
+        // Additional safeguard after 10 seconds - only if first one didn't trigger
+        setTimeout(() => {
+            if (window.TagManager && window.TagManager.state) {
+                const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
+                const isChecking = window.TagManager._checkingExistingData;
+                const isFetching = window.TagManager._fetchingAvailableTags;
+                const availableContainer = document.getElementById('availableTags');
+                const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-            if (!hasTags && !hasRenderedTags) {
-                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing reload');
-                // Force reset all flags
-                window.TagManager._checkingExistingData = false;
-                window.TagManager._fetchingAvailableTags = false;
-                window.TagManager.state.initialDataAttempts = 0;
-                // Force reload using forceReloadTags to bypass all restrictions
-                if (typeof window.TagManager.forceReloadTags === 'function') {
-                    console.log('🔄 CRITICAL SAFEGUARD: Using forceReloadTags to bypass all restrictions');
-                    window.TagManager.forceReloadTags().catch(e => {
-                        console.error('Critical safeguard force reload failed:', e);
-                    });
-                } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
-                    window.TagManager.fetchAndUpdateAvailableTags(true).catch(e => {
-                        console.error('Critical safeguard fetch failed:', e);
-                    });
+                // CRITICAL: Only force reload if tags are truly missing AND not currently being fetched/checked
+                if (!hasTags && !hasRenderedTags && !isChecking && !isFetching) {
+                    console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing reload');
+                    // Force reset all flags
+                    window.TagManager._checkingExistingData = false;
+                    window.TagManager._fetchingAvailableTags = false;
+                    window.TagManager.state.initialDataAttempts = 0;
+                    // Force reload using forceReloadTags to bypass all restrictions
+                    if (typeof window.TagManager.forceReloadTags === 'function') {
+                        console.log('🔄 CRITICAL SAFEGUARD: Using forceReloadTags to bypass all restrictions');
+                        window.TagManager.forceReloadTags().catch(e => {
+                            console.error('Critical safeguard force reload failed:', e);
+                        });
+                    } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                        window.TagManager.fetchAndUpdateAvailableTags(true).catch(e => {
+                            console.error('Critical safeguard fetch failed:', e);
+                        });
+                    }
+                } else if (hasTags || hasRenderedTags) {
+                    console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
+                } else if (isChecking || isFetching) {
+                    console.log('✅ 10s SAFEGUARD: Tags are currently being loaded - skipping force fetch');
                 }
-            } else if (hasTags || hasRenderedTags) {
-                console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
             }
-        }
-    }, 10000);
+        }, 10000);
+    }
     
     // CRITICAL FIX: Reset stuck flags when page becomes visible (user switches tabs)
     // This prevents flags from being stuck if user switches tabs during loading
