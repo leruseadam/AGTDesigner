@@ -16428,6 +16428,9 @@ const TagManager = {
         try {
             console.log('🚀 TagManager.init() called');
 
+            // CRITICAL FIX: Reset upload flag in case it got stuck from a previous error
+            this._uploadInProgress = false;
+
             // Mark as initialized
             this.state.initialized = true;
 
