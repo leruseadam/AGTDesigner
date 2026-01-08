@@ -4860,27 +4860,39 @@ const TagManager = {
             return;
         }
         
-        // CRITICAL FIX: Prevent unnecessary re-renders if tags haven't changed
-        // This prevents cycling/reloading when tags are the same
+        // CRITICAL FIX: Prevent unnecessary re-renders if tags haven't changed AND are already displayed
+        // This prevents cycling/reloading when tags are the same, but only if DOM already shows them
         const tagsToProcess = filteredTags || originalTags;
-        const currentTagCount = this.state.tags ? this.state.tags.length : 0;
-        const newTagCount = tagsToProcess ? tagsToProcess.length : 0;
+        const availableTagsContainer = document.getElementById('availableTags');
+        const hasTagsInDOM = availableTagsContainer && availableTagsContainer.querySelectorAll('.tag-item, .tag-entry').length > 0;
         
-        // If tag counts match and we already have tags displayed, check if tags actually changed
-        if (currentTagCount > 0 && newTagCount === currentTagCount && this.state.tags) {
-            // Quick check: compare first few tags to see if data changed
-            const tagsChanged = this.state.tags.some((existingTag, index) => {
-                const newTag = tagsToProcess[index];
-                if (!newTag) return true;
-                const existingName = existingTag['Product Name*'] || existingTag.ProductName || '';
-                const newName = newTag['Product Name*'] || newTag.ProductName || '';
-                return existingName !== newName;
-            });
+        // Only skip if: tags are already displayed in DOM AND tags haven't changed
+        // BUT always render if container is showing loading state (needs to be cleared)
+        const isShowingLoading = availableTagsContainer && (
+            availableTagsContainer.innerHTML.includes('Loading') || 
+            availableTagsContainer.innerHTML.includes('spinner-border')
+        );
+        
+        if (hasTagsInDOM && !isShowingLoading && tagsToProcess && this.state.tags) {
+            const currentTagCount = this.state.tags.length;
+            const newTagCount = tagsToProcess.length;
             
-            // If tags haven't changed, skip re-render to prevent cycling
-            if (!tagsChanged) {
-                verboseLog('⏭️ Skipping _updateAvailableTags - tags unchanged (preventing reload cycle)');
-                return;
+            // If tag counts match, check if tags actually changed
+            if (currentTagCount > 0 && newTagCount === currentTagCount) {
+                // Quick check: compare first few tags to see if data changed
+                const tagsChanged = this.state.tags.some((existingTag, index) => {
+                    const newTag = tagsToProcess[index];
+                    if (!newTag) return true;
+                    const existingName = existingTag['Product Name*'] || existingTag.ProductName || '';
+                    const newName = newTag['Product Name*'] || newTag.ProductName || '';
+                    return existingName !== newName;
+                });
+                
+                // If tags haven't changed AND are already displayed AND not showing loading, skip re-render
+                if (!tagsChanged) {
+                    verboseLog('⏭️ Skipping _updateAvailableTags - tags unchanged and already displayed (preventing reload cycle)');
+                    return;
+                }
             }
         }
         
