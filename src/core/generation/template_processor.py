@@ -1574,6 +1574,10 @@ class TemplateProcessor:
             self._nuclear_marker_cleanup(rendered_doc)
             self.logger.warning("🧹 TEMPLATE_PROCESSOR: _nuclear_marker_cleanup done")
             
+            # ULTIMATE CLEANUP: Direct literal string replacement for common markers
+            self._ultimate_marker_cleanup(rendered_doc)
+            self.logger.warning("🧹 TEMPLATE_PROCESSOR: _ultimate_marker_cleanup done")
+            
             # CRITICAL: Save and reload document to ensure changes persist
             self.logger.warning("💾 TEMPLATE_PROCESSOR: Saving document after cleanup")
             buffer = BytesIO()
