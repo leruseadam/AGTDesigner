@@ -3912,8 +3912,9 @@ class ExcelProcessor:
                     # Update tag with database values (database takes precedence for lineage, DOH, price, THC/CBD)
                     # Only update fields that are commonly changed in database (lineage, DOH, etc.)
                     # NEVER update Vendor fields - Excel is the source of truth
-                    # CRITICAL FIX: Check both 'Lineage' and 'lineage' (database returns lowercase 'lineage')
-                    db_lineage_value = db_record.get('Lineage') or db_record.get('lineage') or db_record.get('canonical_lineage') or db_record.get('sovereign_lineage')
+                    # CRITICAL FIX: Priority order - sovereign_lineage (manual edits) > Lineage > lineage > canonical_lineage
+                    # sovereign_lineage is the highest priority as it represents manual user edits
+                    db_lineage_value = db_record.get('sovereign_lineage') or db_record.get('Lineage') or db_record.get('lineage') or db_record.get('canonical_lineage')
                     if db_lineage_value:
                         db_lineage = str(db_lineage_value).strip().upper()
                         tag['Lineage'] = db_lineage
