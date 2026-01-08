@@ -9658,20 +9658,26 @@ def get_available_tags():
         logging.info("=== AVAILABLE TAGS REQUEST START ===")
         start_time = time.time()
         
-        # Log current database for this request
-        try:
-            # CRITICAL FIX: Don't use fallback - only load for explicitly selected stores
-            # This prevents auto-loading Bothell before user selects a store
+        # Log current database for this request (skip in fast_load mode to avoid DB initialization overhead)
+        if not fast_load:
+            try:
+                # CRITICAL FIX: Don't use fallback - only load for explicitly selected stores
+                # This prevents auto-loading Bothell before user selects a store
+                store_name = get_current_store_name(allow_fallback=False)
+                cache_store_name = _normalize_store_key(store_name) if store_name else None
+                if store_name:
+                    _dbg_db = get_product_database(store_name)
+                    if _dbg_db:
+                        logging.info(f"📦 AVAILABLE-TAGS DB: path={getattr(_dbg_db, 'db_path', 'unknown')} store={getattr(_dbg_db, '_store_name', 'unknown')}")
+                else:
+                    logging.warning("No store selected in available-tags request")
+            except Exception as _dbg_err:
+                logging.warning(f"DB-CHECK available-tags: error: {_dbg_err}")
+        else:
+            # Fast load mode - just get store name without DB initialization
             store_name = get_current_store_name(allow_fallback=False)
             cache_store_name = _normalize_store_key(store_name) if store_name else None
-            if store_name:
-                _dbg_db = get_product_database(store_name)
-                if _dbg_db:
-                    logging.info(f"📦 AVAILABLE-TAGS DB: path={getattr(_dbg_db, 'db_path', 'unknown')} store={getattr(_dbg_db, '_store_name', 'unknown')}")
-            else:
-                logging.warning("No store selected in available-tags request")
-        except Exception as _dbg_err:
-            logging.warning(f"DB-CHECK available-tags: error: {_dbg_err}")
+            logging.info(f"⚡ FAST_LOAD: Skipping DB initialization for available-tags")
 
         # Check for cached available tags first (JSON matched products)
         # Skip cache entirely if prefer_db is set (we want fresh DB data)
