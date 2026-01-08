@@ -629,10 +629,51 @@ class DragAndDropManager {
             }, 500);
         } else if (this.targetPosition !== null && this.targetPosition !== this.originalIndex && this.sourceContainerId === 'selectedTags') {
             // Same-list reordering (only for selected tags)
-            console.log('Performing reorder from', this.originalIndex, 'to', this.targetPosition);
-            this.performReorder();
-            // Add success feedback
-            this.showReorderSuccess();
+            // CRITICAL FIX: Verify we're still within the immediate parent container
+            const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
+            const targetParentContainer = elementUnderMouse ? this.findParentContainer(elementUnderMouse.closest('.tag-row')) : null;
+            
+            if (this.immediateParentContainer && targetParentContainer === this.immediateParentContainer) {
+                // Still within immediate parent - verify element is still in DOM before reordering
+                if (this.draggedElement && this.draggedElement.parentNode) {
+                    // Element is still in DOM - safe to reorder
+                    console.log('Performing reorder from', this.originalIndex, 'to', this.targetPosition);
+                    this.performReorder();
+                    // Add success feedback
+                    this.showReorderSuccess();
+                } else {
+                    // Element was lost - restore from backup if available
+                    console.warn('⚠️ Dragged element was lost, attempting to restore from backup');
+                    if (this.draggedElementSnapshot && this.immediateParentContainer) {
+                        const restoredElement = this.draggedElementSnapshot.innerHTML ? 
+                            Object.assign(document.createElement('div'), {
+                                className: this.draggedElementSnapshot.className,
+                                innerHTML: this.draggedElementSnapshot.innerHTML
+                            }) : null;
+                        if (restoredElement) {
+                            const allTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row'));
+                            if (allTagRows.length > 0 && this.originalIndex < allTagRows.length) {
+                                const restoreBefore = allTagRows[this.originalIndex];
+                                if (restoreBefore && restoreBefore.parentNode) {
+                                    restoreBefore.parentNode.insertBefore(restoredElement, restoreBefore);
+                                } else {
+                                    this.immediateParentContainer.appendChild(restoredElement);
+                                }
+                            } else {
+                                this.immediateParentContainer.appendChild(restoredElement);
+                            }
+                            console.log('✅ Restored element from snapshot');
+                        }
+                    }
+                }
+            } else {
+                // Dropped outside immediate parent - cancel reorder
+                // CRITICAL FIX: Don't remove element if drop is outside immediate parent
+                console.warn('⚠️ Drop outside immediate parent container, canceling reorder');
+                // Element should still be in place since we didn't call performReorder
+                // Just clear any visual indicators and reset
+                this.clearDropIndicators();
+            }
             // Reset drag state
             this.resetDragState();
         } else {
@@ -1001,6 +1042,10 @@ class DragAndDropManager {
             return;
         }
         
+        // CRITICAL FIX: Store original position for restoration if needed
+        const originalNextSibling = draggedElement.nextSibling;
+        const originalParent = draggedElement.parentNode;
+        
         // Get the checkbox value for debugging
         const draggedCheckbox = draggedElement.querySelector('.tag-checkbox');
         const draggedValue = draggedCheckbox ? draggedCheckbox.value : 'unknown';
@@ -1051,9 +1096,35 @@ class DragAndDropManager {
             row.querySelector('.tag-checkbox')
         );
         
+        // CRITICAL FIX: If no remaining tags or target position is invalid, restore to original position
+        if (remainingTagRows.length === 0 || adjustedTargetPosition < 0 || adjustedTargetPosition >= remainingTagRows.length) {
+            console.warn('⚠️ Invalid target position or no remaining tags, restoring to original position');
+            if (originalNextSibling && originalParent) {
+                originalParent.insertBefore(draggedElement, originalNextSibling);
+            } else if (originalParent) {
+                originalParent.appendChild(draggedElement);
+            } else {
+                this.immediateParentContainer.appendChild(draggedElement);
+            }
+            return;
+        }
+        
         const targetElement = remainingTagRows[adjustedTargetPosition];
         // CRITICAL: targetParent should always be the immediate parent container
         const targetParent = this.immediateParentContainer;
+        
+        // CRITICAL FIX: Verify target element is still within the immediate parent container
+        if (!this.immediateParentContainer.contains(targetElement)) {
+            console.warn('⚠️ Target element is outside immediate parent container, restoring to original position');
+            if (originalNextSibling && originalParent) {
+                originalParent.insertBefore(draggedElement, originalNextSibling);
+            } else if (originalParent) {
+                originalParent.appendChild(draggedElement);
+            } else {
+                this.immediateParentContainer.appendChild(draggedElement);
+            }
+            return;
+        }
         
         console.log('Target element parent:', targetParent);
         console.log('Adjusted target position:', adjustedTargetPosition);
