@@ -2979,6 +2979,7 @@ class JSONMatcher:
             inventory_category = str(item.get("inventory_category", "")).strip()
             raw_weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
             raw_units = str(item.get("unit_weight_uom", item.get("uom", "g"))).strip()
+            logging.info(f"📦 JSON Weight extracted: raw_weight='{raw_weight}', raw_units='{raw_units}' from item")
             # Capture price from any JSON field before estimating
             price_candidates = [
                 item.get("line_price"),
@@ -3136,21 +3137,20 @@ class JSONMatcher:
             ratio = self._calculate_ratio_for_json_product(product_type, item)
             
             # ===== STEP 9.5: Standardize description format for consistency =====
-            if use_excel_style_name:
-                description = product_name
+            import re
+            desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*[a-zA-Z]+\s*$', '', product_name, flags=re.IGNORECASE)
+            desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
+            if weight_label:
+                description = f"{desc_clean} - {weight_label}"
             else:
-                description = product_name
-                import re
-                desc_clean = re.sub(r'\s*-?\s*\d+\.?\d*\s*[a-zA-Z]+\s*$', '', description, flags=re.IGNORECASE)
-                desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
-                if weight_label:
-                    description = f"{desc_clean} - {weight_label}"
-                else:
-                    description = desc_clean
+                description = desc_clean
             
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
             # Vendor and brand - CRITICAL: Vendor should NEVER be empty
             vendor_final = vendor if vendor and vendor.strip() else (global_vendor if global_vendor else 'Unknown Vendor')
+            
+            # Determine DOH value based on product type
+            doh_value = self._determine_doh_value(product_type, description)
             
             product = {
                 # Core identification
@@ -3193,6 +3193,10 @@ class JSONMatcher:
                 # Ratios
                 'Ratio': ratio,
                 'Ratio_or_THC_CBD': ratio,
+                
+                # DOH Compliance
+                'DOH': doh_value,
+                'DOH Compliant (Yes/No)': doh_value,
                 
                 # Metadata
                 'Source': 'JSON - No DB Match',
@@ -3940,7 +3944,7 @@ class JSONMatcher:
             
             if self._product_table_has_column('strain_id'):
                 query = """
-                    SELECT p.*, COALESCE(s.sovereign_lineage, s.canonical_lineage) as canonical_lineage
+                    SELECT p.*, s.canonical_lineage 
                     FROM products p
                     LEFT JOIN strains s ON p.strain_id = s.id
                     WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?
@@ -5077,11 +5081,18 @@ class JSONMatcher:
                                 params = []
                                 for term in search_terms[:3]:
                                     params.extend([f'%{term}%', f'%{term}%'])
-                                
-                                # Add brand filter if we know it's Ceres
-                                where_sql += ' AND "Product Brand" = ?'
-                                params.append('Ceres')
-                                
+
+                                # CRITICAL FIX: Only add brand filter if we actually have brand information from JSON
+                                # Don't hardcode 'Ceres' - use the actual brand from the JSON item
+                                if brand and brand.strip():
+                                    where_sql += ' AND "Product Brand" = ?'
+                                    params.append(brand)
+
+                                # CRITICAL FIX: Also add vendor filter for better matching accuracy
+                                if vendor and vendor.strip():
+                                    where_sql += ' AND "Vendor/Supplier*" = ?'
+                                    params.append(vendor)
+
                                 logging.info(f"🔍 SQL WHERE clause: {where_sql}")
                                 logging.info(f"🔍 SQL params: {params}")
                                 
@@ -5215,7 +5226,7 @@ class JSONMatcher:
                                             'strain_name': best_match.strain_name,
                                             'lineage': strain_info.get('canonical_lineage', 'HYBRID'),
                                             'product_type': product_features.get('product_type', 'Core Flower'),
-                                            'price': '',  # No default price - must come from data
+                                            'price': '25',  # Default price
                                             'weight': extracted_weight,
                                             'units': 'g',
                                             'description': formatted_description,  # Use proper tag format

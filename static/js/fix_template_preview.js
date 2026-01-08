@@ -89,7 +89,7 @@ function initializeTemplatePreview() {
                 <div style="border: 1px solid #ccc; padding: 8px; margin: 4px; background: white; border-radius: 4px;">
                     <div style="font-weight: bold; font-size: ${brandSize}px; color: #333; margin-bottom: 4px;">Sample Brand</div>
                     <div style="font-size: ${descriptionSize}px; color: #666; margin-bottom: 4px;">Sample Description Text</div>
-                    <div style="font-size: ${priceSize}px; font-weight: bold; color: #007bff; margin-bottom: 4px;">$25.00</div>
+                    <div style="font-size: ${priceSize}px; font-weight: bold; color: #007bff; margin-bottom: 4px;">$0.00</div>
                     <div style="font-size: ${lineageSize}px; color: #009900; text-transform: uppercase;">HYBRID</div>
                 </div>
             </div>

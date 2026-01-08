@@ -619,9 +619,8 @@ class ProductDatabase:
                         "CBGV" TEXT,
                         "CBNV" TEXT,
                         "CBGVA" TEXT,
-                        "sovereign_lineage" TEXT,  -- Manual lineage override for products without strains
                         FOREIGN KEY (strain_id) REFERENCES strains (id),
-                        UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
+                        UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                     )
                 ''')
                 
@@ -1092,9 +1091,8 @@ class ProductDatabase:
                     "Quantity Received*" TEXT,  -- Alternative to "Quantity*"
                     "qty" TEXT,  -- Alternative to "Quantity*"
                     "Source" TEXT,  -- Source of product data (Excel Import, JSON Match, etc.)
-                    "sovereign_lineage" TEXT,  -- Manual lineage override for products without strains
                     FOREIGN KEY (strain_id) REFERENCES strains (id),
-                    UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand", "Weight*")
+                    UNIQUE("Product Name*", "Vendor/Supplier*", "Product Brand")
                 )
             ''')
             
@@ -1218,22 +1216,15 @@ class ProductDatabase:
             return None
 
     def update_all_canonical_lineages_to_mode(self):
-        """Update all strains' canonical_lineage to the mode lineage from the products table.
-        CRITICAL: Skips strains with sovereign_lineage (manual edits) to preserve user changes."""
+        """Update all strains' canonical_lineage to the mode lineage from the products table."""
         self.init_database()
         conn = self._get_connection()
         cursor = conn.cursor()
-        # Get all strains WITHOUT sovereign lineage (don't overwrite manual edits)
-        cursor.execute('SELECT id, strain_name, canonical_lineage, sovereign_lineage FROM strains')
+        # Get all strains
+        cursor.execute('SELECT id, strain_name, canonical_lineage FROM strains')
         strains = cursor.fetchall()
         updated = 0
-        skipped = 0
-        for strain_id, strain_name, canonical_lineage, sovereign_lineage in strains:
-            # CRITICAL: Skip strains with sovereign lineage (manual edits)
-            if sovereign_lineage:
-                skipped += 1
-                logger.debug(f"Skipping '{strain_name}' - has sovereign lineage '{sovereign_lineage}'")
-                continue
+        for strain_id, strain_name, canonical_lineage in strains:
             mode_lineage = self.get_mode_lineage(strain_id)
             if mode_lineage and mode_lineage != canonical_lineage:
                 cursor.execute('''
@@ -1242,7 +1233,7 @@ class ProductDatabase:
                 logger.info(f"Updated canonical_lineage for '{strain_name}' to '{mode_lineage}' (was '{canonical_lineage}')")
                 updated += 1
         conn.commit()
-        logger.info(f"Canonical lineage update complete. {updated} strains updated, {skipped} skipped (sovereign lineage protected).")
+        logger.info(f"Canonical lineage update complete. {updated} strains updated.")
 
     @timed_operation("add_or_update_strain")
     @retry_on_lock(max_retries=3, delay=0.5)
@@ -1375,57 +1366,51 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                logger.warning(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
+                # Rate-limit noisy blank-name logs: log first occurrence and then sparsely (every 1000)
+                if self._rejected_blank_names == 1 or self._rejected_blank_names % 1000 == 1:
+                    logger.info(
+                        f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})"
+                    )
                 return None
             
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:
                 self._rejected_invalid_names += 1
-                logger.warning(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
+                # Rate-limit invalid-name logs
+                if self._rejected_invalid_names == 1 or self._rejected_invalid_names % 1000 == 1:
+                    logger.info(f"❌ REJECTED: Cannot add product with invalid product name: '{product_name}' (count: {self._rejected_invalid_names})")
                 return None
             
             # RELAXED VALIDATION: Allow single character names for vertical template compatibility
             # Check for minimum length (at least 1 character instead of 2)
             if len(str(product_name).strip()) < 1:
                 self._rejected_short_names += 1
-                logger.warning(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
+                if self._rejected_short_names == 1 or self._rejected_short_names % 1000 == 1:
+                    logger.info(f"❌ REJECTED: Product name too short (must be at least 1 character): '{product_name}' (count: {self._rejected_short_names})")
                 return None
             
-            # CRITICAL FIX: Apply defaults for essential fields BEFORE validation
-            # This ensures products are added even if vendor/product_type are missing
-            # Check ALL vendor column name variations
-            vendor_raw = (product_data.get('Vendor/Supplier*', '') or 
-                          product_data.get('Vendor/Supplier', '') or 
-                          product_data.get('Vendor', '') or 
-                          product_data.get('vendor', '') or 
-                          product_data.get('Supplier', '') or 
-                          product_data.get('supplier', '') or 
-                          '')
-            vendor = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
-            product_data['Vendor/Supplier*'] = vendor  # Update product_data with default
-            product_data['Vendor'] = vendor  # Also set Vendor for compatibility
+            # Additional validation for essential fields
+            vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
+            product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
             
-            product_type_raw = product_data.get('Product Type*', '')
-            product_type = self._ensure_crucial_value(product_type_raw, 'Unknown', 'Product Type')
-            product_data['Product Type*'] = product_type  # Update product_data with default
+            if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
+                self._rejected_missing_vendor += 1
+                if self._rejected_missing_vendor == 1 or self._rejected_missing_vendor % 1000 == 1:
+                    logger.info(f"❌ REJECTED: Product '{product_name}' missing vendor information (count: {self._rejected_missing_vendor})")
+                return None
             
-            # Validation removed - defaults are always applied above, so vendor and product_type will never be empty
-            # Products will always be added with at least 'Unknown Vendor' and 'Unknown' product type
+            if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
+                self._rejected_missing_type += 1
+                if self._rejected_missing_type == 1 or self._rejected_missing_type % 1000 == 1:
+                    logger.info(f"❌ REJECTED: Product '{product_name}' missing product type (count: {self._rejected_missing_type})")
+                return None
             
             normalized_name = self._normalize_product_name(product_name)
             current_date = datetime.now().isoformat()
             
             # Get or create strain
-            strain_name = product_data.get('Product Strain', '').strip() if product_data.get('Product Strain') else ''
+            strain_name = product_data.get('Product Strain', '')
             strain_id = None
-
-            # CRITICAL FIX: If no Product Strain, extract strain from product name (classic types only)
-            # This ensures products without "Product Strain" field still get linked to strains
-            # so their lineage edits can be saved to the strains table
-            if not strain_name:
-                product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
-                strain_name = self._extract_strain_from_product_name(product_name, product_type)
-
             if strain_name:
                 # Normalize lineage before storing
                 normalized_lineage = self._normalize_lineage(product_data.get('Lineage'))
@@ -1449,14 +1434,13 @@ class ProductDatabase:
                 # Normalize vendor and brand for better matching
                 vendor_value = product_data.get(get_canonical_field('Vendor/Supplier*'), '')
                 brand_value = product_data.get(get_canonical_field('Product Brand'), '')
-                weight_value = product_data.get('Weight*', '')
                 
-                # First check exact match (name + vendor + brand + weight) - matches UNIQUE constraint
+                # First check exact match (name + vendor + brand)
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*"
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
-                ''', (normalized_name, vendor_value, brand_value, weight_value))
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+                ''', (normalized_name, vendor_value, brand_value))
                 
                 existing = cursor.fetchone()
                 
@@ -1527,11 +1511,14 @@ class ProductDatabase:
                     cursor.execute("PRAGMA table_info(products)")
                     available_columns = {row[1] for row in cursor.fetchall()}
                     
-                    # CRITICAL FIX: For NEW products from Excel, ALWAYS use Excel lineage
-                    # Don't check sovereign_lineage - that's only for manual Tag Manager overrides
-                    # Excel is the source of truth for new products
+                    # CRITICAL: Check if strain has sovereign_lineage before using Excel lineage
                     lineage_to_use = self._normalize_lineage(product_data.get('Lineage'))
-                    logger.info(f"📊 NEW PRODUCT: Using Excel lineage '{lineage_to_use}' for '{product_name}'")
+                    if strain_id:
+                        cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
+                        sovereign_result = cursor.fetchone()
+                        if sovereign_result and sovereign_result[0]:
+                            lineage_to_use = str(sovereign_result[0]).strip()
+                            logger.info(f"🔒 NEW PRODUCT: Using sovereign lineage '{lineage_to_use}' for '{product_name}' (ignoring Excel)")
                     
                     # Build column list and values list based on what exists
                     columns_to_insert = []
@@ -1615,22 +1602,6 @@ class ProductDatabase:
                         'CBD test result': product_data.get('CBD test result', ''),
                     }
                     
-                    # CRITICAL FIX: Include ALL remaining fields from product_data that aren't already in column_data_map
-                    # This ensures all Excel columns are included, not just the hardcoded ones
-                    for col_name, col_value in product_data.items():
-                        if col_name not in column_data_map:
-                            # Only add if the column exists in the database
-                            # Also validate column name to prevent SQL injection
-                            if col_name in available_columns and isinstance(col_name, str):
-                                # Clean the value - convert None to empty string, handle NaN
-                                if col_value is None:
-                                    clean_value = ''
-                                elif isinstance(col_value, str) and col_value.lower() in ['nan', 'none', 'null']:
-                                    clean_value = ''
-                                else:
-                                    clean_value = col_value
-                                column_data_map[col_name] = clean_value
-                    
                     # Only include columns that exist in the database
                     for col_name, col_value in column_data_map.items():
                         if col_name in available_columns:
@@ -1642,47 +1613,12 @@ class ProductDatabase:
                     placeholders = ', '.join(['?' for _ in values_to_insert])
                     
                     insert_query = f'INSERT INTO products ({columns_str}) VALUES ({placeholders})'
-                    try:
-                        cursor.execute(insert_query, values_to_insert)
-                        product_id = cursor.lastrowid
-                        conn.commit()
-                        logger.info(f"✅ ADDED NEW product '{product_name}' (ID: {product_id}, Vendor: {vendor_value}, Brand: {brand_value})")
-                        return product_id
-                    except sqlite3.IntegrityError as e:
-                        # Handle UNIQUE constraint violation - product already exists with same name/vendor/brand/weight
-                        if "UNIQUE constraint failed" in str(e) or "unique constraint" in str(e).lower():
-                            logger.warning(f"⚠️ UNIQUE constraint violation for '{product_name}' (Vendor: {vendor_value}, Brand: {brand_value}) - attempting to find and update existing product")
-                            conn.rollback()
-                            
-                            # Try to find the existing product by the UNIQUE constraint fields
-                            weight_value = product_data.get('Weight*', '')
-                            cursor.execute('''
-                                SELECT id, total_occurrences, "Product Name*"
-                                FROM products 
-                                WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
-                            ''', (normalized_name, vendor_value, brand_value, weight_value))
-                            
-                            existing = cursor.fetchone()
-                            if existing:
-                                product_id, occurrences, existing_name = existing
-                                logger.info(f"Found existing product via UNIQUE constraint: '{existing_name}' (ID: {product_id}) - UPDATING")
-                                try:
-                                    self._update_existing_product(cursor, product_id, product_data)
-                                    conn.commit()
-                                    logger.info(f"Successfully updated product '{existing_name}' after UNIQUE constraint violation")
-                                    return product_id
-                                except Exception as update_error:
-                                    logger.error(f"Failed to update product after UNIQUE constraint: {update_error}")
-                                    conn.rollback()
-                                    raise
-                            else:
-                                logger.error(f"UNIQUE constraint violation but could not find existing product: {e}")
-                                raise
-                        else:
-                            # Other integrity errors
-                            logger.error(f"Integrity error inserting product '{product_name}': {e}")
-                            conn.rollback()
-                            raise
+                    cursor.execute(insert_query, values_to_insert)
+                    
+                    product_id = cursor.lastrowid
+                    conn.commit()
+                    logger.info(f"✅ ADDED NEW product '{product_name}' (ID: {product_id}, Vendor: {vendor_value}, Brand: {brand_value})")
+                    return product_id
                 
         except Exception as e:
             product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
@@ -1714,29 +1650,8 @@ class ProductDatabase:
                 logger.warning("No data to store - DataFrame is empty")
                 return {'stored': 0, 'updated': 0, 'errors': 0, 'message': 'No data to store'}
             
-            # CRITICAL FIX: Store ALL Excel data - don't filter it out
-            # The filter should ONLY exclude products that are EXPLICITLY JSON matched tags
-            # Excel uploads should ALWAYS be stored
+            # Filter out JSON matched tags to prevent duplicate storage
             filtered_df = self._filter_json_matched_tags(df)
-            
-            # CRITICAL: If filtering removed everything, check if this is Excel data
-            # Excel data should NEVER be filtered out completely
-            if filtered_df.empty and not df.empty:
-                logger.warning(f"⚠️ Filter removed all {len(df)} rows - checking if this is Excel data")
-                # Check if any rows have Excel indicators
-                has_excel_indicators = False
-                if 'Source' in df.columns:
-                    excel_mask = df['Source'].astype(str).str.contains('Excel|Upload|Import', case=False, na=False)
-                    has_excel_indicators = excel_mask.any()
-                
-                # If this looks like Excel data, don't filter it
-                if has_excel_indicators or 'Source' not in df.columns:
-                    logger.warning(f"⚠️ This appears to be Excel data - storing ALL {len(df)} rows (bypassing filter)")
-                    filtered_df = df.copy()
-                else:
-                    logger.warning(f"⚠️ All rows were filtered as JSON matched tags - nothing to store")
-            
-            logger.info(f"📊 Excel storage: {len(df)} original rows → {len(filtered_df)} rows to store")
 
             # CRITICAL NORMALIZATION: map common column aliases used by different upload paths
             try:
@@ -1748,30 +1663,12 @@ class ProductDatabase:
                 if 'Product Name*' in cols:
                     filtered_df['Product Name*'] = filtered_df['Product Name*'].astype(str).str.strip()
 
-                # Vendor - check multiple column name variations
-                vendor_cols = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'vendor', 'Supplier', 'supplier']
-                vendor_found = None
-                for vcol in vendor_cols:
-                    if vcol in cols:
-                        vendor_found = vcol
-                        break
-                
-                if vendor_found and 'Vendor/Supplier*' not in cols:
-                    filtered_df['Vendor/Supplier*'] = filtered_df[vendor_found]
+                # Vendor
+                if 'Vendor/Supplier*' not in cols and 'Vendor' in cols:
+                    filtered_df['Vendor/Supplier*'] = filtered_df['Vendor']
                     cols.add('Vendor/Supplier*')
-                    logger.info(f"📊 VENDOR MAPPING: Mapped '{vendor_found}' column to 'Vendor/Supplier*'")
-                
                 if 'Vendor/Supplier*' in cols:
                     filtered_df['Vendor/Supplier*'] = filtered_df['Vendor/Supplier*'].astype(str).str.strip()
-                    # Log vendor values to debug missing vendors
-                    non_empty_vendors = filtered_df['Vendor/Supplier*'].notna() & (filtered_df['Vendor/Supplier*'] != '')
-                    vendor_count = non_empty_vendors.sum()
-                    logger.info(f"📊 VENDOR CHECK: Found {vendor_count}/{len(filtered_df)} rows with vendor values")
-                    if vendor_count < len(filtered_df):
-                        empty_vendor_rows = filtered_df[~non_empty_vendors]
-                        if len(empty_vendor_rows) > 0:
-                            logger.warning(f"⚠️ VENDOR MISSING: {len(empty_vendor_rows)} rows have empty vendor values")
-                            logger.warning(f"   First few product names with missing vendors: {empty_vendor_rows['Product Name*'].head(3).tolist() if 'Product Name*' in empty_vendor_rows.columns else 'N/A'}")
 
                 # Product type
                 if 'Product Type*' not in cols and 'Product Type' in cols:
@@ -1868,22 +1765,12 @@ class ProductDatabase:
                     if index < 5:
                         logger.info(f"[WEIGHT DEBUG] Final values - Weight: '{weight_value}' | Units: '{units_value}'")
                     
-                    # CRITICAL FIX: Check ALL vendor column name variations from Excel
-                    vendor_raw = (row_dict.get('Vendor/Supplier*', '') or 
-                                 row_dict.get('Vendor/Supplier', '') or 
-                                 row_dict.get('Vendor', '') or 
-                                 row_dict.get('vendor', '') or 
-                                 row_dict.get('Supplier', '') or 
-                                 row_dict.get('supplier', '') or 
-                                 '')
-                    vendor_value = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
-                    
                     product_data = {
                         'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
                         'Lineage': row_dict.get('Lineage', ''),
-                        'Vendor/Supplier*': vendor_value,
-                        'Vendor': vendor_value,
+                        'Vendor/Supplier*': self._ensure_crucial_value(row_dict.get('Vendor/Supplier*', row_dict.get('Vendor', '')), 'Unknown Vendor', 'Vendor'),
+                        'Vendor': self._ensure_crucial_value(row_dict.get('Vendor', row_dict.get('Vendor/Supplier*', '')), 'Unknown Vendor', 'Vendor'),
                         'Product Brand': self._ensure_crucial_value(row_dict.get('Product Brand', ''), 'Unknown Brand', 'Product Brand'),
                         'Description': self._process_description(
                             row_dict.get('Product Name*', ''), 
@@ -1894,12 +1781,7 @@ class ProductDatabase:
                         'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
                         'Product Strain': row_dict.get('Product Strain', ''),
                         'Quantity*': row_dict.get('Quantity*', ''),
-                        # CRITICAL FIX: Check multiple DOH column names from Excel
-                        'DOH': (row_dict.get('DOH', '') or 
-                                row_dict.get('DOH Compliant (Yes/No)', '') or 
-                                row_dict.get('DOH Compliant*', '') or 
-                                row_dict.get('DOH*', '') or 
-                                ''),
+                        'DOH': row_dict.get('DOH Compliant (Yes/No)', row_dict.get('DOH', '')),
                         'Concentrate Type': row_dict.get('Concentrate Type', ''),
                         'Ratio': self._extract_ratio_from_product_name(
                             row_dict.get('Product Name*', ''), 
@@ -1935,22 +1817,8 @@ class ProductDatabase:
                         'CBDA': row_dict.get('Total CBD', ''),
                         'CBN': row_dict.get('CBN', ''),
                         'Ratio_or_THC_CBD': row_dict.get('Ratio_or_THC_CBD', ''),
-                        # CRITICAL FIX: Check ALL vendor column name variations from Excel
-                        'Vendor/Supplier*': (row_dict.get('Vendor/Supplier*', '') or 
-                                             row_dict.get('Vendor/Supplier', '') or 
-                                             row_dict.get('Vendor', '') or 
-                                             row_dict.get('vendor', '') or 
-                                             row_dict.get('Supplier', '') or 
-                                             row_dict.get('supplier', '') or 
-                                             ''),
-                        'Vendor/Supplier': (row_dict.get('Vendor/Supplier', '') or 
-                                           row_dict.get('Vendor/Supplier*', '') or 
-                                           row_dict.get('Vendor', '') or 
-                                           ''),
-                        'Vendor': (row_dict.get('Vendor', '') or 
-                                  row_dict.get('Vendor/Supplier*', '') or 
-                                  row_dict.get('Vendor/Supplier', '') or 
-                                  ''),
+                        'Vendor/Supplier*': row_dict.get('Vendor/Supplier*', ''),
+                        'Vendor/Supplier': row_dict.get('Vendor/Supplier', ''),
                         'Product Name*': row_dict.get('Product Name*', ''),
                         'Product Name': row_dict.get('Product Name', ''),
                         'Quantity Received*': row_dict.get('Quantity Received*', ''),
@@ -2111,18 +1979,6 @@ class ProductDatabase:
                         'CZ': row_dict.get('CZ', '')
                     }
                     
-                    # CRITICAL FIX: Include ALL remaining Excel columns that aren't already in product_data
-                    # This ensures no data from Excel is lost - store EVERYTHING from Excel
-                    for col_name, col_value in row_dict.items():
-                        if col_name not in product_data:
-                            # Include ALL values from Excel, even if empty (they might be needed)
-                            if col_value is not None:
-                                # Convert to string and clean, but keep the value
-                                clean_value = str(col_value).strip() if isinstance(col_value, str) else col_value
-                                # Don't skip empty strings - they might be meaningful
-                                product_data[col_name] = clean_value
-                            # If None, skip it (but empty strings are OK)
-                    
                     # Skip rows without product name - check multiple possible column names
                     product_name = (product_data.get('ProductName') or 
                                   product_data.get('Product Name*') or 
@@ -2135,26 +1991,25 @@ class ProductDatabase:
                         logger.warning(f"Row {index + 1}: Skipping blank/invalid product name: '{product_name}'")
                         continue
                     
-                    # Skip rows with only whitespace (allow 1 character minimum)
-                    if str(product_name).strip() == '' or len(str(product_name).strip()) < 1:
+                    # Skip rows with only whitespace or special characters
+                    if str(product_name).strip() == '' or len(str(product_name).strip()) < 2:
                         logger.warning(f"Row {index + 1}: Skipping product name too short or only whitespace: '{product_name}'")
                         continue
                     
                     # Update the product data with the found name
                     product_data['Product Name*'] = str(product_name).strip()
                     
-                    # CRITICAL FIX: Apply defaults BEFORE validation to prevent products from being skipped
-                    # This ensures products are added even if vendor/product_type are missing
-                    vendor_raw = product_data.get('Vendor/Supplier*', product_data.get('Vendor', ''))
-                    vendor = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
-                    product_data['Vendor/Supplier*'] = vendor
-                    product_data['Vendor'] = vendor
+                    # Additional validation: Skip rows with missing essential data
+                    vendor = product_data.get('Vendor', '').strip()
+                    product_type = product_data.get('Product Type*', '').strip()
                     
-                    product_type_raw = product_data.get('Product Type*', '')
-                    product_type = self._ensure_crucial_value(product_type_raw, 'Unknown', 'Product Type')
-                    product_data['Product Type*'] = product_type
+                    if not vendor or str(vendor).lower() in ['nan', 'none', 'null', '']:
+                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing vendor information")
+                        continue
                     
-                    # Validation removed - defaults are always applied above, so products will never be skipped for missing vendor/product_type
+                    if not product_type or str(product_type).lower() in ['nan', 'none', 'null', '']:
+                        logger.warning(f"Row {index + 1}: Skipping product '{product_name}' - missing product type")
+                        continue
                     
                     # Skip duplicate entries within the same upload (same name + vendor + type combination)
                     duplicate_key = f"{product_name}|{vendor}|{product_type}"
@@ -2246,75 +2101,30 @@ class ProductDatabase:
                     cursor_temp = conn.cursor()
                     cursor_temp.execute("SELECT COUNT(*) FROM products")
                     count_before = cursor_temp.fetchone()[0]
-                    cursor_temp.close()
                     
-                    # Log before attempting to add - show vendor source
-                    vendor_in_data = product_data.get('Vendor/Supplier*', '') or product_data.get('Vendor', '') or product_data.get('Vendor/Supplier', '')
-                    logger.info(f"🔍 Row {index + 1}: Attempting to add product '{product_name}'")
-                    logger.info(f"   Vendor in product_data: '{vendor_in_data}' -> Final vendor: '{vendor}'")
-                    logger.info(f"   Type: {product_type}, Weight: {product_data.get('Weight*', 'N/A')}")
-                    if not vendor_in_data or vendor_in_data in ['', 'Unknown Vendor', 'nan', 'none', 'null']:
-                        logger.warning(f"⚠️ VENDOR MISSING: Product '{product_name}' has no vendor in Excel data!")
-                        logger.warning(f"   Available vendor columns in row_dict: {[k for k in row_dict.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]}")
+                    product_id = self.add_or_update_product(product_data)
                     
-                    try:
-                        product_id = self.add_or_update_product(product_data)
-                    
-                        if product_id:
-                            cursor_temp = conn.cursor()
-                            cursor_temp.execute("SELECT COUNT(*) FROM products")
-                            count_after = cursor_temp.fetchone()[0]
-                            cursor_temp.close()
-                            
-                            if count_after > count_before:
-                                stored_count += 1
-                                logger.info(f"✅ Row {index + 1}: STORED NEW product '{product_name}' (ID: {product_id})")
-                            else:
-                                updated_count += 1
-                                logger.info(f"🔄 Row {index + 1}: UPDATED existing product '{product_name}' (ID: {product_id})")
-                        elif product_id is None:
-                            # Product was rejected (validation failed or duplicate)
-                            skipped_duplicates += 1
-                            logger.warning(f"⚠️ Row {index + 1}: Product '{product_name}' was rejected (returned None) - check validation logs above")
-                            continue
+                    if product_id:
+                        cursor_temp.execute("SELECT COUNT(*) FROM products")
+                        count_after = cursor_temp.fetchone()[0]
+                        
+                        if count_after > count_before:
+                            stored_count += 1
                         else:
-                            error_count += 1
-                            error_msg = f"Row {index + 1}: Failed to store product '{product_name}' (product_id={product_id})"
-                            errors.append(error_msg)
-                            logger.error(f"❌ {error_msg}")
-                    except Exception as add_error:
-                        error_count += 1
-                        error_msg = f"Row {index + 1}: Exception adding product '{product_name}': {str(add_error)}"
-                        errors.append(error_msg)
-                        logger.error(f"❌ {error_msg}")
-                        import traceback
-                        logger.error(f"Traceback: {traceback.format_exc()}")
+                            updated_count += 1
+                    elif product_id is None:
+                        # Product was skipped as duplicate
+                        skipped_duplicates += 1
+                        logger.info(f"Row {index + 1}: Skipped duplicate product '{product_name}'")
                         continue
+                    else:
+                        error_count += 1
+                        errors.append(f"Row {index + 1}: Failed to store product")
                         
                 except Exception as row_error:
                     error_count += 1
-                    error_msg = f"Row {index + 1}: {str(row_error)}"
-                    errors.append(error_msg)
-                    logger.error(f"❌ ERROR processing row {index + 1} for product '{product_name}': {row_error}")
-                    import traceback
-                    logger.error(f"Traceback: {traceback.format_exc()}")
-                    # Don't continue - try to add the product anyway with minimal data
-                    try:
-                        # Try to add with just the essentials
-                        minimal_product_data = {
-                            'Product Name*': product_name,
-                            'Vendor/Supplier*': vendor if 'vendor' in locals() else 'Unknown Vendor',
-                            'Product Type*': product_type if 'product_type' in locals() else 'Unknown',
-                            'Weight*': product_data.get('Weight*', '1'),
-                            'Units': product_data.get('Units', 'g'),
-                            'Price': product_data.get('Price', '0.00')
-                        }
-                        fallback_id = self.add_or_update_product(minimal_product_data)
-                        if fallback_id:
-                            stored_count += 1
-                            logger.info(f"✅ FALLBACK: Added product '{product_name}' with minimal data after error")
-                    except Exception as fallback_error:
-                        logger.error(f"❌ FALLBACK also failed for '{product_name}': {fallback_error}")
+                    errors.append(f"Row {index + 1}: {str(row_error)}")
+                    logger.error(f"Error processing row {index + 1}: {row_error}")
                     continue
             
             # Calculate excluded counts
@@ -2649,22 +2459,12 @@ class ProductDatabase:
             for col in json_match_indicators:
                 if col in filtered_df.columns:
                     if col == 'Source':
-                        # CRITICAL FIX: Only filter products EXPLICITLY marked as JSON matched
-                        # Don't filter Excel uploads - they should always be stored
-                        # Look for JSON match indicators BUT exclude Excel/Upload sources
-                        json_match_indicators = filtered_df[col].astype(str).str.contains(
-                            'JSON Match|AI Match|Generated Tag', 
+                        # Look for JSON match indicators in Source column
+                        json_match_mask |= filtered_df[col].astype(str).str.contains(
+                            'JSON Match|AI Match|JSON|AI|Match|Generated', 
                             case=False, 
                             na=False
                         )
-                        # Exclude Excel/Upload sources from filtering - these should ALWAYS be stored
-                        excel_sources = filtered_df[col].astype(str).str.contains(
-                            'Excel|Upload|Import', 
-                            case=False, 
-                            na=False
-                        )
-                        # Only mark as JSON match if it's JSON match AND not Excel
-                        json_match_mask |= (json_match_indicators & ~excel_sources)
                     else:
                         # Look for non-null values in other JSON match columns
                         json_match_mask |= filtered_df[col].notna()
@@ -2813,7 +2613,6 @@ class ProductDatabase:
                     FROM products p
                     {join_clause}
                     WHERE p.normalized_name = ? AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
-                    ORDER BY p."Vendor/Supplier*" IS NOT NULL DESC, p.rowid DESC
                 ''', (normalized_name, vendor, brand))
             else:
                 cursor.execute(f'''
@@ -2823,7 +2622,6 @@ class ProductDatabase:
                     FROM products p
                     {join_clause}
                     WHERE p.normalized_name = ?
-                    ORDER BY p."Vendor/Supplier*" IS NOT NULL DESC, p.rowid DESC
                 ''', (normalized_name,))
             
             result = cursor.fetchone()
@@ -3553,75 +3351,11 @@ class ProductDatabase:
         """Normalize product name for consistent matching."""
         if not isinstance(product_name, str):
             return ""
-
+        
         # Use the existing normalization function
         from .excel_processor import normalize_name
         return normalize_name(product_name)
-
-    def _extract_strain_from_product_name(self, product_name: str, product_type: str = None) -> str:
-        """Extract strain name from product name for classic product types.
-
-        Only extracts for classic types: flower, pre-roll, concentrate, etc.
-        Returns empty string for non-classic types (edibles, tinctures, topicals).
-        """
-        if not product_name or not isinstance(product_name, str):
-            return ''
-
-        # Define classic types (same as Excel processor)
-        classic_types = [
-            "flower", "pre-roll", "infused pre-roll", "concentrate",
-            "solventless concentrate", "vape cartridge", "rso/co2 tankers"
-        ]
-
-        # Only extract for classic types
-        if product_type and product_type.lower() not in classic_types:
-            return ''
-
-        # Extract strain name from product name
-        # Common patterns:
-        # "Pocket Aces Badder by Super Mega Bussin' - 1g" -> "Pocket Aces"
-        # "Blue Dream Flower by Vendor - 3.5g" -> "Blue Dream"
-        # "OG Kush Pre-Roll - 1g x 5 Pack" -> "OG Kush"
-
-        import re
-
-        # Remove common suffixes and brand info
-        # Pattern: "StrainName ProductType by Brand - Weight"
-        name = product_name.strip()
-
-        # Remove " by [Brand]" part
-        name = re.sub(r'\s+by\s+.+$', '', name, flags=re.IGNORECASE)
-
-        # Remove weight info like " - 1g", " - 3.5g", etc.
-        name = re.sub(r'\s*-\s*[\d.]+\s*g.*$', '', name, flags=re.IGNORECASE)
-        name = re.sub(r'\s*-\s*\d+\s*x\s*[\d.]+.*$', '', name, flags=re.IGNORECASE)
-
-        # Remove product type keywords
-        product_type_keywords = [
-            'badder', 'wax', 'crumble', 'sugar', 'sauce', 'diamonds', 'shatter',
-            'live resin', 'live rosin', 'cured resin', 'hash rosin',
-            'honey', 'butter', 'rocks', 'oil', 'distillate',
-            'flower', 'pre-roll', 'preroll', 'infused', 'vape', 'cartridge'
-        ]
-
-        for keyword in product_type_keywords:
-            # Remove keyword and anything after it (case-insensitive)
-            pattern = r'\s+' + re.escape(keyword) + r'.*$'
-            name = re.sub(pattern, '', name, flags=re.IGNORECASE)
-
-        # Clean up and return
-        strain_name = name.strip()
-
-        # Validate: must be at least 2 characters and not a common non-strain word
-        if len(strain_name) < 2:
-            return ''
-
-        non_strain_words = ['the', 'and', 'or', 'with', 'pack', 'box']
-        if strain_name.lower() in non_strain_words:
-            return ''
-
-        return strain_name
-
+    
     def _decode_json_abbreviations(self, json_name: str) -> str:
         """Decode JSON abbreviations to full product names."""
         decoded = json_name.lower().strip()
@@ -4038,19 +3772,10 @@ class ProductDatabase:
             return ''
     
     def _update_existing_product(self, cursor, product_id, product_data):
-        """Update an existing product with new data from Excel.
-
-        HYBRID PRIORITY SYSTEM:
-        - Price & DOH: Excel can overwrite (these change frequently in inventory)
-        - Lineage & Other Fields: Database takes precedence, Excel only fills gaps
-        - Exception: sovereign_lineage (manual edits) always wins over everything
-
-        This allows Excel to update volatile fields (prices, compliance status) while
-        preserving stable fields (lineage, product info) that are managed in database.
-        """
+        """Update an existing product with new data. New data always replaces old values."""
         try:
             current_date = datetime.now().isoformat()
-
+            
             # Get current product data for comparison
             cursor.execute('SELECT "Price", "THC test result", "CBD test result", "Weight*", "Units" FROM products WHERE id = ?', (product_id,))
             current_data = cursor.fetchone()
@@ -4086,162 +3811,124 @@ class ProductDatabase:
             ak_value = self._calculate_ak_value(product_data)
             
             # Update the product with new data
-            # PRIORITY: Sovereign (manual) lineage ALWAYS takes precedence over Excel
-            # Excel data overwrites database values ONLY if no sovereign lineage exists
-            incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
-            incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
-
-            # Check if incoming lineage is valid (not empty/null)
-            has_valid_incoming_lineage = (incoming_lineage_clean and
-                                        incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
-
-            # CRITICAL: Check if product has sovereign_lineage (manual override)
-            cursor.execute('SELECT "sovereign_lineage" FROM products WHERE id = ?', (product_id,))
-            sovereign_result = cursor.fetchone()
-            sovereign_lineage = sovereign_result[0] if sovereign_result and sovereign_result[0] else ''
-            sovereign_lineage_clean = str(sovereign_lineage).strip() if sovereign_lineage else ''
-            has_sovereign_lineage = (sovereign_lineage_clean and
-                                    sovereign_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
-
-            # If product has sovereign lineage, NEVER overwrite it with Excel data
-            if has_sovereign_lineage:
-                final_lineage = sovereign_lineage_clean
-                logger.info(f"🔒 SOVEREIGN LINEAGE PROTECTED: Keeping manual lineage '{final_lineage}' for product ID {product_id} (Excel update blocked)")
-            # Otherwise use Excel lineage if it's valid
-            elif has_valid_incoming_lineage:
-                final_lineage = incoming_lineage_clean
-                logger.info(f"✅ LINEAGE FROM EXCEL: Using Excel lineage '{final_lineage}' for product ID {product_id}")
+            # CRITICAL FIX: Check for sovereign_lineage FIRST - it takes absolute priority
+            # Only check strain_id if the column exists in the database
+            strain_id = None
+            sovereign_lineage = None
+            
+            if self._products_has_column('strain_id'):
+                try:
+                    cursor.execute('SELECT strain_id FROM products WHERE id = ?', (product_id,))
+                    strain_id_result = cursor.fetchone()
+                    strain_id = strain_id_result[0] if strain_id_result else None
+                    
+                    if strain_id:
+                        # Check if this strain has a manually-set sovereign_lineage
+                        cursor.execute('SELECT sovereign_lineage FROM strains WHERE id = ?', (strain_id,))
+                        sovereign_result = cursor.fetchone()
+                        if sovereign_result and sovereign_result[0]:
+                            sovereign_lineage = str(sovereign_result[0]).strip()
+                            logger.info(f"🔒 SOVEREIGN LINEAGE: Found manually-set lineage '{sovereign_lineage}' for product ID {product_id}")
+                except Exception as strain_error:
+                    logger.warning(f"Could not check strain_id for product {product_id}: {strain_error}")
+                    strain_id = None
+            
+            # If sovereign lineage exists, USE IT and ignore Excel lineage
+            if sovereign_lineage:
+                final_lineage = sovereign_lineage
+                logger.info(f"✅ LINEAGE PRIORITY: Using sovereign lineage '{final_lineage}' for product ID {product_id} (ignoring Excel)")
             else:
-                # Only preserve DB lineage if Excel has no lineage and no sovereign lineage
+                # No sovereign lineage - use normal Excel/database priority logic
+                incoming_lineage = self._normalize_lineage(product_data.get('Lineage'))
+                incoming_lineage_clean = str(incoming_lineage).strip() if incoming_lineage else ''
+                # Check if incoming lineage is valid (not empty/null)
+                has_valid_incoming_lineage = (incoming_lineage_clean and 
+                                            incoming_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
+                
+                # Get current database lineage to preserve it
                 cursor.execute('SELECT "Lineage" FROM products WHERE id = ?', (product_id,))
                 current_db_lineage = cursor.fetchone()
                 current_lineage = current_db_lineage[0] if current_db_lineage and current_db_lineage[0] else ''
                 current_lineage_clean = str(current_lineage).strip() if current_lineage else ''
-                has_existing_lineage = (current_lineage_clean and
+                has_existing_lineage = (current_lineage_clean and 
                                       current_lineage_clean not in ['', 'nan', 'none', 'null', 'None', 'NaN'])
-
-                if has_existing_lineage:
+                
+                # Determine final lineage: prefer incoming if valid, otherwise preserve existing
+                if has_valid_incoming_lineage:
+                    final_lineage = incoming_lineage_clean
+                    logger.info(f"✅ LINEAGE UPDATE: Using incoming lineage '{final_lineage}' for product ID {product_id}")
+                elif has_existing_lineage:
                     final_lineage = current_lineage_clean
-                    logger.info(f"✅ LINEAGE PRESERVE: Keeping existing DB lineage '{final_lineage}' for product ID {product_id} (Excel had no lineage)")
+                    logger.info(f"✅ LINEAGE PRESERVE: Preserving existing lineage '{final_lineage}' for product ID {product_id} (incoming was empty)")
                 else:
-                    final_lineage = ''
-                    logger.info(f"⚠️ LINEAGE EMPTY: No lineage available for product ID {product_id}")
+                    final_lineage = incoming_lineage_clean  # Even if empty, use it
+                    logger.info(f"⚠️ LINEAGE EMPTY: No lineage to preserve for product ID {product_id}")
             
-            # Get available columns in the database
-            cursor.execute("PRAGMA table_info(products)")
-            available_columns = {row[1] for row in cursor.fetchall()}
-            
-            # Build dynamic UPDATE statement to include ALL fields from product_data
-            update_fields = []
-            update_values = []
-            
-            # Core fields that need special handling
-            product_name = product_data.get('Product Name*', product_data.get('ProductName', ''))
-            normalized_name = self._normalize_product_name(product_name) if product_name else ''
-
-            # PRIORITY SYSTEM:
-            # - Price and DOH: Excel can overwrite (these change frequently)
-            # - Other fields: Database takes precedence, Excel only fills gaps
-            excel_doh = product_data.get('DOH', '')
-            excel_price = product_data.get('Price', '')
-
-            # Determine Price: ALWAYS use Excel if available (prices change frequently)
-            has_excel_price = excel_price and str(excel_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
-
-            if has_excel_price:
-                final_price = excel_price
-                logger.info(f"💰 PRICE FROM EXCEL: Using Excel price '{final_price}' for product '{product_name}'")
-            else:
-                # Fall back to DB price if Excel has no price
-                cursor.execute('SELECT "Price" FROM products WHERE id = ?', (product_id,))
-                current_price_result = cursor.fetchone()
-                current_price = current_price_result[0] if current_price_result and current_price_result[0] else ''
-                has_db_price = current_price and str(current_price).strip() not in ['', '0', '0.00', 'nan', 'none', 'null', 'None', 'NaN']
-
-                if has_db_price:
-                    final_price = current_price
-                    logger.info(f"💰 PRICE FROM DB: Using database price '{final_price}' for product '{product_name}' (Excel had no price)")
-                else:
-                    final_price = ''
-                    logger.info(f"⚠️ PRICE EMPTY: No price available for product '{product_name}'")
-
-            # Determine DOH: ALWAYS use Excel if available (DOH status changes frequently)
-            has_excel_doh = excel_doh and str(excel_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
-
-            if has_excel_doh:
-                final_doh = excel_doh
-                logger.info(f"🏷️ DOH FROM EXCEL: Using Excel DOH '{final_doh}' for product '{product_name}'")
-            else:
-                # Fall back to DB DOH if Excel has no DOH
-                cursor.execute('SELECT "DOH" FROM products WHERE id = ?', (product_id,))
-                current_doh_result = cursor.fetchone()
-                current_doh = current_doh_result[0] if current_doh_result and current_doh_result[0] else ''
-                has_db_doh = current_doh and str(current_doh).strip() not in ['', 'nan', 'none', 'null', 'None', 'NaN']
-
-                if has_db_doh:
-                    final_doh = current_doh
-                    logger.info(f"🏷️ DOH FROM DB: Using database DOH '{final_doh}' for product '{product_name}' (Excel had no DOH)")
-                else:
-                    final_doh = ''
-
-            # Update fields
-            update_fields.append('"Product Type*" = ?')
-            update_values.append(product_data.get('Product Type*'))
-
-            update_fields.append('"Lineage" = ?')
-            update_values.append(final_lineage)
-
-            update_fields.append('"Price" = ?')
-            update_values.append(final_price)
-
-            update_fields.append('"DOH" = ?')
-            update_values.append(final_doh)
-            
-            if normalized_name and 'normalized_name' in available_columns:
-                update_fields.append('"normalized_name" = ?')
-                update_values.append(normalized_name)
-            
-            update_fields.append('"last_seen_date" = ?')
-            update_values.append(current_date)
-            
-            update_fields.append('"updated_at" = ?')
-            update_values.append(current_date)
-            
-            # Add all other fields from product_data that exist in the database
-            # Skip fields that are already handled above or are internal/metadata fields
-            skip_fields = {
-                'Product Type*', 'Lineage', 'DOH', 'Price', 'last_seen_date', 'updated_at',
-                'first_seen_date', 'created_at', 'total_occurrences', 'normalized_name',
-                'id', 'strain_id'  # These are handled separately or shouldn't be updated
-            }
-            
-            for col_name, col_value in product_data.items():
-                if col_name in skip_fields:
-                    continue
-                # Only include if column exists in database
-                if col_name in available_columns:
-                    update_fields.append(f'"{col_name}" = ?')
-                    # Handle special calculated fields
-                    if col_name == 'AI':
-                        update_values.append(self._calculate_ai_value(product_data))
-                    elif col_name == 'AK':
-                        update_values.append(self._calculate_ak_value(product_data))
-                    elif col_name == 'AJ':
-                        update_values.append(product_data.get('THC Content', ''))
-                    elif col_name == 'Product Strain':
-                        update_values.append(self._calculate_product_strain_original(
-                            product_data.get('Product Type*', ''),
-                            product_data.get('Product Name*', ''),
-                            product_data.get('Description', ''),
-                            product_data.get('Ratio', '')
-                        ))
-                    else:
-                        update_values.append(col_value)
-            
-            # Build and execute the UPDATE query
-            update_query = f'UPDATE products SET {", ".join(update_fields)} WHERE id = ?'
-            update_values.append(product_id)
-            cursor.execute(update_query, update_values)
+            # CRITICAL FIX: Excel values for DOH, Price, and Product Type always overwrite database
+            # These fields are the source of truth from Excel uploads
+            cursor.execute('''
+                UPDATE products SET
+                    "Product Type*" = ?,
+                    "Lineage" = ?,
+                    "Vendor/Supplier*" = ?,
+                    "Product Brand" = ?,
+                    "Description" = ?,
+                    "Weight*" = ?,
+                    "Units" = ?,
+                    "Price" = ?,
+                    "Product Strain" = ?,
+                    "Quantity*" = ?,
+                    "DOH" = ?,
+                    "Concentrate Type" = ?,
+                    "Ratio" = ?,
+                    "JointRatio" = ?,
+                    "THC test result" = ?,
+                    "CBD test result" = ?,
+                    "Total THC" = ?,
+                    "THCA" = ?,
+                    "CBDA" = ?,
+                    "THC" = ?,
+                    "CBD" = ?,
+                    "AI" = ?,
+                    "AJ" = ?,
+                    "AK" = ?,
+                    "last_seen_date" = ?,
+                    "updated_at" = ?
+                WHERE id = ?
+            ''', (
+                product_data.get('Product Type*'),  # Excel Product Type (High THC/CBD) overwrites DB
+                final_lineage,
+                product_data.get('Vendor/Supplier*'),
+                product_data.get('Product Brand'),
+                product_data.get('Description'),
+                product_data.get('Weight*'),
+                product_data.get('Units'),
+                product_data.get('Price'),  # Excel Price overwrites DB
+                self._calculate_product_strain_original(
+                    product_data.get('Product Type*', ''),
+                    product_data.get('Product Name*', ''),
+                    product_data.get('Description', ''),
+                    product_data.get('Ratio', '')
+                ),
+                product_data.get('Quantity*', ''),
+                product_data.get('DOH', ''),  # Excel DOH overwrites DB
+                product_data.get('Concentrate Type', ''),
+                product_data.get('Ratio', ''),
+                product_data.get('JointRatio', ''),
+                product_data.get('THC test result', ''),
+                product_data.get('CBD test result', ''),
+                product_data.get('Total THC', ''),
+                product_data.get('THCA', ''),
+                product_data.get('CBDA', ''),
+                product_data.get('THC', ''),
+                product_data.get('CBD', ''),
+                self._calculate_ai_value(product_data),
+                product_data.get('THC Content', ''),
+                self._calculate_ak_value(product_data),
+                current_date,
+                current_date,
+                product_id
+            ))
             
             # CRITICAL: Ensure lineage change is logged (commit handled by caller)
             logger.info(f"✅ Successfully updated product ID {product_id} with lineage '{final_lineage}'")
@@ -4836,28 +4523,27 @@ class ProductDatabase:
     
     @timed_operation("get_strain_lineage_map")
     def get_strain_lineage_map(self) -> Dict[str, str]:
-        """Get a mapping of normalized strain names to their lineages, prioritizing sovereign (manual) lineages."""
+        """Get a mapping of normalized strain names to their canonical lineages."""
         try:
             self.init_database()  # Ensure DB is initialized
-
+            
             cache_key = self._get_cache_key("strain_lineage_map")
-
+            
             # Check cache first
             cached_result = self._get_from_cache(cache_key)
             if cached_result is not None:
                 return cached_result
-
+            
             conn = self._get_connection()
             cursor = conn.cursor()
-            # CRITICAL FIX: Prioritize sovereign_lineage (manual edits) over canonical_lineage (Excel data)
-            cursor.execute('SELECT normalized_name, COALESCE(sovereign_lineage, canonical_lineage) FROM strains WHERE COALESCE(sovereign_lineage, canonical_lineage) IS NOT NULL')
-
+            cursor.execute('SELECT normalized_name, canonical_lineage FROM strains WHERE canonical_lineage IS NOT NULL')
+            
             lineage_map = {row[0]: row[1] for row in cursor.fetchall() if row[0] and row[1]}
-
+            
             # Cache the result for 10 minutes
             self._set_cache(cache_key, lineage_map, ttl=600)
             return lineage_map
-
+            
         except Exception as e:
             logger.error(f"Error getting strain lineage map: {e}")
             return {}
@@ -4891,34 +4577,33 @@ class ProductDatabase:
 
             # CRITICAL FIX: Use normalized name and try both column names
             # This ensures updates work even with formatting differences
-            # CRITICAL: Set BOTH Lineage and sovereign_lineage for manual updates
             if vendor and brand:
                 cursor.execute('''
                     UPDATE products
-                    SET "Lineage" = ?, sovereign_lineage = ?
+                    SET "Lineage" = ?
                     WHERE ("Product Name*" = ? OR "ProductName" = ?)
                     AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (new_lineage, new_lineage, product_name, product_name, vendor, brand))
-                logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
+                ''', (new_lineage, product_name, product_name, vendor, brand))
+                logger.info(f"Updated lineage for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
             else:
                 # Try exact match first
                 cursor.execute('''
                     UPDATE products
-                    SET "Lineage" = ?, sovereign_lineage = ?
+                    SET "Lineage" = ?
                     WHERE "Product Name*" = ? OR "ProductName" = ?
-                ''', (new_lineage, new_lineage, product_name, product_name))
+                ''', (new_lineage, product_name, product_name))
 
                 # If no rows updated with exact match, try case-insensitive match
                 if cursor.rowcount == 0:
                     cursor.execute('''
                         UPDATE products
-                        SET "Lineage" = ?, sovereign_lineage = ?
+                        SET "Lineage" = ?
                         WHERE LOWER(TRIM("Product Name*")) = LOWER(TRIM(?))
                         OR LOWER(TRIM("ProductName")) = LOWER(TRIM(?))
-                    ''', (new_lineage, new_lineage, product_name, product_name))
-                    logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' using case-insensitive match to '{new_lineage}'")
+                    ''', (new_lineage, product_name, product_name))
+                    logger.info(f"Updated lineage for product '{product_name}' using case-insensitive match to '{new_lineage}'")
                 else:
-                    logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' to '{new_lineage}'")
+                    logger.info(f"Updated lineage for product '{product_name}' to '{new_lineage}'")
 
             conn.commit()
             rows_updated = cursor.rowcount
@@ -4926,16 +4611,6 @@ class ProductDatabase:
                 logger.warning(f"No product found in database to update: '{product_name}' (vendor={vendor}, brand={brand})")
             else:
                 logger.info(f"Successfully updated {rows_updated} row(s) for product '{product_name}'")
-
-                # CRITICAL FIX: Clear lineage cache for this product to force fresh lookup
-                # Without this, get_product_lineage() will return the old cached value
-                with _lineage_cache_lock:
-                    cache_key = product_name.strip().lower()
-                    if cache_key in _lineage_cache:
-                        del _lineage_cache[cache_key]
-                        del _lineage_cache_timestamps[cache_key]
-                        logger.info(f"✅ Cleared lineage cache for '{product_name}' after update")
-
             return rows_updated > 0
         except Exception as e:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
@@ -4980,15 +4655,10 @@ class ProductDatabase:
                 return None
             
             # Try exact match first (fastest) - also get strain for sativa hybrid check
-            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                       p."Product Strain"
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p."Product Name*" = ? OR p."ProductName" = ?
-                ORDER BY p.id DESC
+                SELECT "Lineage", "Product Strain" FROM products 
+                WHERE "Product Name*" = ? OR "ProductName" = ?
+                ORDER BY id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -5022,16 +4692,11 @@ class ProductDatabase:
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
-            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                       p."Product Strain"
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
-                   OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
-                ORDER BY p.id DESC
+                SELECT "Lineage", "Product Strain" FROM products 
+                WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?))
+                   OR TRIM(LOWER("ProductName")) = TRIM(LOWER(?))
+                ORDER BY id DESC
                 LIMIT 1
             ''', (product_name_norm, product_name_norm))
             
@@ -5056,15 +4721,10 @@ class ProductDatabase:
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
-            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                       p."Product Strain"
-                FROM products p
-                LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p."Product Name*" LIKE ? OR p."ProductName" LIKE ?
-                ORDER BY p.id DESC
+                SELECT "Lineage", "Product Strain" FROM products 
+                WHERE "Product Name*" LIKE ? OR "ProductName" LIKE ?
+                ORDER BY id DESC
                 LIMIT 1
             ''', (f'%{product_name_norm}%', f'%{product_name_norm}%'))
             
@@ -5119,13 +4779,11 @@ class ProductDatabase:
                     logger.debug(f"Found vendor-specific lineage for {strain_name} + {brand}: {result[0]}")
                     return result[0]
                 
-                # Check products table for vendor/brand combination
-                # CRITICAL FIX: Join with strains and prioritize sovereign_lineage
+                # Check products table for vendor/brand combination without relying on missing strain_id
+                # Match by normalized Product Strain text to the requested strain
                 normalized_strain = self._normalize_strain_name(strain_name)
                 cursor.execute('''
-                    SELECT COALESCE(s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
-                    FROM products p
-                    LEFT JOIN strains s ON p.strain_id = s.id
+                    SELECT p."Lineage" FROM products p
                     WHERE LOWER(TRIM(COALESCE(p."Product Strain", ''))) = ?
                       AND p."Vendor/Supplier*" = ? AND p."Product Brand" = ?
                     ORDER BY p.id DESC
@@ -5137,14 +4795,11 @@ class ProductDatabase:
                     logger.debug(f"Found product-specific lineage for {strain_name} + {vendor} + {brand}: {result[0]}")
                     return result[0]
             
-            # Fallback to strain lineage from strains table (prioritizes sovereign_lineage)
+            # Fallback to canonical lineage from strains table
             strain_info = self.get_strain_info(strain_name)
-            if strain_info:
-                # CRITICAL FIX: Use display_lineage which prioritizes sovereign_lineage over canonical
-                lineage = strain_info.get('display_lineage') or strain_info.get('canonical_lineage')
-                if lineage:
-                    logger.debug(f"Using strain lineage for {strain_name}: {lineage}")
-                    return lineage
+            if strain_info and strain_info.get('canonical_lineage'):
+                logger.debug(f"Using canonical lineage for {strain_name}: {strain_info['canonical_lineage']}")
+                return strain_info['canonical_lineage']
             
             return None
             
@@ -5669,10 +5324,9 @@ class ProductDatabase:
             placeholders = ','.join(['?' for _ in normalized_names])
             
             # Fixed query - use products table directly with correct column names
-            # CRITICAL: Include sovereign_lineage to capture manual tag manager edits
             cursor.execute(f'''
                 SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
-                       "Product Strain" as strain_name, "Lineage" as canonical_lineage, sovereign_lineage, total_occurrences, first_seen_date, last_seen_date,
+                       "Product Strain" as strain_name, "Lineage" as canonical_lineage, total_occurrences, first_seen_date, last_seen_date,
                        "Description", "Weight*", "Units", "Price", 
                        "THC test result", "CBD test result", "Test result unit (% or mg)",
                        "Quantity*", "DOH", "Concentrate Type", "Ratio", "JointRatio", "State", "Is Sample? (yes/no)",
@@ -5711,58 +5365,56 @@ class ProductDatabase:
                         'Vendor': result[4],  # vendor
                         'Vendor/Supplier*': result[4],  # Excel column name compatibility
                         'Product Brand': result[5],  # brand
-                        # CRITICAL: Prioritize sovereign_lineage (manual overrides) over regular Lineage
-                        'sovereign_lineage': result[9],  # CRITICAL: sovereign_lineage contains manual tag manager edits
-                        'Lineage': (result[9] if result[9] and str(result[9]).strip() not in ['', 'None', 'nan'] else result[6]) or 'MIXED',  # Use sovereign_lineage if available, otherwise use Lineage
+                        'Lineage': result[6] or 'MIXED',  # lineage
                         'Product Strain': result[7],  # strain_name from Product Strain column
                         'strain_name': result[7],  # strain_name from Product Strain column
-                        'canonical_lineage': (result[9] if result[9] and str(result[9]).strip() not in ['', 'None', 'nan'] else result[8]),  # Use sovereign_lineage if available, otherwise use Lineage
-                        'total_occurrences': result[10],
-                        'first_seen_date': result[11],
-                        'last_seen_date': result[12],
-                        'Description': result[13] or result[1],  # description or product_name
-                        'Weight*': result[14],  # weight
-                        'Units': result[15],  # units
-                        'Price': result[16],  # price
-                        'THC test result': result[17],  # thc_test_result
-                        'CBD test result': result[18],  # cbd_test_result
-                        'Test result unit (% or mg)': result[19],  # test_result_unit with correct field name
-                        'Quantity*': result[20],  # quantity
-                        'DOH': result[21],  # doh_compliant
-                        'Concentrate Type': result[22],  # concentrate_type with correct field name
-                        'Ratio': result[23],  # ratio
-                        'JointRatio': result[24],  # joint_ratio
-                        'State': result[25],  # state
-                        'Is Sample? (yes/no)': result[26],  # is_sample with correct field name
-                        'Is MJ product?(yes/no)': result[27],  # is_mj_product with correct field name
-                        'Discountable? (yes/no)': result[28],  # discountable with correct field name
-                        'Room*': result[29],  # room
-                        'Batch Number': result[30],  # batch_number with correct field name
-                        'Lot Number': result[31],  # lot_number with correct field name
-                        'Barcode*': result[32],  # barcode with correct field name
-                        'Medical Only (Yes/No)': result[33],  # medical_only with correct field name
-                        'Med Price': result[34],  # med_price with correct field name
-                        'Expiration Date(YYYY-MM-DD)': result[35],  # expiration_date with correct field name
-                        'Is Archived? (yes/no)': result[36],  # is_archived with correct field name
-                        'THC Per Serving': result[37],  # thc_per_serving with correct field name
-                        'Allergens': result[38],  # allergens with correct field name
-                        'Solvent': result[39],  # solvent with correct field name
-                        'Accepted Date': result[40],  # accepted_date with correct field name
-                        'Internal Product Identifier': result[41],  # internal_product_identifier with correct field name
-                        'Product Tags (comma separated)': result[42],  # product_tags with correct field name
-                        'Image URL': result[43],  # image_url with correct field name
-                        'Ingredients': result[44],  # ingredients with correct field name
-                        'CombinedWeight': result[45],  # combined_weight with correct field name
-                        'Ratio_or_THC_CBD': result[46],  # ratio_or_thc_cbd with correct field name
-                        'Description_Complexity': result[47],  # description_complexity with correct field name
-                        'Total THC': result[48],  # total_thc
-                        'THCA': result[49],  # thca
-                        'CBDA': result[50],  # cbda
-                        'CBN': result[51],  # cbn
+                        'canonical_lineage': result[8],  # canonical_lineage from Lineage column
+                        'total_occurrences': result[9],
+                        'first_seen_date': result[10],
+                        'last_seen_date': result[11],
+                        'Description': result[12] or result[1],  # description or product_name
+                        'Weight*': result[13],  # weight
+                        'Units': result[14],  # units
+                        'Price': result[15],  # price
+                        'THC test result': result[16],  # thc_test_result
+                        'CBD test result': result[17],  # cbd_test_result
+                        'Test result unit (% or mg)': result[18],  # test_result_unit with correct field name
+                        'Quantity*': result[19],  # quantity
+                        'DOH': result[20],  # doh_compliant
+                        'Concentrate Type': result[21],  # concentrate_type with correct field name
+                        'Ratio': result[22],  # ratio
+                        'JointRatio': result[23],  # joint_ratio
+                        'State': result[24],  # state
+                        'Is Sample? (yes/no)': result[25],  # is_sample with correct field name
+                        'Is MJ product?(yes/no)': result[26],  # is_mj_product with correct field name
+                        'Discountable? (yes/no)': result[27],  # discountable with correct field name
+                        'Room*': result[28],  # room
+                        'Batch Number': result[29],  # batch_number with correct field name
+                        'Lot Number': result[30],  # lot_number with correct field name
+                        'Barcode*': result[31],  # barcode with correct field name
+                        'Medical Only (Yes/No)': result[32],  # medical_only with correct field name
+                        'Med Price': result[33],  # med_price with correct field name
+                        'Expiration Date(YYYY-MM-DD)': result[34],  # expiration_date with correct field name
+                        'Is Archived? (yes/no)': result[35],  # is_archived with correct field name
+                        'THC Per Serving': result[36],  # thc_per_serving with correct field name
+                        'Allergens': result[37],  # allergens with correct field name
+                        'Solvent': result[38],  # solvent with correct field name
+                        'Accepted Date': result[39],  # accepted_date with correct field name
+                        'Internal Product Identifier': result[40],  # internal_product_identifier with correct field name
+                        'Product Tags (comma separated)': result[41],  # product_tags with correct field name
+                        'Image URL': result[42],  # image_url with correct field name
+                        'Ingredients': result[43],  # ingredients with correct field name
+                        'CombinedWeight': result[44],  # combined_weight with correct field name
+                        'Ratio_or_THC_CBD': result[45],  # ratio_or_thc_cbd with correct field name
+                        'Description_Complexity': result[46],  # description_complexity with correct field name
+                        'Total THC': result[47],  # total_thc
+                        'THCA': result[48],  # thca
+                        'CBDA': result[49],  # cbda
+                        'CBN': result[50],  # cbn
                         # Add Excel column name compatibility fields
                         'ProductBrand': result[5],
                         'ProductStrain': result[7],
-                        'WeightWithUnits': f"{result[14]}{result[15]}" if result[14] and result[15] else result[14] or result[15] or '',
+                        'WeightWithUnits': f"{result[13]}{result[14]}" if result[13] and result[14] else result[13] or result[14] or '',
                         'displayName': result[1]  # For frontend compatibility
                     }
                     
@@ -5814,10 +5466,17 @@ class ProductDatabase:
             # If we didn't find all products, try fuzzy matching
             logger.info(f"Found {len(exact_matches)} exact matches, trying fuzzy matching for remaining products")
             
-            # Get all products for fuzzy matching
+            # Get all products for fuzzy matching (exclude deactivated and samples)
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM products ORDER BY "Product Name*"')
+            cursor.execute('''
+                SELECT * FROM products
+                WHERE "Product Type*" NOT LIKE '%DEACTIVATED%'
+                    AND "Product Type*" NOT LIKE '%Sample%'
+                    AND "Product Type*" != 'Samples - Educational'
+                    AND "Product Type*" != 'Sample - Vendor'
+                ORDER BY "Product Name*"
+            ''')
             all_rows = cursor.fetchall()
             columns = [description[0] for description in cursor.description]
             all_products = [dict(zip(columns, row)) for row in all_rows]
@@ -7149,12 +6808,16 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" = ?
+                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
+                    AND p."Product Type*" NOT LIKE '%Sample%'
+                    AND p."Product Type*" != 'Samples - Educational'
+                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.last_seen_date DESC
             ''', (product_name,))
             
@@ -7181,12 +6844,16 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p."Product Strain" LIKE ? OR s.strain_name LIKE ?
+                WHERE (p."Product Strain" LIKE ? OR s.strain_name LIKE ?)
+                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
+                    AND p."Product Type*" NOT LIKE '%Sample%'
+                    AND p."Product Type*" != 'Samples - Educational'
+                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.last_seen_date DESC
             ''', (f'%{strain_name}%', f'%{strain_name}%'))
             
@@ -7213,12 +6880,16 @@ class ProductDatabase:
                        p."Description", p."Weight*", p."Units", p."Price", p."Quantity*", p."DOH", p."Concentrate Type", p."Ratio", p."JointRatio",
                        p."State", p."Is Sample? (yes/no)", p."Is MJ product?(yes/no)", p."Discountable? (yes/no)", p."Room*", p."Batch Number", p."Lot Number", p."Barcode*",
                        p."Medical Only (Yes/No)", p."Med Price", p."Expiration Date(YYYY-MM-DD)", p."Is Archived? (yes/no)", p."THC Per Serving", p."Allergens", p."Solvent", p."Accepted Date",
-                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD", 
+                       p."Internal Product Identifier", p."Product Tags (comma separated)", p."Image URL", p."Ingredients", p."CombinedWeight", p."Ratio_or_THC_CBD",
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", p.total_occurrences, p.first_seen_date, p.last_seen_date,
                        s.canonical_lineage, s.sovereign_lineage
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Type*" = ? AND (p."Product Strain" = ? OR s.strain_name = ?)
+                    AND p."Product Type*" NOT LIKE '%DEACTIVATED%'
+                    AND p."Product Type*" NOT LIKE '%Sample%'
+                    AND p."Product Type*" != 'Samples - Educational'
+                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.last_seen_date DESC
             ''', (product_type, strain_name, strain_name))
             
@@ -7276,6 +6947,10 @@ class ProductDatabase:
             query = f'''
                 SELECT p.id, {", ".join(select_columns)}
                 FROM products p
+                WHERE p."Product Type*" NOT LIKE '%DEACTIVATED%'
+                    AND p."Product Type*" NOT LIKE '%Sample%'
+                    AND p."Product Type*" != 'Samples - Educational'
+                    AND p."Product Type*" != 'Sample - Vendor'
                 ORDER BY p.id
             '''
             

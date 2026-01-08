@@ -86,10 +86,7 @@ class Config:
     
     # PythonAnywhere specific settings
     PYTHONANYWHERE_MODE = os.environ.get('PYTHONANYWHERE_MODE', 'False').lower() == 'true'
-
-    # QR Code base URL for preroll templates
-    QR_BASE_URL = os.environ.get('QR_BASE_URL', 'https://www.agtpricetags.com')
-
+    
     @classmethod
     def init_app(cls, app):
         """Initialize the app with this config."""

@@ -37,10 +37,10 @@ function testAdvancedFeatures() {
     const endpoints = [
         '/api/database-stats',
         '/api/database-vendor-stats',
-        '/api/database-analytics'
-        // DISABLED: '/api/available-tags' - this was interfering with tag selection
+        '/api/database-analytics',
+        '/api/available-tags'
     ];
-
+    
     endpoints.forEach(endpoint => {
         fetch(endpoint)
             .then(response => {

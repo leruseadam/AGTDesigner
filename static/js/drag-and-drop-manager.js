@@ -1052,19 +1052,23 @@ class DragAndDropManager {
             // Insert before the target element
             try {
                 targetParent.insertBefore(draggedElement, targetElement);
+                console.log('Inserted before target element');
             } catch (e) {
                 console.error('❌ Error inserting before target element:', e);
                 // Fallback: append to parent
                 targetParent.appendChild(draggedElement);
+                console.log('Fallback: appended to target parent');
             }
         } else if (targetParent) {
             // Append to the target parent
             try {
                 targetParent.appendChild(draggedElement);
+                console.log('Appended to target parent');
             } catch (e) {
                 console.error('❌ Error appending to target parent:', e);
                 // Fallback: append to container
                 container.appendChild(draggedElement);
+                console.log('Fallback: appended to main container');
             }
         } else if (remainingTagRows.length > 0) {
             // Insert before the first remaining element
@@ -1073,20 +1077,25 @@ class DragAndDropManager {
             if (firstParent) {
                 try {
                     firstParent.insertBefore(draggedElement, firstElement);
+                    console.log('Inserted before first element');
                 } catch (e) {
                     console.error('❌ Error inserting before first element:', e);
                     container.appendChild(draggedElement);
+                    console.log('Fallback: appended to main container');
                 }
             } else {
                 container.appendChild(draggedElement);
+                console.log('Appended to main container');
             }
         } else {
             // No remaining elements, append to main container
             container.appendChild(draggedElement);
+            console.log('Appended to main container (no remaining elements)');
         }
         
         // Verify the element is still in the selected tags container
         const isStillInSelected = container.contains(draggedElement);
+        console.log('Element still in selected tags:', isStillInSelected);
         
         if (!isStillInSelected) {
             console.error('❌ Element was moved out of selected tags! Attempting to restore...');

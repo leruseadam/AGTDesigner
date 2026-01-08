@@ -185,9 +185,6 @@ class TemplateProcessor:
         # Performance tracking
         self.start_time = time.time()
         self.chunk_count = 0
-        
-        # Template expansion cache - avoid re-expanding templates with same size
-        self._template_expansion_cache = {}
 
         # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
         if self.template_type in ['horizontal', 'vertical', 'double']:
@@ -1241,69 +1238,42 @@ class TemplateProcessor:
         
         try:
             # CRITICAL FIX: Re-expand template with correct number of products to prevent blank labels
-            # OPTIMIZATION: Cache template expansions to avoid re-expanding for same size
             num_products = len(chunk)
-            cache_key = f"{self.template_type}_{num_products}"
             
-            if cache_key in self._template_expansion_cache:
-                # Use cached template expansion
-                self._expanded_template_buffer = self._template_expansion_cache[cache_key]
-                if hasattr(self._expanded_template_buffer, 'seek'):
-                    self._expanded_template_buffer.seek(0)
-            else:
-                # For all templates, re-expand with correct number of products
-                if self.template_type in ['horizontal', 'vertical']:
-                    self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
-                elif self.template_type == 'double':
-                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                elif self.template_type == 'mini':
-                    self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
-                
-                # Cache the expansion (create a copy since BytesIO is consumed)
-                if hasattr(self._expanded_template_buffer, 'getvalue'):
-                    cached_buffer = BytesIO(self._expanded_template_buffer.getvalue())
-                    self._template_expansion_cache[cache_key] = cached_buffer
-                    self._expanded_template_buffer.seek(0)
-                elif hasattr(self._expanded_template_buffer, 'seek'):
-                    self._expanded_template_buffer.seek(0)
+            # For all templates, re-expand with correct number of products
+            if self.template_type in ['horizontal', 'vertical']:
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
+            elif self.template_type == 'double':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
+            elif self.template_type == 'mini':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
+            
+            if hasattr(self._expanded_template_buffer, 'seek'):
+                self._expanded_template_buffer.seek(0)
             
             doc = DocxTemplate(self._expanded_template_buffer)
             
-            # Debug: Log the order of records in this chunk (only for small chunks to reduce logging overhead)
-            if len(chunk) <= 10:
-                chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
-                self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
-            else:
-                self.logger.info(f"Processing chunk with {len(chunk)} records")
+            # Debug: Log the order of records in this chunk
+            chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
+            self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
             
-            # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
-            # This reduces 200+ queries for 100 products to just 3-4 queries total
+            # OPTIMIZATION: Pre-load all brand data in batch to avoid N+1 queries
+            # This reduces 100+ queries for 100 products to just 1 query total
             product_brand_cache = {}
-            product_vendor_cache = {}
-            product_lineage_cache = {}
-            strain_info_cache = {}
-            joint_ratio_cache = {}
             try:
                 from src.core.data.product_database import get_product_database
                 product_db = get_product_database()
                 if product_db:
                     product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
                     product_names = [n for n in product_names if n]
-                    
-                    # Collect unique strain names for batch loading
-                    strain_names = set()
-                    for r in chunk:
-                        strain = r.get('ProductStrain', '') or r.get('Product Strain', '')
-                        if strain:
-                            strain_names.add(strain)
-                    
                     if product_names:
                         try:
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
                             placeholders = ','.join(['?'] * len(product_names))
-                            
-                            # Load brand data
                             batch_brand_query = f'''
                                 SELECT "Product Name*", "Product Brand"
                                 FROM products
@@ -1316,86 +1286,10 @@ class TemplateProcessor:
                                 pname, brand = row_result
                                 if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_brand_cache[pname] = str(brand).strip()
-                            
-                            # Load vendor data - try Vendor/Supplier* first, then Vendor, then ProductVendor
-                            batch_vendor_query = f'''
-                                SELECT "Product Name*", 
-                                       CASE 
-                                           WHEN "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' THEN "Vendor/Supplier*"
-                                           WHEN "Vendor" IS NOT NULL AND "Vendor" != '' THEN "Vendor"
-                                           WHEN "ProductVendor" IS NOT NULL AND "ProductVendor" != '' THEN "ProductVendor"
-                                           ELSE NULL
-                                       END as vendor
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND (
-                                    ("Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '')
-                                    OR ("Vendor" IS NOT NULL AND "Vendor" != '')
-                                    OR ("ProductVendor" IS NOT NULL AND "ProductVendor" != '')
-                                )
-                            '''
-                            cursor.execute(batch_vendor_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, vendor = row_result
-                                if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_vendor_cache[pname] = str(vendor).strip()
-                            
-                            # Load lineage data (sovereign_lineage, Lineage, canonical_lineage)
-                            batch_lineage_query = f'''
-                                SELECT "Product Name*", sovereign_lineage, "Lineage", canonical_lineage
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                            '''
-                            cursor.execute(batch_lineage_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, sov_lineage, lineage, canon_lineage = row_result
-                                # Priority: sovereign_lineage > Lineage > canonical_lineage
-                                if sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(sov_lineage).strip()
-                                elif lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(lineage).strip()
-                                elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(canon_lineage).strip()
-                            
-                            # Load JointRatio data
-                            batch_joint_ratio_query = f'''
-                                SELECT "Product Name*", JointRatio
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND JointRatio IS NOT NULL
-                                AND JointRatio != ""
-                            '''
-                            cursor.execute(batch_joint_ratio_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, joint_ratio = row_result
-                                if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    joint_ratio_cache[pname] = str(joint_ratio).strip()
-                            
-                            # Batch load strain info
-                            if strain_names:
-                                strain_placeholders = ','.join(['?'] * len(strain_names))
-                                batch_strain_query = f'''
-                                    SELECT strain_name, display_lineage, sovereign_lineage, canonical_lineage
-                                    FROM strains
-                                    WHERE strain_name IN ({strain_placeholders})
-                                '''
-                                cursor.execute(batch_strain_query, list(strain_names))
-                                for row_result in cursor.fetchall():
-                                    strain_name, display_lineage, sov_lineage, canon_lineage = row_result
-                                    strain_info = {}
-                                    # Priority: display_lineage > sovereign_lineage > canonical_lineage
-                                    if display_lineage and str(display_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['display_lineage'] = str(display_lineage).strip()
-                                    elif sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['sovereign_lineage'] = str(sov_lineage).strip()
-                                    elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['canonical_lineage'] = str(canon_lineage).strip()
-                                    if strain_info:
-                                        strain_info_cache[strain_name] = strain_info
-                        except Exception as batch_err:
-                            self.logger.warning(f"Batch data query failed: {batch_err}")
+                        except Exception as batch_brand_err:
+                            self.logger.warning(f"Batch brand query failed: {batch_brand_err}")
             except Exception as e:
-                self.logger.warning(f"Failed to pre-load batch data: {e}")
+                self.logger.warning(f"Failed to pre-load brand data: {e}")
             
             # Build context for each record in the chunk
             context = {}
@@ -1419,14 +1313,12 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    # Pass all caches to avoid N+1 queries
-                    label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
-                                                               product_lineage_cache, strain_info_cache, joint_ratio_cache)
+                    # Pass brand cache to avoid N+1 queries
+                    label_context = self._build_label_context(record, doc, product_brand_cache)
                 context[f'Label{i+1}'] = label_context
-                # Debug logging to check field values and order (only for first few labels to reduce overhead)
-                if i < 3:
-                    product_name = record.get('ProductName', 'Unknown')
-                    self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
+                # Debug logging to check field values and order
+                product_name = record.get('ProductName', 'Unknown')
+                self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
             
             # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
             # to prevent Jinja template errors when template references missing labels
@@ -1685,20 +1577,11 @@ class TemplateProcessor:
             'QR': '',
         }
     
-    def _build_label_context(self, record, doc, product_brand_cache=None, product_vendor_cache=None, 
-                             product_lineage_cache=None, strain_info_cache=None, joint_ratio_cache=None):
-        # Initialize caches to empty dicts if None
-        product_brand_cache = product_brand_cache or {}
-        product_vendor_cache = product_vendor_cache or {}
-        product_lineage_cache = product_lineage_cache or {}
-        strain_info_cache = strain_info_cache or {}
-        joint_ratio_cache = joint_ratio_cache or {}
+    def _build_label_context(self, record, doc, product_brand_cache=None):
         """Ultra-optimized label context building for maximum performance."""
         # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
             product_brand_cache = {}
-        if product_vendor_cache is None:
-            product_vendor_cache = {}
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
         product_name = record.get('ProductName', 'Unknown')
@@ -1706,56 +1589,6 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
-        
-        # CRITICAL FIX: Read vendor directly from record first - it should already be in the Excel column
-        # Check ALL possible vendor field variations, including case-insensitive matching
-        vendor_from_record = None
-        
-        # First, get all vendor-related keys from the record (case-insensitive search)
-        vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-        
-        # Standard vendor field names to check (in priority order)
-        vendor_field_names = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'ProductVendor', 'vendor']
-        
-        # Try standard field names first - check label_context FIRST (it's a dict copy of record)
-        for field_name in vendor_field_names:
-            # Check label_context first (already copied from record via dict(record))
-            val = label_context.get(field_name)
-            if val is None or pd.isna(val):
-                # Fallback to record if not in label_context
-                val = record.get(field_name)
-            
-            if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                vendor_from_record = str(val).strip()
-                self.logger.info(f"✅ Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
-                break
-        
-        # If not found in standard fields, check ALL vendor-related keys from BOTH label_context and record
-        if not vendor_from_record and vendor_related_keys:
-            for key in vendor_related_keys:
-                # Check label_context first, then record
-                val = label_context.get(key)
-                if val is None or pd.isna(val):
-                    val = record.get(key)
-                
-                if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                    vendor_from_record = str(val).strip()
-                    self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
-                    break
-        
-        # Store vendor early so it's available throughout processing
-        if vendor_from_record:
-            label_context['_vendor_from_record'] = vendor_from_record
-            # Also set ProductVendor directly in label_context so it's available immediately
-            # This ensures vendor is preserved even if later logic tries to clear it
-            if self.template_type == 'vertical':
-                label_context['ProductVendor'] = vendor_from_record
-            else:
-                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
-        else:
-            # Log warning with all available keys for debugging
-            all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
-            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Sample record keys: {all_keys_sample}")
         
         # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
@@ -1835,47 +1668,14 @@ class TemplateProcessor:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
             excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
             
-            # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
-            # Only query database if record lineage is missing
-            db_lineage = None
-            # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-            record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-            if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
-                # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
-                db_lineage = str(record_lineage).strip()
-                if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                    self.logger.info(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-            elif product_name:
-                # Record lineage missing - query database directly (avoid get_product_lineage which applies override)
+            # CRITICAL: Always check database FIRST - database lineage always takes priority
+            if product_name:
                 from app import get_product_database, get_current_store_name
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # Query database directly to avoid sativa hybrid override in get_product_lineage()
-                    try:
-                        conn = product_db._get_connection()
-                        cursor = conn.cursor()
-                        # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
-                        cursor.execute('''
-                            SELECT sovereign_lineage, "Lineage", "canonical_lineage"
-                            FROM products
-                            WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                            ORDER BY id DESC
-                            LIMIT 1
-                        ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                        result = cursor.fetchone()
-                        # Priority: sovereign_lineage > Lineage > canonical_lineage
-                        if result and result[0]:
-                            db_lineage = str(result[0]).strip()
-                            self.logger.info(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
-                        elif result and result[1]:
-                            db_lineage = str(result[1]).strip()
-                        elif result and result[2]:
-                            db_lineage = str(result[2]).strip()
-                    except Exception as db_err:
-                        self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
-                        # Fallback to get_product_lineage if direct query fails
-                        db_lineage = product_db.get_product_lineage(product_name)
+                    # FIRST: Check product-level lineage (preserves user changes)
+                    db_lineage = product_db.get_product_lineage(product_name)
                     
                     # If no product-level lineage, check strain-level lineage
                     if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
@@ -1954,29 +1754,12 @@ class TemplateProcessor:
         else:
             # CRITICAL FIX: For new products without proper type, infer from product name
             product_name = record.get('ProductName', '')
-            name_lower = product_name.lower()
-
-            # 1) High‑signal concentrate patterns
-            if any(keyword in name_lower for keyword in ['live rosin', 'hash rosin', 'solventless', 'rosin']):
-                product_type = 'solventless concentrate'
-                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'solventless concentrate' (from name)")
-
-            # 2) Vape / disposable patterns
-            elif any(keyword in name_lower for keyword in ['disposable vape', 'disposable cart', 'vape cart', 'cartridge', 'vape pen']):
-                product_type = 'vape cartridge'
-                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'vape cartridge' (from name)")
-
-            # 3) Classic flower keywords
-            elif any(keyword in name_lower for keyword in ['flower', 'bud', 'nug', 'herb']):
+            if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
                 product_type = 'flower'
                 self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
-
-            # 4) Pre‑roll patterns
-            elif any(keyword in name_lower for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
+            elif any(keyword in product_name.lower() for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
                 product_type = 'pre-roll'
                 self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
-
-            # 5) Fallback – keep previous behaviour
             else:
                 product_type = 'flower'  # Default to flower for new products
                 self.logger.info(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
@@ -1999,15 +1782,19 @@ class TemplateProcessor:
                 product_name = record.get('ProductName') or record.get('Product Name*', '')
                 if product_name:
                     try:
-                        # Use pre-loaded cache instead of individual query
-                        if joint_ratio_cache and product_name:
-                            joint_ratio = joint_ratio_cache.get(product_name)
-                            if joint_ratio:
-                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
-                            else:
-                                self.logger.debug(f"No JointRatio in cache for '{product_name}'")
+                        # Get JointRatio directly from database
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
+                        if product_db:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute('SELECT JointRatio FROM products WHERE "Product Name*" = ?', (product_name,))
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                joint_ratio = result[0]
+                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from database for '{product_name}'")
                     except Exception as e:
-                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from cache: {e}")
+                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from database: {e}")
             
             self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
@@ -2185,16 +1972,13 @@ class TemplateProcessor:
                             if clean_weight.startswith('\u2011'):
                                 # Replace non-breaking hyphen with regular hyphen
                                 clean_weight = clean_weight.replace('\u2011', '-', 1).replace('\u00A0', ' ')
-                            # CRITICAL FIX: Remove trailing hyphen from primary_text to prevent double hyphen
-                            # (e.g., "Pre-Roll-" + "- 0.5g" = "Pre-Roll-- 0.5g")
-                            primary_text_clean = primary_text.rstrip('-').rstrip()
                             if clean_weight.startswith('-'):
                                 # Weight already has hyphen, just append it with space
-                                desc_and_weight = f"{primary_text_clean} {clean_weight}"
+                                desc_and_weight = f"{primary_text} {clean_weight}"
                             else:
                                 # Add hyphen and space before weight
-                                desc_and_weight = f"{primary_text_clean} - {clean_weight}"
-                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text_clean}' with weight '{clean_weight}' -> '{desc_and_weight}'")
+                                desc_and_weight = f"{primary_text} - {clean_weight}"
+                            self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' with weight '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             # No weight available, use description only
                             desc_and_weight = primary_text
@@ -2233,8 +2017,11 @@ class TemplateProcessor:
                                     self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
-                        # Use consistent space-hyphen-space pattern for all templates
-                        desc_and_weight = f"{desc} - {clean_weight}"
+                        # For preroll template, use non-breaking hyphen to keep hyphen and weight together
+                        if self.template_type == 'preroll':
+                            desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
+                        else:
+                            desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                         self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
                     else:
                         # Fallback to constructing from Weight* + Units
@@ -2250,8 +2037,11 @@ class TemplateProcessor:
                         
                         if weight_value and units_value:
                             clean_weight = f"{weight_value}{units_value}"
-                            # Use consistent space-hyphen-space pattern for all templates
-                            desc_and_weight = f"{desc} - {clean_weight}"
+                            # For preroll template, use non-breaking hyphen to keep hyphen and weight together
+                            if self.template_type == 'preroll':
+                                desc_and_weight = f"{desc} \u2011\u00A0{clean_weight}"
+                            else:
+                                desc_and_weight = f"{desc} -\u00A0{clean_weight}"
                             self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
                         else:
                             desc_and_weight = desc
@@ -2263,31 +2053,8 @@ class TemplateProcessor:
         # Fast DOH image processing - only if needed
         # IMPORTANT: Only use the canonical DOH field for image decisions
         # Ignore legacy "DOH Compliant (Yes/No)" and any other variants
-        doh_value = label_context.get('DOH', '') or record.get('DOH', '')
+        doh_value = label_context.get('DOH', '')
         product_name = label_context.get('ProductName', 'Unknown')
-        
-        # CRITICAL FIX: If DOH is missing from record, query database directly
-        if not doh_value or str(doh_value).strip() in ['', 'None', 'nan']:
-            try:
-                from app import get_product_database, get_current_store_name
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        SELECT "DOH" FROM products
-                        WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                        ORDER BY id DESC
-                        LIMIT 1
-                    ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                    result = cursor.fetchone()
-                    if result and result[0] and str(result[0]).strip() not in ['', 'None', 'nan']:
-                        doh_value = str(result[0]).strip()
-                        label_context['DOH'] = doh_value
-                        self.logger.info(f"🔍 DOH RETRIEVED FROM DB: '{product_name}' - DOH: '{doh_value}'")
-            except Exception as db_err:
-                self.logger.warning(f"Could not retrieve DOH from database: {db_err}")
 
         # CRITICAL DEBUG: Log DOH field processing with all possible sources
         self.logger.info(f"🔍 DOH DOCX GENERATION: Product '{product_name}' - DOH field: '{doh_value}' from record")
@@ -2316,8 +2083,7 @@ class TemplateProcessor:
             image_path = process_doh_image(doh_upper, product_type)
             if image_path:
                 # Fast width selection - reduced by 1mm for all template types
-                # Preroll template uses half size (5.5mm) for DOH logo
-                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13, 'preroll': 5.5}
+                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13}
                 image_width = Mm(width_map.get(self.template_type, 11))
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
@@ -2342,12 +2108,8 @@ class TemplateProcessor:
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
-        # CRITICAL DEBUG: Log brand field processing (only for first few products)
-        if not hasattr(self, '_brand_debug_count'):
-            self._brand_debug_count = 0
-        self._brand_debug_count += 1
-        if self._brand_debug_count <= 3:
-            self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
+        # CRITICAL DEBUG: Log brand field processing
+        self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
         
         # CRITICAL FIX: Check if brand is missing and apply fallback logic FIRST
         if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
@@ -2430,41 +2192,41 @@ class TemplateProcessor:
                 lineage_val = str(lineage_text).strip().upper()
                 self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
             else:
-                # PRIORITY 2: Fallback to cache lookup if record lineage is empty
-                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking cache...")
-                db_lineage = None
-                # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-                record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-                if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
-                    # Use record lineage (already set correctly by enrichment)
-                    db_lineage = str(record_lineage).strip()
-                    if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                        self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-                elif product_name and product_lineage_cache:
-                    # Use pre-loaded cache instead of individual query
-                    db_lineage = product_lineage_cache.get(product_name)
-                    if db_lineage:
-                        self.logger.info(f"✅ Using cached lineage '{db_lineage}' for '{product_name}'")
-                
-                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                    lineage_val = str(db_lineage).strip().upper()
-                    self.logger.info(f"✅ Using product lineage: '{lineage_val}' for '{product_name}'")
-                
-                # If no product-level lineage, try strain-level from cache
-                if not lineage_val and product_strain and strain_info_cache:
-                    strain_info = strain_info_cache.get(product_strain)
-                    if strain_info:
-                        preferred = (
-                            strain_info.get('display_lineage') or
-                            strain_info.get('sovereign_lineage') or
-                            strain_info.get('canonical_lineage')
-                        )
-                        if preferred:
-                            lineage_val = str(preferred).strip().upper()
-                            self.logger.info(f"✅ Using cached strain lineage: '{lineage_val}' for strain '{product_strain}'")
-                
-                if not lineage_val:
-                    self.logger.debug(f"No lineage found in record or cache")
+                # PRIORITY 2: Fallback to database lookup if record lineage is empty
+                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking database...")
+                try:
+                    from app import get_product_database, get_current_store_name
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    
+                    # Try to get product-level lineage first (more specific, includes manual updates)
+                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                    db_lineage = None
+                    if product_name:
+                        db_lineage = product_db.get_product_lineage(product_name)
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        lineage_val = str(db_lineage).strip().upper()
+                        self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
+                    
+                    # If no product-level lineage, try strain-level
+                    if not lineage_val and product_strain:
+                        strain_info = product_db.get_strain_info(product_strain)
+                        if strain_info:
+                            preferred = (
+                                strain_info.get('display_lineage') or
+                                strain_info.get('sovereign_lineage') or
+                                strain_info.get('canonical_lineage')
+                            )
+                            if preferred:
+                                lineage_val = str(preferred).strip().upper()
+                                self.logger.info(f"✅ Using database strain lineage fallback: '{lineage_val}' for strain '{product_strain}'")
+                    
+                    if not lineage_val:
+                        self.logger.debug(f"No lineage found in record or database")
+                except Exception as e:
+                    # Default fallback if database lookup fails
+                    lineage_val = ""
+                    self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
             
             # CRITICAL FIX: Ensure classic types always have lineage data
             if not lineage_val or lineage_val.strip() == "":
@@ -2502,97 +2264,18 @@ class TemplateProcessor:
                 self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
             
             # Set ProductVendor to actual vendor/supplier for classic types
-            # CRITICAL: Use vendor from record FIRST (it's already in the Excel column)
-            vendor_val = label_context.get('_vendor_from_record')
-            
-            # If _vendor_from_record wasn't set, try reading directly from record again
-            # This handles cases where vendor reading at the start might have failed
-            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                # Try ALL possible vendor field variations directly from record
-                vendor_fields = [
-                    'Vendor/Supplier*',
-                    'Vendor/Supplier',
-                    'Vendor',
-                    'ProductVendor',
-                    'vendor',
-                    'Vendor/Supplier *',  # Handle space variations
-                    'Vendor/Supplier* ',  # Handle trailing space
-                ]
-                
-                # Also check label_context (from dict copy) in case field name doesn't match exactly
-                for field in vendor_fields:
-                    val = label_context.get(field) or record.get(field)
-                    if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                        vendor_val = str(val).strip()
-                        self.logger.info(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}' (direct read)")
-                        # Store it for later use
-                        label_context['_vendor_from_record'] = vendor_val
-                        break
-                
-                # If still not found, check ALL vendor-related keys (case-insensitive)
-                if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                    vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                    for key in vendor_related_keys:
-                        val = record.get(key)
-                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                            vendor_val = str(val).strip()
-                            self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_val}' for '{product_name}' (case-insensitive match)")
-                            label_context['_vendor_from_record'] = vendor_val
-                            break
-            
-            # PRIORITY 2: Try database cache as fallback ONLY if record doesn't have it
-            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
-                try:
-                    cached_vendor = product_vendor_cache.get(product_name, "")
-                    if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                        vendor_val = cached_vendor
-                        self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
-                except Exception as e:
-                    self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-            
-            # If still no vendor, log all available fields for debugging
-            if not vendor_val or not str(vendor_val).strip():
-                available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                self.logger.warning(f"⚠️ INITIAL EXTRACTION: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-                # Log actual values from vendor fields for debugging
-                for field in vendor_fields:
-                    val = record.get(field)
-                    if val is not None:
-                        self.logger.warning(f"⚠️ INITIAL EXTRACTION: Field '{field}' has value: '{val}' (type: {type(val).__name__})")
-                self.logger.warning(f"⚠️ INITIAL EXTRACTION: Will try fallback logic later. All record keys: {list(record.keys())[:20]}...")  # First 20 keys for debugging
-            
-            # Handle NaN values and empty strings
-            if vendor_val is None or pd.isna(vendor_val) or str(vendor_val).lower() in ['nan', 'none', 'null', '']:
-                vendor_val = ''
-            
-            # CRITICAL: Check if ProductVendor was already set at the start (from _vendor_from_record)
-            # If so, preserve it - don't overwrite with empty
-            existing_vendor = label_context.get('ProductVendor', '')
-            if existing_vendor and str(existing_vendor).strip() and 'PRODUCTVENDOR_START' not in str(existing_vendor):
-                # ProductVendor was set at the start, keep it
-                self.logger.info(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
-            elif vendor_val and str(vendor_val).strip():
+            # Get vendor from record, not from product_brand
+            vendor_val = record.get('Vendor') or record.get('Vendor/Supplier*') or record.get('ProductVendor', '')
+            if vendor_val and str(vendor_val).lower() != 'nan':
                 # For vertical template, don't wrap with markers since it uses simple placeholders
                 if self.template_type == 'vertical':
-                    label_context['ProductVendor'] = str(vendor_val).strip()
+                    label_context['ProductVendor'] = str(vendor_val)
                 else:
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val).strip()}PRODUCTVENDOR_END"
-                self.logger.info(f"✅ Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
+                self.logger.debug(f"Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}'")
             else:
-                # CRITICAL: Even if vendor_val is empty, check _vendor_from_record one more time
-                # This catches cases where vendor reading at the start found it but it wasn't used above
-                final_vendor = label_context.get('_vendor_from_record', '')
-                if final_vendor and str(final_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                    if self.template_type == 'vertical':
-                        label_context['ProductVendor'] = str(final_vendor).strip()
-                    else:
-                        label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(final_vendor).strip()}PRODUCTVENDOR_END"
-                    self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
-                else:
-                    # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
-                    if not existing_vendor or not str(existing_vendor).strip():
-                        label_context['ProductVendor'] = ""
-                        self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
+                label_context['ProductVendor'] = ""
+                self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
             product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
@@ -3130,22 +2813,22 @@ class TemplateProcessor:
                 from src.core.generation.text_processing import make_nonbreaking_hyphens
                 original_description = label_context['Description']
                 label_context['Description'] = make_nonbreaking_hyphens(label_context['Description'])
-                self.logger.info(f"🔧 NON-BREAKING FORMATTING (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
+                self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
 
         # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
         if label_context.get('ProductName'):
             from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_product_name = label_context['ProductName']
             label_context['ProductName'] = make_nonbreaking_hyphens(label_context['ProductName'])
-            self.logger.info(f"🔧 NON-BREAKING FORMATTING: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
-
-        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight
+            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
+        
+        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight to prevent "Pre-Roll" splitting
         if label_context.get('DescAndWeight'):
             from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_desc_weight = label_context['DescAndWeight']
             label_context['DescAndWeight'] = make_nonbreaking_hyphens(label_context['DescAndWeight'])
-            self.logger.info(f"🔧 NON-BREAKING FORMATTING: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
-
+            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
+        
 
         # Fast line break processing
         product_type = (label_context.get('ProductType', '').lower() or 
@@ -3206,101 +2889,18 @@ class TemplateProcessor:
             val = ' '.join(val.split())
             label_context['JointRatio'] = val
         
-        # Fast vendor handling - set ProductVendor if it's missing or empty (ONLY for classic types)
-        # This ensures vendor is populated even if earlier logic didn't set it or set it to empty
-        # Non-classic types should NOT have ProductVendor
-        product_type_check = (label_context.get('ProductType', '').lower() or 
-                             label_context.get('Product Type*', '').lower())
-        from src.core.constants import CLASSIC_TYPES
-        is_classic_type_for_vendor = product_type_check in [t.lower() for t in CLASSIC_TYPES]
-        
-        # Only process vendor for classic types
-        if is_classic_type_for_vendor:
-            current_vendor = label_context.get('ProductVendor', '')
-            vendor_is_empty = False
+        # Fast vendor handling - only override if ProductVendor wasn't already set by our logic
+        # This preserves the ProductVendor logic for classic types
+        if 'ProductVendor' not in label_context:
+            product_type = (label_context.get('ProductType', '').lower() or 
+                           label_context.get('Product Type*', '').lower())
             
-            # Check if ProductVendor is missing or empty
-            if not current_vendor or not str(current_vendor).strip():
-                vendor_is_empty = True
-            else:
-                # Unwrap markers to check if actual content is empty
-                try:
-                    unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
-                    if not unwrapped or not unwrapped.strip():
-                        vendor_is_empty = True
-                except:
-                    # If unwrapping fails, check if it's just empty markers
-                    if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
-                        match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
-                        if not match or not match.group(1).strip():
-                            vendor_is_empty = True
-                    elif str(current_vendor).strip() == '':
-                        vendor_is_empty = True
-            
-        if vendor_is_empty:
-            # PRIORITY 1: Use vendor we already read from record at the start
-            enriched_vendor = label_context.get('_vendor_from_record', '')
-            if enriched_vendor:
-                self.logger.debug(f"✅ Using vendor from record: '{enriched_vendor}' for '{product_name}'")
-            
-            # PRIORITY 2: Try to enrich vendor from pre-loaded cache if not in record
-            if not enriched_vendor:
-                try:
-                    # Use cached vendor data (loaded in batch before loop)
-                    enriched_vendor = product_vendor_cache.get(product_name, "")
-                    if enriched_vendor:
-                        self.logger.info(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
-                except Exception as e:
-                    self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-            
-            # PRIORITY 3: Fallback to record fields directly if still not found
-            if not enriched_vendor:
-                    product_type = (label_context.get('ProductType', '').lower() or 
-                                   label_context.get('Product Type*', '').lower())
-                    
-                    # CRITICAL: Check all possible vendor field names with comprehensive fallback
-                    product_vendor = None
-                    vendor_fields = [
-                        'Vendor/Supplier*',
-                        'Vendor/Supplier',
-                        'Vendor',
-                        'ProductVendor',
-                        'vendor',
-                        'Vendor/Supplier *',  # Handle space variations
-                        'Vendor/Supplier* ',  # Handle trailing space
-                    ]
-                    
-                    # Try each field name
-                    for field in vendor_fields:
-                        val = record.get(field)
-                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                            product_vendor = val
-                            self.logger.debug(f"✅ FALLBACK: Found vendor in field '{field}': '{product_vendor}' for '{product_name}'")
-                            break
-                    
-                    # If still no vendor, log all available fields for debugging
-                    if not product_vendor or not str(product_vendor).strip():
-                        available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                        self.logger.warning(f"⚠️ FALLBACK: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-                    
-                    # Handle NaN values in vendor data
-                    if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
-                        product_vendor = ''
-                    enriched_vendor = product_vendor
-
-            # Set vendor if we found one
-            if enriched_vendor and str(enriched_vendor).strip():
-                # For vertical template, don't wrap with markers since it uses simple placeholders
-                if self.template_type == 'vertical':
-                    label_context['ProductVendor'] = str(enriched_vendor).strip()
-                else:
-                    label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
-                self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}' (product_type: '{product_type}')")
-            else:
-                # No vendor found anywhere, set to empty
-                label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
-                self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
-        # End of classic type vendor handling - non-classic types already have ProductVendor set to empty above
+            # Only set vendor from record if ProductVendor wasn't already set by our logic
+            product_vendor = record.get('Vendor') or record.get('Vendor/Supplier*', '') or record.get('ProductVendor', '')
+            # Handle NaN values in vendor data
+            if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
+                product_vendor = ''
+            label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
 
         # Generate QR code - special handling for preroll template
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
@@ -3336,24 +2936,10 @@ class TemplateProcessor:
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable, try multiple fallbacks
+                # If host_url is unavailable (very unusual), allow an override via env
                 if not base_url:
-                    # First try environment variable
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
-
-                # If still no base_url, try Flask config
-                if not base_url:
-                    try:
-                        from flask import current_app
-                        base_url = current_app.config.get('QR_BASE_URL', '').strip()
-                    except Exception:
-                        pass
-
-                # Last resort: use production URL as default
-                if not base_url:
-                    base_url = 'https://www.agtpricetags.com'
-                    self.logger.warning(f"No QR_BASE_URL configured, using default: {base_url}")
-
+                
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
                 # This allows the route to filter products by vendor
@@ -3361,15 +2947,33 @@ class TemplateProcessor:
                     # URL encode vendor to handle special characters
                     from urllib.parse import quote
                     vendor_encoded = quote(vendor_clean)
-                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    if base_url:
+                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
+                    else:
+                        # Use relative URL if no base_url available
+                        qr_url = f"/preroll-items/{group_id}?vendor={vendor_encoded}"
                 else:
                     # Fallback to group_id only if no vendor (backward compatibility)
-                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
-
+                    if base_url:
+                        qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
+                    else:
+                        # Use relative URL if no base_url available
+                        qr_url = f"/preroll-items/{group_id}"
+                
                 # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
-                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
-                if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
-                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
+                # If we detect a local host, just drop the scheme/host and use a relative path; most
+                # modern scanners will still treat this as a URL when opened from a browser context.
+                if base_url and ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(qr_url)
+                    qr_url = parsed.path or qr_url
+                    if parsed.query:
+                        qr_url = f"{qr_url}?{parsed.query}"
+                    self.logger.warning(f"QR URL used a localhost base, converted to relative path: {qr_url}")
+                
+                # Log if using relative URL (no base_url)
+                if not base_url:
+                    self.logger.info(f"PREROLL QR: No base URL available; using relative URL: {qr_url}")
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
@@ -3573,9 +3177,14 @@ class TemplateProcessor:
                 # The dynamic template creation already handles empty cells properly
                 self.logger.info("Skipping blank cell clearing for dynamic mini template")
                 
-                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
-                # This avoids processing every cell/paragraph/run twice
-                self.logger.info("Skipping early dimension enforcement for mini template (will be done at end)")
+                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells
+                for table in doc.tables:
+                    enforce_fixed_cell_dimensions(table, 'mini')
+                    self.logger.info("Applied fixed cell dimensions to mini template table")
+                
+                # CRITICAL: Enhanced table expansion prevention for mini template
+                doc = prevent_table_expansion_enhanced(doc, 'mini')
+                self.logger.info("Applied enhanced table expansion prevention to mini template")
                 
                 # Apply mini template specific font sizing
                 self._apply_mini_template_font_sizing(doc)
@@ -3600,9 +3209,14 @@ class TemplateProcessor:
                 # The dynamic template creation already handles empty cells properly
                 self.logger.info("Skipping blank cell clearing for dynamic preroll template")
                 
-                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
-                # This avoids processing every cell/paragraph/run twice
-                self.logger.info("Skipping early dimension enforcement for preroll template (will be done at end)")
+                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells (same as mini)
+                for table in doc.tables:
+                    enforce_fixed_cell_dimensions(table, 'preroll')
+                    self.logger.info("Applied fixed cell dimensions to preroll template table")
+                
+                # CRITICAL: Enhanced table expansion prevention for preroll template (same as mini)
+                doc = prevent_table_expansion_enhanced(doc, 'preroll')
+                self.logger.info("Applied enhanced table expansion prevention to preroll template")
                 
                 # Apply preroll template specific font sizing (uses preroll config, not mini)
                 self._apply_mini_template_font_sizing(doc)  # This method now uses self.template_type
@@ -3722,8 +3336,16 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
         
-        # OPTIMIZATION: Only call prevent_table_expansion_enhanced once - it already does everything
-        # enforce_fixed_cell_dimensions does, plus more, so we don't need both
+        # CRITICAL: Final cell dimension enforcement to prevent any expansion
+        try:
+            for table in doc.tables:
+                enforce_fixed_cell_dimensions(table, self.template_type)
+                self.logger.info(f"Applied final fixed cell dimensions to {self.template_type} template table")
+        except Exception as e:
+            self.logger.warning(f"Final cell dimension enforcement failed: {e}")
+
+        
+        # CRITICAL: Enhanced table expansion prevention - additional layer of protection
         try:
             doc = prevent_table_expansion_enhanced(doc, self.template_type)
             self.logger.info(f"Applied enhanced table expansion prevention to {self.template_type} template")
@@ -5109,32 +4731,19 @@ class TemplateProcessor:
                         from src.core.generation.unified_font_sizing import get_font_size
                         vendor_font_size = get_font_size(marker_data['content'], 'vendor', self.template_type, self.scale_factor)
                         set_run_font_size(run, vendor_font_size)
-                        # Set vendor text to italic and gray color
+                        # Set vendor text to italic and light gray color
                         run.font.italic = True
                         from docx.shared import RGBColor
-                        # Set gray color at both run level and XML level for consistency
-                        run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                        run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
                         run.font.color.theme_color = None  # Clear any theme color
-                        # Also set color at XML level to ensure it sticks
-                        rPr = run._element.get_or_add_rPr()
-                        color = rPr.find(qn('w:color'))
-                        if color is None:
-                            color = OxmlElement('w:color')
-                            rPr.append(color)
-                        color.set(qn('w:val'), '808080')  # Gray color in hex without #
                     continue
                 elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                     product_type = self.label_context['ProductType']
                 else:
                     product_type = None
                 
-                # Special handling for ProductStrain marker - use unified font sizing system and left alignment
+                # Special handling for ProductStrain marker - use unified font sizing system
                 if marker_name in ('PRODUCTSTRAIN', 'STRAIN'):
-                    # Left-align PRODUCTSTRAIN markers
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    # Ensure consistent spacing above strain section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
                     strain_content = str(marker_data.get('content') or '').strip()
                     for run in paragraph.runs:
                         run_text = run.text or ''
@@ -7304,26 +6913,21 @@ class TemplateProcessor:
             if vendor_content and vendor_content.strip():
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                vendor_run.font.bold = True
+                vendor_run.font.italic = True  # Make vendor text italic
+                
+                # Set vendor color to light gray (#CCCCCC)
+                from docx.shared import RGBColor
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
+                # Ensure the color is applied by setting it explicitly
+                vendor_run.font.color.theme_color = None  # Clear any theme color
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
-
-                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
-                vendor_run.font.bold = True
-                vendor_run.font.italic = True  # Make vendor text italic
-
-                # Set vendor color to gray (#808080) at both run level and XML level
-                from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                vendor_run.font.color.theme_color = None  # Clear any theme color
-                # Also set color at XML level to ensure it sticks
-                rPr = vendor_run._element.get_or_add_rPr()
-                color = rPr.find(qn('w:color'))
-                if color is None:
-                    color = OxmlElement('w:color')
-                    rPr.append(color)
-                color.set(qn('w:val'), '808080')  # Gray color in hex without #
             
             # Set tab stops to position vendor on the right (only if vendor content exists)
             if vendor_content:
@@ -7431,26 +7035,21 @@ class TemplateProcessor:
                 
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                vendor_run.font.bold = True
+                vendor_run.font.italic = True  # Make vendor text italic
+                
+                # Set vendor color to light gray (#CCCCCC)
+                from docx.shared import RGBColor
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
+                # Ensure the color is applied by setting it explicitly
+                vendor_run.font.color.theme_color = None  # Clear any theme color
+                vendor_run.font.color.rgb = RGBColor(204, 204, 204)  # #CCCCCC
+                
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
-
-                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
-                vendor_run.font.bold = True
-                vendor_run.font.italic = True  # Make vendor text italic
-
-                # Set vendor color to gray (#808080) at both run level and XML level
-                from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                vendor_run.font.color.theme_color = None  # Clear any theme color
-                # Also set color at XML level to ensure it sticks
-                rPr = vendor_run._element.get_or_add_rPr()
-                color = rPr.find(qn('w:color'))
-                if color is None:
-                    color = OxmlElement('w:color')
-                    rPr.append(color)
-                color.set(qn('w:val'), '808080')  # Gray color in hex without #
                 
                 # Set tab stops to position vendor on the right
                 paragraph.paragraph_format.tab_stops.clear_all()

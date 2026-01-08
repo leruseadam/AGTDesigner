@@ -1104,15 +1104,8 @@ def truncate_text_for_cell(text, max_length=50):
     return text[:max_length-3] + "..."
 
 
-def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_processing=False):
-    """
-    Enforce fixed cell dimensions to prevent any cell growth with text.
-    
-    Args:
-        table: The table to process
-        template_type: Type of template (mini, vertical, etc.)
-        skip_paragraph_processing: If True, skip expensive paragraph/run processing (faster)
-    """
+def enforce_fixed_cell_dimensions(table, template_type=None):
+    """Enforce fixed cell dimensions to prevent any cell growth with text."""
     try:
         from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
         from docx.shared import Inches
@@ -1146,13 +1139,9 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
             tblPr = OxmlElement('w:tblPr')
         
         # Ensure fixed layout
-        tblLayout = tblPr.find(qn('w:tblLayout'))
-        if tblLayout is None:
-            tblLayout = OxmlElement('w:tblLayout')
-            tblLayout.set(qn('w:type'), 'fixed')
-            tblPr.append(tblLayout)
-        elif tblLayout.get(qn('w:type')) != 'fixed':
-            tblLayout.set(qn('w:type'), 'fixed')
+        tblLayout = OxmlElement('w:tblLayout')
+        tblLayout.set(qn('w:type'), 'fixed')
+        tblPr.append(tblLayout)
         
         # Set table to not auto-fit
         table.autofit = False
@@ -1322,6 +1311,13 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                 tcW.set(qn('w:w'), '2880')  # Fixed width in twips (2.0 inches = 2880 twips)
                                 tcW.set(qn('w:type'), 'dxa')  # Fixed width type
                             
+                            # Disable cell auto-sizing
+                            tcFitText = tcPr.find(qn('w:tcFitText'))
+                            if tcFitText is None:
+                                tcFitText = OxmlElement('w:tcFitText')
+                                tcPr.append(tcFitText)
+                            tcFitText.set(qn('w:val'), '0')  # Disable fit text
+                            
                             # Set cell height to exact value
                             # ONLY set height if template_type was not provided (template-specific heights set above)
                             if not template_type:
@@ -1333,57 +1329,59 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                 tcH.set(qn('w:hRule'), 'exact')  # Exact height rule
                             
                             # Process paragraphs in the cell to prevent text overflow
-                            # OPTIMIZATION: Skip expensive paragraph/run processing if requested
-                            if not skip_paragraph_processing:
-                                for paragraph in cell.paragraphs:
-                                    # Set paragraph spacing to minimum
-                                    paragraph.paragraph_format.space_before = Pt(0)
-                                    paragraph.paragraph_format.space_after = Pt(0)
-                                    paragraph.paragraph_format.line_spacing = 1.0
+                            for paragraph in cell.paragraphs:
+                                # Set paragraph spacing to minimum
+                                paragraph.paragraph_format.space_before = Pt(0)
+                                paragraph.paragraph_format.space_after = Pt(0)
+                                paragraph.paragraph_format.line_spacing = 1.0
+                                
+                                # CRITICAL: Set paragraph alignment to prevent expansion
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                
+                                # CRITICAL: Enable text wrapping and prevent overflow
+                                pPr = paragraph._element.get_or_add_pPr()
+                                
+                                # Add text wrapping control
+                                wrap = pPr.find(qn('w:wordWrap'))
+                                if wrap is None:
+                                    wrap = OxmlElement('w:wordWrap')
+                                    pPr.append(wrap)
+                                wrap.set(qn('w:val'), '1')  # Enable word wrapping
+                                
+                                # Add overflow control
+                                overflow = pPr.find(qn('w:overflowPunct'))
+                                if overflow is None:
+                                    overflow = OxmlElement('w:overflowPunct')
+                                    pPr.append(overflow)
+                                overflow.set(qn('w:val'), '0')  # Disable overflow punctuation
+                                
+                                # CRITICAL: Truncate text if it's too long for the cell
+                                full_text = paragraph.text
+                                if full_text and len(full_text) > 50:  # Adjust max length as needed
+                                    truncated_text = truncate_text_for_cell(full_text, 50)
+                                    # Clear existing runs and add truncated text
+                                    paragraph.clear()
+                                    run = paragraph.add_run(truncated_text)
                                     
-                                    # CRITICAL: Set paragraph alignment to prevent expansion
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                    # Set font properties to prevent text expansion
+                                    if not run.font.size:
+                                        # Use unified font sizing system for default size
+                                        from src.core.generation.unified_font_sizing import get_font_size
+                                        default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                                        run.font.size = default_size
                                     
-                                    # CRITICAL: Enable text wrapping but keep words together (never split mid-word)
-                                    pPr = paragraph._element.get_or_add_pPr()
-
-                                    # CRITICAL FIX: Disable character-level wrapping - only allow word-level wrapping
-                                    # This prevents mid-word splits like "Blueberry - 7" -> "Blueberry - 7|g"
-                                    wordWrap = pPr.find(qn('w:wordWrap'))
-                                    if wordWrap is None:
-                                        wordWrap = OxmlElement('w:wordWrap')
-                                        pPr.append(wordWrap)
-                                    wordWrap.set(qn('w:val'), '1')  # Enable wrapping at word boundaries only
-
-                                    # CRITICAL FIX: Suppress automatic hyphenation to prevent "3.5g" from breaking
-                                    suppressAutoHyphens = pPr.find(qn('w:suppressAutoHyphens'))
-                                    if suppressAutoHyphens is None:
-                                        suppressAutoHyphens = OxmlElement('w:suppressAutoHyphens')
-                                        pPr.append(suppressAutoHyphens)
-
-                                    # CRITICAL FIX: Prevent text from overflowing or breaking mid-word
-                                    # Use autoSpaceDE (disable auto-spacing) to prevent unexpected breaks
-                                    autoSpaceDE = pPr.find(qn('w:autoSpaceDE'))
-                                    if autoSpaceDE is None:
-                                        autoSpaceDE = OxmlElement('w:autoSpaceDE')
-                                        pPr.append(autoSpaceDE)
-                                    autoSpaceDE.set(qn('w:val'), '0')  # Disable auto-spacing that can cause mid-word breaks
-
-                                    # Add overflow control
-                                    overflow = pPr.find(qn('w:overflowPunct'))
-                                    if overflow is None:
-                                        overflow = OxmlElement('w:overflowPunct')
-                                        pPr.append(overflow)
-                                    overflow.set(qn('w:val'), '0')  # Disable overflow punctuation
+                                    # CRITICAL: Force text to wrap within cell boundaries
+                                    rPr = run._element.get_or_add_rPr()
                                     
-                                    # CRITICAL: Truncate text if it's too long for the cell
-                                    full_text = paragraph.text
-                                    if full_text and len(full_text) > 50:  # Adjust max length as needed
-                                        truncated_text = truncate_text_for_cell(full_text, 50)
-                                        # Clear existing runs and add truncated text
-                                        paragraph.clear()
-                                        run = paragraph.add_run(truncated_text)
-                                        
+                                    # Add text wrapping control to run
+                                    wrap_run = rPr.find(qn('w:wordWrap'))
+                                    if wrap_run is None:
+                                        wrap_run = OxmlElement('w:wordWrap')
+                                        rPr.append(wrap_run)
+                                    wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
+                                else:
+                                    # Ensure text doesn't wrap beyond cell boundaries
+                                    for run in paragraph.runs:
                                         # Set font properties to prevent text expansion
                                         if not run.font.size:
                                             # Use unified font sizing system for default size
@@ -1400,25 +1398,6 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                             wrap_run = OxmlElement('w:wordWrap')
                                             rPr.append(wrap_run)
                                         wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
-                                    else:
-                                        # Ensure text doesn't wrap beyond cell boundaries
-                                        for run in paragraph.runs:
-                                            # Set font properties to prevent text expansion
-                                            if not run.font.size:
-                                                # Use unified font sizing system for default size
-                                                from src.core.generation.unified_font_sizing import get_font_size
-                                                default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
-                                                run.font.size = default_size
-                                            
-                                            # CRITICAL: Force text to wrap within cell boundaries
-                                            rPr = run._element.get_or_add_rPr()
-                                            
-                                            # Add text wrapping control to run
-                                            wrap_run = rPr.find(qn('w:wordWrap'))
-                                            if wrap_run is None:
-                                                wrap_run = OxmlElement('w:wordWrap')
-                                                rPr.append(wrap_run)
-                                            wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
                         except Exception as cell_error:
                             logger.warning(f"Error processing cell in row: {cell_error}")
                             continue
@@ -2034,58 +2013,55 @@ def prevent_table_expansion_enhanced(doc, template_type=None):
                             tcPr.append(tcFitText)
                         tcFitText.set(qn('w:val'), '0')  # Disable fit text
                         
-                        # LAYER 7: Process paragraphs to prevent text overflow (optimized - only if needed)
-                        # OPTIMIZATION: Only process paragraphs if cell has text that might overflow
-                        cell_text = cell.text.strip()
-                        if cell_text and len(cell_text) > 30:  # Only process cells with substantial text
-                            for paragraph in cell.paragraphs:
-                                # Set minimal spacing
-                                paragraph.paragraph_format.space_before = Pt(0)
-                                paragraph.paragraph_format.space_after = Pt(0)
-                                paragraph.paragraph_format.line_spacing = 1.0
+                        # LAYER 7: Process paragraphs to prevent text overflow
+                        for paragraph in cell.paragraphs:
+                            # Set minimal spacing
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
+                            paragraph.paragraph_format.line_spacing = 1.0
+                            
+                            # Force left alignment to prevent expansion
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            
+                            # Add text wrapping controls at XML level
+                            pPr = paragraph._element.get_or_add_pPr()
+                            
+                            # Enable word wrapping
+                            wrap = pPr.find(qn('w:wordWrap'))
+                            if wrap is None:
+                                wrap = OxmlElement('w:wordWrap')
+                                pPr.append(wrap)
+                            wrap.set(qn('w:val'), '1')
+                            
+                            # Disable overflow
+                            overflow = pPr.find(qn('w:overflowPunct'))
+                            if overflow is None:
+                                overflow = OxmlElement('w:overflowPunct')
+                                pPr.append(overflow)
+                            overflow.set(qn('w:val'), '0')
+                            
+                            # LAYER 8: Process runs to prevent font expansion
+                            for run in paragraph.runs:
+                                # Ensure text doesn't cause expansion
+                                if len(run.text) > 100:
+                                    # Truncate very long text
+                                    run.text = run.text[:97] + "..."
                                 
-                                # Force left alignment to prevent expansion
-                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                # Set font properties to prevent expansion
+                                if not run.font.size:
+                                    # Use unified font sizing system for default size
+                                    from src.core.generation.unified_font_sizing import get_font_size
+                                    default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                                    run.font.size = default_size
                                 
-                                # Add text wrapping controls at XML level
-                                pPr = paragraph._element.get_or_add_pPr()
+                                # Add text wrapping control to run level
+                                rPr = run._element.get_or_add_rPr()
                                 
-                                # Enable word wrapping
-                                wrap = pPr.find(qn('w:wordWrap'))
-                                if wrap is None:
-                                    wrap = OxmlElement('w:wordWrap')
-                                    pPr.append(wrap)
-                                wrap.set(qn('w:val'), '1')
-                                
-                                # Disable overflow
-                                overflow = pPr.find(qn('w:overflowPunct'))
-                                if overflow is None:
-                                    overflow = OxmlElement('w:overflowPunct')
-                                    pPr.append(overflow)
-                                overflow.set(qn('w:val'), '0')
-                                
-                                # LAYER 8: Process runs to prevent font expansion (only if text is long)
-                                for run in paragraph.runs:
-                                    # Ensure text doesn't cause expansion
-                                    if len(run.text) > 100:
-                                        # Truncate very long text
-                                        run.text = run.text[:97] + "..."
-                                    
-                                    # Set font properties to prevent expansion (only if not already set)
-                                    if not run.font.size:
-                                        # Use unified font sizing system for default size
-                                        from src.core.generation.unified_font_sizing import get_font_size
-                                        default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
-                                        run.font.size = default_size
-                                    
-                                    # Add text wrapping control to run level (only if not already set)
-                                    rPr = run._element.get_or_add_rPr()
-                                    
-                                    wrap_run = rPr.find(qn('w:wordWrap'))
-                                    if wrap_run is None:
-                                        wrap_run = OxmlElement('w:wordWrap')
-                                        rPr.append(wrap_run)
-                                        wrap_run.set(qn('w:val'), '1')
+                                wrap_run = rPr.find(qn('w:wordWrap'))
+                                if wrap_run is None:
+                                    wrap_run = OxmlElement('w:wordWrap')
+                                    rPr.append(wrap_run)
+                                wrap_run.set(qn('w:val'), '1')
                 
                 # LAYER 9: Final table-level constraints
                 # Disable all table auto-sizing features

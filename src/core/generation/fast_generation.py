@@ -105,26 +105,23 @@ class FastGenerationEngine:
         
         # Generate the document
         final_doc = self.template_processor.process_records(records)
-        if final_doc is None:
-            logger.error("❌ FastGenerationEngine: process_records returned None (no document generated)")
-            raise RuntimeError("Failed to generate document: no valid records or template error.")
-
+        
         # Cache the result
         buffer = BytesIO()
         final_doc.save(buffer)
         buffer.seek(0)
         _generation_cache[cache_key] = buffer.getvalue()
-
+        
         # Track timestamp for manual TTL
         if not HAS_CACHETOOLS:
             _cache_timestamps[cache_key] = time.time()
             # Clean up old entries if cache is too large
             if len(_generation_cache) > 100:
                 self._cleanup_cache()
-
+        
         generation_time = time.time() - start_time
         logger.info(f"⚡ Generation completed in {generation_time:.2f}s (cache hit rate: {self._get_hit_rate():.1f}%)")
-
+        
         # Return the document
         buffer.seek(0)
         return Document(buffer)
@@ -276,13 +273,28 @@ def optimize_records_for_generation(records: List[Dict]) -> List[Dict]:
     start_time = time.time()
     
     optimized = []
+    from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
+
     for record in records:
         # Create a minimal record with only required fields
+        # Normalize lineage for classic types: any non-canonical value -> 'HYBRID'
+        raw_lineage = record.get('Lineage', '')
+        product_type = (record.get('ProductType', '') or '').strip().lower()
+        lineage_up = str(raw_lineage).strip().upper() if raw_lineage is not None else ''
+        if product_type in CLASSIC_TYPES:
+            if not lineage_up or lineage_up == 'MIXED' or lineage_up not in VALID_CLASSIC_LINEAGES:
+                normalized_lineage = 'HYBRID'
+            else:
+                normalized_lineage = lineage_up
+        else:
+            # Non-classic types preserve whatever lineage/brand is present (default to MIXED)
+            normalized_lineage = lineage_up if lineage_up else 'MIXED'
+
         optimized_record = {
             'Product Name*': record.get('Product Name*', record.get('ProductName', '')),
             'ProductName': record.get('Product Name*', record.get('ProductName', '')),
             'ProductType': record.get('ProductType', ''),
-            'Lineage': record.get('Lineage', 'MIXED'),
+            'Lineage': normalized_lineage,
             'ProductBrand': record.get('ProductBrand', record.get('Product Brand', '')),
             'Product Brand': record.get('Product Brand', record.get('ProductBrand', '')),
             'Vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
