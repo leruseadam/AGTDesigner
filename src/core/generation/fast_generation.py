@@ -111,31 +111,53 @@ class FastGenerationEngine:
             # CRITICAL: Clean markers from cached document too
             logger.warning("🧹🧹🧹 ABOUT TO CALL CLEANUP ON CACHED DOC")
             
-            # DEBUG: Check for markers before cleanup
-            sample_texts = []
+            # DEBUG: Check for markers before cleanup - scan ALL cells
             marker_count = 0
-            for table in cached_doc.tables[:1]:  # Check first table
-                for row in table.rows[:2]:  # Check first 2 rows
-                    for cell in row.cells[:2]:  # Check first 2 cells
+            marker_samples = []
+            cells_checked = 0
+            
+            # Check all tables, all rows, all cells
+            for table_idx, table in enumerate(cached_doc.tables):
+                for row_idx, row in enumerate(table.rows):
+                    for cell_idx, cell in enumerate(row.cells):
+                        cells_checked += 1
                         if cell.text:
-                            text = cell.text[:200]  # First 200 chars
-                            sample_texts.append(text)
-                            # Count markers
-                            if 'DESC_START' in text or 'DESC_END' in text:
-                                marker_count += text.count('DESC_START') + text.count('DESC_END')
-                            if 'PRICE_START' in text or 'PRICE_END' in text:
-                                marker_count += text.count('PRICE_START') + text.count('PRICE_END')
-                            if len(sample_texts) >= 3:
-                                break
-                    if len(sample_texts) >= 3:
-                        break
-                if len(sample_texts) >= 3:
-                    break
+                            text = cell.text
+                            # Check for all marker variations (case-insensitive)
+                            text_upper = text.upper()
+                            
+                            # Count all marker types
+                            markers_found = []
+                            if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
+                                count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
+                                marker_count += count
+                                markers_found.append(f'DESC({count})')
+                            
+                            if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
+                                count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
+                                marker_count += count
+                                markers_found.append(f'PRICE({count})')
+                            
+                            # Check for any _START or _END pattern
+                            import re
+                            if re.search(r'\w+_(?:START|END)', text_upper):
+                                count = len(re.findall(r'\w+_(?:START|END)', text_upper))
+                                marker_count += count
+                                markers_found.append(f'OTHER({count})')
+                            
+                            if markers_found and len(marker_samples) < 5:
+                                marker_samples.append({
+                                    'table': table_idx,
+                                    'row': row_idx,
+                                    'cell': cell_idx,
+                                    'markers': markers_found,
+                                    'text': text[:150]
+                                })
             
             if marker_count > 0:
-                logger.error(f"❌ FOUND {marker_count} MARKERS IN CACHED DOC BEFORE CLEANUP! Sample: {sample_texts[0][:100] if sample_texts else 'N/A'}")
+                logger.error(f"❌ FOUND {marker_count} MARKERS IN CACHED DOC BEFORE CLEANUP! Checked {cells_checked} cells. Samples: {marker_samples}")
             else:
-                logger.debug(f"✅ No markers found in cached doc before cleanup (checked {len(sample_texts)} sample texts)")
+                logger.debug(f"✅ No markers found in cached doc before cleanup (checked {cells_checked} cells)")
             
             try:
                 self.template_processor._final_marker_cleanup(cached_doc)
@@ -145,22 +167,51 @@ class FastGenerationEngine:
                 self.template_processor._ultimate_marker_cleanup(cached_doc)
                 logger.warning("🧹 ULTIMATE CLEANUP DONE")
                 
-                # DEBUG: Check for markers after cleanup
+                # DEBUG: Check for markers after cleanup - scan ALL cells
                 marker_count_after = 0
-                for table in cached_doc.tables[:1]:
-                    for row in table.rows[:2]:
-                        for cell in row.cells[:2]:
+                marker_samples_after = []
+                cells_checked_after = 0
+                import re
+                
+                for table_idx, table in enumerate(cached_doc.tables):
+                    for row_idx, row in enumerate(table.rows):
+                        for cell_idx, cell in enumerate(row.cells):
+                            cells_checked_after += 1
                             if cell.text:
                                 text = cell.text
-                                if 'DESC_START' in text or 'DESC_END' in text:
-                                    marker_count_after += text.count('DESC_START') + text.count('DESC_END')
-                                if 'PRICE_START' in text or 'PRICE_END' in text:
-                                    marker_count_after += text.count('PRICE_START') + text.count('PRICE_END')
+                                text_upper = text.upper()
+                                
+                                # Count all marker types
+                                markers_found = []
+                                if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
+                                    count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
+                                    marker_count_after += count
+                                    markers_found.append(f'DESC({count})')
+                                
+                                if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
+                                    count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
+                                    marker_count_after += count
+                                    markers_found.append(f'PRICE({count})')
+                                
+                                # Check for any _START or _END pattern
+                                if re.search(r'\w+_(?:START|END)', text_upper):
+                                    count = len(re.findall(r'\w+_(?:START|END)', text_upper))
+                                    marker_count_after += count
+                                    markers_found.append(f'OTHER({count})')
+                                
+                                if markers_found and len(marker_samples_after) < 5:
+                                    marker_samples_after.append({
+                                        'table': table_idx,
+                                        'row': row_idx,
+                                        'cell': cell_idx,
+                                        'markers': markers_found,
+                                        'text': text[:150]
+                                    })
                 
                 if marker_count_after > 0:
-                    logger.error(f"❌❌❌ CLEANUP FAILED: {marker_count_after} markers still present after cleanup!")
+                    logger.error(f"❌❌❌ CLEANUP FAILED: {marker_count_after} markers still present after cleanup! Checked {cells_checked_after} cells. Samples: {marker_samples_after}")
                 else:
-                    logger.debug(f"✅ Cleanup successful: all markers removed")
+                    logger.debug(f"✅ Cleanup successful: all markers removed (checked {cells_checked_after} cells)")
             except Exception as e:
                 logger.error(f"❌❌❌ CLEANUP FAILED: {e}")
                 import traceback
