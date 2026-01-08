@@ -4541,63 +4541,74 @@ class TemplateProcessor:
             replacements_made = 0
             
             def clean_text(text):
-                """Clean text by removing all marker strings while preserving content between them."""
+                """Clean text by removing all marker strings - ULTRA AGGRESSIVE approach."""
                 if not text:
                     return text
 
                 cleaned = text
 
-                # STEP 1: Extract content between paired markers BEFORE removing them
-                # This is CRITICAL - we must preserve the content between START and END markers
-
-                # Handle all field marker pairs - including split variations
+                # STEP 1: Extract content between paired markers (preserve content, remove markers)
+                # Handle all marker pairs - use flexible patterns to catch split variations
                 marker_pairs = [
-                    ('PRICE_START', 'PRICE_END'),
-                    ('PRICE_START', 'RICE_END'),  # Split variation: P was separated
-                    ('PRICE_STARTS', 'PRICE_END'),  # Split variation: START + S
-                    ('PRICE_STARTS', 'RICE_END'),  # Both split
-                    ('DESC_START', 'DESC_END'),
-                    ('DESC_START', 'tgDESC_END'),  # Corrupted variation
-                    ('LINEAGE_START', 'LINEAGE_END'),
-                    ('PRODUCTBRAND_START', 'PRODUCTBRAND_END'),
-                    ('PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END'),
-                    ('PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END'),
-                    ('PRODUCTNAME_START', 'PRODUCTNAME_END'),
-                    ('WEIGHTUNITS_START', 'WEIGHTUNITS_END'),
-                    ('THC_CBD_START', 'THC_CBD_END'),
-                    ('RATIO_START', 'RATIO_END'),
-                    ('JOINT_RATIO_START', 'JOINT_RATIO_END'),
-                    ('DOH_START', 'DOH_END'),
-                    ('PRODUCTVENDOR_START', 'PRODUCTVENDOR_END'),
-                    ('PRODUCTTYPE_START', 'PRODUCTTYPE_END'),
+                    # PRICE - handle PRICE_START/PRICE_STARTS with PRICE_END/RICE_END
+                    (r'PRICE_START[S]?', r'(?:PRICE|RICE)_END'),
+                    # DESC - handle DESC_START with DESC_END/tgDESC_END
+                    (r'DESC_START', r'(?:tg)?DESC_END'),
+                    # All other standard markers
+                    (r'LINEAGE_START', r'LINEAGE_END'),
+                    (r'PRODUCTBRAND(?:_CENTER)?_START', r'PRODUCTBRAND(?:_CENTER)?_END'),
+                    (r'PRODUCTSTRAIN_START', r'PRODUCTSTRAIN_END'),
+                    (r'PRODUCTNAME_START', r'PRODUCTNAME_END'),
+                    (r'WEIGHTUNITS_START', r'WEIGHTUNITS_END'),
+                    (r'THC_CBD_START', r'THC_CBD_END'),
+                    (r'RATIO_START', r'RATIO_END'),
+                    (r'JOINT_RATIO_START', r'JOINT_RATIO_END'),
+                    (r'DOH_START', r'DOH_END'),
+                    (r'PRODUCTVENDOR_START', r'PRODUCTVENDOR_END'),
+                    (r'PRODUCTTYPE_START', r'PRODUCTTYPE_END'),
                 ]
 
-                for start_marker, end_marker in marker_pairs:
-                    # Use case-insensitive regex to find and extract content
-                    # Handle markers that might have extra characters (split across runs)
-                    # e.g., PRICE_STARTS should match PRICE_START
-                    start_pattern = re.escape(start_marker)
-                    # Also match start_marker followed by any uppercase letters
-                    if start_marker.endswith('_START'):
-                        start_pattern = re.escape(start_marker.rstrip('_START')) + r'_START[A-Z]*'
-                    
+                for start_pattern, end_pattern in marker_pairs:
+                    # Extract content: START...content...END -> content
                     pattern = re.compile(
-                        start_pattern + r'(.*?)' + re.escape(end_marker),
+                        start_pattern + r'(.*?)' + end_pattern,
                         re.IGNORECASE | re.DOTALL
                     )
-                    # Replace "START...content...END" with just "content"
                     cleaned = pattern.sub(r'\1', cleaned)
 
-                # STEP 2: Remove any remaining standalone markers that don't have pairs
-                for marker in literal_markers:
-                    pattern = re.compile(re.escape(marker), re.IGNORECASE)
+                # STEP 2: Remove ALL standalone marker strings (direct string removal)
+                # This catches markers that don't have pairs or are split weirdly
+                all_markers_to_remove = [
+                    # PRICE markers (all variations)
+                    'PRICE_START', 'PRICE_STARTS', 'PRICE_END', 'RICE_END',
+                    # DESC markers
+                    'DESC_START', 'DESC_END', 'tgDESC_END',
+                    # All other markers from literal_markers
+                ] + literal_markers
+                
+                # Remove duplicates
+                all_markers_to_remove = list(dict.fromkeys(all_markers_to_remove))
+                
+                for marker in all_markers_to_remove:
+                    # Direct string replacement (case-insensitive)
+                    # Remove with word boundaries to avoid partial matches
+                    pattern = re.compile(r'\b' + re.escape(marker) + r'\b', re.IGNORECASE)
                     cleaned = pattern.sub('', cleaned)
+                    # Also remove without word boundaries (in case it's part of a larger string)
+                    cleaned = cleaned.replace(marker.upper(), '')
+                    cleaned = cleaned.replace(marker.lower(), '')
+                    cleaned = cleaned.replace(marker, '')
 
-                # STEP 3: Catch any remaining _START or _END patterns
-                cleaned = re.sub(r'\b\w+_(?:START|END)\b', '', cleaned, flags=re.IGNORECASE)
+                # STEP 3: Catch any remaining _START or _END patterns (ultimate catch-all)
+                # This regex catches ANY word_START or word_END pattern
+                cleaned = re.sub(r'\b\w+_(?:START|END)[A-Z]*\b', '', cleaned, flags=re.IGNORECASE)
+                # Also catch without word boundaries
+                cleaned = re.sub(r'\w+_(?:START|END)[A-Z]*', '', cleaned, flags=re.IGNORECASE)
 
-                # STEP 4: Remove common marker fragments that can be left behind
-                # (e.g., "tg" from "tgDESC_END", "bis" from "PRODUCTBRAND_END")
+                # STEP 4: Remove common split marker fragments
+                cleaned = re.sub(r'\bRICE_END\b', '', cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r'\bPRICE_STARTS\b', '', cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r'\btgDESC_END\b', '', cleaned, flags=re.IGNORECASE)
                 cleaned = re.sub(r'\btg\b', '', cleaned, flags=re.IGNORECASE)
                 cleaned = re.sub(r'\bbis\b', '', cleaned, flags=re.IGNORECASE)
 
@@ -4672,28 +4683,39 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Run cleanup multiple times to catch markers that appear after text reconstruction
             # Sometimes markers get split across runs and only appear after we merge text
-            max_iterations = 5  # Increased iterations to handle complex splits
+            max_iterations = 10  # Increased to 10 iterations for thorough cleanup
             iteration = 0
             while iteration < max_iterations:
                 iteration += 1
                 found_markers = False
                 
-                # Quick pass to check if any markers remain
+                # Quick pass to check if any markers remain - check ALL paragraphs in ALL cells
                 for paragraph in doc.paragraphs:
-                    if paragraph.text and clean_text(paragraph.text) != paragraph.text:
-                        found_markers = True
-                        break
-                    if not found_markers:
-                        for table in doc.tables:
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    if cell.text and clean_text(cell.text) != cell.text:
-                                        found_markers = True
+                    if paragraph.text:
+                        test_cleaned = clean_text(paragraph.text)
+                        if test_cleaned != paragraph.text:
+                            found_markers = True
+                            break
+                
+                if not found_markers:
+                    # Also check all paragraphs within table cells
+                    for table in doc.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for paragraph in cell.paragraphs:
+                                    if paragraph.text:
+                                        test_cleaned = clean_text(paragraph.text)
+                                        if test_cleaned != paragraph.text:
+                                            found_markers = True
+                                            break
+                                    if found_markers:
                                         break
                                 if found_markers:
                                     break
                             if found_markers:
                                 break
+                        if found_markers:
+                            break
                 
                 if not found_markers:
                     break  # No markers found, we're done
@@ -4707,10 +4729,11 @@ class TemplateProcessor:
                                 paragraph.runs[0].text = cleaned
                                 for run in paragraph.runs[1:]:
                                     run.text = ''
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Error in iteration cleanup (paragraph): {e}")
                         continue
                 
-                # Run cleanup again on tables
+                # Run cleanup again on tables - check ALL paragraphs within cells
                 for table in doc.tables:
                     try:
                         for row in table.rows:
@@ -4723,9 +4746,11 @@ class TemplateProcessor:
                                                 paragraph.runs[0].text = cleaned
                                                 for run in paragraph.runs[1:]:
                                                     run.text = ''
-                                    except:
+                                    except Exception as e:
+                                        self.logger.debug(f"Error in iteration cleanup (cell paragraph): {e}")
                                         continue
-                    except:
+                    except Exception as e:
+                        self.logger.debug(f"Error in iteration cleanup (table): {e}")
                         continue
             
             if replacements_made > 0:
