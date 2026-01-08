@@ -366,6 +366,9 @@ class DragAndDropManager {
         // Store additional identifying information
         this.draggedElementId = tagRow.getAttribute('data-tag-id');
         
+        // CRITICAL: Store the immediate parent container to restrict dragging within it
+        this.immediateParentContainer = this.findParentContainer(tagRow);
+        
         // Store a snapshot of the element's state
         this.draggedElementSnapshot = {
             textContent: this.draggedElementText,
@@ -475,8 +478,20 @@ class DragAndDropManager {
         this.targetContainerId = targetContainerId;
         
         // If dragging within the same container, find reorder position
+        // CRITICAL FIX: Only allow reordering within the immediate parent container
         if (this.sourceContainerId === this.targetContainerId && this.sourceContainerId === 'selectedTags') {
-            this.findDropPosition(e.clientY);
+            // Check if mouse is over an element within the immediate parent container
+            const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
+            const targetParentContainer = elementUnderMouse ? this.findParentContainer(elementUnderMouse.closest('.tag-row')) : null;
+            
+            // Only allow reordering if target is within the same immediate parent container
+            if (this.immediateParentContainer && targetParentContainer === this.immediateParentContainer) {
+                this.findDropPosition(e.clientY);
+            } else {
+                // Mouse is outside immediate parent - clear drop indicators
+                this.targetPosition = null;
+                this.clearDropIndicators();
+            }
         } else {
             // Cross-list dragging - clear reorder indicators
             this.targetPosition = null;
@@ -631,19 +646,26 @@ class DragAndDropManager {
         const container = document.querySelector('#selectedTags');
         if (!container) return;
         
-        // Get all tag rows in the entire selected tags container
-        const allTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
+        // CRITICAL FIX: Only allow dragging within the immediate parent container
+        // This prevents tags from moving outside their immediate list (weight-section, vendor-section, etc.)
+        if (!this.immediateParentContainer) {
+            console.warn('No immediate parent container found, cannot find drop position');
+            return;
+        }
+        
+        // Get all tag rows ONLY within the immediate parent container
+        const allTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row')).filter(row => 
             row.querySelector('.tag-checkbox')
         );
         
         if (allTagRows.length === 0) return;
         
-        console.log(`Found ${allTagRows.length} total tag rows across all containers`);
+        console.log(`Found ${allTagRows.length} tag rows within immediate parent container`);
         
         let targetIndex = 0;
-        let targetParent = null;
+        let targetParent = this.immediateParentContainer;
         
-        // Find the target position across all containers
+        // Find the target position within the immediate parent container only
         for (let i = 0; i < allTagRows.length; i++) {
             const item = allTagRows[i];
             const rect = item.getBoundingClientRect();
@@ -651,11 +673,9 @@ class DragAndDropManager {
             
             if (mouseY < itemMiddle) {
                 targetIndex = i;
-                targetParent = this.findParentContainer(item);
                 break;
             } else if (i === allTagRows.length - 1) {
                 targetIndex = allTagRows.length;
-                targetParent = this.findParentContainer(item);
             }
         }
         
@@ -664,7 +684,7 @@ class DragAndDropManager {
             targetIndex = this.originalIndex + 1;
         }
         
-        // Ensure target index is within bounds
+        // Ensure target index is within bounds of the immediate parent container
         targetIndex = Math.max(0, Math.min(targetIndex, allTagRows.length));
         
         if (this.targetPosition !== targetIndex) {
@@ -961,8 +981,14 @@ class DragAndDropManager {
         const container = document.querySelector('#selectedTags');
         if (!container) return;
         
-        // Get all tag rows BEFORE removing anything
-        const allTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
+        // CRITICAL FIX: Only reorder within the immediate parent container
+        if (!this.immediateParentContainer) {
+            console.error('❌ No immediate parent container found, cannot reorder');
+            return;
+        }
+        
+        // Get all tag rows ONLY within the immediate parent container BEFORE removing anything
+        const allTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row')).filter(row => 
             row.querySelector('.tag-checkbox')
         );
         
@@ -1020,13 +1046,14 @@ class DragAndDropManager {
         // Ensure target position is within bounds
         adjustedTargetPosition = Math.max(0, Math.min(adjustedTargetPosition, allTagRows.length - 1));
         
-        // Get the target element after removal
-        const remainingTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
+        // Get the target element after removal (only within immediate parent container)
+        const remainingTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row')).filter(row => 
             row.querySelector('.tag-checkbox')
         );
         
         const targetElement = remainingTagRows[adjustedTargetPosition];
-        const targetParent = targetElement ? this.findParentContainer(targetElement) : null;
+        // CRITICAL: targetParent should always be the immediate parent container
+        const targetParent = this.immediateParentContainer;
         
         console.log('Target element parent:', targetParent);
         console.log('Adjusted target position:', adjustedTargetPosition);
@@ -1340,6 +1367,7 @@ class DragAndDropManager {
         this.sourceContainerId = null;
         this.targetContainer = null;
         this.targetContainerId = null;
+        this.immediateParentContainer = null; // Reset immediate parent container
         
         // Remove dragging class from any elements and re-enable checkboxes
         const draggingElements = document.querySelectorAll('.tag-row.dragging');
