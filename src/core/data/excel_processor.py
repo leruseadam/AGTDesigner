@@ -3580,23 +3580,51 @@ class ExcelProcessor:
                 safe_get_value(row.get('Vendor/Supplier', ''))     # Fallback column name
             )
             
+            # CRITICAL FIX: Also check for vendor in all possible column variations (case-insensitive)
+            if not vendor_value:
+                for col_name in row.index:
+                    col_lower = str(col_name).lower()
+                    if 'vendor' in col_lower or 'supplier' in col_lower:
+                        potential_vendor = safe_get_value(row.get(col_name, ''))
+                        if potential_vendor and potential_vendor not in ['nan', 'NaN', '', 'None']:
+                            vendor_value = potential_vendor
+                            logger.debug(f"Found vendor '{vendor_value}' in column '{col_name}' for product '{product_name}'")
+                            break
+            
             # FALLBACK: If vendor is missing, try to extract from product name (e.g., "Product Name by Vendor Name")
             # This handles cases where Excel file doesn't have vendor columns populated
+            # NOTE: This is a last resort - vendor should be in Excel columns
             if not vendor_value and product_name:
                 import re
                 # Pattern: "Product Name by Vendor Name" or "Product Name by Vendor Name - Weight"
-                match = re.search(r'\s+by\s+([^-]+?)(?:\s*-\s*\d|$)', product_name, re.IGNORECASE)
-                if match:
-                    extracted_vendor = match.group(1).strip()
-                    if extracted_vendor and len(extracted_vendor) > 1:
-                        vendor_value = extracted_vendor
-                        logger.debug(f"Extracted vendor '{vendor_value}' from product name '{product_name}'")
+                # More flexible pattern that handles various formats
+                patterns = [
+                    r'\s+by\s+([^-]+?)(?:\s*-\s*\d|$)',  # "Product by Vendor - 1g"
+                    r'\s+by\s+([^-]+?)(?:\s*\(|$)',      # "Product by Vendor (description)"
+                    r'\s+by\s+([A-Z][^-]+?)(?:\s|$)',    # "Product by VendorName"
+                ]
+                for pattern in patterns:
+                    match = re.search(pattern, product_name, re.IGNORECASE)
+                    if match:
+                        extracted_vendor = match.group(1).strip()
+                        # Filter out common false positives
+                        if extracted_vendor and len(extracted_vendor) > 1 and extracted_vendor.lower() not in ['the', 'a', 'an']:
+                            vendor_value = extracted_vendor
+                            logger.debug(f"Extracted vendor '{vendor_value}' from product name '{product_name}' using pattern '{pattern}'")
+                            break
             
-            # Debug logging for vendor field detection
+            # Debug logging for vendor field detection (only log first 10 to avoid spam)
             if not vendor_value and product_name:
-                available_vendor_cols = [col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]
-                logger.warning(f"⚠️ Vendor field is empty for product '{product_name}'. Available vendor columns: {available_vendor_cols}")
-                logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+                if not hasattr(self, '_vendor_warning_count'):
+                    self._vendor_warning_count = 0
+                if self._vendor_warning_count < 10:
+                    available_vendor_cols = [col for col in row.index if 'vendor' in col.lower() or 'supplier' in col.lower()]
+                    logger.warning(f"⚠️ Vendor field is empty for product '{product_name}'. Available vendor columns: {available_vendor_cols}")
+                    logger.debug(f"Row vendor values: Vendor/Supplier*='{row.get('Vendor/Supplier*', '')}', Vendor='{row.get('Vendor', '')}', Vendor/Supplier='{row.get('Vendor/Supplier', '')}'")
+                    self._vendor_warning_count += 1
+                elif self._vendor_warning_count == 10:
+                    logger.warning(f"⚠️ Suppressing further vendor warnings (10+ products missing vendor)")
+                    self._vendor_warning_count += 1
             
             # Extract THC/CBD values from the appropriate columns
             # Use the actual column names from the Excel file
