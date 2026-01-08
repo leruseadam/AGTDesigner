@@ -46,7 +46,7 @@ def _load_font_sizing_config():
                     'description': [(10, 28), (20, 26), (30, 24), (35, 22), (40, 20), (45, 18), (50, 16), (70, 14), (80, 12), (float('inf'), 10)],
                     'brand': [(5, 12), (15, 10), (20, 8), (30, 7.5), (40, 7), (float('inf'), 6.5)],
                     'price': [(10, 26), (15, 21), (float('inf'), 14)],
-                    'lineage': [(15, 14), (25, 13), (35, 10), (45, 9), (float('inf'), 9)],
+                    'lineage': [(10, 16), (20, 15), (30, 14), (40, 13), (float('inf'), 12)],  # Increased from 9-14pt to 12-16pt
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
                     'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
@@ -60,7 +60,7 @@ def _load_font_sizing_config():
                     'description': [(10, 36), (20, 34), (30, 30), (40, 28), (45, 26), (50, 24), (60, 23), (70, 22), (80, 20), (float('inf'), 18)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
-                    'lineage': [(100, 18), (float('inf'), 14)],  # Max 18pt for lineage to prevent 20pt sizing
+                    'lineage': [(10, 20), (20, 19), (30, 18), (50, 17), (float('inf'), 16)],  # Increased from 14-18pt to 16-20pt
                     'ratio': [(10, 14), (20, 12), (30, 9), (float('inf'), 9)],
                     'thc_cbd': [(10, 12), (float('inf'), 12)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
