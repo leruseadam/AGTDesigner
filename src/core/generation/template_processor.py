@@ -948,12 +948,16 @@ class TemplateProcessor:
             if not paragraph.text.strip():
                 paragraph._element.getparent().remove(paragraph._element)
 
-        # Set grid and cell dimensions
+        # Set grid and cell dimensions - ALWAYS 3x3 for horizontal/vertical templates
         num_rows = 3
         num_cols = 3
-        col_width_twips = "3000"  # Adjust as needed
-        row_height_pts = Pt(120)   # Adjust as needed
         max_cells = num_rows * num_cols
+        
+        # Use proper cell dimensions from constants based on template type
+        from src.core.constants import CELL_DIMENSIONS
+        cell_dims = CELL_DIMENSIONS.get(self.template_type, {'width': 2.4, 'height': 3.4})
+        col_width_twips = str(int(cell_dims['width'] * 1440))  # Convert inches to twips
+        row_height_pts = Pt(cell_dims['height'] * 72)  # Convert inches to points
         total_products = num_products if num_products is not None else 49
         pages = (total_products + max_cells - 1) // max_cells
         # PERFORMANCE: Only log for large expansions
@@ -1578,7 +1582,41 @@ class TemplateProcessor:
             # PERFORMANCE FIX: Skip expensive operations, just do essential cleanup
             from src.core.generation.docx_formatting import remove_all_headers_and_footers
             rendered_doc = remove_all_headers_and_footers(rendered_doc)
-            
+
+            # CRITICAL: Apply essential formatting BEFORE marker cleanup (markers are needed for sizing)
+            self.logger.warning("🎨 TEMPLATE_PROCESSOR: Applying essential formatting")
+
+            # Apply font sizing (uses markers to identify fields)
+            markers = [
+                'DESC', 'PRODUCTBRAND', 'PRODUCTBRAND_CENTER', 'PRICE', 'LINEAGE',
+                'THC_CBD', 'THC_CBD_LABEL', 'RATIO', 'JOINT_RATIO', 'WEIGHTUNITS', 'PRODUCTSTRAIN', 'DOH', 'PRODUCTVENDOR'
+            ]
+            self._recursive_autosize_template_specific_multi(rendered_doc, markers)
+
+            # Apply lineage colors to cells
+            from src.core.generation.docx_formatting import apply_lineage_colors
+            apply_lineage_colors(rendered_doc)
+
+            # Ensure proper table centering
+            try:
+                self._ensure_proper_centering(rendered_doc)
+            except Exception as centering_error:
+                self.logger.warning(f"Centering failed: {centering_error}")
+
+            # Clean up lineage+brand concatenation for classic types
+            try:
+                self._clean_up_lineage_brand_concatenation(rendered_doc)
+            except Exception as e:
+                self.logger.warning(f"Lineage brand concatenation cleanup failed: {e}")
+
+            # Ensure Lineage field centering for nonclassic types
+            try:
+                self._ensure_lineage_centering_for_nonclassic_types(rendered_doc)
+            except Exception as e:
+                self.logger.warning(f"Final lineage centering fix failed: {e}")
+
+            self.logger.warning("🎨 TEMPLATE_PROCESSOR: Essential formatting complete")
+
             # CRITICAL FIX: Always clean markers even when skipping other post-processing
             self.logger.warning("🧹🧹🧹 TEMPLATE_PROCESSOR: About to call marker cleanup")
             self._final_marker_cleanup(rendered_doc)
@@ -2695,8 +2733,16 @@ class TemplateProcessor:
 
                     lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
 
-                    # Use lineage hint for color logic while leaving actual brand in ProductBrand field
-                    label_context['Lineage'] = lineage_hint_token
+                    # CRITICAL FIX: For vertical templates, preserve the actual Lineage value
+                    # Don't overwrite Lineage with hint token - Lineage should show actual lineage from database/Excel
+                    # Only use hint token in ProductBrand for color logic
+                    # If Lineage was already set (from database lookup), preserve it
+                    if 'Lineage' not in label_context or not label_context.get('Lineage'):
+                        # Only set Lineage to hint if it wasn't already set
+                        # But actually, for non-classic types, we should preserve any existing lineage
+                        # or use the lineage_for_color as the actual lineage value
+                        label_context['Lineage'] = lineage_for_color
+                    # Otherwise, keep the existing Lineage value (from database lookup earlier)
 
                     # Populate ProductBrand with hint + brand markers for display (single source of truth)
                     label_context['ProductBrand'] = (
@@ -2704,7 +2750,7 @@ class TemplateProcessor:
                     )
                     label_context['ProductBrand_Center'] = ""
 
-                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set ProductBrand to '{final_brand_text}' with lineage hint '{lineage_for_color}'")
+                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set ProductBrand to '{final_brand_text}' with lineage hint '{lineage_for_color}', preserved Lineage: '{label_context.get('Lineage', 'NOT SET')}'")
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -3357,9 +3403,9 @@ class TemplateProcessor:
         
         if product_type in ['pre-roll', 'infused pre-roll']:
             # Use JointRatio for prerolls and infused prerolls
-            joint_ratio = (record.get('JointRatio') or 
-                          record.get('Joint Ratio') or 
-                          record.get('Ratio') or 
+            joint_ratio = (record.get('JointRatio') or
+                          record.get('Joint Ratio') or
+                          record.get('Ratio') or
                           '')
             if joint_ratio:
                 # Wrap JointRatio with markers for proper template processing
@@ -3368,6 +3414,9 @@ class TemplateProcessor:
                 self.logger.debug(f"FINAL: Set JointRatio for {product_type}: '{joint_ratio}'")
             else:
                 self.logger.debug(f"FINAL: No JointRatio found for {product_type}")
+
+        # DO NOT unwrap markers here - they are needed for font sizing in the rendered document
+        # Markers will be removed AFTER font sizing is applied in the cleanup phase
 
         return label_context
 
@@ -6798,15 +6847,22 @@ class TemplateProcessor:
 
                 
                 # Calculate and set proper table width for perfect centering
-                from src.core.constants import CELL_DIMENSIONS, GRID_LAYOUTS
+                from src.core.constants import CELL_DIMENSIONS
                 
-                # Get individual cell dimensions and grid layout
+                # Get individual cell dimensions
                 cell_dims = CELL_DIMENSIONS.get(self.template_type, {'width': 2.4, 'height': 2.4})
-                grid_layout = GRID_LAYOUTS.get(self.template_type, {'rows': 3, 'cols': 3})
+                
+                # For horizontal and vertical templates, ALWAYS use 3x3 grid (3 columns)
+                if self.template_type in ['horizontal', 'vertical']:
+                    num_columns = 3
+                else:
+                    # For other template types, use their specific grid layout
+                    from src.core.constants import GRID_LAYOUTS
+                    grid_layout = GRID_LAYOUTS.get(self.template_type, {'rows': 3, 'cols': 3})
+                    num_columns = grid_layout['cols']
                 
                 # Calculate total table width: individual cell width * number of columns
                 individual_cell_width = cell_dims['width']
-                num_columns = grid_layout['cols']
                 total_table_width = individual_cell_width * num_columns
                 
                 # Set table width to ensure proper centering
