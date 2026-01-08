@@ -4924,46 +4924,24 @@ const TagManager = {
             }
             verboseLog('No tags provided, showing empty state');
             
-            // CRITICAL FIX: Check if tags are being fetched FIRST - show loading instead of upload prompt
-            const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData;
+            // CRITICAL FIX: Check if tags are being fetched FIRST - show loading immediately
+            // This prevents showing upload prompt when tags are already loading on page reload
+            const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData || this._uploadInProgress;
             
-            if (isFetchingTags) {
-                // Show loading indicator while tags are being fetched
-                availableTagsContainer.innerHTML = `
-                    <div style="
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        justify-content: center;
-                        min-height: 400px;
-                        padding: 3rem 2rem;
-                    ">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading tags...</h5>
-                        <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            // CRITICAL FIX: Check if no Excel file is uploaded and show proper empty state
+            // CRITICAL FIX: Also check if file exists in session storage (indicates file was uploaded)
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            const hasFile = file && file !== 'nofile' && file !== '' && file !== 'database';
+            
             // CRITICAL FIX: Check if file path is displayed in UI (indicates file is uploaded/loading)
             const fileInfoText = document.getElementById('fileInfoText');
             const hasFileInUI = fileInfoText && fileInfoText.textContent && 
                                fileInfoText.textContent !== 'No file uploaded' && 
                                fileInfoText.textContent.trim() !== '';
             
-            // CRITICAL FIX: Also treat as "no file" if total tag count is 0 (not just filtered)
-            // Note: isFetchingTags is already declared at line 4928 in this function
-            const hasNoTags = !this.state.tags || this.state.tags.length === 0;
-            const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database' || (hasNoTags && !hasFileInUI && !isFetchingTags);
-            
-            // CRITICAL FIX: Show loading state if file is uploaded but tags are still loading
-            if (hasFileInUI && hasNoTags && (isFetchingTags || this._uploadInProgress)) {
-                // File is uploaded and tags are loading - show loading indicator instead of upload prompt
+            // CRITICAL FIX: Show loading state FIRST if tags are being fetched OR file exists
+            // This ensures we never show upload prompt when tags are loading
+            if (isFetchingTags || hasFile || hasFileInUI) {
+                // Tags are loading or file exists - show loading indicator immediately
                 availableTagsContainer.innerHTML = `
                     <div style="
                         display: flex;
@@ -4983,6 +4961,10 @@ const TagManager = {
                 reenableScaling();
                 return;
             }
+            
+            // CRITICAL FIX: Only show upload prompt if no file exists and tags are NOT loading
+            const hasNoTags = !this.state.tags || this.state.tags.length === 0;
+            const noFileUploaded = !hasFile && !hasFileInUI && hasNoTags && !isFetchingTags;
             
             if (noFileUploaded) {
                 // Show prominent upload prompt when Excel is needed
