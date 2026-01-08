@@ -3507,7 +3507,8 @@ const TagManager = {
                 
                 this._vendorDebugLogged = true;
             }
-            // Normalize empty strings and 'Unknown' to ensure consistent handling
+            // CRITICAL: Vendor MUST come from Excel column ONLY - product name contains BRAND, not vendor
+            // Do NOT extract vendor from product name - that would be extracting brand instead
             if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
                 vendor = '';
             } else {
@@ -3594,14 +3595,14 @@ const TagManager = {
                 }
             }
 
-            // CRITICAL: Vendor MUST come from Excel data, never from product name
-            // If vendor is missing, it means the Excel file doesn't have vendor columns populated
+            // CRITICAL FIX: If vendor is still empty after extraction attempts, set to Unknown Vendor
+            // Note: Vendor extraction from product name already happened above, so this is a fallback
             if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
                 // Only log first 10 missing vendors to avoid console spam
                 if (!this._missingVendorLogCount) this._missingVendorLogCount = 0;
                 if (this._missingVendorLogCount < 10) {
                     const productName = tag['Product Name*'] || tag.ProductName || 'Unknown';
-                    console.warn(`⚠️ Missing vendor for product '${productName}'. Excel file is missing vendor data.`);
+                    console.warn(`⚠️ Missing vendor for product '${productName}'. Vendor should always be in Excel data.`);
                     this._missingVendorLogCount++;
                 } else if (this._missingVendorLogCount === 10) {
                     console.warn(`⚠️ ... (suppressing further missing vendor warnings)`);
@@ -5046,14 +5047,38 @@ const TagManager = {
                     filterBar.style.display = 'none';
                 }
             } else {
-                // File is uploaded but no tags match filters
-                availableTagsContainer.innerHTML = `
-                    <div style="text-align: center; padding: 2rem 1rem; color: var(--text-secondary, #6c757d);">
-                        <div style="font-size: 2.5rem; margin-bottom: 0.75rem; opacity: 0.5;">🔍</div>
-                        <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">No products match your current filters</p>
-                        <p style="font-size: 0.9rem; opacity: 0.8;">Try adjusting or clearing your filters</p>
-                    </div>
-                `;
+                // CRITICAL FIX: Check if tags are loading BEFORE showing "no match" message
+                // Re-check isFetchingTags here in case it changed since the earlier check
+                const isStillFetching = this._fetchingAvailableTags || this._checkingExistingData || this._uploadInProgress;
+                
+                if (isStillFetching) {
+                    // Tags are still loading - show loading indicator
+                    availableTagsContainer.innerHTML = `
+                        <div style="
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            justify-content: center;
+                            min-height: 400px;
+                            padding: 3rem 2rem;
+                        ">
+                            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading products...</h5>
+                            <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
+                        </div>
+                    `;
+                } else {
+                    // File is uploaded but no tags match filters
+                    availableTagsContainer.innerHTML = `
+                        <div style="text-align: center; padding: 2rem 1rem; color: var(--text-secondary, #6c757d);">
+                            <div style="font-size: 2.5rem; margin-bottom: 0.75rem; opacity: 0.5;">🔍</div>
+                            <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">No products match your current filters</p>
+                            <p style="font-size: 0.9rem; opacity: 0.8;">Try adjusting or clearing your filters</p>
+                        </div>
+                    `;
+                }
             }
             
             // Don't hide tag containers - keep them visible even when empty
@@ -5064,7 +5089,7 @@ const TagManager = {
             }
             // CRITICAL FIX: Clear filename display when no tags are available
             // This prevents confusion when file path shows but tags don't load
-            const fileInfoText = document.getElementById('fileInfoText');
+            // Note: fileInfoText is already declared at line 4954 in this function
             if (fileInfoText && noFileUploaded) {
                 fileInfoText.textContent = 'No file uploaded';
                 verboseLog('✅ Cleared filename display - no tags available');
@@ -16530,6 +16555,16 @@ const TagManager = {
 
     // CRITICAL FIX: Add init function that loads tags automatically
     async init() {
+        // CRITICAL FIX: Add safeguard timeout to ensure splash completes even if init hangs
+        // Declare at function level so it's accessible in all catch blocks
+        let splashTimeout = setTimeout(() => {
+            console.warn('⚠️ TagManager.init() taking too long - forcing splash to complete');
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+        }, 15000); // 15 second timeout
+        
         try {
             console.log('🚀 TagManager.init() called');
 
@@ -16618,9 +16653,27 @@ const TagManager = {
                 } else {
                     console.warn('⚠️ Tags not loaded in init()');
                 }
+                
+                // CRITICAL FIX: Clear splash timeout since we completed successfully
+                clearTimeout(splashTimeout);
+                
+                // CRITICAL FIX: Ensure splash completes even if fetchAndUpdateAvailableTags didn't do it
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    console.log('🔧 Ensuring AppLoadingSplash completes after init()');
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                
                 return loaded;
             } catch (error) {
                 console.error('❌ Error loading tags in init():', error);
+                // CRITICAL FIX: Clear splash timeout and ensure splash completes on error
+                clearTimeout(splashTimeout);
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    console.log('🔧 Ensuring AppLoadingSplash completes after init() error');
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
                 // Don't throw - allow app to continue even if tags fail to load
                 // If we have cached data, that's better than nothing
                 return this.state.tags && this.state.tags.length > 0;
@@ -16628,6 +16681,13 @@ const TagManager = {
         } catch (error) {
             console.error('❌ CRITICAL: Error in TagManager.init():', error);
             console.error('Stack trace:', error.stack);
+            // CRITICAL FIX: Ensure splash completes even on critical error
+            clearTimeout(splashTimeout);
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                console.log('🔧 Ensuring AppLoadingSplash completes after critical init() error');
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
             // Mark as initialized anyway to prevent infinite retry loops
             this.state.initialized = true;
             return false;
