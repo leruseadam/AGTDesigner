@@ -113,9 +113,10 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Use database lineage directly - canonical_lineage/currentLineage is source of truth
-  // Respect database values - don't convert unless absolutely necessary
-  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
+  // CRITICAL: Match tag generation - use database fields first (canonical_lineage/currentLineage)
+  // Tag generation uses record.get('Lineage') which comes from database enrichment
+  // This ensures UI matches exactly what tag generation uses for colors
+  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -284,9 +285,10 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Use database lineage directly - canonical_lineage/currentLineage is source of truth
-  // Respect database values - don't convert unless absolutely necessary
-  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
+  // CRITICAL: Match tag generation - use database fields first (canonical_lineage/currentLineage)
+  // Tag generation uses record.get('Lineage') which comes from database enrichment
+  // This ensures UI matches exactly what tag generation uses for colors
+  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();

@@ -11113,18 +11113,26 @@ const TagManager = {
     
     _normalizeLineageFields(tag) {
         try {
-            // CRITICAL: Always prioritize canonical_lineage/currentLineage (from database) as source of truth
-            // If database lineage exists, use it exclusively - don't fall back to Excel Lineage
+            // CRITICAL: Use EXACT same lineage priority as docx generation
+            // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
+            // Only use Excel lineage if product is brand new (not in database)
             let lin;
             let fromDatabase = false;
             
-            if (tag.canonical_lineage || tag.currentLineage) {
-                // Database lineage exists - use it (this is the source of truth)
+            // EXACT same priority as docx generation (tag_generator.py line 909):
+            // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+            if (tag.sovereign_lineage) {
+                // Product-level sovereign_lineage (user changes) - highest priority
+                lin = tag.sovereign_lineage.toString().trim();
+                fromDatabase = true;
+            } else if (tag.canonical_lineage || tag.currentLineage) {
+                // Strain-level canonical_lineage or currentLineage - database lineage
                 lin = (tag.canonical_lineage || tag.currentLineage || '').toString().trim();
                 fromDatabase = true;
             } else {
-                // No database lineage - fall back to other fields only if database lineage is missing
+                // No database lineage - use Excel Lineage only for brand new products
                 lin = (tag.Lineage || tag.lineage || '').toString().trim();
+                // Don't mark as fromDatabase - this is Excel lineage for new products
             }
             
             if (lin) {
@@ -11133,14 +11141,18 @@ const TagManager = {
                 // This ensures UI always shows database lineage, not Excel lineage
                 if (fromDatabase) {
                     // Database lineage is source of truth - set ALL fields to database value
+                    // Preserve sovereign_lineage if it exists (highest priority from docx generation)
+                    if (tag.sovereign_lineage) {
+                        tag.sovereign_lineage = normalized;
+                    }
                     tag.canonical_lineage = normalized;
                     tag.currentLineage = normalized;
                     tag.Lineage = normalized;
                     tag.lineage = normalized;
                     tag['Lineage*'] = normalized;
                 } else {
-                    // No database lineage - normalize all fields to the same value
-                    // But don't set canonical_lineage/currentLineage (they should come from database)
+                    // No database lineage - normalize Excel fields only (brand new product)
+                    // Don't set canonical_lineage/currentLineage/sovereign_lineage (they should come from database)
                     tag.Lineage = normalized;
                     tag.lineage = normalized;
                     tag['Lineage*'] = normalized;

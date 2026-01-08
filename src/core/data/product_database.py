@@ -3375,20 +3375,35 @@ class ProductDatabase:
                 except ValueError:
                     continue
         
-        # If no pattern found, try to generate from weight
+        # If no pattern found, try to generate from weight (e.g., "5g" -> "1g x 5 Pack")
         if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
             try:
-                weight_float = float(weight)
-                if weight_float == 1.0:
-                    return "1g"
-                else:
-                    # Format weight similar to price formatting - no decimals unless original has decimals
-                    if weight_float.is_integer():
-                        formatted_weight = f"{int(weight_float)}g"
+                # Extract numeric value from weight string (handle "5g", "5 g", etc.)
+                weight_str = str(weight).strip().lower()
+                weight_match = re.search(r'(\d+(?:\.\d+)?)', weight_str)
+                if weight_match:
+                    weight_float = float(weight_match.group(1))
+                    
+                    # Convert to joint ratio format: "5g" -> "1g x 5 Pack"
+                    if weight_float >= 1.0:
+                        # For weights >= 1g, assume 1g per joint
+                        count = int(weight_float) if weight_float.is_integer() else weight_float
+                        if count == 1:
+                            return "1g"
+                        else:
+                            return f"1g x {int(count)} Pack"
                     else:
-                        # Round to 2 decimal places and remove trailing zeros
-                        formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
-                    return formatted_weight
+                        # For weights < 1g (e.g., 0.5g), assume that weight per joint
+                        # Try to figure out pack count from total weight
+                        # Common: 0.5g x 2 Pack = 1g total, 0.5g x 4 Pack = 2g total
+                        if weight_float == 0.5:
+                            # 0.5g could be 0.5g x 2 Pack (1g total) or just 0.5g single
+                            # Default to 0.5g x 2 Pack
+                            return "0.5g x 2 Pack"
+                        else:
+                            # For other fractional weights, return as-is
+                            formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
+                            return formatted_weight
             except (ValueError, TypeError):
                 pass
         
@@ -5066,13 +5081,15 @@ class ProductDatabase:
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+            # Also handle case where normalized_product_strain is NULL - fall back to name-based join
             # FIX: Use LOWER(TRIM()) to normalize Product Strain on-the-fly since normalized_product_strain column doesn't exist
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                 LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = s2.normalized_name
+                LEFT JOIN strains s3 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                 WHERE p."Product Name*" = ? OR p."ProductName" = ?
                 ORDER BY p.id DESC
                 LIMIT 1
@@ -5111,13 +5128,15 @@ class ProductDatabase:
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
+            # Also handle case where normalized_product_strain is NULL - fall back to name-based join
             # FIX: Use LOWER(TRIM()) to normalize Product Strain on-the-fly since normalized_product_strain column doesn't exist
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                 LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = s2.normalized_name
+                LEFT JOIN strains s3 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                 WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
                    OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
                 ORDER BY p.id DESC

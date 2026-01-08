@@ -2027,6 +2027,16 @@ class TemplateProcessor:
                                 self.logger.debug(f"No JointRatio in cache for '{product_name}'")
                     except Exception as e:
                         self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from cache: {e}")
+                
+                # If still no joint ratio, just use weight
+                if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                    weight_value = record.get('Weight*', '') or label_context.get('Weight*', '')
+                    units_value = record.get('Units', '') or label_context.get('Units', '')
+                    if weight_value and units_value:
+                        joint_ratio = f"{weight_value}{units_value}"
+                    elif weight_value:
+                        joint_ratio = str(weight_value)
+                    self.logger.debug(f"🔧 USING WEIGHT: JointRatio '{joint_ratio}' from weight '{weight_value}{units_value}' for '{product_name}'")
             
             self.logger.debug(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
@@ -2072,20 +2082,20 @@ class TemplateProcessor:
                     self.logger.warning(f"⚠️ WEIGHT FALLBACK: No Excel processor available, using simple concatenation: '{weight_units}'")
             
             label_context['WeightUnits'] = weight_units
+        
+        # CRITICAL FIX: Remove any weight markers that might interfere with display
+        if label_context['WeightUnits'] and 'WEIGHTUNITS_START' in str(label_context['WeightUnits']):
+            # Extract the actual weight value from the markers
+            weight_text = str(label_context['WeightUnits'])
+            start_marker = 'WEIGHTUNITS_START'
+            end_marker = 'WEIGHTUNITS_END'
             
-            # CRITICAL FIX: Remove any weight markers that might interfere with display
-            if label_context['WeightUnits'] and 'WEIGHTUNITS_START' in str(label_context['WeightUnits']):
-                # Extract the actual weight value from the markers
-                weight_text = str(label_context['WeightUnits'])
-                start_marker = 'WEIGHTUNITS_START'
-                end_marker = 'WEIGHTUNITS_END'
-                
-                if start_marker in weight_text and end_marker in weight_text:
-                    start_idx = weight_text.find(start_marker) + len(start_marker)
-                    end_idx = weight_text.find(end_marker)
-                    actual_weight = weight_text[start_idx:end_idx].strip()
-                    label_context['WeightUnits'] = actual_weight
-                    self.logger.info(f"🔧 WEIGHT MARKERS REMOVED: '{weight_text}' -> '{actual_weight}' for '{record.get('ProductName', 'N/A')}'")
+            if start_marker in weight_text and end_marker in weight_text:
+                start_idx = weight_text.find(start_marker) + len(start_marker)
+                end_idx = weight_text.find(end_marker)
+                actual_weight = weight_text[start_idx:end_idx].strip()
+                label_context['WeightUnits'] = actual_weight
+                self.logger.info(f"🔧 WEIGHT MARKERS REMOVED: '{weight_text}' -> '{actual_weight}' for '{record.get('ProductName', 'N/A')}'")
 
         # Define product type sets for use throughout the method
         from src.core.constants import CLASSIC_TYPES

@@ -3694,6 +3694,7 @@ class ExcelProcessor:
             tag = {
                 'Product Name*': product_name,
                 'Vendor': vendor_value,
+                'Vendor*': vendor_value,  # CRITICAL: Frontend expects Vendor* field
                 'Vendor/Supplier*': vendor_value,
                 'ProductVendor': vendor_value,  # CRITICAL: Template processor needs ProductVendor field
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
@@ -8061,6 +8062,18 @@ class ExcelProcessor:
 
             # Get vendor from multiple possible column names using fast accessor
             vendor_value = get_val('Vendor/Supplier*') or get_val('Vendor') or get_val('Vendor/Supplier')
+            
+            # CRITICAL FIX: Also check for vendor in all possible column variations (case-insensitive)
+            # This ensures vendor is found even if column name doesn't match exactly
+            if not vendor_value:
+                for col_name in col_names:
+                    col_lower = str(col_name).lower()
+                    if 'vendor' in col_lower or 'supplier' in col_lower:
+                        potential_vendor = get_val(col_name)
+                        if potential_vendor and potential_vendor not in ['nan', 'NaN', '', 'None']:
+                            vendor_value = potential_vendor
+                            logger.debug(f"Found vendor '{vendor_value}' in column '{col_name}' for product '{product_name}'")
+                            break
 
             # Get description for DescAndWeight field
             # DescAndWeight should contain just the description text (mapped to DESC marker in template)
@@ -8128,7 +8141,9 @@ class ExcelProcessor:
                 'Description': description,
                 'DescAndWeight': desc_and_weight,
                 'Vendor': vendor_value,
+                'Vendor*': vendor_value,  # CRITICAL: Frontend expects Vendor* field
                 'Vendor/Supplier*': vendor_value,
+                'ProductVendor': vendor_value,  # CRITICAL: Template processor needs ProductVendor field
                 'Product Brand': get_val('Product Brand'),
                 'ProductBrand': get_val('Product Brand'),
                 'Lineage': get_val('Lineage') or 'MIXED',

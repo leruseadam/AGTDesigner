@@ -1818,10 +1818,17 @@ def add_performance_headers(response):
     # Add caching headers for static assets
     if request.path.startswith('/static/'):
         response.headers['Cache-Control'] = 'public, max-age=31536000'  # 1 year
-    # Add cache headers for API responses (short-lived)
+    # Add cache headers for API responses (optimized for faster reloads)
     elif request.path.startswith('/api/'):
         if response.status_code == 200:
-            response.headers['Cache-Control'] = 'private, max-age=60'  # 1 minute for API responses
+            # Special handling for tag endpoints - longer cache for faster reloads
+            if request.path in ['/api/available-tags', '/api/selected-tags']:
+                # 5 minutes cache for tag endpoints - allows fast reloads while keeping data fresh
+                # Browser will cache responses and serve from cache on reload for faster page loads
+                response.headers['Cache-Control'] = 'private, max-age=300, must-revalidate'
+            else:
+                # 2 minutes for other API responses
+                response.headers['Cache-Control'] = 'private, max-age=120, must-revalidate'
     # Security headers
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
@@ -7213,6 +7220,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
                 continue
             if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
                 tag['Lineage'] = db_lineage
+                tag['Lineage*'] = db_lineage  # CRITICAL: Set Excel column name for UI
                 tag['lineage'] = db_lineage.lower()
                 tag['canonical_lineage'] = db_lineage
                 tag['currentLineage'] = db_lineage
@@ -7228,6 +7236,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
 
 def _calculate_joint_ratio_for_record(db_record):
     """Calculate joint ratio for pre-roll products from database record."""
+    import re  # Ensure re module is available
+    
     product_name = db_record.get('Product Name*', '')
     product_type = db_record.get('Product Type*', '')
     weight = _normalize_weight_string(db_record.get('Weight*', ''))
@@ -7269,20 +7279,35 @@ def _calculate_joint_ratio_for_record(db_record):
         amount = match.group(1)
         return _normalize_weight_string(f"{amount}g")
     
-    # If no pattern found, try to generate from weight
+    # If no pattern found, try to generate from weight (e.g., "5g" -> "1g x 5 Pack")
     if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
         try:
-            weight_float = float(weight)
-            if weight_float == 1.0:
-                return "1g"
-            else:
-                # Format weight similar to price formatting - no decimals unless original has decimals
-                if weight_float.is_integer():
-                    formatted_weight = f"{int(weight_float)}g"
+            # Extract numeric value from weight string (handle "5g", "5 g", etc.)
+            weight_str = str(weight).strip().lower()
+            weight_match = re.search(r'(\d+(?:\.\d+)?)', weight_str)
+            if weight_match:
+                weight_float = float(weight_match.group(1))
+                
+                # Convert to joint ratio format: "5g" -> "1g x 5 Pack"
+                if weight_float >= 1.0:
+                    # For weights >= 1g, assume 1g per joint
+                    count = int(weight_float) if weight_float.is_integer() else weight_float
+                    if count == 1:
+                        return "1g"
+                    else:
+                        return f"1g x {int(count)} Pack"
                 else:
-                    # Round to 2 decimal places and remove trailing zeros
-                    formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
-                return _normalize_weight_string(formatted_weight)
+                    # For weights < 1g (e.g., 0.5g), assume that weight per joint
+                    # Try to figure out pack count from total weight
+                    # Common: 0.5g x 2 Pack = 1g total, 0.5g x 4 Pack = 2g total
+                    if weight_float == 0.5:
+                        # 0.5g could be 0.5g x 2 Pack (1g total) or just 0.5g single
+                        # Default to 0.5g x 2 Pack
+                        return "0.5g x 2 Pack"
+                    else:
+                        # For other fractional weights, return as-is
+                        formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
+                        return formatted_weight
         except (ValueError, TypeError):
             pass
     
@@ -7955,10 +7980,11 @@ def generate_labels():
                                         # Batch query with both strain joins (same logic as get_product_lineage)
                                         cur.execute(f'''
                                             SELECT p."Product Name*",
-                                                   COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") as lineage
+                                                   COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") as lineage
                                             FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                             WHERE p."Product Name*" IN ({placeholders})
                                         ''', product_names_for_batch)
                                         for row in cur.fetchall():
@@ -8658,13 +8684,14 @@ def generate_labels():
                             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                             # PERFORMANCE: Query only products in current batch (already limited)
                             cur.execute(f'''
-                                SELECT 
+                                SELECT
                                     p."Product Name*",
                                     p.normalized_name,
-                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
+                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
                                 FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
                             WHERE p."Product Name*" IN ({placeholders})
                             ''', product_names)
                             for row in cur.fetchall():
@@ -9426,18 +9453,26 @@ def process_database_product_for_api(db_product):
         product_type = str(processed_product.get('Product Type*', '')).lower()
         product_name = str(processed_product.get('Product Name*', ''))
         
-        # CRITICAL FIX: For pre-roll and infused pre-roll products, use JointRatio instead of Weight* + Units
+        # CRITICAL FIX: For pre-roll and infused pre-roll products, use JointRatio if available, otherwise use weight
         if product_type in ['pre-roll', 'infused pre-roll']:
             joint_ratio = str(processed_product.get('JointRatio', '')).strip()
             if joint_ratio and joint_ratio not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                combined_weight = joint_ratio  # Use JointRatio directly (e.g., "0.5g x 2 Pack")
+                combined_weight = joint_ratio  # Use JointRatio directly (e.g., "1g x 5 Pack")
             else:
-                # Calculate JointRatio from product name or use default
-                calculated_joint_ratio = _calculate_joint_ratio_for_record(processed_product)
-                if calculated_joint_ratio:
-                    combined_weight = calculated_joint_ratio
+                # If JointRatio is missing, just use weight
+                if weight_value and units and str(units) != 'None' and str(units) != '':
+                    try:
+                        weight_float = float(weight_value)
+                        if weight_float == int(weight_float):
+                            combined_weight = f'{int(weight_float)}{units}'
+                        else:
+                            combined_weight = f'{weight_value}{units}'
+                    except (ValueError, TypeError):
+                        combined_weight = f'{weight_value}{units}' if weight_value else 'N/A'
+                elif weight_value:
+                    combined_weight = str(weight_value)
                 else:
-                    combined_weight = "0.5g x 2 Pack"  # Default for pre-rolls
+                    combined_weight = 'N/A'
         # Special override for Moonshot products - force to 2.5oz
         elif 'moonshot' in product_name.lower() and weight_value and units and units.lower() in ['g', 'grams', 'gram']:
             combined_weight = "2.5oz"
@@ -9988,6 +10023,7 @@ def get_available_tags():
                                     tag['currentLineage'] = db_lineage_clean
                                     tag['canonical_lineage'] = db_lineage_clean
                                     tag['Lineage'] = db_lineage_clean
+                                    tag['Lineage*'] = db_lineage_clean  # CRITICAL: Set Excel column name for UI
                                     tag['lineage'] = db_lineage_clean.lower()
                                     enriched_count += 1
                                 else:
@@ -11081,6 +11117,7 @@ def get_available_tags():
                                     tag['currentLineage'] = db_lineage
                                     tag['canonical_lineage'] = db_lineage
                                     tag['Lineage'] = db_lineage
+                                    tag['Lineage*'] = db_lineage  # CRITICAL: Set Excel column name for UI
                                     tag['lineage'] = db_lineage.lower()
                                     updated_count += 1
                                 else:
@@ -11117,6 +11154,7 @@ def get_available_tags():
                                                     tag['currentLineage'] = db_lineage_clean
                                                     tag['canonical_lineage'] = db_lineage_clean
                                                     tag['Lineage'] = db_lineage_clean
+                                                    tag['Lineage*'] = db_lineage_clean  # CRITICAL: Set Excel column name for UI
                                                     tag['lineage'] = db_lineage_clean.lower()
                                                     
                                                     updated_count += 1
@@ -11151,6 +11189,7 @@ def get_available_tags():
                                                         tag['currentLineage'] = current_lineage
                                                         tag['canonical_lineage'] = current_lineage
                                                         tag['Lineage'] = current_lineage
+                                                        tag['Lineage*'] = current_lineage  # CRITICAL: Set Excel column name for UI
                                                         tag['lineage'] = current_lineage.lower()
                                             except Exception as individual_err:
                                                 logging.debug(f"Individual query failed for '{tag_name}': {individual_err}")
@@ -11176,6 +11215,8 @@ def get_available_tags():
                                                     if current_lineage:
                                                         tag['currentLineage'] = current_lineage
                                                         tag['canonical_lineage'] = current_lineage
+                                                        tag['Lineage'] = current_lineage
+                                                        tag['Lineage*'] = current_lineage  # CRITICAL: Set Excel column name for UI
                                         
                                         if individual_updated > 0:
                                             logging.info(f"✅ Verified {individual_updated}/{len(tags_to_query)} tags with individual database queries")
@@ -11380,15 +11421,16 @@ def get_available_tags():
                             # Try with strain join first - get both product name and normalized name for matching
                             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                             lineage_query = '''
-                                SELECT 
+                                SELECT
                                     p."Product Name*" AS product_name,
                                     p.normalized_name AS normalized_name,
-                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
+                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
                                 FROM products p
                                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
-                                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") IS NOT NULL 
-                                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") != ''
+                                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
+                                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
                             '''
                             cur.execute(lineage_query)
                             rows = cur.fetchall()
@@ -11512,6 +11554,7 @@ def get_available_tags():
                     excel_tag['currentLineage'] = db_lineage_clean
                     excel_tag['canonical_lineage'] = db_lineage_clean
                     excel_tag['Lineage'] = db_lineage_clean
+                    excel_tag['Lineage*'] = db_lineage_clean  # CRITICAL: Set Excel column name for UI
                     excel_tag['lineage'] = db_lineage_clean.lower()
                 
                     updated_excel_count += 1
@@ -11536,6 +11579,7 @@ def get_available_tags():
                     excel_tag['currentLineage'] = db_lineage_clean
                     excel_tag['canonical_lineage'] = db_lineage_clean
                     excel_tag['Lineage'] = db_lineage_clean
+                    excel_tag['Lineage*'] = db_lineage_clean  # CRITICAL: Set Excel column name for UI
                     excel_tag['lineage'] = db_lineage_clean.lower()
                 
                     updated_excel_count += 1
@@ -11641,6 +11685,7 @@ def get_available_tags():
                                 tag['currentLineage'] = db_lineage_clean
                                 tag['canonical_lineage'] = db_lineage_clean
                                 tag['Lineage'] = db_lineage_clean  # Overwrite Excel Lineage
+                                tag['Lineage*'] = db_lineage_clean  # CRITICAL: Set Excel column name for UI
                                 tag['lineage'] = db_lineage_clean.lower()
                                 final_lineage_check_count += 1
                                 logging.info(f"✅ FINAL CHECK: Set database lineage for '{tag_name}': '{db_lineage_clean}'")
@@ -13113,125 +13158,208 @@ def api_logs():
 # WEB PERFORMANCE OPTIMIZATION: Add web-optimized routes
 @app.route('/api/web/available-tags', methods=['GET'])
 def get_web_available_tags():
-    """Web-optimized version of available tags with aggressive caching and compression"""
+    """Web-optimized version - uses same fast path as regular endpoint but always with fast_load=1"""
     try:
         start_time = time.time()
         
-        # Check if this is a web client request
-        user_agent = request.headers.get('User-Agent', '')
-        is_web_client = 'Windows' in user_agent or request.args.get('platform') == 'windows'
+        # WEB OPTIMIZATION: Always use fast_load=1 and skip prefer_db for maximum speed
+        # This skips slow database queries that cause timeouts on web servers
+        fast_load = True  # Always fast for web
+        prefer_db = False  # Skip database queries for speed
+        nocache = request.args.get('nocache') in ('1', 'true', 'True')
         
-        if ENHANCED_LOGGING_AVAILABLE:
-            enhanced_logger.log_info("Web-optimized available tags route called", 
-                                   {'platform': 'web', 'user_agent': user_agent[:50]})
+        # Use same cache key as regular endpoint
+        session_file_path = session.get('file_path', '')
+        upload_timestamp = session.get('upload_timestamp', '')
+        if session_file_path:
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
         else:
-            logging.info("Web-optimized available tags route called")
+            cache_key = get_session_cache_key('available_tags')
         
-        cache_key = get_session_cache_key('web_available_tags')
+        # Check cache first (unless nocache is set)
+        if not nocache:
+            cached_tags = cache.get(cache_key)
+            if cached_tags:
+                elapsed = (time.time() - start_time) * 1000
+                logging.info(f"✅ WEB: Using {len(cached_tags)} cached tags ({elapsed:.1f}ms)")
+                safe_cached_tags = make_json_safe(cached_tags)
+                response = make_response(jsonify({
+                    'tags': safe_cached_tags,
+                    'total_count': len(safe_cached_tags),
+                    'source': 'web-cache'
+                }))
+                response = compress_response(response)
+                return response
         
-        # WEB OPTIMIZATION: Aggressive caching for web clients
-        cached_tags = cache.get(cache_key)
-        if cached_tags:
-            elapsed = (time.time() - start_time) * 1000
-            if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"Using cached web available tags ({elapsed:.1f}ms)", 
-                                          {'cache_hit': True, 'tags_count': len(cached_tags)})
-            else:
-                logging.info(f"✅ Using {len(cached_tags)} cached web available tags ({elapsed:.1f}ms)")
-            
-            # Apply compression for web clients
-            response = make_response(jsonify({
-                'tags': cached_tags,
-                'total_count': len(cached_tags),
-                'source': 'web-cache'
-            }))
-            response = compress_response(response)
-            return response
+        # WEB OPTIMIZATION: Use the same fast Excel-only path as regular endpoint
+        # This skips all database queries for maximum speed
+        logging.info("🔄 WEB: Building tags with fast Excel-only path (no database queries)...")
         
-        logging.info("🔄 No web cache found, building optimized tag list...")
+        # Get Excel processor
+        excel_processor = get_session_excel_processor()
+        if excel_processor is None:
+            excel_processor = get_excel_processor()
         
-        # RESOURCE-EFFICIENT MODE: Only use Excel processor to reduce memory usage
-        all_tags = []
-        
-        # Try Excel processor first (lighter than database queries)
-        excel_processor = get_excel_processor()
-        
-        # CRITICAL FIX: If Excel processor is empty, try to load default file for selected store
+        # Try to load default file if processor is empty
         if excel_processor and (excel_processor.df is None or excel_processor.df.empty):
-            store_name = get_current_store_name()
-            logging.info(f"WEB TAGS: Excel empty, trying to load default file for store: {store_name}")
-            
+            store_name = get_current_store_name(allow_fallback=False)
             if store_name:
                 try:
                     from src.core.data.excel_processor import get_default_upload_file
                     default_file = get_default_upload_file(store_name)
                     if default_file and os.path.exists(default_file):
-                        logging.info(f"WEB TAGS: Loading default Excel file: {default_file}")
+                        logging.info(f"WEB: Loading default file: {default_file}")
                         excel_processor.load_file(default_file)
-                        logging.info(f"WEB TAGS: Loaded {len(excel_processor.df) if excel_processor.df is not None else 0} rows")
-                    else:
-                        logging.warning(f"WEB TAGS: No default file found for store {store_name}")
-                except Exception as load_error:
-                    logging.error(f"WEB TAGS: Error loading default file: {load_error}")
+                except Exception as load_err:
+                    logging.warning(f"WEB: Error loading default file: {load_err}")
         
-        if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
-            try:
-                excel_tags = excel_processor.get_available_tags()
-                all_tags.extend(excel_tags)
-                logging.info(f"✅ Excel processor returned {len(excel_tags)} tags")
-            except Exception as e:
-                logging.warning(f"Excel processor error: {e}")
-        
-        # DATABASE FALLBACK DISABLED: Only show tags from Excel files
-        # If no Excel data, return empty instead of loading entire database
-        if not all_tags:
-            logging.info("WEB TAGS: No Excel data - returning empty (database fallback disabled)")
+        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
+            logging.info("WEB: No Excel data available")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
-                'source': 'no-excel-file',
-                'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
+                'source': 'web-no-excel'
             })
         
-        if all_tags:
-            # WEB OPTIMIZATION: Cache the results for web clients
-            cache.set(cache_key, all_tags, timeout=300)  # Cache for 5 minutes
+        # Get tags from Excel
+        try:
+            excel_tags = excel_processor.get_available_tags()
+            
+            # CRITICAL FIX: Use EXACT same lineage priority as docx generation
+            # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage" (Excel)
+            # Only use Excel lineage if product is brand new (not in database)
+            store_name = get_current_store_name(allow_fallback=False)
+            if store_name:
+                try:
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        logging.info("🔄 WEB: Aligning tags with database using docx generation lineage priority")
+                        
+                        # Collect product names for batch lookup
+                        product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
+                        if product_names:
+                            lineage_map = {}
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            
+                            # Use EXACT same query as docx generation (tag_generator.py line 909)
+                            normalized_names = [product_db._normalize_product_name(name) for name in product_names]
+                            chunk_size = 400
+                            for start in range(0, len(normalized_names), chunk_size):
+                                chunk = normalized_names[start:start + chunk_size]
+                                placeholders = ','.join(['?' for _ in chunk])
+                                
+                                # EXACT same COALESCE priority as docx generation
+                                cursor.execute(f'''
+                                    SELECT
+                                        p."Product Name*" AS product_name,
+                                        p.normalized_name AS normalized_name,
+                                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                                    FROM products p
+                                    LEFT JOIN strains s ON p.strain_id = s.id OR p.normalized_product_strain = s.normalized_name
+                                    WHERE p.normalized_name IN ({placeholders})
+                                    ORDER BY p.id DESC
+                                ''', chunk)
+                                
+                                for row in cursor.fetchall():
+                                    db_name = row[0]
+                                    db_norm = row[1]
+                                    db_lineage = row[2]
+                                    if db_name and db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                                        lineage_clean = str(db_lineage).strip().upper()
+                                        # Map by normalized and original name for O(1) lookup
+                                        if db_norm:
+                                            lineage_map[str(db_norm).strip().lower()] = lineage_clean
+                                        normalized = product_db._normalize_product_name(db_name)
+                                        lineage_map[normalized] = lineage_clean
+                                        lineage_map[db_name.lower().strip()] = lineage_clean
+                            
+                            # Apply database lineage to tags (same priority as docx generation)
+                            for tag in excel_tags:
+                                name = tag.get('Product Name*')
+                                if not name:
+                                    continue
+                                
+                                normalized = product_db._normalize_product_name(name)
+                                db_lineage = lineage_map.get(normalized) or lineage_map.get(str(name).lower().strip())
+                                
+                                if db_lineage:
+                                    # Product exists in database - use database lineage (same as docx generation)
+                                    lineage_clean = db_lineage.upper()
+                                    tag['sovereign_lineage'] = lineage_clean  # Set for consistency
+                                    tag['canonical_lineage'] = lineage_clean
+                                    tag['currentLineage'] = lineage_clean
+                                    tag['Lineage'] = lineage_clean
+                                    tag['Lineage*'] = lineage_clean
+                                    tag['lineage'] = lineage_clean.lower()
+                                else:
+                                    # Brand new product not in database - use Excel lineage as fallback
+                                    excel_lineage = tag.get('Lineage')
+                                    if excel_lineage and str(excel_lineage).strip():
+                                        lineage_clean = str(excel_lineage).strip().upper()
+                                        tag['Lineage'] = lineage_clean
+                                        tag['Lineage*'] = lineage_clean
+                                        tag['lineage'] = lineage_clean.lower()
+                                        # Don't set canonical_lineage/currentLineage for Excel-only lineage
+                                        # This marks it as Excel lineage, not database lineage
+                            
+                            logging.info(f"✅ WEB: Applied database lineage to {len([t for t in excel_tags if t.get('canonical_lineage')])} tags, Excel fallback for {len([t for t in excel_tags if not t.get('canonical_lineage')])} new products")
+                except Exception as align_err:
+                    logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
+            
+            # Normalize all tags (both database and Excel lineage)
+            simple_tags = []
+            for tag in excel_tags:
+                # Get final lineage (database takes priority, Excel as fallback)
+                final_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage')
+                
+                if final_lineage and str(final_lineage).strip():
+                    lineage_clean = str(final_lineage).strip().upper()
+                    # Ensure all fields are set consistently
+                    if tag.get('canonical_lineage'):
+                        # Database lineage - set all fields
+                        tag['currentLineage'] = lineage_clean
+                        tag['canonical_lineage'] = lineage_clean
+                        tag['Lineage'] = lineage_clean
+                        tag['Lineage*'] = lineage_clean
+                        tag['lineage'] = lineage_clean.lower()
+                    else:
+                        # Excel lineage only (new product) - set Excel fields
+                        tag['Lineage'] = lineage_clean
+                        tag['Lineage*'] = lineage_clean
+                        tag['lineage'] = lineage_clean.lower()
+                simple_tags.append(tag)
+            
+            safe_tags = make_json_safe(simple_tags)
+            
+            # Cache for faster reloads
+            try:
+                cache.set(cache_key, safe_tags, timeout=3600)  # 1 hour cache
+                logging.info(f"💾 WEB: Cached {len(safe_tags)} tags")
+            except Exception as cache_err:
+                logging.warning(f"WEB: Cache set failed: {cache_err}")
             
             elapsed = (time.time() - start_time) * 1000
-            if ENHANCED_LOGGING_AVAILABLE:
-                enhanced_logger.log_success(f"Web available tags (Excel-only) completed ({elapsed:.1f}ms)", 
-                                          {'tags_count': len(all_tags), 'cached': True})
-            else:
-                logging.info(f"✅ Web available tags (Excel-only) completed ({elapsed:.1f}ms)")
+            logging.info(f"✅ WEB: Fast path completed ({elapsed:.1f}ms) - {len(safe_tags)} tags")
             
-            # Apply compression for web clients
             response = make_response(jsonify({
-                'tags': all_tags,
-                'total_count': len(all_tags),
-                'source': 'web-excel-only'
+                'tags': safe_tags,
+                'total_count': len(safe_tags),
+                'source': 'web-fast-excel-only'
             }))
             response = compress_response(response)
             return response
-        
-        # Fallback: return empty list for web clients
-        if ENHANCED_LOGGING_AVAILABLE:
-            enhanced_logger.log_warning("No Excel data available for web available tags")
-        else:
-            logging.warning("No Excel data available for web available tags")
-        
-        response = make_response(jsonify({
-            'tags': [],
-            'total_count': 0,
-            'source': 'web-empty'
-        }))
-        response = compress_response(response)
-        return response
+            
+        except Exception as excel_err:
+            logging.error(f"WEB: Excel processor error: {excel_err}")
+            import traceback
+            logging.error(traceback.format_exc())
+            return jsonify({'error': str(excel_err)}), 500
         
     except Exception as e:
-        if ENHANCED_LOGGING_AVAILABLE:
-            log_route_error('get_web_available_tags', e, request)
-        else:
-            logging.error(f"Error in web available tags: {str(e)}")
+        logging.error(f"Error in web available tags: {str(e)}")
+        import traceback
+        logging.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/web/filter-options', methods=['GET', 'POST'])
@@ -13372,12 +13500,13 @@ def _get_filter_options_from_database(store_name=None):
             conn = product_db._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") AS lineage
+                SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                 LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") IS NOT NULL
-                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, p."Lineage") != ''
+                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
+                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
             ''')
             db_lineages = [str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
             lineages = set(db_lineages)
@@ -19622,13 +19751,15 @@ def set_strain_lineage():
             if has_strain_id:
                 # Update products using strain_id if column exists
                 # Also update products with matching Product Strain for products without strain_id set
+                # CRITICAL: Also set sovereign_lineage on products so they remember manual override
                 cursor.execute('''
                     UPDATE products
                     SET "Lineage" = ?,
+                        sovereign_lineage = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE strain_id = ?
                        OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
-                ''', (lineage, strain_id, strain_name))
+                ''', (lineage, lineage, strain_id, strain_name))
                 
                 # Get the count of updated products
                 cursor.execute('''
@@ -19640,12 +19771,14 @@ def set_strain_lineage():
                 product_count = cursor.fetchone()[0]
             else:
                 # Fallback: Update products using Product Strain column if strain_id doesn't exist
+                # CRITICAL: Also set sovereign_lineage on products so they remember manual override
                 cursor.execute('''
                     UPDATE products
                     SET "Lineage" = ?,
+                        sovereign_lineage = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
-                ''', (lineage, strain_name))
+                ''', (lineage, lineage, strain_name))
                 
                 # Get the count of updated products
                 cursor.execute('''
