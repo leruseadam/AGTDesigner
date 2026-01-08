@@ -10098,8 +10098,8 @@ const TagManager = {
         } else if (!storeConfirmed) {
             // Store not confirmed - don't show loading, let store modal show
             verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
-        } else if (hasExistingTags) {
-            // Reload/refresh - show splash to indicate loading is happening
+        } else if (storeConfirmed && hasExistingTags) {
+            // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
             this.showActionSplash('Refreshing tags...');
             // Also show loading indicator in container if it exists
             // BUT don't grey out on initial page load - only on refresh
