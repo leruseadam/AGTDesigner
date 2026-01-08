@@ -112,6 +112,8 @@ class FastGenerationEngine:
                 logger.warning("🧹 FIRST CLEANUP DONE")
                 self.template_processor._nuclear_marker_cleanup(cached_doc)
                 logger.warning("🧹 NUCLEAR CLEANUP DONE")
+                self.template_processor._ultimate_marker_cleanup(cached_doc)
+                logger.warning("🧹 ULTIMATE CLEANUP DONE")
             except Exception as e:
                 logger.error(f"❌❌❌ CLEANUP FAILED: {e}")
                 import traceback
@@ -133,6 +135,8 @@ class FastGenerationEngine:
         logger.warning("🧹 FastGenerationEngine: Calling marker cleanup before caching")
         self.template_processor._final_marker_cleanup(final_doc)
         self.template_processor._nuclear_marker_cleanup(final_doc)
+        self.template_processor._ultimate_marker_cleanup(final_doc)
+        logger.warning("🧹 FastGenerationEngine: All marker cleanup done")
 
         # Cache the result
         buffer = BytesIO()
