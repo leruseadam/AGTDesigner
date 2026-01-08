@@ -4827,6 +4827,16 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
+        // CRITICAL FIX: Don't update tags if store is not confirmed
+        // This prevents loading states from appearing before store selection modal
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        
+        if (!storeConfirmed) {
+            verboseLog('Store not confirmed - skipping _updateAvailableTags (store modal should show)');
+            return;
+        }
+        
         console.log('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
         console.log('📍 Call stack:', new Error().stack);
         
