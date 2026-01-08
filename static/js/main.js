@@ -1049,6 +1049,11 @@ const TagManager = {
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
+    getCurrentFileName() {
+        // Get current file name from sessionStorage
+        return (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+    },
+
     getAvailableTagsCacheKey() {
         try {
             const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
