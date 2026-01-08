@@ -1330,11 +1330,13 @@ const TagManager = {
             const optimizedTags = tags.map(tag => {
                 // Keep only essential fields needed for display and filtering
                 // CRITICAL: Preserve vendor in multiple formats to ensure it's found during extraction
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || tag['ProductVendor'] || '';
                 return {
                     'Product Name*': tag['Product Name*'],
                     'Vendor*': tag['Vendor*'] || vendor, // Preserve vendor
                     'Vendor': tag['Vendor'] || vendor, // Also store as 'Vendor' for extraction
+                    'Vendor/Supplier*': tag['Vendor/Supplier*'] || vendor, // Preserve Vendor/Supplier*
+                    'ProductVendor': tag['ProductVendor'] || vendor, // Preserve ProductVendor
                     vendor: vendor, // Also store as lowercase for extraction
                     'Brand*': tag['Brand*'],
                     'Product Type*': tag['Product Type*'],
@@ -1421,20 +1423,23 @@ const TagManager = {
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
         
-        // CRITICAL FIX: Check for recent lineage updates - skip cache if lineage was recently updated
-        // This ensures UI shows fresh database lineage, not stale cached Excel lineage
+        // CRITICAL FIX: Check for recent lineage updates - show cache first, then refresh in background
+        // This ensures fast page loads while still getting fresh database lineage
         const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
         const skipCacheDueToLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
         
-        // CRITICAL FIX: In database-only mode, always fetch from backend to ensure correct lineage
-        // Don't use cache in database-only mode - it might have stale Excel lineage
-        if (shouldLoadFromDatabase || skipCacheDueToLineageUpdate) {
+        // PERFORMANCE FIX: Always show cache first for instant load, then refresh in background if needed
+        // This prevents slow page reloads while still ensuring fresh lineage data
+        const needsBackgroundRefresh = shouldLoadFromDatabase || skipCacheDueToLineageUpdate;
+        
+        if (needsBackgroundRefresh) {
             if (shouldLoadFromDatabase) {
-                console.log('🔄 Skipping cache - database-only mode (will fetch fresh from backend for correct lineage)');
+                console.log('⚡ Showing cache immediately, will refresh from database in background for correct lineage');
             } else {
-                console.log('🔄 Skipping cache - recent lineage update detected (will fetch fresh from backend)');
+                console.log('⚡ Showing cache immediately, will refresh in background after recent lineage update');
             }
-            return false; // Force fetch from backend to get fresh database lineage
+            // Don't return false - continue to show cache, but mark for background refresh
+            // The background refresh will happen in checkForExistingData or fetchAndUpdateAvailableTags
         }
         
         // If no Excel file but we have database, try to load from cache first, then fetch from database
@@ -4904,12 +4909,14 @@ const TagManager = {
         if (tagsToProcess && tagsToProcess.length > 0) {
             tagsToProcess.forEach(tag => {
                 // If vendor exists in any format, preserve it in all formats for extraction
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || tag['ProductVendor'] || '';
                 if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
                     // Preserve vendor in all possible field names for extraction
                     if (!tag['Vendor*']) tag['Vendor*'] = vendor;
                     if (!tag['Vendor']) tag['Vendor'] = vendor;
                     if (!tag.vendor) tag.vendor = vendor;
+                    if (!tag['Vendor/Supplier*']) tag['Vendor/Supplier*'] = vendor;
+                    if (!tag['ProductVendor']) tag['ProductVendor'] = vendor;
                 }
             });
         }
@@ -10087,6 +10094,11 @@ const TagManager = {
         const availableTagsContainer = document.getElementById('availableTags');
         const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
         
+        // CRITICAL FIX: Detect web client early for cache optimization
+        const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                          window.location.hostname.includes('agtpricetags.com') ||
+                          (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+        
         // Check if cache exists to determine if we should show loading or use cache
         const cachedTags = this.loadAvailableTagsFromCache();
         const hasCache = cachedTags && cachedTags.length > 0;
@@ -10095,6 +10107,11 @@ const TagManager = {
             console.log(`⚡ CACHE AVAILABLE: ${cachedTags.length} tags in cache - will use for instant display`);
         } else {
             console.log('📊 No cache or tags already exist - fetching from server');
+        }
+        
+        // PERFORMANCE: For web clients, prioritize cache even more aggressively
+        if (isWebClient && hasCache && !hasExistingTags && !forceReload) {
+            console.log(`⚡ WEB CLIENT: Using cache immediately for faster load`);
         }
         
         // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
@@ -10205,14 +10222,16 @@ const TagManager = {
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
+                // PERFORMANCE: Shorter timeout for web clients (faster failure recovery)
+                const safetyTimeoutMs = isWebClient ? 20000 : 60000; // 20s for web, 60s for desktop
                 safetyTimeout = setTimeout(() => {
-                    console.warn('⚠️ Safety timeout: Hiding loading spinner');
+                    console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
                     // Just hide the splash, don't show error message
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
                     // Don't show error message - let the app continue working
-                }, 60000); // 60 seconds - very generous timeout
+                }, safetyTimeoutMs);
             }
 
             // PERFORMANCE FIX: Use cache first for instant load, then refresh in background
@@ -10325,14 +10344,23 @@ const TagManager = {
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
-            const maxRetries = 3; // Allow retries for errors
-            // PERFORMANCE: Reduced from 30 to 15 retries - if file takes longer than 30 seconds, use cache
-            const maxProcessingRetries = 15; // Allow 15 retries for 202 (file processing) - 30 seconds max wait
+            
+            // CRITICAL FIX: Use web-optimized endpoint for web clients (PythonAnywhere, etc.)
+            // Detect if we're running in a web browser (not localhost)
+            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                              window.location.hostname.includes('agtpricetags.com') ||
+                              (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            
+            // PERFORMANCE: Web clients need faster timeouts and fewer retries
+            const maxRetries = isWebClient ? 2 : 3; // Fewer retries for web
+            const maxProcessingRetries = isWebClient ? 5 : 15; // Much fewer processing retries for web (10 seconds vs 30)
+            const fetchTimeout = isWebClient ? 10000 : 30000; // 10 seconds for web, 30 for desktop
+            
             let retryCount = 0;
             let processingRetryCount = 0;
             let lastError;
             
-            console.log(`🔄 Entering retry loop (maxRetries: ${maxRetries}, maxProcessingRetries: ${maxProcessingRetries})`);
+            console.log(`🔄 Entering retry loop (maxRetries: ${maxRetries}, maxProcessingRetries: ${maxProcessingRetries}, timeout: ${fetchTimeout}ms, web: ${isWebClient})`);
             console.log(`📊 Current state: retryCount=${retryCount}, processingRetryCount=${processingRetryCount}`);
             
             // CRITICAL: Continue retrying as long as EITHER condition is met (not both)
@@ -10342,36 +10370,46 @@ const TagManager = {
                 try {
                     console.log(`🔄 Retry attempt ${retryCount + 1} (processing retries: ${processingRetryCount})`);
                     const controller = new AbortController();
-                    // PERFORMANCE: Reduced timeout to 30 seconds - if it takes longer, use cache
-                    // Most files should load in 10-15 seconds, large files can use cache fallback
+                    // PERFORMANCE: Faster timeout for web clients - use cache for slow loads
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
-                    }, 30000); // 30 seconds - faster timeout, use cache for slow loads
+                        console.warn(`⚠️ Tag loading timeout after ${fetchTimeout}ms - will try cache or show error`);
+                    }, fetchTimeout);
 
-                    // CRITICAL FIX: Always use prefer_db in database-only mode to ensure correct lineage from database
-                    // Also use prefer_db after recent lineage updates
+                    // CRITICAL FIX: Check for recent lineage updates - force nocache to get fresh database lineage
+                    // This ensures UI shows correct lineage values after updates, not stale cached values
                     const currentFile = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
                     const isDatabaseMode = !currentFile || currentFile === 'nofile' || currentFile === '' || currentFile === 'database';
                     const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
                     const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
-                    const forceDbLineage = this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate;
-                    // PERFORMANCE: Always use cache for first load (retryCount === 0), skip nocache parameter
-                    const useCache = retryCount === 0 && !forceDbLineage && !forceReload;
+                    
+                    // CRITICAL FIX: For web clients, if lineage was recently updated, force nocache to bypass stale cache
+                    // Web endpoint will still get database lineage when needed (it checks lineage_update_timestamp)
+                    // PERFORMANCE: Web clients skip prefer_db for speed, but still get fresh data when lineage updates
+                    const forceDbLineage = isWebClient ? false : (this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate);
+                    // CRITICAL: Force nocache if lineage was recently updated (even for web clients) to get fresh lineage
+                    const useCache = retryCount === 0 && !forceDbLineage && !forceReload && !hasRecentLineageUpdate;
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Always use prefer_db in database mode or after recent lineage updates to ensure correct lineage
-                    const preferDbParam = forceDbLineage ? '&prefer_db=1' : '';
+                    // Skip prefer_db for web clients (web endpoint handles lineage updates via timestamp check)
+                    const preferDbParam = (isWebClient || !forceDbLineage) ? '' : '&prefer_db=1';
+                    
+                    // Use web endpoint for web clients, regular endpoint for localhost/desktop
+                    const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
                     
                     // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
                     const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
-                        `/api/available-tags?t=${timestamp}${fastLoadParam}${preferDbParam}` :
-                        `/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
+                        `${baseEndpoint}?t=${timestamp}${fastLoadParam}${preferDbParam}` :
+                        `${baseEndpoint}?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
                     
-                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl}`);
+                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
                     
+                    // PERFORMANCE: Browser will now cache responses for 5 minutes (via HTTP headers)
+                    // This provides faster reloads without needing to modify fetch logic
                     response = await fetch(optimizedFetchUrl, {
-                        signal: controller.signal
+                        signal: controller.signal,
+                        // Add cache mode to leverage HTTP cache headers
+                        cache: useCache ? 'default' : 'no-cache'
                     });
                     clearTimeout(timeoutId);
                     
@@ -10383,8 +10421,8 @@ const TagManager = {
                     if (response.status === 202) {
                         processingRetryCount++;
                         
-                        // PERFORMANCE: After 5 retries (10 seconds), try to show cached data immediately
-                        if (processingRetryCount === 5) {
+                        // PERFORMANCE: After half of max retries, try to show cached data immediately
+                        if (processingRetryCount === Math.floor(maxProcessingRetries / 2)) {
                             verboseLog('⏳ File processing taking a while, showing cached data while waiting...');
                             const cachedTags = this.hydrateAvailableTagsFromCache();
                             if (cachedTags) {
@@ -10404,10 +10442,13 @@ const TagManager = {
                             throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
                         }
                         
-                        // Show user-friendly loading message
+                        // PERFORMANCE: For web clients, add small delay between retries to avoid overwhelming server
+                        // For desktop, retry immediately
+                        if (isWebClient && processingRetryCount > 0) {
+                            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay for web
+                        }
                         
-                        verboseLog(`⏳ File still processing (202), retrying immediately... (${processingRetryCount}/${maxProcessingRetries})`);
-                        // PERFORMANCE: No delay - retry immediately for faster response
+                        verboseLog(`⏳ File still processing (202), retrying... (${processingRetryCount}/${maxProcessingRetries})`);
                         continue; // Retry without incrementing error retry count
                     }
 
@@ -12447,6 +12488,13 @@ const TagManager = {
 
             // Continue loading fresh data in background (non-blocking)
             console.log('📡 Background: Fetching selected tags and filters');
+            
+            // PERFORMANCE FIX: Check if we need to refresh tags in background for fresh lineage
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
+            const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
+            const needsBackgroundRefresh = shouldLoadFromDatabase || (lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000);
+            
             // CRITICAL FIX: Fetch filters AFTER selected tags to ensure data is ready
             Promise.allSettled([
                 this.fetchAndUpdateSelectedTags()
@@ -12458,6 +12506,15 @@ const TagManager = {
                 return this.fetchAndPopulateFilters();
             }).then(() => {
                 console.log('✅ Background: Selected tags and filters loaded');
+                
+                // PERFORMANCE FIX: Refresh tags in background if needed for fresh lineage
+                // This ensures fast page loads while still getting fresh database lineage
+                if (needsBackgroundRefresh) {
+                    console.log('🔄 Background: Refreshing tags for fresh database lineage...');
+                    this.fetchAndUpdateAvailableTags(true).catch(err => {
+                        console.warn('Background tag refresh error (non-critical):', err);
+                    });
+                }
             }).catch(err => {
                 console.warn('Background load error (non-critical):', err);
             });
