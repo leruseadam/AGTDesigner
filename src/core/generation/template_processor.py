@@ -5268,11 +5268,31 @@ class TemplateProcessor:
             return 'ratio'
 
         # CRITICAL FIX: Check for classic lineage values BEFORE brand detection
-        # Classic lineage values should use 'lineage' field type (14-20pt) not 'brand' (10-16pt)
+        # Classic lineage values should use 'lineage' field type (18pt for <100 chars, 14pt for longer) not 'brand' (10-16pt)
+        # Check both exact matches and if text contains/startswith lineage values (handles extra spaces, markers, etc.)
         classic_lineages = ['hybrid/sativa', 'hybrid/indica', 'sativa', 'indica', 'hybrid', 'cbd', 'mixed']
-        if text_stripped.upper() in [lineage.upper() for lineage in classic_lineages]:
-            self.logger.debug(f"🎯 CLASSIC LINEAGE DETECTED: '{text_stripped}' classified as lineage")
+        text_upper = text_stripped.upper()
+        
+        # Check for exact match first
+        if text_upper in [lineage.upper() for lineage in classic_lineages]:
+            self.logger.debug(f"🎯 CLASSIC LINEAGE DETECTED (exact): '{text_stripped}' classified as lineage")
             return 'lineage'
+        
+        # Check if text starts with or contains classic lineage values (handles cases with extra characters)
+        for lineage in classic_lineages:
+            lineage_upper = lineage.upper()
+            # Check if text starts with lineage (handles "HYBRID/SATIVA - extra text")
+            if text_upper.startswith(lineage_upper) or text_upper.replace(' ', '').startswith(lineage_upper.replace('/', '')):
+                self.logger.debug(f"🎯 CLASSIC LINEAGE DETECTED (starts with): '{text_stripped}' classified as lineage")
+                return 'lineage'
+            # Check if lineage appears as a word in the text (handles "HYBRID/SATIVA" anywhere)
+            if lineage_upper in text_upper or lineage_upper.replace('/', '') in text_upper.replace('/', ''):
+                # Make sure it's not part of a longer word
+                import re
+                if re.search(r'\b' + re.escape(lineage_upper) + r'\b', text_upper) or \
+                   re.search(r'\b' + re.escape(lineage_upper.replace('/', '')) + r'\b', text_upper.replace('/', '')):
+                    self.logger.debug(f"🎯 CLASSIC LINEAGE DETECTED (contains): '{text_stripped}' classified as lineage")
+                    return 'lineage'
 
         # Check for well-known brand names that should be visible
         # Only classify as 'brand' if we're CERTAIN it's a brand name that should be visible
