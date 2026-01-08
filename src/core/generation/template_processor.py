@@ -4501,6 +4501,64 @@ class TemplateProcessor:
             import traceback
             self.logger.error(traceback.format_exc())
 
+    def _ultimate_marker_cleanup(self, doc):
+        """
+        Ultimate cleanup: Direct literal string replacement for stubborn markers.
+        This removes exact marker strings that somehow survived previous cleanups.
+        """
+        try:
+            # List of exact marker strings to remove (no regex, just direct string replacement)
+            literal_markers = [
+                'DESC_START', 'DESC_END',
+                'PRICE_START', 'PRICE_END', 
+                'RICE_END',  # Typo variation
+                'PRODUCTBRAND_START', 'PRODUCTBRAND_END',
+                'PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END',
+                'PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END',
+                'LINEAGE_START', 'LINEAGE_END',
+                'PRODUCTVENDOR_START', 'PRODUCTVENDOR_END',
+                'THC_CBD_START', 'THC_CBD_END',
+                'RATIO_START', 'RATIO_END',
+                'WEIGHTUNITS_START', 'WEIGHTUNITS_END',
+            ]
+            
+            replacements_made = 0
+            
+            # Process all paragraphs
+            for paragraph in doc.paragraphs:
+                for run in paragraph.runs:
+                    if run.text:
+                        original = run.text
+                        cleaned = original
+                        for marker in literal_markers:
+                            if marker in cleaned:
+                                cleaned = cleaned.replace(marker, '')
+                                replacements_made += 1
+                        if cleaned != original:
+                            run.text = cleaned
+            
+            # Process all tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if run.text:
+                                    original = run.text
+                                    cleaned = original
+                                    for marker in literal_markers:
+                                        if marker in cleaned:
+                                            cleaned = cleaned.replace(marker, '')
+                                            replacements_made += 1
+                                    if cleaned != original:
+                                        run.text = cleaned
+            
+            if replacements_made > 0:
+                self.logger.warning(f"⚡ ULTIMATE CLEANUP: Removed {replacements_made} literal marker strings")
+            
+        except Exception as e:
+            self.logger.error(f"❌ ULTIMATE CLEANUP ERROR: {e}")
+
     def _final_lineage_cleanup(self, doc):
         """
         Final cleanup to remove any leading spaces from lineage content - OPTIMIZED.
