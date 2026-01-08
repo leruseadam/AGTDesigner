@@ -10391,7 +10391,7 @@ const TagManager = {
             // PERFORMANCE: Web clients need faster timeouts and fewer retries
             const maxRetries = isWebClient ? 2 : 3; // Fewer retries for web
             const maxProcessingRetries = isWebClient ? 5 : 15; // Much fewer processing retries for web (10 seconds vs 30)
-            const fetchTimeout = isWebClient ? 10000 : 30000; // 10 seconds for web, 30 for desktop
+            const fetchTimeout = isWebClient ? 30000 : 30000; // Temporarily increased to 30s for web to handle slow backend (TODO: optimize backend)
             
             let retryCount = 0;
             let processingRetryCount = 0;
