@@ -32,6 +32,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Cache version: increment this when lineage enrichment logic changes to invalidate old cache
+TAGS_CACHE_VERSION = "v2.1"  # Updated when lineage field extraction changes
+
 # Cache resolved default file paths to avoid repeated filesystem scans
 DEFAULT_FILE_CACHE: Dict[str, str] = {}
 
@@ -1021,8 +1024,8 @@ class ExcelProcessor:
                         normalized_filters = normalized_value
                     else:
                         normalized_filters = (normalized_value,)
-        # Include cache token to force misses after explicit invalidation
-        return (namespace, data_source, normalized_filters, self._cache_token)
+        # Include cache token and version to force misses after explicit invalidation or logic changes
+        return (namespace, data_source, normalized_filters, self._cache_token, TAGS_CACHE_VERSION)
 
     def _clone_tag_results(self, tags: List[Any]) -> List[Any]:
         """Create a safe clone of tag results for cache storage or retrieval."""
