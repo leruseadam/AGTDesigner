@@ -3591,27 +3591,9 @@ class ExcelProcessor:
                             logger.debug(f"Found vendor '{vendor_value}' in column '{col_name}' for product '{product_name}'")
                             break
             
-            # FALLBACK: If vendor is missing, try to extract from product name (e.g., "Product Name by Vendor Name")
-            # This handles cases where Excel file doesn't have vendor columns populated
-            # NOTE: This is a last resort - vendor should be in Excel columns
-            if not vendor_value and product_name:
-                import re
-                # Pattern: "Product Name by Vendor Name" or "Product Name by Vendor Name - Weight"
-                # More flexible pattern that handles various formats
-                patterns = [
-                    r'\s+by\s+([^-]+?)(?:\s*-\s*\d|$)',  # "Product by Vendor - 1g"
-                    r'\s+by\s+([^-]+?)(?:\s*\(|$)',      # "Product by Vendor (description)"
-                    r'\s+by\s+([A-Z][^-]+?)(?:\s|$)',    # "Product by VendorName"
-                ]
-                for pattern in patterns:
-                    match = re.search(pattern, product_name, re.IGNORECASE)
-                    if match:
-                        extracted_vendor = match.group(1).strip()
-                        # Filter out common false positives
-                        if extracted_vendor and len(extracted_vendor) > 1 and extracted_vendor.lower() not in ['the', 'a', 'an']:
-                            vendor_value = extracted_vendor
-                            logger.debug(f"Extracted vendor '{vendor_value}' from product name '{product_name}' using pattern '{pattern}'")
-                            break
+            # CRITICAL: Vendor MUST come from Excel data columns, never from product name
+            # If vendor is missing, the Excel file doesn't have vendor columns populated
+            # Do NOT extract from product name - that's unreliable and causes data quality issues
             
             # Debug logging for vendor field detection (only log first 10 to avoid spam)
             if not vendor_value and product_name:
