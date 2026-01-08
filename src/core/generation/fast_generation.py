@@ -27,7 +27,7 @@ except ImportError:
 
 # CRITICAL FIX: Clear cache on module load to remove documents with markers
 # Cache version: increment this when cleanup logic changes to invalidate old cache
-CACHE_VERSION = "v2.1"  # Updated when marker cleanup changes
+CACHE_VERSION = "v2.2"  # Updated when marker cleanup changes - force cache invalidation
 logger.warning(f"🧹 CLEARING GENERATION CACHE (version {CACHE_VERSION}) - Removing old cached documents with markers")
 _generation_cache.clear()
 
