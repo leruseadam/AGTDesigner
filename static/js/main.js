@@ -7865,6 +7865,17 @@ const TagManager = {
                     this._updateAvailableTags(this.state.tags, null);
                     verboseLog('✅ Re-rendered available tags to show updated lineage');
                 }
+                
+                // CRITICAL FIX: Ensure checkboxes are enabled and clickable after lineage update
+                // This prevents the issue where checkboxes become unresponsive after lineage changes
+                setTimeout(() => {
+                    this._ensureCheckboxesEnabled();
+                    // CRITICAL FIX: Re-initialize checkbox handlers in case they were lost during re-render
+                    if (typeof this._reinitializeCheckboxHandlers === 'function') {
+                        this._reinitializeCheckboxHandlers();
+                    }
+                    verboseLog('✅ Ensured checkboxes are enabled and handlers reattached after lineage update');
+                }, 150);
             }, 100);
             
             verboseLog('✅ Lineage updated successfully - refreshed display to show changes');
@@ -14586,6 +14597,12 @@ const TagManager = {
         // CRITICAL: First sync all available tag checkboxes with persistentSelectedTags state
         const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
         availableCheckboxes.forEach(checkbox => {
+            // CRITICAL FIX: Ensure checkbox is enabled and clickable before syncing state
+            checkbox.disabled = false;
+            checkbox.style.pointerEvents = 'auto';
+            checkbox.removeAttribute('data-drag-disabled');
+            checkbox.removeAttribute('data-reordering');
+            
             const tagName = checkbox.value;
             const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
             if (checkbox.checked !== shouldBeChecked) {
