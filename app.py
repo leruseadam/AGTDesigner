@@ -6114,31 +6114,32 @@ def set_store():
             _persist_store_selection()
         
         # CRITICAL FIX: Clear caches BEFORE clearing globals (cache key depends on _last_loaded_file)
-        # Get cache keys while excel_processor still has the old file path
+        # OPTIMIZATION: Use timeout to prevent hanging on cache operations
         try:
-            initial_data_cache_key = get_session_cache_key('initial_data')
-            available_tags_cache_key = get_session_cache_key('available_tags')
-
-            # Delete the caches
-            cache.delete(initial_data_cache_key)
-            cache.delete(available_tags_cache_key)
-            logging.debug(f"Cleared initial_data and available_tags cache for new store: {store_value}")
-        except Exception as cache_error:
-            # If cache key generation fails (e.g., Excel processor is slow), clear all session caches
-            logging.warning(f"Failed to get specific cache keys, clearing all caches: {cache_error}")
+            # Use a simple timeout wrapper for cache operations
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Cache operation timed out")
+            
+            # Set 2 second timeout for cache operations
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(2)
+            
             try:
-                # Clear all caches for this session
-                sid = session.get('_id', None) or (session.sid if hasattr(session, 'sid') else 'unknown')
-                # Use a wildcard pattern or just clear the simple keys
-                for key_base in ['initial_data', 'available_tags', 'web_available_tags']:
-                    try:
-                        # Try with empty file path
-                        simple_key = hashlib.sha256(f"{key_base}:{sid}:".encode()).hexdigest()
-                        cache.delete(simple_key)
-                    except:
-                        pass
-            except Exception as e2:
-                logging.warning(f"Failed to clear caches with fallback method: {e2}")
+                initial_data_cache_key = get_session_cache_key('initial_data')
+                available_tags_cache_key = get_session_cache_key('available_tags')
+
+                # Delete the caches
+                cache.delete(initial_data_cache_key)
+                cache.delete(available_tags_cache_key)
+                logging.debug(f"Cleared initial_data and available_tags cache for new store: {store_value}")
+            finally:
+                signal.alarm(0)  # Cancel timeout
+        except (TimeoutError, Exception) as cache_error:
+            # If cache key generation fails or times out, skip cache clearing
+            # It's not critical - caches will expire naturally
+            logging.warning(f"Cache clearing skipped (timeout or error): {cache_error}")
 
         # CRITICAL: Clear other session data from previous store (but keep selected_store!)
         session.pop('file_path', None)
