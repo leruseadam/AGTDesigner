@@ -702,6 +702,10 @@ class ProductDatabase:
                 if 'canonical_lineage' in product_columns:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_canonical_lineage ON products(canonical_lineage)')
 
+                # CRITICAL PERFORMANCE FIX: Add index on "Product Name*" for exact matching in web endpoint lineage queries
+                # Web endpoint uses: WHERE p."Product Name*" IN (...) for batch lineage lookups
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_product_name ON products("Product Name*")')
+                
                 # CRITICAL PERFORMANCE FIX: Add index on LOWER("Product Name*") for tag enrichment queries
                 # This prevents full table scans during tag generation (5-minute delay fix)
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_name_lower ON products(LOWER("Product Name*"))')
