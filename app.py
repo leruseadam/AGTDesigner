@@ -6137,10 +6137,19 @@ def set_store():
             pass
 
         # CRITICAL: Clear other session data from previous store (but keep selected_store!)
+        # NOTE: We clear file_path and uploaded_filename to force reload with new store's database
+        # However, if the same file is valid for the new store, it will be reloaded automatically
+        old_file_path = session.get('file_path')
+        old_filename = session.get('uploaded_filename')
+        
         session.pop('file_path', None)
         session.pop('uploaded_filename', None)
         session.pop('upload_timestamp', None)
         session.pop('selected_tags', None)
+        
+        # Log what was cleared for debugging
+        if old_file_path or old_filename:
+            logging.info(f"Cleared file data for store switch: file_path={old_file_path}, filename={old_filename}")
 
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
