@@ -3467,52 +3467,50 @@ const TagManager = {
         const vendorCounts = new Map();
         
         uniqueTags.forEach(tag => {
-            // Use the correct field names from the tag object - check multiple possible field names
-            // CRITICAL FIX: Always extract vendor from vendor fields only, never from brand
-            // CRITICAL FIX: Check all possible vendor field names (case-insensitive)
+            // CRITICAL FIX: Preserve vendor from cache - check if vendor was already extracted and stored
+            // Tags from cache should already have vendor data, so use it first
             let vendor = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
-                        tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
-                        tag['Vendor/Supplier'] || tag['Product Vendor'] || tag['ProductVendor'] || '';
+                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
+                        tag['Product Vendor'] || tag['ProductVendor'] || '';
             
-            // DEBUG: Log first few tags to see what fields are available
-            if (!this._vendorDebugLogged && (!vendor || vendor.trim() === '')) {
-                const sampleTag = tags && tags.length > 0 ? tags[0] : tag;
-                const allVendorKeys = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier'));
-                console.log('🔍 DEBUG: Sample tag fields for vendor extraction:', {
-                    hasVendor: !!sampleTag.vendor,
-                    hasVendorCapital: !!sampleTag.Vendor,
-                    hasVendorSupplier: !!sampleTag['Vendor/Supplier*'],
-                    allVendorKeys: allVendorKeys,
-                    vendorValues: allVendorKeys.reduce((acc, key) => {
-                        acc[key] = sampleTag[key];
-                        return acc;
-                    }, {}),
-                    allKeys: Object.keys(sampleTag).slice(0, 20), // First 20 keys
-                    sampleTag: sampleTag
-                });
+            // CRITICAL FIX: If vendor is already set and valid, use it immediately
+            // This prevents re-extraction that causes "Unknown Vendor" to appear
+            if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown' && vendor.trim() !== 'unknown vendor') {
+                vendor = vendor.trim();
+            } else {
+                // Only try extraction if vendor is truly missing
+                // Check all possible vendor field names (case-insensitive)
+                vendor = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
+                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
+                        tag['Product Vendor'] || tag['ProductVendor'] || '';
                 
-                // CRITICAL: If no vendor found and we have product name, try to extract from name
-                if (!vendor && sampleTag['Product Name*']) {
-                    const productName = sampleTag['Product Name*'];
-                    // Try to extract vendor from "Product by Vendor" pattern
-                    const vendorMatch = productName.match(/\s+by\s+([^-]+?)(?:\s*-\s*\d|$)/i);
-                    if (vendorMatch && vendorMatch[1]) {
-                        const extractedVendor = vendorMatch[1].trim();
-                        if (extractedVendor && extractedVendor.length > 1) {
-                            console.log(`💡 Extracted vendor '${extractedVendor}' from product name '${productName}'`);
-                            vendor = extractedVendor;
-                        }
-                    }
+                // DEBUG: Log first few tags to see what fields are available (only if vendor still missing)
+                if (!this._vendorDebugLogged && (!vendor || vendor.trim() === '')) {
+                    const sampleTag = tags && tags.length > 0 ? tags[0] : tag;
+                    const allVendorKeys = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier'));
+                    console.log('🔍 DEBUG: Sample tag fields for vendor extraction:', {
+                        hasVendor: !!sampleTag.vendor,
+                        hasVendorCapital: !!sampleTag.Vendor,
+                        hasVendorSupplier: !!sampleTag['Vendor/Supplier*'],
+                        allVendorKeys: allVendorKeys,
+                        vendorValues: allVendorKeys.reduce((acc, key) => {
+                            acc[key] = sampleTag[key];
+                            return acc;
+                        }, {}),
+                        allKeys: Object.keys(sampleTag).slice(0, 20), // First 20 keys
+                        sampleTag: sampleTag
+                    });
+                    
+                    this._vendorDebugLogged = true;
                 }
                 
-                this._vendorDebugLogged = true;
-            }
-            // CRITICAL: Vendor MUST come from Excel column ONLY - product name contains BRAND, not vendor
-            // Do NOT extract vendor from product name - that would be extracting brand instead
-            if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
-                vendor = '';
-            } else {
-                vendor = vendor.trim();
+                // CRITICAL: Vendor MUST come from Excel column ONLY - product name contains BRAND, not vendor
+                // Do NOT extract vendor from product name - that would be extracting brand instead
+                if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
+                    vendor = '';
+                } else {
+                    vendor = vendor.trim();
+                }
             }
             let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
             const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
