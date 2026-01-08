@@ -257,6 +257,11 @@ class TemplateProcessor:
             
             unique_labels = set(matches)
             
+            # CRITICAL: Prevent double template expansion - user has exact dimensions set
+            if self.template_type == 'double':
+                self.logger.info("Double template detected - skipping expansion to preserve exact table dimensions")
+                return buffer  # Return original template without modification
+            
             if len(unique_labels) < required_labels or force_expand:
                 # CRITICAL FIX: Use standard expansion methods for now
                 # Dynamic templates will be created later in _process_chunk based on actual product count
@@ -266,9 +271,6 @@ class TemplateProcessor:
                 elif self.template_type == 'inventory':
                     self.logger.info("Calling 2x2 inventory expansion method")
                     return self._expand_template_to_2x2_inventory()
-                elif self.template_type == 'double':
-                    self.logger.info("Calling 4x3 expansion method")
-                    return self._expand_template_to_4x3_fixed_double()
                 elif self.template_type == 'preroll':
                     # Preroll uses 4x5 grid like mini template
                     self.logger.info("Calling 4x5 expansion method for preroll template")
@@ -1337,10 +1339,17 @@ class TemplateProcessor:
                 self.logger.debug(f"⚡ TEMPLATE CACHE HIT: Using cached expansion for {cache_key}")
             else:
                 # For all templates, re-expand with correct number of products
-                if self.template_type in ['horizontal', 'vertical']:
+                # CRITICAL: Skip expansion for double templates to preserve exact dimensions
+                if self.template_type == 'double':
+                    self.logger.info(f"Double template detected - skipping dynamic expansion to preserve exact table dimensions")
+                    # Use original template buffer without modification
+                    if not hasattr(self, '_expanded_template_buffer') or not self._expanded_template_buffer:
+                        # Load original template if buffer doesn't exist
+                        from io import BytesIO
+                        with open(self._get_template_path(), 'rb') as f:
+                            self._expanded_template_buffer = BytesIO(f.read())
+                elif self.template_type in ['horizontal', 'vertical']:
                     self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
-                elif self.template_type == 'double':
-                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
                 elif self.template_type == 'mini':
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
                 

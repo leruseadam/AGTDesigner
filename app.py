@@ -8689,19 +8689,22 @@ def generate_labels():
         # from src.core.generation.fast_generation import FastGenerationEngine, optimize_records_for_generation
         # fast_engine = FastGenerationEngine(processor)
         
-        # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
-        if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
-            # CRITICAL FIX: Don't force re-expansion for horizontal/vertical/double templates as it bypasses dynamic template creation
-            if processor.template_type in ['horizontal', 'vertical', 'double']:
+        # CRITICAL: For mini and double templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
+        if hasattr(processor, '_expand_template_if_needed') and processor.template_type not in ['mini', 'double']:
+            # CRITICAL FIX: Don't force re-expansion for horizontal/vertical templates as it bypasses dynamic template creation
+            if processor.template_type in ['horizontal', 'vertical']:
                 logging.info(f"{processor.template_type.title()} template detected - skipping forced re-expansion to allow dynamic template creation")
             else:
-                # Force re-expansion for other templates (but not for mini templates)
+                # Force re-expansion for other templates (but not for mini/double templates)
                 processor._expanded_template_buffer = processor._expand_template_if_needed(
                     force_expand=True
                 )
         elif processor.template_type == 'mini':
             # Mini templates have fixed capacity - log this for debugging
             logging.info(f"Mini template detected - skipping forced re-expansion to maintain fixed 20-label capacity")
+        elif processor.template_type == 'double':
+            # Double templates have exact dimensions set by user - never expand them
+            logging.info(f"Double template detected - skipping forced re-expansion to preserve exact table dimensions")
         # Apply custom template settings if they exist
         if template_settings:
             # Apply custom font sizes if in fixed mode
@@ -17738,15 +17741,18 @@ def json_inventory():
         
         processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor)
         
-        # CRITICAL: For mini templates, NEVER force re-expansion as they have fixed capacity
-        if hasattr(processor, '_expand_template_if_needed') and processor.template_type != 'mini':
-            # Force re-expansion (but not for mini templates)
+        # CRITICAL: For mini and double templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
+        if hasattr(processor, '_expand_template_if_needed') and processor.template_type not in ['mini', 'double']:
+            # Force re-expansion (but not for mini/double templates)
             processor._expanded_template_buffer = processor._expand_template_if_needed(
                 force_expand=True
             )
         elif processor.template_type == 'mini':
             # Mini templates have fixed capacity - log this for debugging
             logging.info(f"Mini template detected - skipping forced re-expansion to maintain fixed 20-label capacity")
+        elif processor.template_type == 'double':
+            # Double templates have exact dimensions set by user - never expand them
+            logging.info(f"Double template detected - skipping forced re-expansion to preserve exact table dimensions")
         
         # Debug the template dimensions
         from docx import Document
