@@ -1399,10 +1399,10 @@ class TagsTable {
     
     // Performance optimization: Render tags in batches to keep UI responsive
     // OPTIMIZATION: Increased batch sizes and improved progressive rendering for faster initial display
-    // For small lists (< 500), render all at once for better performance
+    // For small lists (< 200), render all at once for better performance
     // For larger lists, use progressive rendering with larger initial batch
-    const batchSize = tags.length > 500 ? 200 : tags.length;
-    const initialBatchSize = tags.length > 500 ? 300 : tags.length; // Show more tags immediately
+    const batchSize = tags.length > 200 ? 100 : tags.length;
+    const initialBatchSize = tags.length > 200 ? 150 : tags.length; // Show more tags immediately
     
     if (tags.length <= batchSize) {
       // Small list: render all at once using DocumentFragment for efficiency

@@ -1441,13 +1441,16 @@ const TagManager = {
         const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
 
         if (hasRecentLineageUpdate) {
-            console.log('🔄 Recent lineage update detected - clearing cache to force fresh database fetch');
+            const timeSinceUpdate = Date.now() - parseInt(lastLineageUpdateTime, 10);
+            console.log(`🔄 Recent lineage update detected (${Math.round(timeSinceUpdate/1000)}s ago) - clearing cache to force fresh database fetch`);
             // Clear the cache so fresh data with updated sovereign_lineage is fetched
             const cacheKey = this.getAvailableTagsCacheKey();
             try {
+                const hadLocalStorage = !!localStorage.getItem(cacheKey);
+                const hadSessionStorage = !!sessionStorage.getItem(cacheKey);
                 localStorage.removeItem(cacheKey);
                 sessionStorage.removeItem(cacheKey);
-                console.log('✅ Cleared frontend cache - will fetch fresh lineage from database');
+                console.log(`✅ Cleared frontend cache (localStorage: ${hadLocalStorage}, sessionStorage: ${hadSessionStorage}) - will fetch fresh lineage from database`);
             } catch (e) {
                 console.warn('Could not clear cache:', e);
             }
@@ -10132,12 +10135,10 @@ const TagManager = {
         // This provides instant display on reload while keeping data fresh
         const availableTagsContainer = document.getElementById('availableTags');
         const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
-        
-        // CRITICAL FIX: Detect web client early for cache optimization
-        const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
-                          window.location.hostname.includes('agtpricetags.com') ||
-                          (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
-        
+
+        // REMOVED: isWebClient declaration moved earlier (before try block at line 10254)
+        // to avoid "Cannot access before initialization" error
+
         // Check if cache exists to determine if we should show loading or use cache
         const cachedTags = this.loadAvailableTagsFromCache();
         const hasCache = cachedTags && cachedTags.length > 0;
@@ -10247,6 +10248,12 @@ const TagManager = {
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
         // Declare cacheUsedForDisplay at function scope so it's accessible throughout
         let cacheUsedForDisplay = false;
+
+        // CRITICAL: Declare isWebClient before try block so it's available everywhere
+        const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                          window.location.hostname.includes('agtpricetags.com') ||
+                          (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             // Ensure flag is initialized
@@ -10257,7 +10264,7 @@ const TagManager = {
             // CRITICAL: Declare safetyTimeout at the very start of function so it's always available in catch block
             // This prevents "safetyTimeout is not defined" errors if an exception occurs early
             let safetyTimeout = null;
-            
+
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
@@ -10481,10 +10488,11 @@ const TagManager = {
                             throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
                         }
                         
-                        // PERFORMANCE: For web clients, add small delay between retries to avoid overwhelming server
-                        // For desktop, retry immediately
-                        if (isWebClient && processingRetryCount > 0) {
-                            await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay for web
+// PERFORMANCE: For web clients, add progressive delay between retries to avoid overwhelming server
+            // For desktop, retry immediately
+            if (isWebClient && processingRetryCount > 0) {
+                const delay = Math.min(500 * processingRetryCount, 3000); // Progressive delay up to 3s
+                await new Promise(resolve => setTimeout(resolve, delay));
                         }
                         
                         verboseLog(`⏳ File still processing (202), retrying... (${processingRetryCount}/${maxProcessingRetries})`);

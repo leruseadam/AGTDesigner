@@ -7284,8 +7284,14 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
                     aligned_count += 1
         
         if aligned_count > 0:
-            logging.info(f"✅ Aligned {aligned_count} tags with database lineage (force_overwrite={force_overwrite})")
-        
+            logging.info(f"✅ Aligned {aligned_count}/{len(aligned_tags)} tags with database lineage (force_overwrite={force_overwrite})")
+            # DEBUG: Log a sample aligned tag to verify sovereign_lineage is set
+            sample_aligned = next((t for t in aligned_tags if isinstance(t, dict) and t.get('sovereign_lineage')), None)
+            if sample_aligned:
+                logging.info(f"📋 Sample aligned tag: {sample_aligned.get('Product Name*')} -> sovereign_lineage={sample_aligned.get('sovereign_lineage')}")
+        else:
+            logging.warning(f"⚠️ No tags were aligned! lineage_map size: {len(lineage_map)}, tags count: {len(aligned_tags)}")
+
         return aligned_tags
     except Exception as e:
         logging.warning(f"Lineage alignment failed: {e}")
