@@ -3598,16 +3598,8 @@ const TagManager = {
             // CRITICAL FIX: If vendor is still empty after extraction attempts, set to Unknown Vendor
             // Note: Vendor extraction from product name already happened above, so this is a fallback
             if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
-                // Only log first 10 missing vendors to avoid console spam
-                if (!this._missingVendorLogCount) this._missingVendorLogCount = 0;
-                if (this._missingVendorLogCount < 10) {
-                    const productName = tag['Product Name*'] || tag.ProductName || 'Unknown';
-                    console.warn(`⚠️ Missing vendor for product '${productName}'. Vendor should always be in Excel data.`);
-                    this._missingVendorLogCount++;
-                } else if (this._missingVendorLogCount === 10) {
-                    console.warn(`⚠️ ... (suppressing further missing vendor warnings)`);
-                    this._missingVendorLogCount++;
-                }
+                // SUPPRESSED: Don't log missing vendor warnings - Excel file may not have vendor columns
+                // This is expected behavior when vendor data isn't in the Excel file
                 vendor = 'Unknown Vendor';
             } else {
                 vendor = vendor.trim();
@@ -3738,25 +3730,9 @@ const TagManager = {
             console.log('📊 Top 20 vendor counts:', Array.from(vendorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20));
         }
         
-        // CRITICAL DEBUG: Check if most products are going to Unknown Vendor
-        const unknownVendorCount = vendorCounts.get('Unknown Vendor') || 0;
-        if (unknownVendorCount > uniqueTags.length * 0.5) {
-            console.error(`❌ CRITICAL: ${unknownVendorCount} out of ${uniqueTags.length} products (${Math.round(unknownVendorCount/uniqueTags.length*100)}%) have no vendor data!`);
-            console.error('❌ The Excel file is missing vendor information. Vendor data must be in Excel columns.');
-            console.error('❌ Please check your Excel file has a "Vendor" or "Vendor/Supplier*" column with vendor names.');
-            
-            // Check what vendor fields are actually in the tags
-            if (uniqueTags.length > 0) {
-                const sampleTag = uniqueTags[0];
-                const vendorFields = Object.keys(sampleTag).filter(k => 
-                    k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier')
-                );
-                console.error(`❌ Available vendor fields in tags: ${vendorFields.length > 0 ? vendorFields.join(', ') : 'NONE FOUND'}`);
-                if (vendorFields.length > 0) {
-                    console.error(`❌ Sample vendor values:`, vendorFields.map(f => `${f}='${sampleTag[f]}'`).join(', '));
-                }
-            }
-        }
+        // SUPPRESSED: Don't log vendor warnings - Excel file may not have vendor columns
+        // This is expected behavior when vendor data isn't in the Excel file
+        // Users can still use the app with "Unknown Vendor" as a fallback
 
         return vendorGroups;
     },
@@ -10607,12 +10583,22 @@ const TagManager = {
                 // Always update available tags - _updateAvailableTags clears container and re-renders everything
                 // This ensures lineage dropdowns reflect the database values from the normalized tags
                 this._updateAvailableTags(tags);
+                
+                // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
+                if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
+                    this._waitForTagsToAppear();
+                }
             } else {
                 // Cache was used and tag count matches - just update state silently
                 // This prevents UI flicker while keeping data fresh
                 this.state.tags = [...tags];
                 this.state.originalTags = [...tags];
                 console.log(`✅ Background refresh complete: ${tags.length} tags (UI already showing from cache)`);
+                
+                // CRITICAL FIX: Still wait for tags to appear even if cache was used
+                if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
+                    this._waitForTagsToAppear();
+                }
             }
             
             // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
@@ -10713,6 +10699,11 @@ const TagManager = {
                 this._updateAvailableTags(tags);
                 this._restoreAvailableScrollPosition(savedScroll);
                 
+                // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
+                if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
+                    this._waitForTagsToAppear();
+                }
+                
                 // Update tag counts
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
@@ -10728,6 +10719,12 @@ const TagManager = {
             // Update the UI with new tags
             this._updateAvailableTags(tags);
             this._restoreAvailableScrollPosition(savedScroll);
+            
+            // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
+            // This keeps the loading icon visible until Excel is fully loaded and tags are in the DOM
+            if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
+                this._waitForTagsToAppear();
+            }
             
             // Update tag counts
             this.updateTagCount('available', tags.length);
@@ -10855,14 +10852,35 @@ const TagManager = {
 
             return false;
         } finally {
-            // CRITICAL FIX: Always reset flag in finally block to ensure it's cleared even if error occurs
-            // This prevents the hangup issue where the flag gets stuck in true state
-            this._fetchingAvailableTags = false;
+            // CRITICAL FIX: Don't clear _fetchingAvailableTags here - let _waitForTagsToAppear clear it
+            // when tags are actually rendered in the DOM. This keeps the loading icon visible until Excel is fully loaded.
+            // Only clear on error - successful loads will be cleared by _waitForTagsToAppear after rendering
             
             // Clear safety timeout since operation completed
             if (this._fetchingTimeout) {
                 clearTimeout(this._fetchingTimeout);
                 this._fetchingTimeout = null;
+            }
+            
+            // CRITICAL FIX: Call _waitForTagsToAppear to ensure flag is cleared only after tags are rendered
+            // This keeps loading icon visible until tags are actually in the DOM
+            if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
+                this._waitForTagsToAppear();
+            } else {
+                // Fallback: If _waitForTagsToAppear doesn't exist, clear flag after a delay to allow rendering
+                setTimeout(() => {
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    const tagItems = availableTagsContainer?.querySelectorAll('.tag-item');
+                    if (tagItems && tagItems.length > 0) {
+                        // Tags are rendered, safe to clear flag
+                        this._fetchingAvailableTags = false;
+                        console.log(`✅ Tags rendered (${tagItems.length} items) - clearing loading flag`);
+                    } else {
+                        // No tags yet, but clear flag anyway to prevent permanent blocking
+                        console.warn('⚠️ No tags found after fetch, clearing loading flag anyway');
+                        this._fetchingAvailableTags = false;
+                    }
+                }, 500); // Give tags time to render
             }
         }
     },
