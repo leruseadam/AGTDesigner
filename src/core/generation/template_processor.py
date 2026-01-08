@@ -3433,13 +3433,25 @@ class TemplateProcessor:
                           record.get('Joint Ratio') or
                           record.get('Ratio') or
                           '')
-            if joint_ratio:
+            
+            # CRITICAL FIX: If JointRatio is missing from record, try to get it from cache
+            if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                product_name = record.get('ProductName') or record.get('Product Name*', '')
+                if product_name and joint_ratio_cache:
+                    cached_joint_ratio = joint_ratio_cache.get(product_name)
+                    if cached_joint_ratio and cached_joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                        joint_ratio = cached_joint_ratio
+                        self.logger.debug(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for Ratio_or_THC_CBD for '{product_name}'")
+            
+            if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                # Format JointRatio using the same formatting function as WeightUnits
+                formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
                 # Wrap JointRatio with markers for proper template processing
-                label_context['Ratio_or_THC_CBD'] = wrap_with_marker(joint_ratio, 'THC_CBD')
-                label_context['THC_CBD'] = wrap_with_marker(joint_ratio, 'THC_CBD')
-                self.logger.debug(f"FINAL: Set JointRatio for {product_type}: '{joint_ratio}'")
+                label_context['Ratio_or_THC_CBD'] = wrap_with_marker(formatted_joint_ratio, 'THC_CBD')
+                label_context['THC_CBD'] = wrap_with_marker(formatted_joint_ratio, 'THC_CBD')
+                self.logger.debug(f"FINAL: Set JointRatio for {product_type} Ratio_or_THC_CBD: '{formatted_joint_ratio}'")
             else:
-                self.logger.debug(f"FINAL: No JointRatio found for {product_type}")
+                self.logger.debug(f"FINAL: No JointRatio found for {product_type} Ratio_or_THC_CBD")
 
         # DO NOT unwrap markers here - they are needed for font sizing in the rendered document
         # Markers will be removed AFTER font sizing is applied in the cleanup phase
