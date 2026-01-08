@@ -9592,6 +9592,19 @@ def get_available_tags():
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        
+        # ULTRA-FAST PATH: If fast_load and we have cache, return immediately
+        if fast_load and not nocache and not prefer_db:
+            cache_key = get_session_cache_key('available_tags')
+            cached_tags = cache.get(cache_key)
+            if cached_tags:
+                safe_cached_tags = make_json_safe(cached_tags)
+                return jsonify({
+                    'tags': safe_cached_tags,
+                    'total_count': len(safe_cached_tags),
+                    'source': 'ultra-fast-cache'
+                })
+        
         # Check memory before processing - but don't block if we have cached data
         memory_ok = check_memory_limit()
         if not memory_ok:

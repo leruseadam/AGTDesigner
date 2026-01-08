@@ -10168,16 +10168,21 @@ const TagManager = {
                     const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
                     const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
                     const forceDbLineage = this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate;
-                    const useCache = retryCount === 0 && !forceDbLineage && !forceReload; // Don't use cache after upload or force reload
+                    // PERFORMANCE: Always use cache for first load (retryCount === 0), skip nocache parameter
+                    const useCache = retryCount === 0 && !forceDbLineage && !forceReload;
                     const cacheParam = useCache ? '' : '&nocache=1';
                     // Always use prefer_db in database mode or after recent lineage updates to ensure correct lineage
                     const preferDbParam = forceDbLineage ? '&prefer_db=1' : '';
                     
-                    const fetchUrl = `/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
-                    console.log(`🌐 Fetching tags from: ${fetchUrl}`);
+                    // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
+                    const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
+                        `/api/available-tags?t=${timestamp}${fastLoadParam}${preferDbParam}` :
+                        `/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
+                    
+                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl}`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
                     
-                    response = await fetch(fetchUrl, {
+                    response = await fetch(optimizedFetchUrl, {
                         signal: controller.signal
                     });
                     clearTimeout(timeoutId);
