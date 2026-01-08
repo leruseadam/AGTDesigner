@@ -1326,11 +1326,16 @@ const TagManager = {
 
             // OPTIMIZATION: Store only essential fields to reduce cache size
             // This reduces cache from ~14MB to ~2-3MB for 5000 tags
+            // CRITICAL FIX: Preserve vendor data in cache to prevent "Unknown Vendor" cycling
             const optimizedTags = tags.map(tag => {
                 // Keep only essential fields needed for display and filtering
+                // CRITICAL: Preserve vendor in multiple formats to ensure it's found during extraction
+                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
                 return {
                     'Product Name*': tag['Product Name*'],
-                    'Vendor*': tag['Vendor*'],
+                    'Vendor*': tag['Vendor*'] || vendor, // Preserve vendor
+                    'Vendor': tag['Vendor'] || vendor, // Also store as 'Vendor' for extraction
+                    vendor: vendor, // Also store as lowercase for extraction
                     'Brand*': tag['Brand*'],
                     'Product Type*': tag['Product Type*'],
                     'Weight*': tag['Weight*'],
@@ -4816,6 +4821,23 @@ const TagManager = {
     _updateAvailableTags(originalTags, filteredTags = null) {
         console.log('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
         console.log('📍 Call stack:', new Error().stack);
+        
+        // CRITICAL FIX: Ensure vendor data is preserved before organizing
+        // This prevents "Unknown Vendor" from appearing when tags are organized
+        const tagsToProcess = filteredTags || originalTags;
+        if (tagsToProcess && tagsToProcess.length > 0) {
+            tagsToProcess.forEach(tag => {
+                // If vendor exists in any format, preserve it in all formats for extraction
+                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
+                    // Preserve vendor in all possible field names for extraction
+                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
+                    if (!tag['Vendor']) tag['Vendor'] = vendor;
+                    if (!tag.vendor) tag.vendor = vendor;
+                }
+            });
+        }
+        
         // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
         // Tags need to appear immediately after upload, not on next frame
         this._performUpdateAvailableTags(originalTags, filteredTags);
