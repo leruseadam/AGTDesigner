@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Cache version: increment this when lineage enrichment logic changes to invalidate old cache
-TAGS_CACHE_VERSION = "v2.1"  # Updated when lineage field extraction changes
+TAGS_CACHE_VERSION = "v2.2"  # Updated when lineage priority order changes (sovereign_lineage first)
 
 # Cache resolved default file paths to avoid repeated filesystem scans
 DEFAULT_FILE_CACHE: Dict[str, str] = {}
