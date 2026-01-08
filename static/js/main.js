@@ -10076,9 +10076,13 @@ const TagManager = {
         // Track background-processing retries (reset on success)
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
+        // CRITICAL FIX: Only show loading if store is confirmed
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        
         // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
-        // Show splash immediately so user knows something is happening
-        if (!hasExistingTags && !hasCache) {
+        // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
+        if (storeConfirmed && !hasExistingTags && !hasCache) {
             // Initial load - show full loading UI
             this.showActionSplash('Loading tags...');
             if (availableTagsContainer) {
@@ -10091,6 +10095,9 @@ const TagManager = {
                     </div>
                 `;
             }
+        } else if (!storeConfirmed) {
+            // Store not confirmed - don't show loading, let store modal show
+            verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
         } else if (hasExistingTags) {
             // Reload/refresh - show splash to indicate loading is happening
             this.showActionSplash('Refreshing tags...');
