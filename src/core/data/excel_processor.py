@@ -4208,6 +4208,7 @@ class ExcelProcessor:
                                             'Weight*': product.get('Weight*', ''),
                                             'Quantity*': product.get('Quantity*', '1'),
                                             'Units': product.get('Units', 'g'),
+                                            'JointRatio': product.get('JointRatio', '') or product.get('Joint Ratio', ''),  # Include JointRatio
                                             'THC test result': product.get('THC test result', ''),
                                             'CBD test result': product.get('CBD test result', ''),
                                             'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),
@@ -4287,6 +4288,13 @@ class ExcelProcessor:
                                                         record['Product Type*'] = excel_type
                                                         logger.debug(f"CRITICAL FIX: Updated product type from Excel: {excel_type}")
                                                 
+                                                # CRITICAL: Include JointRatio from Excel if available
+                                                if excel_match.get('JointRatio') or excel_match.get('Joint Ratio'):
+                                                    excel_joint_ratio = excel_match.get('JointRatio') or excel_match.get('Joint Ratio', '')
+                                                    if excel_joint_ratio:
+                                                        record['JointRatio'] = excel_joint_ratio
+                                                        logger.debug(f"CRITICAL FIX: Updated JointRatio from Excel: {excel_joint_ratio}")
+                                                
                                                 # Update other Excel fields if available
                                                 for col in self.df.columns:
                                                     if col not in record and excel_match.get(col):
@@ -4348,6 +4356,7 @@ class ExcelProcessor:
                                             'Weight*': product.get('Weight*', ''),
                                             'Quantity*': product.get('Quantity*', '1'),
                                             'Units': product.get('Units', 'g'),
+                                            'JointRatio': product.get('JointRatio', '') or product.get('Joint Ratio', ''),  # Include JointRatio
                                             'THC test result': product.get('THC test result', ''),
                                             'CBD test result': product.get('CBD test result', ''),
                                             'Test result unit (% or mg)': product.get('Test result unit (% or mg)', '%'),

@@ -7167,37 +7167,29 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
-        # PERFORMANCE FIX: Normalize product names and use normalized_name index for faster lookups
-        # This is much faster than LOWER("Product Name*") which requires a function call on every row
-        normalized_names = [product_db._normalize_product_name(name) for name in product_names]
-        
+        # CRITICAL FIX: Use EXACT same query as docx generation for consistency
+        # Match by "Product Name*" exactly like docx generation (tag_generator.py line 909)
         chunk_size = 400
-        for start in range(0, len(normalized_names), chunk_size):
-            chunk = normalized_names[start:start + chunk_size]
+        for start in range(0, len(product_names), chunk_size):
+            chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
-        # PERFORMANCE: Use normalized_name index instead of LOWER() function
-        # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
-        # Also handle case where normalized_product_strain is NULL - fall back to name-based join
+        # EXACT same query as docx generation - same WHERE clause, same JOIN, same COALESCE
             cursor.execute(f'''
-                SELECT
-                    p."Product Name*" AS product_name,
-                    p.normalized_name AS normalized_name,
-                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                SELECT p."Product Name*", 
+                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
                 FROM products p
-                LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                WHERE p.normalized_name IN ({placeholders})
+                LEFT JOIN strains s ON p.strain_id = s.id
+                WHERE p."Product Name*" IN ({placeholders})
+                ORDER BY p.id DESC
             ''', chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
-                db_norm = row[1]
-                db_lineage = row[2]
+                db_lineage = row[1]
                 if db_name and db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                     lineage_clean = str(db_lineage).strip().upper()
-                    # Map by normalized and original name for O(1) lookup
-                    if db_norm:
-                        lineage_map[str(db_norm).strip().lower()] = lineage_clean
+                    # Map by original name (exact match like docx generation)
+                    lineage_map[db_name] = lineage_clean
+                    # Also map by normalized name for lookup
                     normalized = product_db._normalize_product_name(db_name)
                     lineage_map[normalized] = lineage_clean
                     lineage_map[db_name.lower().strip()] = lineage_clean
@@ -7213,9 +7205,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
             name = tag.get('Product Name*')
             if not name:
                 continue
-            # Try normalized name first (faster), then fallback to lowercase
-            normalized = product_db._normalize_product_name(name)
-            db_lineage = lineage_map.get(normalized) or lineage_map.get(str(name).lower().strip())
+            # Try exact match first (like docx generation), then normalized, then lowercase
+            db_lineage = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
             if not db_lineage:
                 continue
             if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
@@ -7235,83 +7226,35 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned=True, force_ov
         return tags
 
 def _calculate_joint_ratio_for_record(db_record):
-    """Calculate joint ratio for pre-roll products from database record."""
-    import re  # Ensure re module is available
-    
-    product_name = db_record.get('Product Name*', '')
+    """Get joint ratio for pre-roll products from database record. If missing, use weight directly."""
     product_type = db_record.get('Product Type*', '')
-    weight = _normalize_weight_string(db_record.get('Weight*', ''))
     
-    # Only calculate for pre-roll products
+    # Only process for pre-roll products
     if not product_type or 'pre-roll' not in str(product_type).lower():
         return db_record.get('JointRatio', '')
     
-    if not product_name:
-        return db_record.get('JointRatio', '')
+    # First, check if JointRatio already exists - use it if present
+    joint_ratio = db_record.get('JointRatio', '') or db_record.get('Joint Ratio', '')
+    if joint_ratio and str(joint_ratio).strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+        return str(joint_ratio).strip()
     
-    product_name_str = str(product_name)
+    # If JointRatio is missing, just use weight directly (no calculation)
+    weight = db_record.get('Weight*', '')
+    units = db_record.get('Units', '')
     
-    # Look for patterns like "0.5g x 2 Pack", "1g x 28 Pack", etc.
-    patterns = [
-        r'(\d+(?:\.\d+)?)g\s*x\s*(\d+)\s*pack',  # "0.5g x 2 Pack"
-        r'(\d+(?:\.\d+)?)g\s*x\s*(\d+)',         # "0.5g x 2"
-        r'(\d+(?:\.\d+)?)g\s*×\s*(\d+)',         # "0.5g × 2" (different x character)
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, product_name_str, re.IGNORECASE)
-        if match:
-            amount = match.group(1)
-            count = match.group(2)
-            try:
-                count_int = int(count)
-                if count_int == 1:
-                    return _normalize_weight_string(f"{amount}g")
-                else:
-                    return _normalize_weight_string(f"{amount}g x {count} Pack")
-            except ValueError:
-                continue
-    
-    # Look for single pre-roll patterns like "Product Name - 1g", "Product Name - 0.5g"
-    single_pre_roll_pattern = r'-\s*(\d+(?:\.\d+)?)g\s*$'
-    match = re.search(single_pre_roll_pattern, product_name_str, re.IGNORECASE)
-    if match:
-        amount = match.group(1)
-        return _normalize_weight_string(f"{amount}g")
-    
-    # If no pattern found, try to generate from weight (e.g., "5g" -> "1g x 5 Pack")
-    if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
+    if weight and units and str(units) != 'None' and str(units) != '':
         try:
-            # Extract numeric value from weight string (handle "5g", "5 g", etc.)
-            weight_str = str(weight).strip().lower()
-            weight_match = re.search(r'(\d+(?:\.\d+)?)', weight_str)
-            if weight_match:
-                weight_float = float(weight_match.group(1))
-                
-                # Convert to joint ratio format: "5g" -> "1g x 5 Pack"
-                if weight_float >= 1.0:
-                    # For weights >= 1g, assume 1g per joint
-                    count = int(weight_float) if weight_float.is_integer() else weight_float
-                    if count == 1:
-                        return "1g"
-                    else:
-                        return f"1g x {int(count)} Pack"
-                else:
-                    # For weights < 1g (e.g., 0.5g), assume that weight per joint
-                    # Try to figure out pack count from total weight
-                    # Common: 0.5g x 2 Pack = 1g total, 0.5g x 4 Pack = 2g total
-                    if weight_float == 0.5:
-                        # 0.5g could be 0.5g x 2 Pack (1g total) or just 0.5g single
-                        # Default to 0.5g x 2 Pack
-                        return "0.5g x 2 Pack"
-                    else:
-                        # For other fractional weights, return as-is
-                        formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
-                        return formatted_weight
+            weight_float = float(weight)
+            if weight_float == int(weight_float):
+                return f'{int(weight_float)}{units}'
+            else:
+                return f'{weight}{units}'
         except (ValueError, TypeError):
-            pass
+            return f'{weight}{units}' if weight else ''
+    elif weight:
+        return str(weight)
     
-    return db_record.get('JointRatio', '')
+    return ''
 
 def _replace_json_tags_with_database_data(selected_tags, product_db):
     """
@@ -13243,33 +13186,30 @@ def get_web_available_tags():
                             cursor = conn.cursor()
                             
                             # Use EXACT same query as docx generation (tag_generator.py line 909)
-                            normalized_names = [product_db._normalize_product_name(name) for name in product_names]
+                            # Match by "Product Name*" exactly like docx generation does
                             chunk_size = 400
-                            for start in range(0, len(normalized_names), chunk_size):
-                                chunk = normalized_names[start:start + chunk_size]
+                            for start in range(0, len(product_names), chunk_size):
+                                chunk = product_names[start:start + chunk_size]
                                 placeholders = ','.join(['?' for _ in chunk])
                                 
-                                # EXACT same COALESCE priority as docx generation
+                                # EXACT same query as docx generation - same WHERE clause, same JOIN
                                 cursor.execute(f'''
-                                    SELECT
-                                        p."Product Name*" AS product_name,
-                                        p.normalized_name AS normalized_name,
-                                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") AS lineage
+                                    SELECT p."Product Name*", 
+                                           COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
                                     FROM products p
-                                    LEFT JOIN strains s ON p.strain_id = s.id OR p.normalized_product_strain = s.normalized_name
-                                    WHERE p.normalized_name IN ({placeholders})
+                                    LEFT JOIN strains s ON p.strain_id = s.id
+                                    WHERE p."Product Name*" IN ({placeholders})
                                     ORDER BY p.id DESC
                                 ''', chunk)
                                 
                                 for row in cursor.fetchall():
                                     db_name = row[0]
-                                    db_norm = row[1]
-                                    db_lineage = row[2]
+                                    db_lineage = row[1]
                                     if db_name and db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
                                         lineage_clean = str(db_lineage).strip().upper()
-                                        # Map by normalized and original name for O(1) lookup
-                                        if db_norm:
-                                            lineage_map[str(db_norm).strip().lower()] = lineage_clean
+                                        # Map by original name (exact match like docx generation)
+                                        lineage_map[db_name] = lineage_clean
+                                        # Also map by normalized name for lookup
                                         normalized = product_db._normalize_product_name(db_name)
                                         lineage_map[normalized] = lineage_clean
                                         lineage_map[db_name.lower().strip()] = lineage_clean
@@ -13280,8 +13220,8 @@ def get_web_available_tags():
                                 if not name:
                                     continue
                                 
-                                normalized = product_db._normalize_product_name(name)
-                                db_lineage = lineage_map.get(normalized) or lineage_map.get(str(name).lower().strip())
+                                # Try exact match first (like docx generation), then normalized
+                                db_lineage = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
                                 
                                 if db_lineage:
                                     # Product exists in database - use database lineage (same as docx generation)
@@ -13303,7 +13243,15 @@ def get_web_available_tags():
                                         # Don't set canonical_lineage/currentLineage for Excel-only lineage
                                         # This marks it as Excel lineage, not database lineage
                             
-                            logging.info(f"✅ WEB: Applied database lineage to {len([t for t in excel_tags if t.get('canonical_lineage')])} tags, Excel fallback for {len([t for t in excel_tags if not t.get('canonical_lineage')])} new products")
+                            matched_count = len([t for t in excel_tags if t.get('canonical_lineage')])
+                            excel_fallback_count = len([t for t in excel_tags if not t.get('canonical_lineage')])
+                            logging.info(f"✅ WEB: Applied database lineage to {matched_count} tags, Excel fallback for {excel_fallback_count} new products")
+                            if matched_count == 0 and len(product_names) > 0:
+                                logging.warning(f"⚠️ WEB: No products matched in database! Query returned {len(lineage_map)} results for {len(product_names)} product names")
+                                # Log sample product names for debugging
+                                if len(product_names) > 0:
+                                    logging.warning(f"⚠️ WEB: Sample product names: {product_names[:3]}")
+                                    logging.warning(f"⚠️ WEB: Sample lineage_map keys: {list(lineage_map.keys())[:3] if lineage_map else 'empty'}")
                 except Exception as align_err:
                     logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
             
