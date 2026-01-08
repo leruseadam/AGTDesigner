@@ -3593,18 +3593,21 @@ const TagManager = {
                 }
             }
 
-            // CRITICAL FIX: If vendor is still empty after extraction attempts, set to Unknown Vendor
-            // Note: Vendor extraction from product name already happened above, so this is a fallback
+            // CRITICAL FIX: Only set to Unknown Vendor if vendor is truly missing
+            // Don't overwrite valid vendor data that was already in the tag
             if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
-                // SUPPRESSED: Don't log missing vendor warnings - Excel file may not have vendor columns
-                // This is expected behavior when vendor data isn't in the Excel file
-                vendor = 'Unknown Vendor';
-            } else {
-                vendor = vendor.trim();
-                // CRITICAL FIX: Don't normalize vendor to empty string - preserve original value
-                if (vendor === '') {
+                // Check one more time if vendor exists in tag (might have been set during organization)
+                const finalVendorCheck = tag.vendor || tag.Vendor || tag['Vendor'] || tag['Vendor*'] || 
+                                        tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                if (finalVendorCheck && finalVendorCheck.trim() !== '' && finalVendorCheck.trim().toLowerCase() !== 'unknown') {
+                    vendor = finalVendorCheck.trim();
+                } else {
+                    // SUPPRESSED: Don't log missing vendor warnings - Excel file may not have vendor columns
+                    // This is expected behavior when vendor data isn't in the Excel file
                     vendor = 'Unknown Vendor';
                 }
+            } else {
+                vendor = vendor.trim();
             }
 
             // Determine subcategory for vape products
