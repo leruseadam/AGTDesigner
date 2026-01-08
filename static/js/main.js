@@ -4860,12 +4860,35 @@ const TagManager = {
             return;
         }
         
+        // CRITICAL FIX: Prevent unnecessary re-renders if tags haven't changed
+        // This prevents cycling/reloading when tags are the same
+        const tagsToProcess = filteredTags || originalTags;
+        const currentTagCount = this.state.tags ? this.state.tags.length : 0;
+        const newTagCount = tagsToProcess ? tagsToProcess.length : 0;
+        
+        // If tag counts match and we already have tags displayed, check if tags actually changed
+        if (currentTagCount > 0 && newTagCount === currentTagCount && this.state.tags) {
+            // Quick check: compare first few tags to see if data changed
+            const tagsChanged = this.state.tags.some((existingTag, index) => {
+                const newTag = tagsToProcess[index];
+                if (!newTag) return true;
+                const existingName = existingTag['Product Name*'] || existingTag.ProductName || '';
+                const newName = newTag['Product Name*'] || newTag.ProductName || '';
+                return existingName !== newName;
+            });
+            
+            // If tags haven't changed, skip re-render to prevent cycling
+            if (!tagsChanged) {
+                verboseLog('⏭️ Skipping _updateAvailableTags - tags unchanged (preventing reload cycle)');
+                return;
+            }
+        }
+        
         console.log('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
         console.log('📍 Call stack:', new Error().stack);
         
         // CRITICAL FIX: Ensure vendor data is preserved before organizing
         // This prevents "Unknown Vendor" from appearing when tags are organized
-        const tagsToProcess = filteredTags || originalTags;
         if (tagsToProcess && tagsToProcess.length > 0) {
             tagsToProcess.forEach(tag => {
                 // If vendor exists in any format, preserve it in all formats for extraction
@@ -10638,6 +10661,35 @@ const TagManager = {
             
             if (lineageWasAligned) {
                 console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
+            }
+            
+            // CRITICAL FIX: Preserve vendor data from existing tags when fresh tags arrive
+            // This prevents "Unknown Vendor" from appearing when tags are refreshed
+            if (this.state.tags && this.state.tags.length > 0) {
+                // Create a map of existing tags by product name for vendor lookup
+                const existingTagsMap = new Map();
+                this.state.tags.forEach(existingTag => {
+                    const productName = existingTag['Product Name*'] || existingTag.ProductName || '';
+                    if (productName) {
+                        const vendor = existingTag['Vendor*'] || existingTag['Vendor'] || existingTag.vendor || 
+                                     existingTag['Vendor/Supplier*'] || existingTag['Product Vendor'] || '';
+                        if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
+                            existingTagsMap.set(productName, vendor);
+                        }
+                    }
+                });
+                
+                // Preserve vendor data in fresh tags from existing tags
+                tags.forEach(tag => {
+                    const productName = tag['Product Name*'] || tag.ProductName || '';
+                    if (productName && existingTagsMap.has(productName)) {
+                        const existingVendor = existingTagsMap.get(productName);
+                        // Preserve vendor in all possible field names
+                        if (!tag['Vendor*']) tag['Vendor*'] = existingVendor;
+                        if (!tag['Vendor']) tag['Vendor'] = existingVendor;
+                        if (!tag.vendor) tag.vendor = existingVendor;
+                    }
+                });
             }
             
             // PERFORMANCE FIX: Only update UI if we didn't already show cached tags
