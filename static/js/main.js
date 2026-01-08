@@ -1445,6 +1445,17 @@ const TagManager = {
             const cachedTags = this.loadAvailableTagsFromCache();
             if (cachedTags && cachedTags.length) {
                 console.log(`✅ Found ${cachedTags.length} cached tags from database`);
+                // CRITICAL FIX: Preserve vendor data when loading from cache
+                // This ensures vendor is available when tags are organized
+                cachedTags.forEach(tag => {
+                    const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                    if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
+                        // Preserve vendor in all possible field names for extraction
+                        if (!tag['Vendor*']) tag['Vendor*'] = vendor;
+                        if (!tag['Vendor']) tag['Vendor'] = vendor;
+                        if (!tag.vendor) tag.vendor = vendor;
+                    }
+                });
                 // Use the same rendering logic as below
                 verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
                 this.state.hydratedFromCache = true;
@@ -1511,6 +1522,17 @@ const TagManager = {
         // This path is only for Excel mode (has Excel file) and no recent lineage updates
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length) {
+            // CRITICAL FIX: Preserve vendor data when loading from cache
+            // This ensures vendor is available when tags are organized
+            cachedTags.forEach(tag => {
+                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
+                    // Preserve vendor in all possible field names for extraction
+                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
+                    if (!tag['Vendor']) tag['Vendor'] = vendor;
+                    if (!tag.vendor) tag.vendor = vendor;
+                }
+            });
             verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
@@ -3472,50 +3494,42 @@ const TagManager = {
         const vendorCounts = new Map();
         
         uniqueTags.forEach(tag => {
-            // CRITICAL FIX: Preserve vendor from cache - check if vendor was already extracted and stored
-            // Tags from cache should already have vendor data, so use it first
+            // CRITICAL FIX: Preserve vendor from cache - check ALL possible vendor field names
+            // Tags from cache should already have vendor data in multiple formats (Vendor*, Vendor, vendor)
+            // Check in order of preference: lowercase vendor first (most common in cache), then capitalized, then other formats
             let vendor = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
                         tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
                         tag['Product Vendor'] || tag['ProductVendor'] || '';
             
-            // CRITICAL FIX: If vendor is already set and valid, use it immediately
-            // This prevents re-extraction that causes "Unknown Vendor" to appear
-            if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown' && vendor.trim() !== 'unknown vendor') {
-                vendor = vendor.trim();
-            } else {
-                // Only try extraction if vendor is truly missing
-                // Check all possible vendor field names (case-insensitive)
-                vendor = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
-                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
-                        tag['Product Vendor'] || tag['ProductVendor'] || '';
-                
-                // DEBUG: Log first few tags to see what fields are available (only if vendor still missing)
-                if (!this._vendorDebugLogged && (!vendor || vendor.trim() === '')) {
-                    const sampleTag = tags && tags.length > 0 ? tags[0] : tag;
-                    const allVendorKeys = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier'));
-                    console.log('🔍 DEBUG: Sample tag fields for vendor extraction:', {
-                        hasVendor: !!sampleTag.vendor,
-                        hasVendorCapital: !!sampleTag.Vendor,
-                        hasVendorSupplier: !!sampleTag['Vendor/Supplier*'],
-                        allVendorKeys: allVendorKeys,
-                        vendorValues: allVendorKeys.reduce((acc, key) => {
-                            acc[key] = sampleTag[key];
-                            return acc;
-                        }, {}),
-                        allKeys: Object.keys(sampleTag).slice(0, 20), // First 20 keys
-                        sampleTag: sampleTag
-                    });
-                    
-                    this._vendorDebugLogged = true;
-                }
-                
-                // CRITICAL: Vendor MUST come from Excel column ONLY - product name contains BRAND, not vendor
-                // Do NOT extract vendor from product name - that would be extracting brand instead
-                if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
+            // CRITICAL FIX: Normalize vendor value - handle empty strings, null, undefined, and "unknown" variants
+            if (vendor) {
+                vendor = String(vendor).trim();
+                // Check if vendor is actually empty or "unknown" after trimming
+                if (vendor === '' || vendor.toLowerCase() === 'unknown' || vendor.toLowerCase() === 'unknown vendor') {
                     vendor = '';
-                } else {
-                    vendor = vendor.trim();
                 }
+            } else {
+                vendor = '';
+            }
+            
+            // DEBUG: Log first few tags to see what fields are available (only if vendor still missing)
+            if (!this._vendorDebugLogged && (!vendor || vendor.trim() === '')) {
+                const sampleTag = tags && tags.length > 0 ? tags[0] : tag;
+                const allVendorKeys = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier'));
+                console.log('🔍 DEBUG: Sample tag fields for vendor extraction:', {
+                    hasVendor: !!sampleTag.vendor,
+                    hasVendorCapital: !!sampleTag.Vendor,
+                    hasVendorSupplier: !!sampleTag['Vendor/Supplier*'],
+                    allVendorKeys: allVendorKeys,
+                    vendorValues: allVendorKeys.reduce((acc, key) => {
+                        acc[key] = sampleTag[key];
+                        return acc;
+                    }, {}),
+                    allKeys: Object.keys(sampleTag).slice(0, 20), // First 20 keys
+                    sampleTag: sampleTag
+                });
+                
+                this._vendorDebugLogged = true;
             }
             let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
             const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
@@ -3598,21 +3612,30 @@ const TagManager = {
                 }
             }
 
-            // CRITICAL FIX: Only set to Unknown Vendor if vendor is truly missing
+            // CRITICAL FIX: Only set to Unknown Vendor if vendor is truly missing after all checks
             // Don't overwrite valid vendor data that was already in the tag
-            if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
-                // Check one more time if vendor exists in tag (might have been set during organization)
-                const finalVendorCheck = tag.vendor || tag.Vendor || tag['Vendor'] || tag['Vendor*'] || 
-                                        tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
-                if (finalVendorCheck && finalVendorCheck.trim() !== '' && finalVendorCheck.trim().toLowerCase() !== 'unknown') {
-                    vendor = finalVendorCheck.trim();
+            // This prevents "Unknown Vendor" from appearing when vendor data exists but wasn't found initially
+            if (!vendor || vendor.trim() === '') {
+                // Final check: look for vendor in tag one more time (might have been set during _updateAvailableTags)
+                // Check all possible vendor field names one final time
+                const finalVendorCheck = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
+                                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
+                                        tag['Product Vendor'] || tag['ProductVendor'] || '';
+                if (finalVendorCheck && String(finalVendorCheck).trim() !== '' && 
+                    String(finalVendorCheck).trim().toLowerCase() !== 'unknown' && 
+                    String(finalVendorCheck).trim().toLowerCase() !== 'unknown vendor') {
+                    vendor = String(finalVendorCheck).trim();
                 } else {
                     // SUPPRESSED: Don't log missing vendor warnings - Excel file may not have vendor columns
                     // This is expected behavior when vendor data isn't in the Excel file
                     vendor = 'Unknown Vendor';
                 }
             } else {
+                // Vendor was found - ensure it's trimmed and not "unknown"
                 vendor = vendor.trim();
+                if (vendor.toLowerCase() === 'unknown' || vendor.toLowerCase() === 'unknown vendor') {
+                    vendor = 'Unknown Vendor';
+                }
             }
 
             // Determine subcategory for vape products
@@ -12327,6 +12350,17 @@ const TagManager = {
         // PERFORMANCE FIX: Try cache first for instant load
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
+            // CRITICAL FIX: Preserve vendor data when loading from cache
+            // This ensures vendor is available when tags are organized
+            cachedTags.forEach(tag => {
+                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
+                    // Preserve vendor in all possible field names for extraction
+                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
+                    if (!tag['Vendor']) tag['Vendor'] = vendor;
+                    if (!tag.vendor) tag.vendor = vendor;
+                }
+            });
             console.log(`⚡ INSTANT CACHE LOAD: ${cachedTags.length} tags available`);
             // Render cached tags IMMEDIATELY for instant display
             this.state.tags = [...cachedTags];
