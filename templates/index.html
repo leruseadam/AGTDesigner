@@ -781,6 +781,7 @@
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
             if (typeof onStoreConfirmed === 'function') {
               console.log('🔄 Store confirmed, calling initialization callback...');
+              window._tagManagerInitStarted = true; // Mark that initialization has started
               setTimeout(() => {
                 try {
                   onStoreConfirmed();
@@ -791,10 +792,15 @@
             } else {
               console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
             }
-            
+
             // CRITICAL FIX: Also trigger TagManager initialization directly if callback didn't work
             // This ensures TagManager initializes even if the callback path fails
             setTimeout(() => {
+              // Skip if initialization already started via callback
+              if (window._tagManagerInitStarted) {
+                console.log('⏭️ Skipping direct init - callback path already started');
+                return;
+              }
               if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
                 console.log('🔄 Store confirmed - directly initializing TagManager...');
                 try {
