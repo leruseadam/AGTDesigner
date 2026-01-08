@@ -3469,7 +3469,23 @@ const TagManager = {
         uniqueTags.forEach(tag => {
             // Use the correct field names from the tag object - check multiple possible field names
             // CRITICAL FIX: Always extract vendor from vendor fields only, never from brand
-            let vendor = tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || '';
+            // CRITICAL FIX: Check all possible vendor field names (case-insensitive)
+            let vendor = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
+                        tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
+                        tag['Vendor/Supplier'] || tag['Product Vendor'] || tag['ProductVendor'] || '';
+            
+            // DEBUG: Log first few tags to see what fields are available
+            if (!this._vendorDebugLogged && (!vendor || vendor.trim() === '')) {
+                const sampleTag = tags && tags.length > 0 ? tags[0] : tag;
+                console.log('🔍 DEBUG: Sample tag fields for vendor extraction:', {
+                    hasVendor: !!sampleTag.vendor,
+                    hasVendorCapital: !!sampleTag.Vendor,
+                    hasVendorSupplier: !!sampleTag['Vendor/Supplier*'],
+                    allKeys: Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier')),
+                    sampleTag: sampleTag
+                });
+                this._vendorDebugLogged = true;
+            }
             // Normalize empty strings and 'Unknown' to ensure consistent handling
             if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
                 vendor = '';
@@ -5331,17 +5347,25 @@ const TagManager = {
         let sortedVendors = Array.from(organizedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
         
-        // CRITICAL FIX: Filter out "Unknown Vendor" during initial loading to prevent annoying flash
-        // This happens when tags are being organized before vendor extraction completes
+        // CRITICAL FIX: Always render tags even if they have Unknown Vendor
+        // The previous logic was hiding tags during initial load, causing empty display
+        // If tags have Unknown Vendor, it means vendor data is missing from Excel - show them anyway
         const isInitialLoading = (this._fetchingAvailableTags || this._checkingExistingData) && 
                                  (!this.state.tags || this.state.tags.length === 0);
         const hasOnlyUnknownVendor = sortedVendors.length === 1 && 
                                      sortedVendors[0][0] === 'Unknown Vendor';
         
-        if (isInitialLoading && hasOnlyUnknownVendor) {
-            // Don't render "Unknown Vendor" during initial load - wait for vendor extraction to complete
-            verboseLog('⏭️ Skipping "Unknown Vendor" render during initial load - waiting for vendor extraction');
-            // Show loading indicator instead
+        if (hasOnlyUnknownVendor && tagList && tagList.length > 0) {
+            // Tags exist but all have Unknown Vendor - this means vendor data is missing
+            // Still render them, but log a warning
+            console.warn(`⚠️ All ${tagList.length} tags have "Unknown Vendor" - vendor data may be missing from Excel file`);
+            console.warn('⚠️ Check that your Excel file has a "Vendor" or "Vendor/Supplier*" column with vendor names');
+            // Continue to render - don't skip
+        }
+        
+        // Only show loading if we truly have no tags at all
+        if (sortedVendors.length === 0 && (!tagList || tagList.length === 0)) {
+            verboseLog('⏭️ No tags found - showing loading indicator');
             availableTagsContainer.innerHTML = `
                 <div style="
                     display: flex;
