@@ -5108,6 +5108,12 @@ class TemplateProcessor:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
+                            # CRITICAL FIX: Skip paragraphs that have already been processed for combined lineage/vendor
+                            # These paragraphs have correct lineage font sizes set and should not be overridden
+                            if hasattr(paragraph, '_combined_lineage_vendor_processed'):
+                                self.logger.debug(f"Skipping already-processed lineage/vendor paragraph: '{paragraph.text[:50]}...'")
+                                continue
+                            
                             for run in paragraph.runs:
                                 run_text = run.text or ''
                                 if not run_text.strip():
@@ -5122,11 +5128,39 @@ class TemplateProcessor:
                                     except AttributeError:
                                         pass
                                 
+                                # CRITICAL FIX: Check if this run is lineage text BEFORE determining field type
+                                # This ensures lineage gets proper font sizing (18pt for <100 chars, 14pt for longer in vertical)
+                                text_upper = run_text.strip().upper()
+                                classic_lineages = ['HYBRID/SATIVA', 'HYBRID/INDICA', 'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'MIXED']
+                                is_lineage_text = False
+                                for lineage in classic_lineages:
+                                    # Check for exact match
+                                    if text_upper == lineage.upper():
+                                        is_lineage_text = True
+                                        break
+                                    # Check if text starts with or contains lineage as a word
+                                    import re
+                                    if re.search(r'\b' + re.escape(lineage.upper()) + r'\b', text_upper) or \
+                                       re.search(r'\b' + re.escape(lineage.upper().replace('/', '')) + r'\b', text_upper.replace('/', '')):
+                                        is_lineage_text = True
+                                        break
+                                
                                 # Determine field type based on text content and position
                                 field_type = self._determine_field_type_for_template(run_text, paragraph, cell)
                                 
+                                # CRITICAL FIX: Force 'lineage' field type if this is lineage text
+                                # This prevents lineage from being misclassified as 'brand', 'vendor', or 'default' which use smaller fonts
+                                if is_lineage_text:
+                                    field_type = 'lineage'
+                                    self.logger.debug(f"🎯 FORCED LINEAGE FIELD TYPE: '{run_text}' -> lineage (was: {field_type})")
+                                
                                 # Apply unified font sizing
                                 font_size = get_font_size(run_text, field_type, template_orientation, self.scale_factor)
+                                
+                                # CRITICAL FIX: Log lineage font sizes to help debug
+                                if field_type == 'lineage':
+                                    self.logger.info(f"🎯 LINEAGE FONT SIZE: '{run_text}' -> {field_type} -> {font_size.pt}pt (template: {template_orientation}, scale: {self.scale_factor})")
+                                
                                 # Apply at run and XML level to prevent Word from overriding
                                 from src.core.generation.unified_font_sizing import set_run_font_size
                                 set_run_font_size(run, font_size)
