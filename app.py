@@ -6114,18 +6114,8 @@ def set_store():
             _persist_store_selection()
         
         # CRITICAL FIX: Clear caches BEFORE clearing globals (cache key depends on _last_loaded_file)
-        # OPTIMIZATION: Use timeout to prevent hanging on cache operations
-        try:
-            # Use a simple timeout wrapper for cache operations
-            import signal
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError("Cache operation timed out")
-            
-            # Set 2 second timeout for cache operations
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(2)
-            
+        # OPTIMIZATION: Run cache clearing in background thread to prevent blocking
+        def _clear_caches_async():
             try:
                 initial_data_cache_key = get_session_cache_key('initial_data')
                 available_tags_cache_key = get_session_cache_key('available_tags')
@@ -6134,12 +6124,17 @@ def set_store():
                 cache.delete(initial_data_cache_key)
                 cache.delete(available_tags_cache_key)
                 logging.debug(f"Cleared initial_data and available_tags cache for new store: {store_value}")
-            finally:
-                signal.alarm(0)  # Cancel timeout
-        except (TimeoutError, Exception) as cache_error:
-            # If cache key generation fails or times out, skip cache clearing
-            # It's not critical - caches will expire naturally
-            logging.warning(f"Cache clearing skipped (timeout or error): {cache_error}")
+            except Exception as cache_error:
+                # If cache key generation fails, skip cache clearing
+                # It's not critical - caches will expire naturally
+                logging.warning(f"Cache clearing failed (non-critical): {cache_error}")
+        
+        # Run cache clearing in background to avoid blocking the response
+        try:
+            threading.Thread(target=_clear_caches_async, daemon=True).start()
+        except Exception:
+            # If threading fails, just skip cache clearing
+            pass
 
         # CRITICAL: Clear other session data from previous store (but keep selected_store!)
         session.pop('file_path', None)
