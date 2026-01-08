@@ -10094,6 +10094,11 @@ const TagManager = {
     },
 
     async fetchAndUpdateAvailableTags(forceReload = false) {
+        // CRITICAL: Declare isWebClient at function start to avoid "Cannot access before initialization" error
+        const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                          window.location.hostname.includes('agtpricetags.com') ||
+                          (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+        
         // CRITICAL FIX: Reset stuck flag if it's been set for too long, or if force reload
         if (this._fetchingAvailableTags && !forceReload) {
             const fetchStartTime = this._fetchingAvailableTagsStartTime || Date.now();
@@ -10135,9 +10140,6 @@ const TagManager = {
         // This provides instant display on reload while keeping data fresh
         const availableTagsContainer = document.getElementById('availableTags');
         const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
-
-        // REMOVED: isWebClient declaration moved earlier (before try block at line 10254)
-        // to avoid "Cannot access before initialization" error
 
         // Check if cache exists to determine if we should show loading or use cache
         const cachedTags = this.loadAvailableTagsFromCache();
@@ -10248,11 +10250,6 @@ const TagManager = {
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
         // Declare cacheUsedForDisplay at function scope so it's accessible throughout
         let cacheUsedForDisplay = false;
-
-        // CRITICAL: Declare isWebClient before try block so it's available everywhere
-        const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
-                          window.location.hostname.includes('agtpricetags.com') ||
-                          (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
 
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
@@ -10390,12 +10387,6 @@ const TagManager = {
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
-            
-            // CRITICAL FIX: Use web-optimized endpoint for web clients (PythonAnywhere, etc.)
-            // Detect if we're running in a web browser (not localhost)
-            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
-                              window.location.hostname.includes('agtpricetags.com') ||
-                              (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
             
             // PERFORMANCE: Web clients need faster timeouts and fewer retries
             const maxRetries = isWebClient ? 2 : 3; // Fewer retries for web
