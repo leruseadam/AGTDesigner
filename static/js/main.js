@@ -10158,6 +10158,8 @@ const TagManager = {
 
                     // CRITICAL FIX: Always use prefer_db in database-only mode to ensure correct lineage from database
                     // Also use prefer_db after recent lineage updates
+                    const currentFile = this.getCurrentFileName();
+                    const isDatabaseMode = !currentFile || currentFile === 'nofile' || currentFile === '' || currentFile === 'database';
                     const forceDbLineage = this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate;
                     const useCache = retryCount === 0 && !forceDbLineage && !forceReload; // Don't use cache after upload or force reload
                     const cacheParam = useCache ? '' : '&nocache=1';
