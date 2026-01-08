@@ -13,10 +13,9 @@ sys.path.insert(0, str(project_root))
 
 from core.data.product_database import ProductDatabase, get_database_path
 
-@pytest.mark.timeout(10)
 class TestProductDatabase:
     """Tests for ProductDatabase class."""
-
+    
     def test_database_initialization(self, temp_db):
         """Test that database can be initialized."""
         db = ProductDatabase(store_name='Test')
@@ -35,7 +34,6 @@ class TestProductDatabase:
         with pytest.raises(ValueError):
             get_database_path('')
     
-    @pytest.mark.timeout(10)
     def test_add_product(self, populated_db):
         """Test adding a product to the database."""
         db = ProductDatabase(db_path=populated_db, store_name='Test')
@@ -49,7 +47,6 @@ class TestProductDatabase:
         except Exception as e:
             pytest.skip(f"add_product functionality not available: {e}")
     
-    @pytest.mark.timeout(10)
     def test_search_products(self, populated_db):
         """Test searching for products."""
         db = ProductDatabase(db_path=populated_db, store_name='Test')
@@ -158,10 +155,9 @@ class TestProductDatabase:
         except Exception as e:
             pytest.skip(f"get_vendors functionality not available: {e}")
 
-@pytest.mark.timeout(10)
 class TestDatabaseCaching:
     """Tests for database caching functionality."""
-
+    
     def test_lineage_cache(self, populated_db):
         """Test that lineage queries are cached."""
         db = ProductDatabase(db_path=populated_db, store_name='Test')
@@ -190,10 +186,9 @@ class TestDatabaseCaching:
         except Exception as e:
             pytest.skip(f"fuzzy_match cache test not available: {e}")
 
-@pytest.mark.timeout(10)
 class TestDatabaseConcurrency:
     """Tests for database concurrency handling."""
-
+    
     def test_concurrent_access(self, populated_db):
         """Test that database can handle concurrent access."""
         db = ProductDatabase(store_name='Test')

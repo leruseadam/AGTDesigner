@@ -305,10 +305,8 @@
                     console.warn('⚠️ /api/available-tags timeout after 30 seconds, falling back...');
                 }, 30000);
                 
-                // PERFORMANCE: Use default cache mode to leverage HTTP cache headers for faster reloads
                 const quickResponse = await fetch('/api/available-tags?fast_load=1', {
-                    signal: controller.signal,
-                    cache: 'default' // Respect HTTP cache headers (5 minute cache)
+                    signal: controller.signal
                 });
                 if (timeoutId) {
                     clearTimeout(timeoutId);
@@ -441,10 +439,8 @@
                                 console.warn('⚠️ Emergency /api/available-tags timeout after 45 seconds');
                             }, 45000);
                             
-                            // Emergency fallback - use no-cache to bypass cache
                             const directResponse = await fetch('/api/available-tags?nocache=1&fast_load=1', {
-                                signal: emergencyController.signal,
-                                cache: 'no-cache' // Bypass cache for emergency fallback
+                                signal: emergencyController.signal
                             });
                             if (emergencyTimeoutId) {
                                 clearTimeout(emergencyTimeoutId);

@@ -28,9 +28,7 @@ function testAdvancedFeatures() {
     // Test if Bootstrap is available
     if (typeof bootstrap !== 'undefined') {
         console.log('✅ Bootstrap is loaded');
-        // Bootstrap 5.x doesn't expose VERSION consistently, so just confirm it's loaded
-        const version = bootstrap.Tooltip?.VERSION || bootstrap.Modal?.VERSION || '5.1.3 (estimated)';
-        console.log('Bootstrap version:', version);
+        console.log('Bootstrap version:', bootstrap.VERSION || 'Unknown');
     } else {
         console.log('❌ Bootstrap is not loaded');
     }
@@ -58,18 +56,11 @@ function testAdvancedFeatures() {
     });
 }
 
-// CRITICAL FIX: Wait for all inline scripts to load before running tests
-// The advanced feature functions are defined in inline scripts that load AFTER this deferred script
-// So we need to wait for window.load event, not just DOMContentLoaded
-if (document.readyState === 'complete') {
-    // Page already loaded, wait a bit for inline scripts to execute
-    setTimeout(testAdvancedFeatures, 100);
+// Run test when page loads
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', testAdvancedFeatures);
 } else {
-    // Wait for full page load including all inline scripts
-    window.addEventListener('load', () => {
-        // Small delay to ensure inline scripts have executed
-        setTimeout(testAdvancedFeatures, 100);
-    });
+    testAdvancedFeatures();
 }
 
 // Add click handlers to test buttons

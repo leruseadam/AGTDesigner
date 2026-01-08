@@ -1049,11 +1049,6 @@ const TagManager = {
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
-    getCurrentFileName() {
-        // Get current file name from sessionStorage
-        return (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-    },
-
     getAvailableTagsCacheKey() {
         try {
             const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
@@ -1066,12 +1061,8 @@ const TagManager = {
             const normalizedStore = String(store).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
             const normalizedFile = String(file).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-');
             
-            // CRITICAL FIX: Add platform identifier to prevent Chrome sync conflicts
-            // Chrome sync shares localStorage between Mac and Windows, causing stale cache issues
-            const platform = isWindows ? 'win' : 'mac';
-            
-            const cacheKey = `agt_available_tags_${platform}_${normalizedStore}_${normalizedFile}`;
-            verboseLog('🔑 Cache key generated:', cacheKey, '{ platform:', platform, 'store:', normalizedStore, 'file:', normalizedFile, '}');
+            const cacheKey = `agt_available_tags_${normalizedStore}_${normalizedFile}`;
+            verboseLog('🔑 Cache key generated:', cacheKey, '{ store:', normalizedStore, 'file:', normalizedFile, '}');
             return cacheKey;
         } catch (error) {
             console.warn('Failed to build available-tags cache key:', error);
@@ -1107,10 +1098,7 @@ const TagManager = {
             
             const normalizedFile = removeTimestamp(String(file).trim().replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-'));
             
-            // CRITICAL FIX: Add platform identifier to prevent Chrome sync conflicts
-            const platform = isWindows ? 'win' : 'mac';
-            
-            const normalizedKey = `agt_available_tags_${platform}_${normalizedStore}_${normalizedFile}`;
+            const normalizedKey = `agt_available_tags_${normalizedStore}_${normalizedFile}`;
             return normalizedKey;
         } catch (error) {
             console.warn('Failed to build normalized cache key:', error);
@@ -1259,31 +1247,11 @@ const TagManager = {
             if (!payload || !Array.isArray(payload.tags) || payload.tags.length === 0) {
                 return null;
             }
-            
-            // CRITICAL FIX: Validate platform matches - Chrome sync can share cache between Mac/Windows
-            // If platform doesn't match, cache is from different platform and should be invalidated
-            const currentPlatform = isWindows ? 'win' : 'mac';
-            if (payload.platform && payload.platform !== currentPlatform) {
-                console.warn(`⚠️ Cache from different platform (${payload.platform} vs ${currentPlatform}) - invalidating stale cache`);
-                // Clear this stale cache entry
-                storage.removeItem(cacheKey);
-                return null;
-            }
-            
-            // PERFORMANCE: Check cache version but don't block - use old cache for instant display
-            // Will refresh in background to get sovereign_lineage
-            const cacheVersion = payload.cacheVersion || 1;
-            if (cacheVersion < 2) {
-                console.log(`ℹ️ Old cache format detected (version ${cacheVersion}) - using for instant display, will refresh in background for sovereign_lineage`);
-                // Mark for background refresh but still return cache for instant display
-                payload._needsBackgroundRefresh = true;
-            }
-            
             const age = Date.now() - payload.timestamp;
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
                 return null;
             }
-            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded${payload._optimized ? ' (optimized cache)' : ''} (platform: ${payload.platform || 'unknown'})`);
+            verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded`);
 
             return payload.tags;
         } catch (error) {
@@ -1306,26 +1274,12 @@ const TagManager = {
             }
 
             // CRITICAL FIX: Clear old cache entries FIRST to make space
-            // Also clear cache from different platform (Chrome sync can share cache between Mac/Windows)
             const cacheKey = this.getAvailableTagsCacheKey();
-            const currentPlatform = isWindows ? 'win' : 'mac';
             const keysToRemove = [];
             for (let i = 0; i < storage.length; i++) {
                 const key = storage.key(i);
-                if (key && key.includes('agt_available_tags')) {
-                    // Remove if it's not the current cache key
-                    if (key !== cacheKey) {
-                        keysToRemove.push(key);
-                    }
-                    // Also check for cross-platform cache conflicts
-                    // If key doesn't include platform identifier, it's old format - remove it
-                    if (!key.includes(`_${currentPlatform}_`) && !key.includes(`_win_`) && !key.includes(`_mac_`)) {
-                        // Old format cache without platform - remove it
-                        if (!keysToRemove.includes(key)) {
-                            keysToRemove.push(key);
-                            console.log(`🗑️ Removing old-format cache (no platform): ${key}`);
-                        }
-                    }
+                if (key && key.includes('agt_available_tags') && key !== cacheKey) {
+                    keysToRemove.push(key);
                 }
             }
             if (keysToRemove.length > 0) {
@@ -1333,45 +1287,9 @@ const TagManager = {
                 console.log(`🗑️ Cleared ${keysToRemove.length} old cache entries to make space`);
             }
 
-            // OPTIMIZATION: Store only essential fields to reduce cache size
-            // This reduces cache from ~14MB to ~2-3MB for 5000 tags
-            // CRITICAL FIX: Preserve vendor data in cache to prevent "Unknown Vendor" cycling
-            const optimizedTags = tags.map(tag => {
-                // Keep only essential fields needed for display and filtering
-                // CRITICAL: Preserve vendor in multiple formats to ensure it's found during extraction
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || tag['ProductVendor'] || '';
-                return {
-                    'Product Name*': tag['Product Name*'],
-                    'Vendor*': tag['Vendor*'] || vendor, // Preserve vendor
-                    'Vendor': tag['Vendor'] || vendor, // Also store as 'Vendor' for extraction
-                    'Vendor/Supplier*': tag['Vendor/Supplier*'] || vendor, // Preserve Vendor/Supplier*
-                    'ProductVendor': tag['ProductVendor'] || vendor, // Preserve ProductVendor
-                    vendor: vendor, // Also store as lowercase for extraction
-                    'Brand*': tag['Brand*'],
-                    'Product Type*': tag['Product Type*'],
-                    'Weight*': tag['Weight*'],
-                    'Price*': tag['Price*'],
-                    // CRITICAL: Always preserve sovereign_lineage (highest priority - user-edited lineage)
-                    sovereign_lineage: tag.sovereign_lineage,
-                    'Lineage*': tag['Lineage*'] || tag.Lineage || tag.canonical_lineage || tag.currentLineage,
-                    canonical_lineage: tag.canonical_lineage || tag.currentLineage,
-                    currentLineage: tag.currentLineage || tag.canonical_lineage,
-                    Lineage: tag.Lineage || tag.canonical_lineage || tag.currentLineage,
-                    // Keep source for JSON matched tags
-                    Source: tag.Source,
-                    // Keep SKU if present (used for matching)
-                    SKU: tag.SKU,
-                    // Keep any other critical fields that might be needed
-                    ...(tag._db_product ? { _db_product: tag._db_product } : {})
-                };
-            });
-
             const payload = {
                 timestamp: Date.now(),
-                tags: optimizedTags,
-                _optimized: true, // Flag to indicate this is optimized cache
-                platform: currentPlatform, // Store platform to detect cross-platform cache conflicts
-                cacheVersion: 2 // Version 2: includes sovereign_lineage support
+                tags
             };
 
             const payloadStr = JSON.stringify(payload);
@@ -1398,7 +1316,7 @@ const TagManager = {
             }
 
             // Verify tags have database lineage before caching
-            const sampleTag = tags && tags.length > 0 ? tags[0] : null;
+            const sampleTag = tags[0];
             if (sampleTag) {
                 verboseLog('💾 Saving to cache - sample tag lineage:', {
                     name: sampleTag['Product Name*'],
@@ -1425,103 +1343,79 @@ const TagManager = {
 
     hydrateAvailableTagsFromCache() {
         if (this.state.hydratedFromCache) {
-            console.log('⏭️ Skipping cache hydration - already hydrated this session');
             return false;
         }
-        console.log('🔄 hydrateAvailableTagsFromCache() called - attempting to hydrate...');
 
-        // CRITICAL FIX: Always check cache first, regardless of Excel file or database mode
-        // Only skip cache if lineage was recently updated (cache might have stale lineage)
+        // CRITICAL FIX: Load from cache OR database
+        // Check if there's an Excel file OR if we should load from database
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
         
-        // CRITICAL: After lineage updates, clear cache to force fresh fetch from database
-        // This ensures updated sovereign_lineage from database is loaded
-        const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
-        const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
+        // If no Excel file but we have database, try to load from cache first, then fetch from database
+        if (shouldLoadFromDatabase) {
+            console.log('📊 No Excel file, checking cache for database tags...');
+            // Still try to load from cache (might have database tags cached)
+            const cachedTags = this.loadAvailableTagsFromCache();
+            if (cachedTags && cachedTags.length) {
+                console.log(`✅ Found ${cachedTags.length} cached tags from database`);
+                // Use the same rendering logic as below
+                verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
+                this.state.hydratedFromCache = true;
+                this.state.forceFullAvailableTagRender = true;
+                this.state.simplifiedAvailableTagsActive = false;
+                this.state.tags = [...cachedTags];
+                this.state.originalTags = [...cachedTags];
 
-        if (hasRecentLineageUpdate) {
-            const timeSinceUpdate = Date.now() - parseInt(lastLineageUpdateTime, 10);
-            console.log(`🔄 Recent lineage update detected (${Math.round(timeSinceUpdate/1000)}s ago) - clearing cache to force fresh database fetch`);
-            // Clear the cache so fresh data with updated sovereign_lineage is fetched
-            const cacheKey = this.getAvailableTagsCacheKey();
-            try {
-                const hadLocalStorage = !!localStorage.getItem(cacheKey);
-                const hadSessionStorage = !!sessionStorage.getItem(cacheKey);
-                localStorage.removeItem(cacheKey);
-                sessionStorage.removeItem(cacheKey);
-                console.log(`✅ Cleared frontend cache (localStorage: ${hadLocalStorage}, sessionStorage: ${hadSessionStorage}) - will fetch fresh lineage from database`);
-            } catch (e) {
-                console.warn('Could not clear cache:', e);
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+
+                const availableContainer = document.getElementById('availableTags');
+                if (availableContainer) {
+                    this._updateAvailableTags(cachedTags, null);
+                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+                    this.buildFilterOptionsFromTags(cachedTags);
+                    setTimeout(() => {
+                        if (typeof this.setupFilterEventListeners === 'function') {
+                            this.setupFilterEventListeners();
+                            console.log('✅ Filter event listeners attached after cache hydration');
+                        }
+                    }, 50);
+                } else {
+                    const renderCachedTags = () => {
+                        this._updateAvailableTags(cachedTags, null);
+                        verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
+                        this.buildFilterOptionsFromTags(cachedTags);
+                        setTimeout(() => {
+                            if (typeof this.setupFilterEventListeners === 'function') {
+                                this.setupFilterEventListeners();
+                                console.log('✅ Filter event listeners attached after cache hydration');
+                            }
+                        }, 50);
+                    };
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
+                    } else {
+                        renderCachedTags();
+                    }
+                }
+                return true;
+            } else {
+                // No cache - return false so init() or fetchAndUpdateAvailableTags() can fetch from database
+                console.log('📊 No cache found - will fetch from database');
+                return false;
             }
-            return false; // Skip cache, force fresh fetch
         }
 
-        // PERFORMANCE: Always check cache first (works for both Excel and database mode)
-        // This allows tags to load instantly on page refresh instead of waiting for API call
-        console.log(shouldLoadFromDatabase ? '📊 Database mode - checking cache first...' : '📊 Excel mode - checking cache first...');
+        // PATCH: Always use cache, even after recent lineage updates, but keep lineage update logic elsewhere intact.
+        // (No-op: do not skip cache after recent lineage update)
+
         const cachedTags = this.loadAvailableTagsFromCache();
-        
-        if (cachedTags && cachedTags.length > 0) {
-            // Cache found - use it for instant load (works for both Excel and database mode)
-            console.log(`✅ Found ${cachedTags.length} cached tags - using for instant load`);
-            
-            // PERFORMANCE: Check if cache needs background refresh (old format without sovereign_lineage)
-            // Still use cache for instant display - background refresh will update with sovereign_lineage
-            const needsBackgroundRefresh = cachedTags._needsBackgroundRefresh || false;
-            if (needsBackgroundRefresh) {
-                console.log('⚡ Using old cache for instant display - will refresh in background for sovereign_lineage');
-            }
-            
-            // PERFORMANCE: Optimize normalization - batch process for faster execution
-            // CRITICAL FIX: Preserve vendor data and sovereign_lineage when loading from cache
-            // This ensures vendor is available when tags are organized, and user-edited lineage is preserved
-            // Use efficient batch processing instead of forEach for better performance
-            const tagCount = cachedTags.length;
-            for (let i = 0; i < tagCount; i++) {
-                const tag = cachedTags[i];
-                // Preserve vendor data (fast check)
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
-                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
-                    // Preserve vendor in all possible field names for extraction
-                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
-                    if (!tag['Vendor']) tag['Vendor'] = vendor;
-                    if (!tag.vendor) tag.vendor = vendor;
-                }
-                
-                // CRITICAL: Preserve and prioritize sovereign_lineage (user-edited lineage - highest priority)
-                // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage
-                const sovereignRaw = tag.sovereign_lineage;
-                if (sovereignRaw) {
-                    const sovereignStr = String(sovereignRaw).trim();
-                    const sovereignUpper = sovereignStr.toUpperCase();
-                    if (sovereignStr && sovereignUpper !== 'NONE') {
-                        // Set sovereign_lineage as the primary lineage (highest priority)
-                        tag.sovereign_lineage = sovereignUpper;
-                        tag.canonical_lineage = sovereignUpper;
-                        tag.currentLineage = sovereignUpper;
-                        tag.Lineage = sovereignUpper;
-                        tag.lineage = sovereignUpper.toLowerCase();
-                        tag['Lineage*'] = sovereignUpper;
-                    }
-                }
-                
-                if (!tag.sovereign_lineage && (tag.canonical_lineage || tag.currentLineage)) {
-                    // No sovereign_lineage in cache - use canonical/current from database
-                    // Will be enriched with sovereign_lineage from database when fresh tags arrive
-                    const dbLineage = String(tag.canonical_lineage || tag.currentLineage).trim().toUpperCase();
-                    tag.canonical_lineage = dbLineage;
-                    tag.currentLineage = dbLineage;
-                    tag.Lineage = dbLineage;
-                    tag.lineage = dbLineage.toLowerCase();
-                    tag['Lineage*'] = dbLineage;
-                    // Clear any stale sovereign_lineage if it exists but is invalid
-                    if (tag.sovereign_lineage && (String(tag.sovereign_lineage).trim() === '' || String(tag.sovereign_lineage).trim().toUpperCase() === 'NONE')) {
-                        delete tag.sovereign_lineage;
-                    }
-                }
-            }
-            // Use the same rendering logic as below
+        if (cachedTags && cachedTags.length) {
             verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
             this.state.hydratedFromCache = true;
             this.state.forceFullAvailableTagRender = true;
@@ -1529,6 +1423,7 @@ const TagManager = {
             this.state.tags = [...cachedTags];
             this.state.originalTags = [...cachedTags];
 
+            // CRITICAL FIX: Hide splash IMMEDIATELY before rendering
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
@@ -1537,66 +1432,62 @@ const TagManager = {
                 AppLoadingSplash.complete();
             }
 
+            // CRITICAL FIX: Check if DOM is ready before rendering
+            // If DOM is not ready, defer rendering until DOMContentLoaded
             const availableContainer = document.getElementById('availableTags');
             if (availableContainer) {
+                // DOM is ready - render immediately
                 this._updateAvailableTags(cachedTags, null);
                 verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+
+                // Build filters INSTANTLY from cached tags
                 this.buildFilterOptionsFromTags(cachedTags);
-                this._filtersBuiltThisSession = true; // Mark filters as built
+
+                // Setup filter event listeners so filters work
                 setTimeout(() => {
                     if (typeof this.setupFilterEventListeners === 'function') {
                         this.setupFilterEventListeners();
                         console.log('✅ Filter event listeners attached after cache hydration');
                     }
-                    if (typeof this.setupSearchEventListeners === 'function') {
-                        this.setupSearchEventListeners();
-                        console.log('✅ Search event listeners attached after cache hydration');
-                    }
                 }, 50);
             } else {
+                // DOM not ready yet - defer rendering until DOM loads
+                console.log('⏳ DOM not ready, deferring render until DOMContentLoaded');
                 const renderCachedTags = () => {
                     this._updateAvailableTags(cachedTags, null);
                     verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
+
+                    // Build filters from cached tags
                     this.buildFilterOptionsFromTags(cachedTags);
-                    this._filtersBuiltThisSession = true; // Mark filters as built
+
+                    // Setup filter event listeners
                     setTimeout(() => {
                         if (typeof this.setupFilterEventListeners === 'function') {
                             this.setupFilterEventListeners();
                             console.log('✅ Filter event listeners attached after cache hydration');
                         }
-                        if (typeof this.setupSearchEventListeners === 'function') {
-                            this.setupSearchEventListeners();
-                            console.log('✅ Search event listeners attached after cache hydration');
-                        }
                     }, 50);
                 };
+
                 if (document.readyState === 'loading') {
                     document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
                 } else {
+                    // DOM is already loaded but container not found - try immediately
                     renderCachedTags();
                 }
             }
-            
-            // PERFORMANCE: Trigger background refresh if cache is old format (non-blocking)
-            // This will update cache with sovereign_lineage from database without blocking UI
-            if (needsBackgroundRefresh) {
-                console.log('🔄 Triggering background refresh to update cache with sovereign_lineage...');
-                // Don't await - let it run in background without blocking
-                // Use forceReload=true to bypass cache and get fresh data with sovereign_lineage
-                setTimeout(() => {
-                    // Background refresh - fetch fresh data to update cache with sovereign_lineage
-                    this.fetchAndUpdateAvailableTags(true).catch(err => {
-                        console.warn('Background refresh for sovereign_lineage failed (non-critical):', err);
-                    });
-                }, 500); // Small delay to let UI render first, then refresh in background
-            }
-            
+
+            // PERFORMANCE FIX: Use fast_load for background refresh (non-blocking)
+            // This makes page reloads instant while still updating in background
+            this._refreshLineageFromDatabase(cachedTags).then(() => {
+                verboseLog('✅ Background lineage check complete (fast mode)');
+            }).catch(err => {
+                console.warn('⚠️ Background lineage check failed (non-critical):', err);
+            });
+
             return true;
-        } else {
-            // No cache - return false so init() or fetchAndUpdateAvailableTags() can fetch from backend
-            console.log('📊 No cache found - will fetch from backend');
-            return false;
         }
+        return false;
     },
 
     // Helper method to refresh lineage from database
@@ -1610,7 +1501,7 @@ const TagManager = {
             verboseLog('🔄 Background refresh: forcing database lineage enrichment (fast_load=0)');
             
             const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}`, {
-                signal: AbortSignal.timeout(15000) // 15 second timeout (increased from 5s to reduce timeout errors)
+                signal: AbortSignal.timeout(5000) // 5 second timeout (reduced from 30s)
             });
             if (lineageResponse.ok) {
                 const lineageData = await lineageResponse.json();
@@ -1723,8 +1614,7 @@ const TagManager = {
                 }
             }
         } catch (error) {
-            // Silently fail - this is non-critical background operation
-            verboseLog('ℹ️ Background lineage refresh timed out (will retry on next page load)');
+            console.warn('⚠️ Failed to refresh lineage from database:', error);
             throw error;
         }
     },
@@ -1745,15 +1635,13 @@ const TagManager = {
                 if (!tagName) return;
 
                 // Find tag in state
-                const tag = (this.state.tags && Array.isArray(this.state.tags))
-                    ? this.state.tags.find(t =>
-                        (t['Product Name*'] === tagName) || (t.ProductName === tagName)
-                    )
-                    : null;
+                const tag = this.state.tags.find(t =>
+                    (t['Product Name*'] === tagName) || (t.ProductName === tagName)
+                );
 
                 if (tag) {
                     // Get updated lineage
-                    const lineage = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED')
+                    const lineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED')
                         .toString().trim().toUpperCase();
 
                     // Update data-lineage attribute (CSS will handle color change)
@@ -1794,12 +1682,12 @@ const TagManager = {
                 let tag = this._tagLookupMap?.get(name);
                 
                 // If not in Map, fallback to originalTags (only if Map wasn't built yet)
-                if (!tag && this.state.originalTags && Array.isArray(this.state.originalTags)) {
+                if (!tag && this.state.originalTags) {
                     tag = this.state.originalTags.find(t => t['Product Name*'] === name);
                 }
                 
                 // Last resort: current tags (filtered view)
-                if (!tag && this.state.tags && Array.isArray(this.state.tags)) {
+                if (!tag && this.state.tags) {
                     tag = this.state.tags.find(t => t['Product Name*'] === name);
                 }
                 
@@ -1817,7 +1705,7 @@ const TagManager = {
                 
                 // CRITICAL FIX: Ensure all lineage fields are present for color generation
                 // The backend expects canonical_lineage, currentLineage, or Lineage fields
-                const lineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
                 if (!tag.canonical_lineage) tag.canonical_lineage = lineage;
                 if (!tag.currentLineage) tag.currentLineage = lineage;
                 if (!tag.Lineage) tag.Lineage = lineage;
@@ -2100,21 +1988,14 @@ const TagManager = {
         this._isUpdatingFilters = true;
 
         // Debug log for filters
-        const filterCounts = {
+        console.log('🔧🔧🔧 updateFilters called with:', {
             vendor: filters.vendor?.length || 0,
             brand: filters.brand?.length || 0,
             productType: filters.productType?.length || 0,
             lineage: filters.lineage?.length || 0,
             weight: filters.weight?.length || 0,
             preserveExistingValues
-        };
-        console.log('🔧🔧🔧 updateFilters called with:', filterCounts);
-        try {
-            const stack = new Error().stack;
-            console.log('📍 updateFilters call stack:', stack);
-        } catch (e) {
-            console.error('Failed to get stack trace:', e);
-        }
+        });
         verboseLog('Updating filters with:', filters, 'preserveExistingValues:', preserveExistingValues);
 
         // CRITICAL FIX: Check if all filters are empty and we're trying to preserve values
@@ -2282,10 +2163,6 @@ const TagManager = {
         this._isUpdatingFilters = wasUpdatingFilters || false;
         console.log('✅ Filter update complete, _isUpdatingFilters reset to:', this._isUpdatingFilters);
 
-        // CRITICAL FIX: Filter event listeners are set up by the comprehensive
-        // setupFilterEventListeners() method at line ~14817, called from init()
-        // No need to call it here - avoid duplicates
-
         // GUARANTEED FIX: Save current filter values to localStorage
         this.saveFiltersToStorage();
     },
@@ -2338,16 +2215,8 @@ const TagManager = {
     
     buildFilterOptionsFromTags(tags) {
         try {
-            // CRITICAL FIX: Prevent duplicate simultaneous calls
-            if (this._isBuildingFilters) {
-                console.log('⏭️ Skipping buildFilterOptionsFromTags - already building');
-                return;
-            }
-            this._isBuildingFilters = true;
-
             if (!tags || tags.length === 0) {
                 console.log('❌ buildFilterOptionsFromTags: No tags provided!');
-                this._isBuildingFilters = false;
                 return;
             }
 
@@ -2448,14 +2317,9 @@ const TagManager = {
             verboseLog('⚡⚡⚡ Calling updateFilters with built options...');
             this.updateFilters(filterOptionsArrays, true);
             verboseLog('⚡⚡⚡ updateFilters completed');
-
-            // CRITICAL FIX: Reset flag after completion
-            this._isBuildingFilters = false;
-
+            
         } catch (error) {
             console.warn('Failed to build filter options from tags:', error);
-            // CRITICAL FIX: Reset flag on error too
-            this._isBuildingFilters = false;
         }
     },
     
@@ -2562,8 +2426,7 @@ const TagManager = {
             const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
                 // Check vendor filter - only apply if not empty and not "All"
                 if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
-                    // CRITICAL FIX: Check all possible vendor field names
-                    const tagVendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
+                    const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
                     if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) {
                         return false;
                     }
@@ -2686,8 +2549,7 @@ const TagManager = {
                 const tag = tagsForOptions[i];
                 
                 // Always add vendor options (show all vendors)
-                // CRITICAL FIX: Check all possible vendor field names to ensure all vendors are shown
-                const vendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
+                const vendor = (tag.Vendor || tag.vendor || '').toString().trim();
                 if (vendor) availableOptions.vendor.add(vendor);
                 
                 // Always add brand options (show all brands)
@@ -2940,14 +2802,6 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
-            
-            // If search bar is active, re-apply the search with the cleared filter results
-            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-                setTimeout(() => {
-                    this.handleSearch('availableTags', 'availableTagsSearch');
-                }, 50);
-            }
             return;
         }
         
@@ -2977,14 +2831,6 @@ const TagManager = {
             requestAnimationFrame(() => {
                 this._scrollAvailableTagsToTop();
             });
-            
-            // If search bar is active, re-apply the search with the cached filter results
-            const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-            if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-                setTimeout(() => {
-                    this.handleSearch('availableTags', 'availableTagsSearch');
-                }, 50);
-            }
             return;
         }
         
@@ -3000,7 +2846,7 @@ const TagManager = {
         }
         
         verboseLog('applyFilters - tagsToFilter length:', tagsToFilter.length);
-        verboseLog('applyFilters - first tag sample:', tagsToFilter && tagsToFilter.length > 0 ? tagsToFilter[0] : null);
+        verboseLog('applyFilters - first tag sample:', tagsToFilter[0]);
         
         const filteredTags = tagsToFilter.filter(tag => {
             // Check vendor filter - only apply if not empty and not "All"
@@ -3164,71 +3010,20 @@ const TagManager = {
         // This prevents tags from disappearing when filters are active
         const selectedTagObjects = this.getSelectedTagObjects();
         this.updateSelectedTags(selectedTagObjects);
-        
-        // CRITICAL FIX: Ensure checkbox handlers are properly attached to selected tags after filter change
-        // This fixes the issue where checkboxes in selected tags become unresponsive after filter changes
-        setTimeout(() => {
-            const selectedContainer = document.getElementById('selectedTags');
-            if (selectedContainer) {
-                const selectedCheckboxes = selectedContainer.querySelectorAll('.tag-checkbox');
-                selectedCheckboxes.forEach(checkbox => {
-                    // Ensure checkbox is enabled and has proper handlers
-                    checkbox.style.pointerEvents = 'auto';
-                    checkbox.disabled = false;
-                    checkbox.removeAttribute('data-drag-disabled');
-                    checkbox.removeAttribute('data-reordering');
-                    
-                    // CRITICAL FIX: Reattach handlers if they're missing (can happen after filter changes)
-                    // This ensures checkboxes remain functional after filter updates
-                    if (!checkbox._changeHandler && !checkbox.onchange) {
-                        const tagName = checkbox.value;
-                        const tag = this._tagLookupMap?.get(tagName) ||
-                                   (this.state.tags && Array.isArray(this.state.tags) ? this.state.tags.find(t => t['Product Name*'] === tagName) : null) ||
-                                   (this.state.originalTags && Array.isArray(this.state.originalTags) ? this.state.originalTags.find(t => t['Product Name*'] === tagName) : null);
-                        if (tag) {
-                            // Recreate the tag element to get proper handlers
-                            const tagElement = this.createTagElement(tag, true);
-                            const newCheckbox = tagElement.querySelector('.tag-checkbox');
-                            if (newCheckbox && newCheckbox._changeHandler) {
-                                // Replace the old checkbox with the new one that has handlers
-                                const tagRow = checkbox.closest('.tag-item') || checkbox.closest('.tag-row');
-                                if (tagRow) {
-                                    // Replace just the checkbox, not the entire row
-                                    checkbox.replaceWith(newCheckbox);
-                                    console.log(`✅ Reattached handler for checkbox "${tagName}" in selected tags after filter change`);
-                                }
-                            }
-                        }
-                    }
-                });
-            }
-        }, 100); // Small delay to ensure DOM is updated
-        
         this.renderActiveFilters();
         // USER PREFERENCE: Scroll to top after filter update
         requestAnimationFrame(() => {
             this._scrollAvailableTagsToTop();
         });
-        
-        // If search bar is active, re-apply the search with the new filter results
-        const availableTagsSearchInput = document.getElementById('availableTagsSearch');
-        if (availableTagsSearchInput && availableTagsSearchInput.value.trim()) {
-            setTimeout(() => {
-                this.handleSearch('availableTags', 'availableTagsSearch');
-            }, 50);
-        }
     },
 
     handleSearch(listId, searchInputId) {
-        try {
+        // PERFORMANCE FIX: Use requestAnimationFrame for smoother updates
+        return requestAnimationFrame(() => {
             const searchInput = document.getElementById(searchInputId);
-            if (!searchInput) {
-                console.warn(`⚠️ Search input not found: ${searchInputId}`);
-                return false;
-            }
+            if (!searchInput) return false;
             
             const searchTerm = searchInput.value.toLowerCase().trim();
-            verboseLog(`🔍 Search triggered for ${listId}: "${searchTerm}"`);
 
             // Choose which tags to filter
             let tags = [];
@@ -3240,9 +3035,7 @@ const TagManager = {
                 tags = filtered || this.state.originalTags || [];
             } else if (listId === 'selectedTags') {
                 tags = Array.from(this.state.selectedTags).map(name =>
-                    (this.state.originalTags && Array.isArray(this.state.originalTags))
-                        ? this.state.originalTags.find(t => t['Product Name*'] === name)
-                        : null
+                    this.state.originalTags.find(t => t['Product Name*'] === name)
                 ).filter(Boolean);
             }
 
@@ -3267,8 +3060,6 @@ const TagManager = {
                 const tagName = tag['Product Name*'] || '';
                 return tagName.toLowerCase().includes(searchTerm);
             });
-
-            verboseLog(`🔍 Found ${filteredTags.length} matching tags out of ${tags.length} total`);
 
             // Update the list with only matching tags
             if (listId === 'availableTags') {
@@ -3299,37 +3090,7 @@ const TagManager = {
 
             // Return boolean indicating whether any tags match the search
             return filteredTags.length > 0;
-        } catch (error) {
-            console.error(`❌ Error in handleSearch for ${listId}:`, error);
-            return false;
-        }
-    },
-
-    expandAllTagGroups() {
-        try {
-            const availableTagsContainer = document.getElementById('availableTags');
-            if (!availableTagsContainer) {
-                return;
-            }
-
-            // Find all collapsed content elements (vendor-content, brand-content, product-type-content, weight-content, price-content)
-            const collapsedElements = availableTagsContainer.querySelectorAll('.vendor-content.collapsed, .brand-content.collapsed, .product-type-content.collapsed, .weight-content.collapsed, .price-content.collapsed');
-            
-            // Expand all collapsed groups
-            collapsedElements.forEach(element => {
-                element.classList.remove('collapsed');
-            });
-
-            // Update all collapse icons to show expanded state (▼)
-            const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
-            collapseIcons.forEach(icon => {
-                icon.textContent = '▼';
-            });
-
-            verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
-        } catch (error) {
-            console.error('❌ Error expanding tag groups:', error);
-        }
+        });
     },
 
     handleAvailableTagsSearch(event) {
@@ -3440,12 +3201,9 @@ const TagManager = {
     },
 
     organizeBrandCategories(tags) {
-        console.log('🔧 organizeBrandCategories() called with', tags.length, 'tags');
-        console.log('📍 Call stack:', new Error().stack);
-
         const vendorGroups = new Map();
         let skippedTags = 0;
-
+        
         // CRITICAL FIX: Deduplicate by Product Name + Vendor + Price
         // This prevents true duplicates from showing in the list while keeping
         // products with different attributes (DOH, etc.) that share name/vendor
@@ -3473,42 +3231,14 @@ const TagManager = {
         const vendorCounts = new Map();
         
         uniqueTags.forEach(tag => {
-            // CRITICAL FIX: Preserve vendor from cache - check ALL possible vendor field names
-            // Tags from cache should already have vendor data in multiple formats (Vendor*, Vendor, vendor)
-            // Check in order of preference: lowercase vendor first (most common in cache), then capitalized, then other formats
-            let vendor = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
-                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
-                        tag['Product Vendor'] || tag['ProductVendor'] || '';
-            
-            // CRITICAL FIX: Normalize vendor value - handle empty strings, null, undefined, and "unknown" variants
-            if (vendor) {
-                vendor = String(vendor).trim();
-                // Check if vendor is actually empty or "unknown" after trimming
-                if (vendor === '' || vendor.toLowerCase() === 'unknown' || vendor.toLowerCase() === 'unknown vendor') {
-                    vendor = '';
-                }
-            } else {
+            // Use the correct field names from the tag object - check multiple possible field names
+            // CRITICAL FIX: Always extract vendor from vendor fields only, never from brand
+            let vendor = tag.vendor || tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || '';
+            // Normalize empty strings and 'Unknown' to ensure consistent handling
+            if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
                 vendor = '';
-            }
-            
-            // DEBUG: Log first few tags to see what fields are available (only if vendor still missing)
-            if (!this._vendorDebugLogged && (!vendor || vendor.trim() === '')) {
-                const sampleTag = tags && tags.length > 0 ? tags[0] : tag;
-                const allVendorKeys = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('vendor') || k.toLowerCase().includes('supplier'));
-                console.log('🔍 DEBUG: Sample tag fields for vendor extraction:', {
-                    hasVendor: !!sampleTag.vendor,
-                    hasVendorCapital: !!sampleTag.Vendor,
-                    hasVendorSupplier: !!sampleTag['Vendor/Supplier*'],
-                    allVendorKeys: allVendorKeys,
-                    vendorValues: allVendorKeys.reduce((acc, key) => {
-                        acc[key] = sampleTag[key];
-                        return acc;
-                    }, {}),
-                    allKeys: Object.keys(sampleTag).slice(0, 20), // First 20 keys
-                    sampleTag: sampleTag
-                });
-                
-                this._vendorDebugLogged = true;
+            } else {
+                vendor = vendor.trim();
             }
             let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
             const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
@@ -3525,7 +3255,7 @@ const TagManager = {
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : 'Unknown Type';
             // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
-            const lineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
+            const lineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
             // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
             let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
@@ -3569,17 +3299,17 @@ const TagManager = {
             }
             
             // Extract price for grouping - try multiple possible price fields
-            const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag['Product Price'] || tag.price || tag['price'] || '';
+            const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag['Product Price'] || tag.price || '';
             // Format price for grouping - use actual price values, not ranges
             let priceGroup = 'No Price';
             if (rawPrice) {
                 const priceStr = rawPrice.toString().trim();
-                if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none' && priceStr !== '0' && priceStr !== '$0') {
+                if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none') {
                     // Try to extract numeric price value
                     const priceMatch = priceStr.match(/[\d.]+/);
                     if (priceMatch) {
                         const priceNum = parseFloat(priceMatch[0]);
-                        if (!isNaN(priceNum) && priceNum > 0) {
+                        if (!isNaN(priceNum)) {
                             // Format price: omit .00 for whole numbers, show 2 decimals for non-whole numbers
                             if (priceNum % 1 === 0) {
                                 priceGroup = `$${Math.round(priceNum)}`;
@@ -3590,44 +3320,26 @@ const TagManager = {
                     }
                 }
             }
-            
-            // DEBUG: Log when price extraction fails for first few tags
-            if (priceGroup === 'No Price' && !this._priceDebugLogged) {
-                console.log('🔍 DEBUG: Price extraction failed for tag:', {
-                    productName: tag['Product Name*'] || tag.ProductName,
-                    'Price*': tag['Price*'],
-                    'Price* (Tier Name for Bulk)': tag['Price* (Tier Name for Bulk)'],
-                    'Price': tag.Price,
-                    'Product Price': tag['Product Price'],
-                    'price': tag.price,
-                    'rawPrice': rawPrice,
-                    'allKeys': Object.keys(tag).filter(k => k.toLowerCase().includes('price'))
-                });
-                this._priceDebugLogged = true;
-            }
 
-            // CRITICAL FIX: Only set to Unknown Vendor if vendor is truly missing after all checks
-            // Don't overwrite valid vendor data that was already in the tag
-            // This prevents "Unknown Vendor" from appearing when vendor data exists but wasn't found initially
-            if (!vendor || vendor.trim() === '') {
-                // Final check: look for vendor in tag one more time (might have been set during _updateAvailableTags)
-                // Check all possible vendor field names one final time
-                const finalVendorCheck = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
-                                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
-                                        tag['Product Vendor'] || tag['ProductVendor'] || '';
-                if (finalVendorCheck && String(finalVendorCheck).trim() !== '' && 
-                    String(finalVendorCheck).trim().toLowerCase() !== 'unknown' && 
-                    String(finalVendorCheck).trim().toLowerCase() !== 'unknown vendor') {
-                    vendor = String(finalVendorCheck).trim();
-                } else {
-                    // SUPPRESSED: Don't log missing vendor warnings - Excel file may not have vendor columns
-                    // This is expected behavior when vendor data isn't in the Excel file
-                    vendor = 'Unknown Vendor';
+            // CRITICAL FIX: Never extract vendor from product name - "by Vendor" in product names is actually the brand
+            // Vendor should always be in the tag data from Excel - if missing, it's a data quality issue
+            // Never use brand as vendor - this causes brands to appear in vendor list
+            if (!vendor || vendor.trim() === '' || vendor.trim().toLowerCase() === 'unknown') {
+                // Vendor should always be present in Excel data - if missing, log it but use fallback
+                // Only log first 10 missing vendors to avoid console spam
+                if (!this._missingVendorLogCount) this._missingVendorLogCount = 0;
+                if (this._missingVendorLogCount < 10) {
+                    console.warn(`⚠️ Missing vendor for product '${tag['Product Name*'] || tag.ProductName || 'Unknown'}'. Vendor should always be in Excel data.`);
+                    this._missingVendorLogCount++;
+                } else if (this._missingVendorLogCount === 10) {
+                    console.warn(`⚠️ ... (suppressing further missing vendor warnings)`);
+                    this._missingVendorLogCount++;
                 }
+                vendor = 'Unknown Vendor';
             } else {
-                // Vendor was found - ensure it's trimmed and not "unknown"
                 vendor = vendor.trim();
-                if (vendor.toLowerCase() === 'unknown' || vendor.toLowerCase() === 'unknown vendor') {
+                // CRITICAL FIX: Don't normalize vendor to empty string - preserve original value
+                if (vendor === '') {
                     vendor = 'Unknown Vendor';
                 }
             }
@@ -3647,7 +3359,8 @@ const TagManager = {
                 }
             }
 
-            // Normalize the tag data (priceGroup is used for grouping in the UI)
+            // Normalize the tag data (priceGroup is left on the object for analytics,
+            // but we no longer group or categorize by price in the UI)
             // CRITICAL: Preserve all lineage fields (database lineage fields must be preserved exactly)
             // CRITICAL FIX: Ensure lineage fields are always set for UI consistency
             // Use database lineage fields first, then fall back to Excel Lineage, then calculated lineage
@@ -3752,9 +3465,12 @@ const TagManager = {
             console.log('📊 Top 20 vendor counts:', Array.from(vendorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 20));
         }
         
-        // SUPPRESSED: Don't log vendor warnings - Excel file may not have vendor columns
-        // This is expected behavior when vendor data isn't in the Excel file
-        // Users can still use the app with "Unknown Vendor" as a fallback
+        // CRITICAL DEBUG: Check if most products are going to Unknown Vendor
+        const unknownVendorCount = vendorCounts.get('Unknown Vendor') || 0;
+        if (unknownVendorCount > uniqueTags.length * 0.5) {
+            console.warn(`⚠️ WARNING: ${unknownVendorCount} out of ${uniqueTags.length} products (${Math.round(unknownVendorCount/uniqueTags.length*100)}%) have no vendor data!`);
+            console.warn('⚠️ This suggests the Excel file is missing vendor information for most products.');
+        }
 
         return vendorGroups;
     },
@@ -3843,13 +3559,8 @@ const TagManager = {
         
         // Show loading splash IMMEDIATELY for tag population (no delay, no conditions)
         const tagsToShow = filteredTags || originalTags;
-        // CRITICAL FIX: Only show loading if store is confirmed
-        // Don't show loading splash before store selection modal
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
-        // Show splash immediately when tags are being loaded, unless user is actively searching OR store not confirmed
-        if (!this.state.isSearching && storeConfirmed) {
+        // Show splash immediately when tags are being loaded, unless user is actively searching
+        if (!this.state.isSearching) {
             this.showActionSplash('Loading tags...');
             
             // Show loading indicator in container IMMEDIATELY to prevent blank screen
@@ -3864,9 +3575,6 @@ const TagManager = {
                     </div>
                 `;
             }
-        } else if (!storeConfirmed) {
-            // Store not confirmed - don't show loading, let store modal show
-            verboseLog('Store not confirmed - skipping loading splash (store modal should show)');
         }
         
         // PERFORMANCE: Use setTimeout(0) instead of requestAnimationFrame for faster initial render
@@ -3951,8 +3659,8 @@ const TagManager = {
             }
             
             // Find the tag object for this checkbox
-            const tag = (this.state.tags && Array.isArray(this.state.tags) ? this.state.tags.find(t => t['Product Name*'] === tagName) : null) ||
-                       (this.state.originalTags && Array.isArray(this.state.originalTags) ? this.state.originalTags.find(t => t['Product Name*'] === tagName) : null);
+            const tag = this.state.tags.find(t => t['Product Name*'] === tagName) ||
+                       this.state.originalTags.find(t => t['Product Name*'] === tagName);
             
             if (!tag) {
                 // Tag not found, but still ensure checkbox is enabled
@@ -4070,7 +3778,7 @@ const TagManager = {
 
                         // Mark as recently unchecked to prevent race conditions
                         checkbox.setAttribute('data-recently-unchecked', 'true');
-                        setTimeout(() => checkbox.removeAttribute('data-recently-unchecked'), 500);
+                        setTimeout(() => checkbox.removeAttribute('data-recently-unchecked'), 3000);
                     } else {
                         console.log(`⚠️ Tag "${tagName}" not found in persistentSelectedTags (length: ${this.state.persistentSelectedTags.length})`);
                     }
@@ -4141,15 +3849,6 @@ const TagManager = {
             return;
         }
 
-        // CRITICAL FIX: Prevent restore from running too frequently
-        // This prevents checkbox states from being reverted immediately after user clicks
-        const now = Date.now();
-        if (this._lastCheckboxRestoreTime && (now - this._lastCheckboxRestoreTime) < 300) {
-            verboseLog('⏭️ Skipping checkbox restore - too soon after last restore (prevents flickering)');
-            return;
-        }
-        this._lastCheckboxRestoreTime = now;
-
         // CRITICAL FIX: Ensure _selectedTagsSet is synced before restoring checkboxes
         if (!this.state._selectedTagsSet) {
             this.state._selectedTagsSet = new Set();
@@ -4170,7 +3869,7 @@ const TagManager = {
 
         // CRITICAL FIX: Don't restore if we just generated (within last 5 seconds)
         // This prevents clearing checkboxes immediately after generation
-        // Reuse 'now' variable from above (line 3891)
+        const now = Date.now();
         const recentlyGenerated = this._lastGenerationTime && (now - this._lastGenerationTime) < 5000;
         
         // Restore checkbox states based on persistentSelectedTags
@@ -4381,9 +4080,7 @@ const TagManager = {
                         return;
                     }
                     const tagName = checkbox.value;
-                    const tag = (this.state.tags && Array.isArray(this.state.tags))
-                        ? this.state.tags.find(t => t['Product Name*'] === tagName)
-                        : null;
+                    const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
                     if (tag) {
                         checkbox.checked = isChecked;
                         if (isChecked) {
@@ -4843,72 +4540,6 @@ const TagManager = {
 
     // Internal function that actually updates the available tags
     _updateAvailableTags(originalTags, filteredTags = null) {
-        // CRITICAL FIX: Don't update tags if store is not confirmed
-        // This prevents loading states from appearing before store selection modal
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
-        if (!storeConfirmed) {
-            verboseLog('Store not confirmed - skipping _updateAvailableTags (store modal should show)');
-            return;
-        }
-        
-        // CRITICAL FIX: Prevent unnecessary re-renders if tags haven't changed AND are already displayed
-        // This prevents cycling/reloading when tags are the same, but only if DOM already shows them
-        const tagsToProcess = filteredTags || originalTags;
-        const availableTagsContainer = document.getElementById('availableTags');
-        const hasTagsInDOM = availableTagsContainer && availableTagsContainer.querySelectorAll('.tag-item, .tag-entry').length > 0;
-        
-        // Only skip if: tags are already displayed in DOM AND tags haven't changed
-        // BUT always render if container is showing loading state (needs to be cleared)
-        const isShowingLoading = availableTagsContainer && (
-            availableTagsContainer.innerHTML.includes('Loading') || 
-            availableTagsContainer.innerHTML.includes('spinner-border')
-        );
-        
-        if (hasTagsInDOM && !isShowingLoading && tagsToProcess && this.state.tags) {
-            const currentTagCount = this.state.tags.length;
-            const newTagCount = tagsToProcess.length;
-            
-            // If tag counts match, check if tags actually changed
-            if (currentTagCount > 0 && newTagCount === currentTagCount) {
-                // Quick check: compare first few tags to see if data changed
-                const tagsChanged = this.state.tags.some((existingTag, index) => {
-                    const newTag = tagsToProcess[index];
-                    if (!newTag) return true;
-                    const existingName = existingTag['Product Name*'] || existingTag.ProductName || '';
-                    const newName = newTag['Product Name*'] || newTag.ProductName || '';
-                    return existingName !== newName;
-                });
-                
-                // If tags haven't changed AND are already displayed AND not showing loading, skip re-render
-                if (!tagsChanged) {
-                    verboseLog('⏭️ Skipping _updateAvailableTags - tags unchanged and already displayed (preventing reload cycle)');
-                    return;
-                }
-            }
-        }
-        
-        console.log('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
-        console.log('📍 Call stack:', new Error().stack);
-        
-        // CRITICAL FIX: Ensure vendor data is preserved before organizing
-        // This prevents "Unknown Vendor" from appearing when tags are organized
-        if (tagsToProcess && tagsToProcess.length > 0) {
-            tagsToProcess.forEach(tag => {
-                // If vendor exists in any format, preserve it in all formats for extraction
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || tag['ProductVendor'] || '';
-                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
-                    // Preserve vendor in all possible field names for extraction
-                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
-                    if (!tag['Vendor']) tag['Vendor'] = vendor;
-                    if (!tag.vendor) tag.vendor = vendor;
-                    if (!tag['Vendor/Supplier*']) tag['Vendor/Supplier*'] = vendor;
-                    if (!tag['ProductVendor']) tag['ProductVendor'] = vendor;
-                }
-            });
-        }
-        
         // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
         // Tags need to appear immediately after upload, not on next frame
         this._performUpdateAvailableTags(originalTags, filteredTags);
@@ -4985,57 +4616,18 @@ const TagManager = {
         // This prevents tags from disappearing when background operations return empty results
         if (!tags || tags.length === 0) {
             const currentTagCount = availableTagsContainer.querySelectorAll('.tag-item').length;
-            // CRITICAL FIX: Check if tags exist in state FIRST before showing upload prompt
-            const hasTagsInState = this.state.tags && this.state.tags.length > 0;
-            
-            if (currentTagCount > 0 || hasTagsInState) {
-                verboseLog(`⏭️ Skipping empty tag update - ${currentTagCount} tags displayed or ${this.state.tags?.length || 0} tags in state`);
+            if (currentTagCount > 0) {
+                verboseLog(`⏭️ Skipping empty tag update - ${currentTagCount} tags already displayed`);
                 reenableScaling();
                 return;
             }
             verboseLog('No tags provided, showing empty state');
             
-            // CRITICAL FIX: Check if tags are being fetched FIRST - show loading immediately
-            // This prevents showing upload prompt when tags are already loading on page reload
-            const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData || this._uploadInProgress;
-            
-            // CRITICAL FIX: Also check if file exists in session storage (indicates file was uploaded)
+            // CRITICAL FIX: Check if no Excel file is uploaded and show proper empty state
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-            const hasFile = file && file !== 'nofile' && file !== '' && file !== 'database';
-            
-            // CRITICAL FIX: Check if file path is displayed in UI (indicates file is uploaded/loading)
-            const fileInfoText = document.getElementById('fileInfoText');
-            const hasFileInUI = fileInfoText && fileInfoText.textContent && 
-                               fileInfoText.textContent !== 'No file uploaded' && 
-                               fileInfoText.textContent.trim() !== '';
-            
-            // CRITICAL FIX: Show loading state FIRST if tags are being fetched OR file exists
-            // This ensures we never show upload prompt when tags are loading
-            if (isFetchingTags || hasFile || hasFileInUI) {
-                // Tags are loading or file exists - show loading indicator immediately
-                availableTagsContainer.innerHTML = `
-                    <div style="
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        justify-content: center;
-                        min-height: 400px;
-                        padding: 3rem 2rem;
-                    ">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading products...</h5>
-                        <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
-                    </div>
-                `;
-                reenableScaling();
-                return;
-            }
-            
-            // CRITICAL FIX: Only show upload prompt if no file exists and tags are NOT loading
+            // CRITICAL FIX: Also treat as "no file" if total tag count is 0 (not just filtered)
             const hasNoTags = !this.state.tags || this.state.tags.length === 0;
-            const noFileUploaded = !hasFile && !hasFileInUI && hasNoTags && !isFetchingTags;
+            const noFileUploaded = !file || file === 'nofile' || file === '' || file === 'database' || hasNoTags;
             
             if (noFileUploaded) {
                 // Show prominent upload prompt when Excel is needed
@@ -5099,38 +4691,14 @@ const TagManager = {
                     filterBar.style.display = 'none';
                 }
             } else {
-                // CRITICAL FIX: Check if tags are loading BEFORE showing "no match" message
-                // Re-check isFetchingTags here in case it changed since the earlier check
-                const isStillFetching = this._fetchingAvailableTags || this._checkingExistingData || this._uploadInProgress;
-                
-                if (isStillFetching) {
-                    // Tags are still loading - show loading indicator
-                    availableTagsContainer.innerHTML = `
-                        <div style="
-                            display: flex;
-                            flex-direction: column;
-                            align-items: center;
-                            justify-content: center;
-                            min-height: 400px;
-                            padding: 3rem 2rem;
-                        ">
-                            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading products...</h5>
-                            <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
-                        </div>
-                    `;
-                } else {
-                    // File is uploaded but no tags match filters
-                    availableTagsContainer.innerHTML = `
-                        <div style="text-align: center; padding: 2rem 1rem; color: var(--text-secondary, #6c757d);">
-                            <div style="font-size: 2.5rem; margin-bottom: 0.75rem; opacity: 0.5;">🔍</div>
-                            <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">No products match your current filters</p>
-                            <p style="font-size: 0.9rem; opacity: 0.8;">Try adjusting or clearing your filters</p>
-                        </div>
-                    `;
-                }
+                // File is uploaded but no tags match filters
+                availableTagsContainer.innerHTML = `
+                    <div style="text-align: center; padding: 2rem 1rem; color: var(--text-secondary, #6c757d);">
+                        <div style="font-size: 2.5rem; margin-bottom: 0.75rem; opacity: 0.5;">🔍</div>
+                        <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">No products match your current filters</p>
+                        <p style="font-size: 0.9rem; opacity: 0.8;">Try adjusting or clearing your filters</p>
+                    </div>
+                `;
             }
             
             // Don't hide tag containers - keep them visible even when empty
@@ -5141,7 +4709,7 @@ const TagManager = {
             }
             // CRITICAL FIX: Clear filename display when no tags are available
             // This prevents confusion when file path shows but tags don't load
-            // Note: fileInfoText is already declared at line 4954 in this function
+            const fileInfoText = document.getElementById('fileInfoText');
             if (fileInfoText && noFileUploaded) {
                 fileInfoText.textContent = 'No file uploaded';
                 verboseLog('✅ Cleared filename display - no tags available');
@@ -5361,28 +4929,18 @@ const TagManager = {
             const LARGE_DATASET_THRESHOLD = 500;
             if (tags.length > LARGE_DATASET_THRESHOLD) {
                 verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
-
-                // CRITICAL FIX: Prevent duplicate organization if already in progress
-                if (this._isOrganizingTags) {
-                    console.log('⏭️ Skipping tag organization - already in progress');
-                    return;
-                }
-                this._isOrganizingTags = true;
-
                 // Show loading indicator while organizing
                 availableTagsContainer.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Organizing tags...</span></div><p class="mt-2 text-white">Organizing tags...</p></div>';
-
+                
                 // Organize in next event loop tick to prevent blocking
                 setTimeout(() => {
                     try {
                         organizedTags = this.organizeBrandCategories(tags);
-                        this._isOrganizingTags = false; // Clear flag after completion
                         verboseLog('✅ CURRENT INVENTORY: Using same hierarchical organization as Selected Tags');
                         verboseLog('Tags organized successfully, vendor count:', organizedTags.size);
                         // Continue with normal rendering flow
                         this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
                     } catch (error) {
-                        this._isOrganizingTags = false; // Clear flag on error
                         console.error('Error organizing tags:', error);
                         // CRITICAL FIX: Fallback to simple list rendering if organization fails
                         console.log('🔄 Falling back to simple list rendering due to organization error');
@@ -5484,45 +5042,8 @@ const TagManager = {
     },
     
     _renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags) {
-        let sortedVendors = Array.from(organizedTags.entries())
+        const sortedVendors = Array.from(organizedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-        
-        // CRITICAL FIX: Always render tags even if they have Unknown Vendor
-        // The previous logic was hiding tags during initial load, causing empty display
-        // If tags have Unknown Vendor, it means vendor data is missing from Excel - show them anyway
-        const isInitialLoading = (this._fetchingAvailableTags || this._checkingExistingData) && 
-                                 (!this.state.tags || this.state.tags.length === 0);
-        const hasOnlyUnknownVendor = sortedVendors.length === 1 && 
-                                     sortedVendors[0][0] === 'Unknown Vendor';
-        
-        if (hasOnlyUnknownVendor && tagList && tagList.length > 0) {
-            // Tags exist but all have Unknown Vendor - this means vendor data is missing
-            // Still render them, but log a warning
-            console.warn(`⚠️ All ${tagList.length} tags have "Unknown Vendor" - vendor data may be missing from Excel file`);
-            console.warn('⚠️ Check that your Excel file has a "Vendor" or "Vendor/Supplier*" column with vendor names');
-            // Continue to render - don't skip
-        }
-        
-        // Only show loading if we truly have no tags at all
-        if (sortedVendors.length === 0 && (!tagList || tagList.length === 0)) {
-            verboseLog('⏭️ No tags found - showing loading indicator');
-            availableTagsContainer.innerHTML = `
-                <div style="
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    min-height: 200px;
-                    padding: 2rem;
-                ">
-                    <div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem; margin-bottom: 1rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p style="color: rgba(255, 255, 255, 0.7);">Loading products...</p>
-                </div>
-            `;
-            return;
-        }
 
         // CRITICAL FIX: Render vendors in chunks to prevent UI freeze for large datasets
         const VENDOR_BATCH_SIZE = 5; // Process 5 vendors at a time
@@ -5622,23 +5143,18 @@ const TagManager = {
                 const isChecked = e.target.checked;
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
-                console.log(`🔍 Select-all checkbox changed: isChecked=${isChecked}, found ${checkboxes.length} checkboxes in vendor section`);
-                let tagCheckboxCount = 0;
-                let tagsNotInMap = 0;
                 checkboxes.forEach(checkbox => {
                     if (!checkbox.classList.contains('tag-checkbox')) {
                     checkbox.checked = isChecked;
                         return;
                     }
-
-                    tagCheckboxCount++;
+                    
                     const tagName = checkbox.value;
                     // PERFORMANCE: Use Map lookup instead of array.find() - O(1) vs O(n)
                     const tag = this._tagLookupMap?.get(tagName);
                     if (!tag) {
-                        tagsNotInMap++;
-                        // CRITICAL FIX: Don't skip - continue processing even if not in map
-                        console.warn(`⚠️ Tag "${tagName}" not in _tagLookupMap, but continuing`);
+                        checkbox.checked = isChecked;
+                        return;
                     }
 
                     checkbox.checked = isChecked;
@@ -5660,12 +5176,10 @@ const TagManager = {
                         }
                     }
                 });
-                console.log(`📊 Select-all summary: ${tagCheckboxCount} tag checkboxes, ${tagsNotInMap} not in map, ${this.state.persistentSelectedTags.length} in persistentSelectedTags`);
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources (Map, originalTags, tags)
                 // This prevents tags from disappearing when filters are active
                 const selectedTagObjects = this.getSelectedTagObjects();
-                console.log(`📊 getSelectedTagObjects() returned ${selectedTagObjects.length} objects`);
                 this.updateSelectedTags(selectedTagObjects);
                 this.efficientlyUpdateAvailableTagsDisplay();
                 // Use double requestAnimationFrame to ensure it happens after all updates, including updateSelectAllCheckboxes
@@ -6456,9 +5970,9 @@ const TagManager = {
                     this.state.persistentSelectedTags.push(displayName);
                     this.state._selectedTagsSet.add(displayName);
                     // CRITICAL FIX: Mark checkbox as recently checked to prevent race conditions
-                    // Short timeout to prevent immediate restore, but not so long it blocks user deselection
+                    // Extended timeout to 3 seconds to prevent premature unchecking during re-renders
                     checkbox.setAttribute('data-recently-checked', 'true');
-                    setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 500);
+                    setTimeout(() => checkbox.removeAttribute('data-recently-checked'), 3000);
                 }
             } else {
                 const index = this.state.persistentSelectedTags.indexOf(displayName);
@@ -6509,15 +6023,11 @@ const TagManager = {
                     if (tag) return tag;
                     
                     // Fallback to state.tags
-                    if (this.state.tags && Array.isArray(this.state.tags)) {
-                        tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
-                        if (tag) return tag;
-                    }
+                    tag = this.state.tags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
+                    if (tag) return tag;
                     
                     // Fallback to originalTags
-                    if (this.state.originalTags && Array.isArray(this.state.originalTags)) {
-                        tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
-                    }
+                    tag = this.state.originalTags.find(t => t && (t['Product Name*'] === name || t.ProductName === name));
                     if (tag) return tag;
                     
                     // If still not found, log warning but don't filter out - preserve selection
@@ -6632,16 +6142,17 @@ const TagManager = {
         }
         
         // Set data-lineage attribute for CSS coloring on both row and tagElement
-        // CRITICAL FIX: Use EXACT same lineage priority as docx generation
-        // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
-        // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+        // CRITICAL FIX: For JSON matched tags, prioritize the Lineage field from the matched database data
         let lineage;
-        // CRITICAL: Use EXACT same priority as docx generation - check sovereign_lineage FIRST
-        if (tag.sovereign_lineage) {
-            // Product-level sovereign_lineage (user changes) - highest priority (same as docx generation)
-            lineage = tag.sovereign_lineage;
-        } else if (tag.canonical_lineage || tag.currentLineage) {
-            // Strain-level canonical_lineage or currentLineage - database lineage
+        // CRITICAL: Use same pipeline as backend - canonical_lineage (from DB) is ALWAYS source of truth
+        // This ensures UI lineages match database and persist correctly after reload
+        // IMPORTANT: If database lineage exists (canonical_lineage or currentLineage), use it exclusively
+        // NEVER use Excel Lineage (tag.Lineage) if database lineage is present
+        // CRITICAL FIX: Always check database lineage FIRST, never use Excel Lineage when DB lineage exists
+        // CRITICAL FIX: ALWAYS check database fields FIRST - database is the source of truth
+        // NEVER use Excel Lineage if database lineage exists
+        if (tag.canonical_lineage || tag.currentLineage) {
+            // Database lineage exists - use it EXCLUSIVELY (this is the source of truth)
             lineage = tag.canonical_lineage || tag.currentLineage;
             // CRITICAL: Log when we're overriding Excel lineage with database lineage
             if (tag.Lineage && tag.Lineage.toUpperCase() !== lineage.toUpperCase()) {
@@ -6715,15 +6226,12 @@ const TagManager = {
         const lowerProductType = (productTypeCheck || '').toString().toLowerCase();
 
         const hasCbdIndicator = () => {
-            // Check for all CBD family cannabinoids: CBD, CBG, CBN, CBC
             const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
             const sources = [nameStr, descStr, brandStr, ratioStr, lineageStr];
             if (tokens.some(token => sources.some(text => text && text.includes(token)))) {
                 return true;
             }
-            // Also check product type for CBD family indicators
-            const cbdFamilyInProductType = ['high cbd', 'cbd', 'high cbg', 'cbg', 'high cbn', 'cbn', 'high cbc', 'cbc'];
-            if (cbdFamilyInProductType.some(indicator => lowerProductType.includes(indicator))) {
+            if (lowerProductType.includes('high cbd') || lowerProductType.includes('cbd')) {
                 return true;
             }
             return false;
@@ -6815,15 +6323,8 @@ const TagManager = {
             }
         } else {
             // Classic types - use database lineage or default to HYBRID (never MIXED for classic types)
-            // CRITICAL FIX: Check for CBD family indicators (CBD, CBG, CBN, CBC) in product name and force CBD_BLEND if detected
-            // This ensures products with CBD, CBG, CBN, or CBC in the title get yellow color regardless of database lineage
-            if (hasCbdIndicator()) {
-                displayLineage = 'CBD_BLEND';
-                verboseLog(`🎨 CLASSIC with CBD family indicator (CBD/CBG/CBN/CBC): "${displayName}" → CBD_BLEND (yellow)`);
-            } else {
-                // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
-                displayLineage = lineage || 'HYBRID';
-            }
+            // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
+            displayLineage = lineage || 'HYBRID';
             verboseLog(`🎨 Classic type using database lineage: "${displayName}" → ${displayLineage}`);
         }
         } // End of else block for High CBD check
@@ -6896,7 +6397,9 @@ const TagManager = {
         tagName.textContent = cleanedName;
         tagInfo.appendChild(tagName);
         
-        // Price display removed from individual tag items - kept in dropdown header only
+
+        
+
         
         // Add DOH and High CBD/THC images if applicable
         // CRITICAL FIX: Check both DOH field variations for all tags
@@ -7091,23 +6594,15 @@ const TagManager = {
         // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
-        // CRITICAL FIX: Use EXACT same lineage priority as docx generation for dropdown
-        // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
-        // Check tag object DIRECTLY using same priority as docx generation
-        let tagDbLineage = '';
-        if (tag.sovereign_lineage) {
-            tagDbLineage = tag.sovereign_lineage.toString().toUpperCase().trim();
-        } else if (tag.canonical_lineage || tag.currentLineage) {
-            tagDbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
-        }
-        
+        // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
+        // IMPORTANT: Check tag object DIRECTLY, not the lineage variable, to ensure we get the latest database values
+        const tagDbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
         if (tagDbLineage) {
             // Database lineage exists - use it exclusively, ignore Excel Lineage completely
             if (tagDbLineage !== normalizedLineage) {
-                const source = tag.sovereign_lineage ? 'sovereign_lineage' : (tag.canonical_lineage ? 'canonical_lineage' : 'currentLineage');
-                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.${source})`);
+                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.canonical_lineage=${tag.canonical_lineage} or tag.currentLineage=${tag.currentLineage})`);
             }
-            normalizedLineage = tagDbLineage;  // Force database lineage (same priority as docx generation)
+            normalizedLineage = tagDbLineage;  // Force database lineage
         } else {
             // No database lineage - log warning for debugging
             if (isForSelectedTags && normalizedLineage && normalizedLineage !== 'MIXED') {
@@ -7155,7 +6650,7 @@ const TagManager = {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
             // CRITICAL FIX: Classic types should never get MIXED - use HYBRID instead
-            if (isClassicType) {
+            if (isClassicTypeForDropdown) {
                 lineageSelect.value = 'HYBRID';
                 console.log(`🔄 DROPDOWN FIX: Mapped invalid lineage "${normalizedLineage}" to HYBRID for classic type "${displayName}"`);
             } else {
@@ -7165,14 +6660,14 @@ const TagManager = {
             lineageSelect.value = normalizedLineage;
         } else {
             // CRITICAL FIX: Smart fallback based on product type and lineage
-            if (isClassicType) {
+            if (isClassicTypeForDropdown) {
                 // Classic types default to HYBRID
                 lineageSelect.value = 'HYBRID';
                 console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for classic type "${displayName}", defaulting to HYBRID`);
             } else if (isParaphernaliaType || normalizedLineage === 'PARA' || normalizedLineage === 'PARAPHERNALIA') {
                 // Paraphernalia items should always use PARA
                 lineageSelect.value = 'PARA';
-            } else if (normalizedLineage === 'HYBRID' && !isClassicType) {
+            } else if (normalizedLineage === 'HYBRID' && !isClassicTypeForDropdown) {
                 // Non-classic items with HYBRID lineage (likely accessories/paraphernalia misclassified)
                 // Silently default to MIXED (THC) without warning since HYBRID isn't valid for non-classic
                 lineageSelect.value = 'MIXED';
@@ -7186,16 +6681,14 @@ const TagManager = {
         // CRITICAL DEBUG: Log what lineage value was set in dropdown
         if (isForSelectedTags) {
             console.log(`🎯 Set lineage dropdown for SELECTED TAG "${displayName}":`, {
-                'sovereign_lineage': tag.sovereign_lineage || 'NONE',
                 'canonical_lineage': tag.canonical_lineage || 'NONE',
                 'currentLineage': tag.currentLineage || 'NONE',
                 'Excel Lineage': tag.Lineage || 'NONE',
                 'resolved lineage (used)': normalizedLineage,
                 'dropdown value set to': lineageSelect.value
             });
-            // Check if database lineage (sovereign/canonical) differs from Excel
-            const dbLin = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase();
-            if (dbLin && tag.Lineage) {
+            if ((tag.canonical_lineage || tag.currentLineage) && tag.Lineage) {
+                const dbLin = ((tag.canonical_lineage || tag.currentLineage) || '').toString().toUpperCase();
                 const excelLin = (tag.Lineage || '').toString().toUpperCase();
                 if (dbLin !== excelLin) {
                     console.warn(`⚠️ LINEAGE MISMATCH for "${displayName}": database=${dbLin}, excel=${excelLin}, dropdown should show=${dbLin}, actual=${lineageSelect.value}`);
@@ -7534,15 +7027,15 @@ const TagManager = {
     handleLineageChange(tagName, newLineage) {
         const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
         if (tag) {
-            // Update the lineage in the tag object IMMEDIATELY
+            // Update the lineage in the tag object
             tag.lineage = newLineage;
             
-            // Update the color based on the new lineage IMMEDIATELY
+            // Update the color based on the new lineage
             const newColor = this.getLineageColor(newLineage);
             this.updateTagColor(tag, newColor);
             
-            // IMMEDIATE: Update backend immediately (no debounce delay)
-            // UI already updates instantly, backend processes in background
+            // CRITICAL FIX: Debounce backend updates to prevent database lock conflicts when doing many rapid changes
+            // This batches rapid changes so they don't all hit the database at once
             this.updateLineageOnBackendDebounced(tagName, newLineage);
         }
     },
@@ -7571,11 +7064,11 @@ const TagManager = {
             this._lineageUpdateTimeout = null;
         }
         
-        // IMMEDIATE: Process updates immediately (no debounce delay)
-        // UI already updates instantly, backend can process in background
+        // Debounce: wait 500ms before starting to process updates
+        // This batches rapid changes across ALL tags, not just per-tag
         this._lineageUpdateTimeout = setTimeout(() => {
             this._processLineageUpdateQueue();
-        }, 0); // 0ms - immediate processing for instant lineage changes
+        }, 500); // 500ms debounce - batches rapid changes across all tags
     },
     
     async _processLineageUpdateQueue() {
@@ -7614,12 +7107,13 @@ const TagManager = {
             
             while (retryCount <= maxRetries) {
                 try {
-                    // Wait between updates (minimal delay only if retrying)
-                    if (retryCount > 0) {
-                        const delay = Math.min(500 * Math.pow(2, retryCount - 1), 2000); // Exponential backoff: 500ms, 1000ms, 2000ms
+                    // Wait between updates (longer delay if retrying)
+                    if (i > 0 || retryCount > 0) {
+                        const delay = retryCount > 0 
+                            ? Math.min(500 * Math.pow(2, retryCount - 1), 2000) // Exponential backoff: 500ms, 1000ms, 2000ms
+                            : 300; // 300ms delay between different tags (increased from 100ms)
                         await new Promise(resolve => setTimeout(resolve, delay));
                     }
-                    // No delay between different tags - process immediately for instant updates
                     
                     await this.updateLineageOnBackend(tagName, newLineage);
                     verboseLog(`✅ Processed lineage update ${i + 1}/${updatesToProcess.length}: ${tagName}${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
@@ -7677,37 +7171,6 @@ const TagManager = {
 
         // CRITICAL FIX: Record timestamp for pre-generation refresh check
         this._lastLineageUpdateTime = Date.now();
-        
-        // CRITICAL: Track recently updated lineages to prevent refresh from overwriting them
-        if (!this._recentlyUpdatedLineages) {
-            // Try to restore from localStorage on first use
-            try {
-                const stored = localStorage.getItem('_recentlyUpdatedLineages');
-                if (stored) {
-                    const parsed = JSON.parse(stored);
-                    this._recentlyUpdatedLineages = new Map(Object.entries(parsed));
-                    console.log(`✅ Restored ${this._recentlyUpdatedLineages.size} recently updated lineages from localStorage`);
-                } else {
-                    this._recentlyUpdatedLineages = new Map();
-                }
-            } catch (e) {
-                this._recentlyUpdatedLineages = new Map();
-            }
-        }
-        // Store the updated lineage with timestamp - will be preserved for 30 minutes
-        this._recentlyUpdatedLineages.set(tagName, {
-            lineage: newLineage,
-            timestamp: Date.now()
-        });
-
-        // CRITICAL: Persist to localStorage so it survives page reloads
-        try {
-            const obj = Object.fromEntries(this._recentlyUpdatedLineages);
-            localStorage.setItem('_recentlyUpdatedLineages', JSON.stringify(obj));
-            console.log(`💾 Saved recently updated lineages to localStorage (${this._recentlyUpdatedLineages.size} items)`);
-        } catch (e) {
-            console.warn('Failed to save recently updated lineages to localStorage:', e);
-        }
 
         const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
         if (originalTag) {
@@ -7715,7 +7178,6 @@ const TagManager = {
             originalTag.Lineage = newLineage;
             originalTag.currentLineage = newLineage;
             originalTag.canonical_lineage = newLineage;
-            originalTag.sovereign_lineage = newLineage; // CRITICAL: Set sovereign_lineage for UI display
         }
         const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
         if (currentTag) {
@@ -7723,7 +7185,6 @@ const TagManager = {
             currentTag.Lineage = newLineage;
             currentTag.currentLineage = newLineage;
             currentTag.canonical_lineage = newLineage;
-            currentTag.sovereign_lineage = newLineage; // CRITICAL: Set sovereign_lineage for UI display
 
             // CRITICAL FIX: Update _tagLookupMap immediately for getSelectedTagObjects()
             // This ensures tag objects retrieved for generation have the latest lineage
@@ -7793,34 +7254,20 @@ const TagManager = {
             // CRITICAL FIX: Clear frontend cache after successful lineage update
             // This ensures that on page reload, fresh lineage data is fetched from database
             if (responseData.db_updated > 0 || responseData.excel_updated > 0) {
-                // CRITICAL FIX: Update cache with new lineage immediately (don't clear cache)
-                // This preserves the user's change and prevents refresh from pulling old data
-                // Save updated tags to cache immediately so refresh doesn't overwrite
-                if (this.state.tags && this.state.tags.length > 0) {
-                    // CRITICAL: Verify the tag has sovereign_lineage before saving
-                    const updatedTag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                    if (updatedTag) {
-                        console.log(`💾 Saving ${this.state.tags.length} tags to cache with updated lineage for "${tagName}":`, {
-                            sovereign_lineage: updatedTag.sovereign_lineage,
-                            canonical_lineage: updatedTag.canonical_lineage,
-                            Lineage: updatedTag.Lineage
-                        });
-                    }
-                    this.saveAvailableTagsToCache(this.state.tags);
-                }
-                
+                this.clearAvailableTagsCache();
                 // CRITICAL FIX: Store timestamp in BOTH sessionStorage AND localStorage
                 // sessionStorage for current session, localStorage to persist across reloads
                 const updateTime = Date.now().toString();
                 sessionStorage.setItem('lastLineageUpdateTime', updateTime);
                 localStorage.setItem('lastLineageUpdateTime', updateTime);
-                console.log('✅ Saved lineage update timestamp - cache updated with new lineage');
+                console.log('🗑️ Cleared frontend cache after lineage update to ensure fresh data on reload');
                 
-                // CRITICAL FIX: DON'T refresh tags immediately - UI is already updated
-                // The refresh was causing old lineages to be pulled back
-                // Instead, just update cache and let the UI state persist
-                // Background refresh will happen naturally when needed, but won't overwrite sovereign_lineage
-                console.log('⏭️ Skipping immediate refresh - UI already updated, cache saved with new lineage');
+                // CRITICAL FIX: Save updated tags to cache immediately after clearing
+                // This ensures the updated lineage is cached and persists on page reload
+                if (this.state.tags && this.state.tags.length > 0) {
+                    this.saveAvailableTagsToCache(this.state.tags);
+                    console.log('💾 Saved updated tags with new lineage to cache for persistence');
+                }
             }
 
             // CRITICAL FIX: Use verified lineage from response (may be normalized differently)
@@ -7833,7 +7280,6 @@ const TagManager = {
                 originalTag.Lineage = verifiedLineage;
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
-                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set sovereign_lineage for UI display
                 verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
@@ -7856,14 +7302,11 @@ const TagManager = {
             // This ensures that when the tag list is filtered or re-rendered, it shows the updated lineage
             const originalTagIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
             if (originalTagIndex >= 0) {
-                const originalTag = this.state.originalTags[originalTagIndex];
-                originalTag.lineage = verifiedLineage;
-                originalTag.Lineage = verifiedLineage;
-                originalTag.currentLineage = verifiedLineage;
-                originalTag.canonical_lineage = verifiedLineage;
-                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set sovereign_lineage to preserve user edit
-                originalTag['Lineage*'] = verifiedLineage;
-                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage} (sovereign_lineage set)`);
+                this.state.originalTags[originalTagIndex].lineage = verifiedLineage;
+                this.state.originalTags[originalTagIndex].Lineage = verifiedLineage;
+                this.state.originalTags[originalTagIndex].currentLineage = verifiedLineage;
+                this.state.originalTags[originalTagIndex].canonical_lineage = verifiedLineage;
+                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
             // NEW: Instantly update all similar (same vendor + strain) across lists
@@ -7884,9 +7327,13 @@ const TagManager = {
             // OLD CODE REMOVED: The debounced refresh was causing selected tags to be cleared
             // We now rely on direct state/UI updates which are faster and safer
             
-            // Track which tags were recently updated - this is handled earlier at line 7669-7698
-            // The _recentlyUpdatedLineages is a Map, not an array
-            // This duplicate code can be removed as it's already handled above
+            // Track which tags were recently updated
+            if (!this._recentlyUpdatedLineages) {
+                this._recentlyUpdatedLineages = [];
+            }
+            if (!this._recentlyUpdatedLineages.includes(tagName)) {
+                this._recentlyUpdatedLineages.push(tagName);
+            }
             
             // CRITICAL FIX: Mark this lineage update as completed for reload protection
             if (this._lineageUpdatePending) {
@@ -7990,17 +7437,6 @@ const TagManager = {
                     this._updateAvailableTags(this.state.tags, null);
                     verboseLog('✅ Re-rendered available tags to show updated lineage');
                 }
-                
-                // CRITICAL FIX: Ensure checkboxes are enabled and clickable after lineage update
-                // This prevents the issue where checkboxes become unresponsive after lineage changes
-                setTimeout(() => {
-                    this._ensureCheckboxesEnabled();
-                    // CRITICAL FIX: Re-initialize checkbox handlers in case they were lost during re-render
-                    if (typeof this._reinitializeCheckboxHandlers === 'function') {
-                        this._reinitializeCheckboxHandlers();
-                    }
-                    verboseLog('✅ Ensured checkboxes are enabled and handlers reattached after lineage update');
-                }, 150);
             }, 100);
             
             verboseLog('✅ Lineage updated successfully - refreshed display to show changes');
@@ -8245,12 +7681,8 @@ const TagManager = {
             if (!tagDataName) return;
             
             // Find and update the tag in state
-            const stateTag = (this.state.tags && Array.isArray(this.state.tags)) 
-                ? this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName)
-                : null;
-            const originalTag = (this.state.originalTags && Array.isArray(this.state.originalTags))
-                ? this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName)
-                : null;
+            const stateTag = this.state.tags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName);
+            const originalTag = this.state.originalTags.find(t => (t['Product Name*'] || t.ProductName) === tagDataName);
             
             if (stateTag) {
                 stateTag.lineage = newLineage;
@@ -9583,12 +9015,6 @@ const TagManager = {
                                 checkbox.checked = shouldBeChecked;
                                 verboseLog(`Setting checkbox for "${tag['Product Name*']}" to checked: ${shouldBeChecked}`);
                                 
-                                // CRITICAL FIX: Ensure checkbox is enabled and handlers are attached after filter changes
-                                checkbox.style.pointerEvents = 'auto';
-                                checkbox.disabled = false;
-                                checkbox.removeAttribute('data-drag-disabled');
-                                checkbox.removeAttribute('data-reordering');
-                                
                                 // Ensure the checkbox is properly initialized
                                 if (shouldBeChecked) {
                                     checkbox.setAttribute('data-checked', 'true');
@@ -9598,9 +9024,7 @@ const TagManager = {
                                 
                                 // Add a small delay to ensure the checkbox is properly rendered
                                 setTimeout(() => {
-                                    // Double-check the checkbox state and ensure it's enabled
-                                    checkbox.style.pointerEvents = 'auto';
-                                    checkbox.disabled = false;
+                                    // Double-check the checkbox state
                                     if (shouldBeChecked && !checkbox.checked) {
                                         verboseLog(`Fixing checkbox state for "${tag['Product Name*']}" - should be checked but isn't`);
                                         checkbox.checked = true;
@@ -10093,14 +9517,9 @@ const TagManager = {
         }
     },
 
-    async fetchAndUpdateAvailableTags(forceReload = false) {
-        // CRITICAL: Declare isWebClient at function start to avoid "Cannot access before initialization" error
-        const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
-                          window.location.hostname.includes('agtpricetags.com') ||
-                          (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
-        
-        // CRITICAL FIX: Reset stuck flag if it's been set for too long, or if force reload
-        if (this._fetchingAvailableTags && !forceReload) {
+    async fetchAndUpdateAvailableTags() {
+        // CRITICAL FIX: Reset stuck flag if it's been set for too long
+        if (this._fetchingAvailableTags) {
             const fetchStartTime = this._fetchingAvailableTagsStartTime || Date.now();
             const stuckDuration = Date.now() - fetchStartTime;
             if (stuckDuration > 30000) {
@@ -10126,90 +9545,32 @@ const TagManager = {
                     return false;
                 }
             }
-        } else if (forceReload && this._fetchingAvailableTags) {
-            // Force reload: reset flag immediately
-            console.log('🔄 FORCE RELOAD: Resetting _fetchingAvailableTags flag');
-            this._fetchingAvailableTags = false;
-            if (this._fetchingTimeout) {
-                clearTimeout(this._fetchingTimeout);
-                this._fetchingTimeout = null;
-            }
         }
         
-        // PERFORMANCE FIX: Use cache first for fast reloads, then refresh in background
-        // This provides instant display on reload while keeping data fresh
-        const availableTagsContainer = document.getElementById('availableTags');
-        const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
-
-        // Check if cache exists to determine if we should show loading or use cache
+        // PERFORMANCE: Check cache FIRST before setting flags or showing splash
         const cachedTags = this.loadAvailableTagsFromCache();
         const hasCache = cachedTags && cachedTags.length > 0;
-
+        const availableTagsContainer = document.getElementById('availableTags');
+        const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
+        
+        // PERFORMANCE: If cache exists, hydrate immediately and return (instant load)
         if (hasCache && !hasExistingTags) {
-            console.log(`⚡ CACHE AVAILABLE: ${cachedTags.length} tags in cache - will use for instant display`);
-        } else {
-            console.log('📊 No cache or tags already exist - fetching from server');
+            const hydrated = this.hydrateAvailableTagsFromCache();
+            if (hydrated) {
+                console.log('✅ INSTANT LOAD: Tags rendered from cache before any API calls');
+                return true;
+            }
         }
         
-        // PERFORMANCE: For web clients, prioritize cache even more aggressively
-        if (isWebClient && hasCache && !hasExistingTags && !forceReload) {
-            console.log(`⚡ WEB CLIENT: Using cache immediately for faster load`);
-        }
-        
-        // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
-        // This must be set before any UI updates to ensure loading state is shown
-        console.log('🚩 Setting _fetchingAvailableTags = true');
+        // Set flag to prevent concurrent calls
         this._fetchingAvailableTags = true;
         this._fetchingAvailableTagsStartTime = Date.now();
-        this._fetchingAvailableTagsStartTime = Date.now();
-        
-        // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
-        // This prevents infinite loading state
-        if (this._fetchingTimeout) {
-            clearTimeout(this._fetchingTimeout);
-        }
-        this._fetchingTimeout = setTimeout(() => {
-            if (this._fetchingAvailableTags) {
-                console.warn('⚠️ Tag fetch timeout - resetting flag after 60 seconds');
-                this._fetchingAvailableTags = false;
-                this.hideActionSplash();
-            }
-        }, 60000); // 60 second safety timeout
-        
-        // CRITICAL FIX: Immediately show loading state if container is empty
-        // This prevents upload prompt from flashing while tags are being fetched
-        if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0)) {
-            const currentContent = availableTagsContainer.innerHTML.trim();
-            // Only show loading if container is empty or showing upload prompt
-            if (!currentContent || currentContent.includes('upload-prompt') || currentContent.includes('Upload Excel')) {
-                availableTagsContainer.innerHTML = `
-                    <div style="
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        justify-content: center;
-                        min-height: 400px;
-                        padding: 3rem 2rem;
-                    ">
-                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading tags...</h5>
-                        <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
-                    </div>
-                `;
-            }
-        }
         // Track background-processing retries (reset on success)
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
-        // CRITICAL FIX: Only show loading if store is confirmed
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
         // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
-        // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
-        if (storeConfirmed && !hasExistingTags && !hasCache) {
+        // Show splash immediately so user knows something is happening
+        if (!hasExistingTags && !hasCache) {
             // Initial load - show full loading UI
             this.showActionSplash('Loading tags...');
             if (availableTagsContainer) {
@@ -10222,11 +9583,8 @@ const TagManager = {
                     </div>
                 `;
             }
-        } else if (!storeConfirmed) {
-            // Store not confirmed - don't show loading, let store modal show
-            verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
-        } else if (storeConfirmed && hasExistingTags) {
-            // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
+        } else if (hasExistingTags) {
+            // Reload/refresh - show splash to indicate loading is happening
             this.showActionSplash('Refreshing tags...');
             // Also show loading indicator in container if it exists
             // BUT don't grey out on initial page load - only on refresh
@@ -10248,9 +9606,6 @@ const TagManager = {
         }, 30000); // 30 second warning, but don't hide splash
         
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
-        // Declare cacheUsedForDisplay at function scope so it's accessible throughout
-        let cacheUsedForDisplay = false;
-
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             // Ensure flag is initialized
@@ -10261,57 +9616,39 @@ const TagManager = {
             // CRITICAL: Declare safetyTimeout at the very start of function so it's always available in catch block
             // This prevents "safetyTimeout is not defined" errors if an exception occurs early
             let safetyTimeout = null;
-
+            
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
-            if (!hasExistingTags) {
-                // PERFORMANCE: Shorter timeout for web clients (faster failure recovery)
-                const safetyTimeoutMs = isWebClient ? 20000 : 60000; // 20s for web, 60s for desktop
+            if (!hasExistingTags && !hasCache) {
                 safetyTimeout = setTimeout(() => {
-                    console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
+                    console.warn('⚠️ Safety timeout: Hiding loading spinner');
                     // Just hide the splash, don't show error message
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
                     // Don't show error message - let the app continue working
-                }, safetyTimeoutMs);
+                }, 60000); // 60 seconds - very generous timeout
             }
-
-            // PERFORMANCE FIX: Use cache first for instant load, then refresh in background
-            // This provides fast reloads while still keeping data fresh
-            const savedScroll = this._saveAvailableScrollPosition();
             
-            // Check if we have cache and no existing tags - use cache for instant display
-            if (hasCache && !hasExistingTags) {
-                console.log(`⚡ INSTANT CACHE: Using ${cachedTags.length} cached tags for immediate display`);
-                // Render cached tags immediately
-                this.state.tags = [...cachedTags];
-                this.state.originalTags = [...cachedTags];
-                this.state.hydratedFromCache = true;
-                cacheUsedForDisplay = true;
-                
-                // Render immediately for instant UI update (synchronous for fastest display)
-                this._updateAvailableTags(cachedTags, null);
-                console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
-                
-                // Build filters from cached tags immediately
-                this.buildFilterOptionsFromTags(cachedTags);
-                
+            // PERFORMANCE: Double-check cache (in case it was just saved)
+            const hydratedFromCache = this.hydrateAvailableTagsFromCache();
+            if (hydratedFromCache) {
+                console.log('✅ Tags rendered instantly from cache');
+                // PERFORMANCE FIX: Background refresh uses fast_load now (set in _refreshLineageFromDatabase)
+                console.log('⚡ PERFORMANCE: Cache loaded, background refresh will use fast mode');
                 // Hide splash since we have cached tags
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-                
-                // Continue to fetch fresh data in background to update cache (non-blocking)
-                console.log('🔄 Fetching fresh tags in background to update cache...');
-            } else {
-                console.log('⏳ No cache available or tags already exist - fetching from server');
+                return true;
             }
             
+            // Only show loading if we don't have cached tags
+            console.log('⏳ No cache available - preparing loader');
+            
+            // Preserve current scroll/anchor so refreshes don't jump the list
+            const savedScroll = this._saveAvailableScrollPosition();
+
             // Fire off a non-blocking lite prefetch to get instant tags while the
             // full /api/available-tags endpoint is still loading.
             // This should never throw or block the main flow.
@@ -10319,27 +9656,18 @@ const TagManager = {
                 verboseLog('Lite prefetch error (non-critical):', err);
             });
             
-            // Rate limiting: prevent rapid successive calls (unless force reload)
+            // Rate limiting: prevent rapid successive calls
             // Increased to 1000ms to prevent restarts from multiple rapid calls
-            if (!forceReload) {
-                const now = Date.now();
-                if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
-                    const timeSinceLastFetch = now - this._lastFetchTime;
-                    console.warn(`⏸️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 1000ms)`);
-                    verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
-                    // Hide splash if we're skipping
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    return false;
+            const now = Date.now();
+            if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
+                verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
+                // Hide splash if we're skipping
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
                 }
-                this._lastFetchTime = now;
-            } else {
-                // Force reload: reset rate limiting
-                this._lastFetchTime = 0;
-                console.log('🔄 FORCE RELOAD: Bypassing rate limiting');
+                return false;
             }
-            console.log(`✅ Rate limit check passed, proceeding with fetch`);
+            this._lastFetchTime = now;
             
             // Check if we're in JSON matching mode and have JSON matched tags
             const hasJsonMatchedTags = this.state.persistentSelectedTags && this.state.persistentSelectedTags.length > 0;
@@ -10374,100 +9702,53 @@ const TagManager = {
                 // DO NOT return; continue to fetch to pull DB-aligned lineage for regular tags
             }
             
-            console.log('🔍 Starting fetch process...');
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE: Always use fast_load=1 for fast tag loading
-            // Backend will do lightweight lineage alignment even in fast_load mode
-            // This dramatically speeds up initial tag loading while still getting correct lineage
+            // PERFORMANCE FIX: Always use fast_load=1 for instant tag loading
+            // This skips expensive lineage alignment on cached tags for faster response
+            // Lineage will still be aligned when needed, but cached tags return instantly
             const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
-            
-            // PERFORMANCE: Web clients need faster timeouts and fewer retries
-            const maxRetries = isWebClient ? 2 : 3; // Fewer retries for web
-            const maxProcessingRetries = isWebClient ? 5 : 15; // Much fewer processing retries for web (10 seconds vs 30)
-            const fetchTimeout = isWebClient ? 30000 : 30000; // Temporarily increased to 30s for web to handle slow backend (TODO: optimize backend)
-            
+            const maxRetries = 3; // Allow retries for errors
+            const maxProcessingRetries = 30; // Allow 30 retries for 202 (file processing) - enough for 60+ seconds of loading
             let retryCount = 0;
             let processingRetryCount = 0;
             let lastError;
             
-            console.log(`🔄 Entering retry loop (maxRetries: ${maxRetries}, maxProcessingRetries: ${maxProcessingRetries}, timeout: ${fetchTimeout}ms, web: ${isWebClient})`);
-            console.log(`📊 Current state: retryCount=${retryCount}, processingRetryCount=${processingRetryCount}`);
-            
             // CRITICAL: Continue retrying as long as EITHER condition is met (not both)
             // This allows 202 retries to continue even after error retries are exhausted
             while (retryCount < maxRetries || processingRetryCount < maxProcessingRetries) {
-                console.log(`🔄 Loop iteration: retryCount=${retryCount}/${maxRetries}, processingRetryCount=${processingRetryCount}/${maxProcessingRetries}`);
                 try {
-                    console.log(`🔄 Retry attempt ${retryCount + 1} (processing retries: ${processingRetryCount})`);
                     const controller = new AbortController();
-                    // PERFORMANCE: Faster timeout for web clients - use cache for slow loads
+                    // PERFORMANCE: Reduced timeout to 30 seconds for faster failure/retry
+                    // Tags should load much faster with all the optimizations
                     const timeoutId = setTimeout(() => {
                         controller.abort();
-                        console.warn(`⚠️ Tag loading timeout after ${fetchTimeout}ms - will try cache or show error`);
-                    }, fetchTimeout);
+                        console.warn('⚠️ Tag loading timeout after 30 seconds - will try cache or show error');
+                    }, 30000); // 30 seconds - should be plenty with optimizations
 
-                    // CRITICAL FIX: Check for recent lineage updates - force nocache to get fresh database lineage
-                    // This ensures UI shows correct lineage values after updates, not stale cached values
-                    const currentFile = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-                    const isDatabaseMode = !currentFile || currentFile === 'nofile' || currentFile === '' || currentFile === 'database';
-                    const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
-                    const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
-                    
-                    // CRITICAL FIX: For web clients, if lineage was recently updated, force nocache to bypass stale cache
-                    // Web endpoint will still get database lineage when needed (it checks lineage_update_timestamp)
-                    // PERFORMANCE: Web clients skip prefer_db for speed, but still get fresh data when lineage updates
-                    const forceDbLineage = isWebClient ? false : (this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate);
-                    // CRITICAL: Force nocache if lineage was recently updated (even for web clients) to get fresh lineage
-                    const useCache = retryCount === 0 && !forceDbLineage && !forceReload && !hasRecentLineageUpdate;
+                    // CRITICAL FIX: Use prefer_db to ensure lineage values come from database
+                    // PERFORMANCE: Only force prefer_db after uploads to avoid slow queries on cached loads
+                    const forceDbLineage = this._forceDatabaseLineage || false;
+                    const useCache = retryCount === 0 && !forceDbLineage; // Don't use cache after upload
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Skip prefer_db for web clients (web endpoint handles lineage updates via timestamp check)
-                    const preferDbParam = (isWebClient || !forceDbLineage) ? '' : '&prefer_db=1';
-                    
-                    // Use web endpoint for web clients, regular endpoint for localhost/desktop
-                    const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
-                    
-                    // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
-                    const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
-                        `${baseEndpoint}?t=${timestamp}${fastLoadParam}${preferDbParam}` :
-                        `${baseEndpoint}?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
-                    
-                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
-                    console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
-                    
-                    // PERFORMANCE: Browser will now cache responses for 5 minutes (via HTTP headers)
-                    // This provides faster reloads without needing to modify fetch logic
-                    response = await fetch(optimizedFetchUrl, {
-                        signal: controller.signal,
-                        // Add cache mode to leverage HTTP cache headers
-                        cache: useCache ? 'default' : 'no-cache'
+                    // Only use prefer_db when forcing database lineage (after upload), otherwise let fast_load optimize
+                    const preferDbParam = forceDbLineage ? '&prefer_db=1' : '';
+                    response = await fetch(`/api/available-tags?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`, {
+                        signal: controller.signal
                     });
                     clearTimeout(timeoutId);
-                    
-                    console.log(`✅ Fetch completed with status: ${response.status} at ${new Date().toISOString()}`);
 
                     verboseLog(`Available tags response status (attempt ${retryCount + 1}/${maxRetries}, processing retries: ${processingRetryCount + 1}/${maxProcessingRetries}):`, response.status);
 
                     // Handle 202 Accepted (file still processing) - allow more retries for this
                     if (response.status === 202) {
                         processingRetryCount++;
-                        
-                        // PERFORMANCE: After half of max retries, try to show cached data immediately
-                        if (processingRetryCount === Math.floor(maxProcessingRetries / 2)) {
-                            verboseLog('⏳ File processing taking a while, showing cached data while waiting...');
-                            const cachedTags = this.hydrateAvailableTagsFromCache();
-                            if (cachedTags) {
-                                verboseLog('✅ Showing cached tags immediately while file processes in background');
-                                // Continue waiting for fresh data, but user sees cached data now
-                            }
-                        }
-                        
                         if (processingRetryCount >= maxProcessingRetries) {
                             // Too many processing retries - try to use cache or show helpful error
                             verboseLog('⏳ File processing taking too long, trying cache fallback...');
@@ -10479,14 +9760,10 @@ const TagManager = {
                             throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
                         }
                         
-// PERFORMANCE: For web clients, add progressive delay between retries to avoid overwhelming server
-            // For desktop, retry immediately
-            if (isWebClient && processingRetryCount > 0) {
-                const delay = Math.min(500 * processingRetryCount, 3000); // Progressive delay up to 3s
-                await new Promise(resolve => setTimeout(resolve, delay));
-                        }
+                        // Show user-friendly loading message
                         
-                        verboseLog(`⏳ File still processing (202), retrying... (${processingRetryCount}/${maxProcessingRetries})`);
+                        verboseLog(`⏳ File still processing (202), retrying immediately... (${processingRetryCount}/${maxProcessingRetries})`);
+                        // PERFORMANCE: No delay - retry immediately for faster response
                         continue; // Retry without incrementing error retry count
                     }
 
@@ -10513,40 +9790,31 @@ const TagManager = {
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
                     
-                    console.log(`📥 Reading response text...`);
                     const responseText = await response.text();
-                    console.log(`✅ Response text received (length: ${responseText ? responseText.length : 0})`);
                     try {
                         responseData = responseText ? JSON.parse(responseText) : null;
-                        console.log(`✅ JSON parsed successfully, responseData type:`, responseData ? (Array.isArray(responseData) ? 'array' : typeof responseData) : 'null');
                     } catch (parseError) {
-                        console.error('❌ Failed to parse available tags JSON response:', {
+                        console.error('Failed to parse available tags JSON response:', {
                             parseError,
                             snippet: responseText ? responseText.slice(0, 500) : ''
                         });
                         throw parseError;
                     }
-                    console.log(`✅ Breaking from retry loop - fetch successful`);
                     break; // Success - exit retry loop
                     
                 } catch (error) {
                     lastError = error;
-                    console.error(`❌ Fetch error (attempt ${retryCount + 1}/${maxRetries}):`, error);
                     if (error.name === 'AbortError') {
-                        console.warn(`⏱️ Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
                         verboseLog(`Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
                     } else {
-                        console.error(`❌ Request error (attempt ${retryCount + 1}/${maxRetries}):`, error.message || error);
                         verboseLog(`Request error (attempt ${retryCount + 1}/${maxRetries}):`, error);
                     }
                     
                     if (retryCount < maxRetries - 1) {
                         retryCount++;
-                        console.log(`🔄 Retrying immediately... (${retryCount}/${maxRetries})`);
                         verboseLog(`Retrying immediately...`);
                         // PERFORMANCE: No delay - retry immediately for faster response
                     } else {
-                        console.error(`❌ Max retries reached, throwing error:`, error);
                         throw error;
                     }
                 }
@@ -10639,24 +9907,10 @@ const TagManager = {
                     }
                 } else {
                     console.warn('Backend returned empty tags array - no Excel file loaded');
-                    // Show message to user when no Excel file is uploaded
-                    const availableTagsContainer = document.getElementById('availableTags');
-                    if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div class="text-center py-4">
-                                <div class="alert alert-info mx-3">
-                                    <i class="fas fa-info-circle"></i>
-                                    <p class="mb-0 mt-2">No Excel file uploaded. Please upload an Excel file to see available tags.</p>
-                                </div>
-                            </div>
-                        `;
-                    }
                 }
                 this.state.tags = [];
                 this.state.originalTags = [];
-                // CRITICAL FIX: Skip _updateAvailableTags when no Excel file
-                // _updateAvailableTags([]) would clear our "no Excel file" message
-                // this._updateAvailableTags([]);
+                this._updateAvailableTags([]);
                 this._restoreAvailableScrollPosition(savedScroll);
                 // Hide splash when no tags
                 if (this.hideActionSplash) {
@@ -10672,43 +9926,22 @@ const TagManager = {
                 return true;
             }
             
-            // PERFORMANCE OPTIMIZATION: Fast normalization - only normalize what's needed
-            // CRITICAL: Preserve sovereign_lineage (user-edited lineage) - it has highest priority
-            verboseLog(`Normalizing ${tags.length} tags (fast mode)...`);
-            // Use for loop instead of map for better performance on large arrays
-            const normalizedTags = [];
-            for (let i = 0; i < tags.length; i++) {
-                const tag = tags[i];
-                // CRITICAL: Check for sovereign_lineage FIRST (highest priority - user edits)
-                // If sovereign_lineage exists, preserve it and use it as the primary lineage
-                const sovereignRaw = tag.sovereign_lineage;
-                if (sovereignRaw) {
-                    const sovereignStr = String(sovereignRaw).trim();
-                    if (sovereignStr && sovereignStr.toUpperCase() !== 'NONE') {
-                        const sovereignLineage = sovereignStr.toUpperCase();
-                        // Preserve sovereign_lineage and set all other fields to match it (fast path)
-                        tag.sovereign_lineage = sovereignLineage;
-                        tag.Lineage = sovereignLineage;
-                        tag.lineage = sovereignLineage.toLowerCase();
-                        tag.currentLineage = sovereignLineage;
-                        tag.canonical_lineage = sovereignLineage;
-                        tag['Lineage*'] = sovereignLineage;
-                        normalizedTags.push(tag);
-                        continue; // Skip further normalization - sovereign takes precedence
-                    }
-                }
-                // No sovereign_lineage - use database lineage (canonical/current) or apply full normalization
+            // PERFORMANCE OPTIMIZATION: Single-pass normalization to reduce processing overhead
+            // Normalize tags to ensure database lineage is ALWAYS used (single pass instead of multiple)
+            verboseLog(`Normalizing ${tags.length} tags to prioritize database lineage...`);
+            const normalizedTags = tags.map(tag => {
+                // CRITICAL: ALWAYS prioritize database lineage fields over Excel Lineage
                 if (tag.canonical_lineage || tag.currentLineage) {
-                    const dbLineage = String(tag.canonical_lineage || tag.currentLineage).trim().toUpperCase();
+                    const dbLineage = (tag.canonical_lineage || tag.currentLineage).toString().trim().toUpperCase();
+                    // Update all lineage fields to match database lineage for consistency
                     tag.Lineage = dbLineage;
                     tag.lineage = dbLineage.toLowerCase();
                     tag.currentLineage = dbLineage;
                     tag.canonical_lineage = dbLineage;
-                    tag['Lineage*'] = dbLineage;
-                }
+                    }
                 // Apply normalization function if available (for additional processing)
-                normalizedTags.push(this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag);
-            }
+                return this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag;
+            });
             
             tags = normalizedTags;
             verboseLog(`Fetched and normalized ${tags.length} available tags`);
@@ -10754,17 +9987,11 @@ const TagManager = {
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
             // This is especially important when lineage alignment happened on the backend
             console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
-            console.log('📍 Call stack for tag update:', new Error().stack);
             this._backgroundProcessingRetries = 0; // reset after successful load
-
+            
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
-            // CRITICAL FIX: Only build if filters haven't been built yet to prevent duplicate rebuilds
-            if (tags && tags.length > 0 && !this._filtersBuiltThisSession) {
-                console.log('🔧 Building filters from fetched tags (first time this session)');
+            if (tags && tags.length > 0) {
                 this.buildFilterOptionsFromTags(tags);
-                this._filtersBuiltThisSession = true;
-            } else if (this._filtersBuiltThisSession) {
-                console.log('⏭️ Skipping filter rebuild - already built this session');
             }
             
             // CRITICAL: If lineage was aligned from database, ensure tags are fully re-rendered to show database lineage
@@ -10775,164 +10002,9 @@ const TagManager = {
                 console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
             }
             
-            // CRITICAL FIX: Preserve vendor data and sovereign_lineage from CACHED tags when fresh tags arrive
-            // This prevents "Unknown Vendor" from appearing and preserves user-edited lineage
-            // Store reference to cached tags before any modifications
-            const originalCachedTags = cacheUsedForDisplay && cachedTags ? [...cachedTags] : null;
-            const tagsToCompareAgainst = originalCachedTags || 
-                                         (this.state.tags && this.state.tags.length > 0 ? this.state.tags : null);
-            if (tagsToCompareAgainst) {
-                // Create maps of cached/existing tags by product name for vendor and sovereign_lineage lookup
-                const existingTagsMap = new Map();
-                const existingSovereignLineageMap = new Map();
-                tagsToCompareAgainst.forEach(existingTag => {
-                    const productName = existingTag['Product Name*'] || existingTag.ProductName || '';
-                    if (productName) {
-                        // Store vendor
-                        const vendor = existingTag['Vendor*'] || existingTag['Vendor'] || existingTag.vendor || 
-                                     existingTag['Vendor/Supplier*'] || existingTag['Product Vendor'] || '';
-                        if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
-                            existingTagsMap.set(productName, vendor);
-                        }
-                        // Store sovereign_lineage (user-edited lineage - highest priority)
-                        // Only store if it's valid (not empty, not 'NONE')
-                        if (existingTag.sovereign_lineage && 
-                            existingTag.sovereign_lineage.toString().trim() !== '' && 
-                            existingTag.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE') {
-                            existingSovereignLineageMap.set(productName, existingTag.sovereign_lineage.toString().trim().toUpperCase());
-                        }
-                    }
-                });
-                
-                // Preserve vendor data and sovereign_lineage in fresh tags
-                // Use for loop instead of forEach to allow early continue
-                for (let i = 0; i < tags.length; i++) {
-                    const tag = tags[i];
-                    const productName = tag['Product Name*'] || tag.ProductName || '';
-                    if (!productName) continue;
-                    
-                    // Preserve vendor
-                    if (existingTagsMap.has(productName)) {
-                        const existingVendor = existingTagsMap.get(productName);
-                        // Preserve vendor in all possible field names
-                        if (!tag['Vendor*']) tag['Vendor*'] = existingVendor;
-                        if (!tag['Vendor']) tag['Vendor'] = existingVendor;
-                        if (!tag.vendor) tag.vendor = existingVendor;
-                    }
-                    
-                    // CRITICAL: Check for recently updated lineages FIRST (highest priority - just edited)
-                    // This prevents refresh from overwriting lineages that were just updated
-                    const recentlyUpdated = this._recentlyUpdatedLineages && this._recentlyUpdatedLineages.has(productName);
-                    if (recentlyUpdated) {
-                        const updateInfo = this._recentlyUpdatedLineages.get(productName);
-                        const age = Date.now() - updateInfo.timestamp;
-                        // Preserve for 30 minutes after update (increased from 5 minutes)
-                        // This ensures lineage changes persist even across page reloads
-                        if (age < 1800000) {
-                            const recentLineage = updateInfo.lineage.toString().trim().toUpperCase();
-                            tag.sovereign_lineage = recentLineage;
-                            tag.canonical_lineage = recentLineage;
-                            tag.currentLineage = recentLineage;
-                            tag.Lineage = recentLineage;
-                            tag.lineage = recentLineage.toLowerCase();
-                            tag['Lineage*'] = recentLineage;
-                            console.log(`✅ Preserved recently updated lineage for "${productName}": ${recentLineage} (updated ${Math.round(age/1000)}s ago)`);
-                            continue; // Skip to next tag - don't check other sources
-                        } else {
-                            // Too old - remove from tracking
-                            this._recentlyUpdatedLineages.delete(productName);
-                        }
-                    }
-                    
-                    // CRITICAL: Existing cached sovereign_lineage ALWAYS takes precedence over fresh data
-                    // This prevents lineage from flipping when background refresh runs
-                    // User's cached sovereign_lineage (from previous edits) is the source of truth
-                    if (existingSovereignLineageMap.has(productName)) {
-                        // Existing tag has sovereign_lineage - ALWAYS preserve it (user's edits)
-                        const sovereignLineage = existingSovereignLineageMap.get(productName);
-                        tag.sovereign_lineage = sovereignLineage;
-                        // Also set other lineage fields to sovereign for consistency
-                        tag.canonical_lineage = sovereignLineage;
-                        tag.currentLineage = sovereignLineage;
-                        tag.Lineage = sovereignLineage;
-                        tag.lineage = sovereignLineage.toLowerCase();
-                        tag['Lineage*'] = sovereignLineage;
-                        console.log(`✅ Preserved cached sovereign_lineage for "${productName}": ${sovereignLineage} (preventing flip)`);
-                    } else {
-                        // No existing sovereign_lineage - use fresh data from backend
-                        const freshHasSovereign = tag.sovereign_lineage && 
-                                                 tag.sovereign_lineage.toString().trim() !== '' && 
-                                                 tag.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE';
-                        if (freshHasSovereign) {
-                            // Fresh tag has sovereign_lineage from database - use it
-                            const sovereignLineage = tag.sovereign_lineage.toString().trim().toUpperCase();
-                            tag.sovereign_lineage = sovereignLineage;
-                            tag.canonical_lineage = sovereignLineage;
-                            tag.currentLineage = sovereignLineage;
-                            tag.Lineage = sovereignLineage;
-                            tag.lineage = sovereignLineage.toLowerCase();
-                            tag['Lineage*'] = sovereignLineage;
-                            console.log(`✅ Using fresh sovereign_lineage from backend for "${productName}": ${sovereignLineage}`);
-                        }
-                    }
-                }
-            }
-            
-            // PERFORMANCE FIX: Only update UI if we didn't already show cached tags OR if lineage actually changed
-            // CRITICAL: Never update UI if cache was used AND cached tags have sovereign_lineage
-            // This prevents lineage from flipping back and forth
-            let shouldUpdateUI = !cacheUsedForDisplay || tags.length !== (originalCachedTags?.length || 0);
-            
-            // CRITICAL: Check if we should update UI - never update if cached tags have sovereign_lineage
-            if (cacheUsedForDisplay && originalCachedTags && tags.length === originalCachedTags.length) {
-                // Check if any cached tag has sovereign_lineage - if so, don't update UI (preserve user edits)
-                const hasCachedSovereignLineage = originalCachedTags.some(t => 
-                    t.sovereign_lineage && 
-                    t.sovereign_lineage.toString().trim() !== '' && 
-                    t.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE'
-                );
-                
-                if (hasCachedSovereignLineage) {
-                    // Cached tags have sovereign_lineage - don't update UI, preserve user's edits
-                    shouldUpdateUI = false;
-                    console.log('✅ Skipping UI update - cached tags have sovereign_lineage (preserving user edits)');
-                } else {
-                    // No sovereign_lineage in cache - check if fresh tags have new lineage data
-                    let lineageChanged = false;
-                    for (let i = 0; i < tags.length; i++) {
-                        const freshTag = tags[i];
-                        const cachedTag = originalCachedTags[i];
-                        const freshLineage = freshTag.sovereign_lineage || freshTag.canonical_lineage || freshTag.currentLineage || freshTag.Lineage;
-                        const cachedLineage = cachedTag.sovereign_lineage || cachedTag.canonical_lineage || cachedTag.currentLineage || cachedTag.Lineage;
-                        if (freshLineage && cachedLineage && String(freshLineage).trim().toUpperCase() !== String(cachedLineage).trim().toUpperCase()) {
-                            lineageChanged = true;
-                            break;
-                        }
-                    }
-                    shouldUpdateUI = lineageChanged;
-                }
-            }
-            
-            if (shouldUpdateUI) {
-                // Update available tags - _updateAvailableTags clears container and re-renders everything
-                this._updateAvailableTags(tags);
-                
-                // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
-                if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
-                    this._waitForTagsToAppear();
-                }
-            } else {
-                // Cache was used and no significant changes - just update state silently
-                // This prevents UI flicker while keeping data fresh
-                this.state.tags = [...tags];
-                this.state.originalTags = [...tags];
-                console.log(`✅ Background refresh complete: ${tags.length} tags (UI unchanged - preserving cached lineage)`);
-                
-                // CRITICAL FIX: Still wait for tags to appear even if cache was used
-                if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
-                    this._waitForTagsToAppear();
-                }
-            }
+            // Always update available tags - _updateAvailableTags clears container and re-renders everything
+            // This ensures lineage dropdowns reflect the database values from the normalized tags
+            this._updateAvailableTags(tags);
             
             // CRITICAL: ALWAYS update selected tags after loading tags to ensure they have database lineage
             // This is essential because selected tags dropdowns need to show database lineage, not Excel lineage
@@ -11032,11 +10104,6 @@ const TagManager = {
                 this._updateAvailableTags(tags);
                 this._restoreAvailableScrollPosition(savedScroll);
                 
-                // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
-                if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
-                    this._waitForTagsToAppear();
-                }
-                
                 // Update tag counts
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
@@ -11052,12 +10119,6 @@ const TagManager = {
             // Update the UI with new tags
             this._updateAvailableTags(tags);
             this._restoreAvailableScrollPosition(savedScroll);
-            
-            // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
-            // This keeps the loading icon visible until Excel is fully loaded and tags are in the DOM
-            if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
-                this._waitForTagsToAppear();
-            }
             
             // Update tag counts
             this.updateTagCount('available', tags.length);
@@ -11171,11 +10232,8 @@ const TagManager = {
                             <p class="mb-3">${isProcessingError 
                                 ? 'The file is still being processed. Please wait a moment and try again, or refresh the page.' 
                                 : 'There was a problem loading the product tags. This can happen if the database is temporarily unavailable or the connection timed out.'}</p>
-                            <button class="btn btn-primary me-2" onclick="TagManager.retryLoadTags()">
+                            <button class="btn btn-primary" onclick="TagManager.retryLoadTags()">
                                 <i class="fas fa-redo"></i> Retry Loading Tags
-                            </button>
-                            <button class="btn btn-secondary" onclick="TagManager.forceReloadTags()">
-                                <i class="fas fa-sync-alt"></i> Force Reload (Clear Cache)
                             </button>
                         </div>
                         <small class="text-muted d-block mt-2">Error: ${errorMessage}</small>
@@ -11185,152 +10243,41 @@ const TagManager = {
 
             return false;
         } finally {
-            // CRITICAL FIX: Don't clear _fetchingAvailableTags here - let _waitForTagsToAppear clear it
-            // when tags are actually rendered in the DOM. This keeps the loading icon visible until Excel is fully loaded.
-            // Only clear on error - successful loads will be cleared by _waitForTagsToAppear after rendering
-            
-            // Clear safety timeout since operation completed
-            if (this._fetchingTimeout) {
-                clearTimeout(this._fetchingTimeout);
-                this._fetchingTimeout = null;
-            }
-            
-            // CRITICAL FIX: Call _waitForTagsToAppear to ensure flag is cleared only after tags are rendered
-            // This keeps loading icon visible until tags are actually in the DOM
-            if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
-                this._waitForTagsToAppear();
-            } else {
-                // Fallback: If _waitForTagsToAppear doesn't exist, clear flag after a delay to allow rendering
-                setTimeout(() => {
-                    const availableTagsContainer = document.getElementById('availableTags');
-                    const tagItems = availableTagsContainer?.querySelectorAll('.tag-item');
-                    if (tagItems && tagItems.length > 0) {
-                        // Tags are rendered, safe to clear flag
-                        this._fetchingAvailableTags = false;
-                        console.log(`✅ Tags rendered (${tagItems.length} items) - clearing loading flag`);
-                    } else {
-                        // No tags yet, but clear flag anyway to prevent permanent blocking
-                        console.warn('⚠️ No tags found after fetch, clearing loading flag anyway');
-                        this._fetchingAvailableTags = false;
-                    }
-                }, 500); // Give tags time to render
-            }
+            // CRITICAL FIX: Always reset flag in finally block to ensure it's cleared even if error occurs
+            // This prevents the hangup issue where the flag gets stuck in true state
+            this._fetchingAvailableTags = false;
         }
     },
 
     async retryLoadTags() {
         verboseLog('User requested retry of tag loading');
-        // Force reset all flags to allow immediate retry
+        // Reset rate limiting to allow immediate retry
         this._lastFetchTime = 0;
-        this._fetchingAvailableTags = false;
-        this._checkingExistingData = false;
-        this._fetchingAvailableTagsStartTime = null;
-        this._checkingExistingDataStartTime = null;
-        if (this._fetchingTimeout) {
-            clearTimeout(this._fetchingTimeout);
-            this._fetchingTimeout = null;
-        }
         // Show loading indicator
         this.showActionSplash('Retrying tag loading...');
-        // Attempt to load tags again with force flag
+        // Attempt to load tags again
         try {
-            await this.fetchAndUpdateAvailableTags(true); // Pass true to force reload
+            await this.fetchAndUpdateAvailableTags();
         } catch (error) {
             console.error('Retry failed:', error);
-            this.hideActionSplash();
-        }
-    },
-    
-    // Force reload tags - bypasses all rate limiting and stuck flags
-    async forceReloadTags() {
-        console.log('🔄 FORCE RELOAD: Resetting all flags and forcing tag reload');
-        // Reset all flags and timeouts
-        this._lastFetchTime = 0;
-        this._fetchingAvailableTags = false;
-        this._checkingExistingData = false;
-        this._fetchingAvailableTagsStartTime = null;
-        this._checkingExistingDataStartTime = null;
-        if (this._fetchingTimeout) {
-            clearTimeout(this._fetchingTimeout);
-            this._fetchingTimeout = null;
-        }
-        // PERFORMANCE: Show cached data immediately, then refresh in background
-        // This provides instant feedback instead of waiting for full reload
-        const cachedTags = this.hydrateAvailableTagsFromCache();
-        if (cachedTags && cachedTags.length > 0) {
-            console.log(`⚡ INSTANT RELOAD: Showing ${cachedTags.length} cached tags immediately`);
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-            this._updateAvailableTags(cachedTags, null);
-            // Hide splash immediately since we have cached data
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-        } else {
-            // No cache - show loading indicator
-            this.showActionSplash('Reloading tags...');
-        }
-        
-        // Clear cache and fetch fresh data in background (non-blocking)
-        try {
-            const cacheKey = this.getAvailableTagsCacheKey();
-            if (window.sessionStorage) {
-                sessionStorage.removeItem(cacheKey);
-            }
-        } catch (e) {
-            console.warn('Failed to clear cache:', e);
-        }
-        
-        // Fetch fresh data in background (don't await - non-blocking)
-        try {
-            await this.fetchAndUpdateAvailableTags(true); // Pass true to force reload
-        } catch (error) {
-            console.error('Background reload failed:', error);
-            // Don't hide splash or throw - cached data is already shown
         }
     },
     
     _normalizeLineageFields(tag) {
         try {
-            // CRITICAL: Use EXACT same lineage priority as docx generation
-            // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
-            // Only use Excel lineage if product is brand new (not in database)
+            // CRITICAL: Always prioritize canonical_lineage/currentLineage (from database) as source of truth
+            // If database lineage exists, use it exclusively - don't fall back to Excel Lineage
             let lin;
             let fromDatabase = false;
             
-               // EXACT same priority as docx generation (tag_generator.py line 909):
-               // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-               // CRITICAL FIX: Treat 'NONE' as empty/null (same as backend)
-               const cleanLineageValue = (val) => {
-                   if (!val) return null;
-                   const cleaned = String(val).trim().toUpperCase();
-                   if (cleaned === '' || cleaned === 'NONE' || cleaned === 'NULL' || cleaned === 'NAN') {
-                       return null;
-                   }
-                   return cleaned;
-               };
-               
-               const sovereignClean = cleanLineageValue(tag.sovereign_lineage);
-               if (sovereignClean) {
-                   // Product-level sovereign_lineage (user changes) - highest priority
-                   lin = sovereignClean;
-                   fromDatabase = true;
-               } else if (tag.canonical_lineage || tag.currentLineage) {
-                   // Strain-level canonical_lineage or currentLineage - database lineage
-                   const canonicalClean = cleanLineageValue(tag.canonical_lineage || tag.currentLineage);
-                   if (canonicalClean) {
-                       lin = canonicalClean;
-                       fromDatabase = true;
-                   } else {
-                       // No database lineage - use Excel Lineage only for brand new products
-                       lin = cleanLineageValue(tag.Lineage || tag.lineage) || '';
-                       // Don't mark as fromDatabase - this is Excel lineage for new products
-                   }
-               } else {
-                   // No database lineage - use Excel Lineage only for brand new products
-                   lin = cleanLineageValue(tag.Lineage || tag.lineage) || '';
-                   // Don't mark as fromDatabase - this is Excel lineage for new products
-               }
+            if (tag.canonical_lineage || tag.currentLineage) {
+                // Database lineage exists - use it (this is the source of truth)
+                lin = (tag.canonical_lineage || tag.currentLineage || '').toString().trim();
+                fromDatabase = true;
+            } else {
+                // No database lineage - fall back to other fields only if database lineage is missing
+                lin = (tag.Lineage || tag.lineage || '').toString().trim();
+            }
             
             if (lin) {
                 const normalized = lin.toUpperCase();
@@ -11338,18 +10285,14 @@ const TagManager = {
                 // This ensures UI always shows database lineage, not Excel lineage
                 if (fromDatabase) {
                     // Database lineage is source of truth - set ALL fields to database value
-                    // Preserve sovereign_lineage if it exists (highest priority from docx generation)
-                    if (tag.sovereign_lineage) {
-                        tag.sovereign_lineage = normalized;
-                    }
                     tag.canonical_lineage = normalized;
                     tag.currentLineage = normalized;
                     tag.Lineage = normalized;
                     tag.lineage = normalized;
                     tag['Lineage*'] = normalized;
                 } else {
-                    // No database lineage - normalize Excel fields only (brand new product)
-                    // Don't set canonical_lineage/currentLineage/sovereign_lineage (they should come from database)
+                    // No database lineage - normalize all fields to the same value
+                    // But don't set canonical_lineage/currentLineage (they should come from database)
                     tag.Lineage = normalized;
                     tag.lineage = normalized;
                     tag['Lineage*'] = normalized;
@@ -11395,27 +10338,19 @@ const TagManager = {
             this._cachedFilterOptionsHash = null;
             this._cachedFilterOptionsTagsLength = null;
             
-            // CRITICAL FIX: Preserve selected tags during upload without validation
             const currentSelectedTags = [...this.state.persistentSelectedTags];
-
-            // Only clear and revalidate if NOT during upload
-            if (!this._isUploadInProgress) {
-                this.state.persistentSelectedTags = [];
-                this.state._selectedTagsSet = new Set(); // PERFORMANCE: Reset Set when clearing tags
-                this.state.selectedTags = new Set();
-
-                if (currentSelectedTags.length > 0) {
-                    const tagNameSet = new Set(tags.map(t => t['Product Name*']));
-                    for (const tagName of currentSelectedTags) {
-                        if (tagNameSet.has(tagName)) {
-                            this.state.persistentSelectedTags.push(tagName);
-                            this.state.selectedTags.add(tagName);
-                        }
+            this.state.persistentSelectedTags = [];
+            this.state._selectedTagsSet = new Set(); // PERFORMANCE: Reset Set when clearing tags
+            this.state.selectedTags = new Set();
+            
+            if (currentSelectedTags.length > 0) {
+                const tagNameSet = new Set(tags.map(t => t['Product Name*']));
+                for (const tagName of currentSelectedTags) {
+                    if (tagNameSet.has(tagName)) {
+                        this.state.persistentSelectedTags.push(tagName);
+                        this.state.selectedTags.add(tagName);
                     }
                 }
-            } else {
-                // During upload, preserve ALL selected tags without validation
-                verboseLog('💾 Preserving selected tags during upload without validation');
             }
             
             this.validateSelectedTags();
@@ -11440,8 +10375,6 @@ const TagManager = {
 
     async fetchAndUpdateSelectedTags() {
         try {
-            console.log('🔄 fetchAndUpdateSelectedTags called');
-            console.log('📍 Current selected tags count:', this.state.persistentSelectedTags.length);
             verboseLog('Fetching selected tags...');
             
             // CRITICAL FIX: Prevent fetching if we just had a recent selection (within last 10 seconds)
@@ -11589,15 +10522,26 @@ const TagManager = {
         const retryDelay = 200; // Reduced to 200ms for faster response
         
         try {
-            // CRITICAL FIX: Always fetch filter options from backend API to ensure all vendors are included
-            // Building from this.state.tags can be incomplete if it only contains selected tags after refresh
-            // The backend API uses the full DataFrame, so it always has all available vendors
-            // PERFORMANCE: Only use cached tags as fallback if backend fetch fails
-            const useCachedTags = false; // Disable cached tag building to fix vendor filter issue
-            
-            if (useCachedTags && this.state.tags && this.state.tags.length > 0) {
+            // PERFORMANCE: Try to build filters from cached tags first (instant)
+            if (this.state.tags && this.state.tags.length > 0) {
                 verboseLog('⚡ Building filters from cached tags for instant population');
                 this.buildFilterOptionsFromTags(this.state.tags);
+                // Still fetch from backend in background for accuracy, but don't wait
+                fetch(`/api/filter-options?t=${Date.now()}`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                }).then(response => {
+                    if (response.ok) {
+                        return response.json();
+                    }
+                }).then(filterOptions => {
+                    if (filterOptions && !filterOptions.error) {
+                        // Update with backend data (more accurate)
+                        this.updateFilters(filterOptions, true);
+                    }
+                }).catch(err => {
+                    verboseLog('Background filter fetch failed (non-critical):', err);
+                });
                 return; // Return immediately after building from cache
             }
             
@@ -11952,31 +10896,16 @@ const TagManager = {
 
             // CRITICAL FIX: Restore filters from localStorage IMMEDIATELY before API call
             // This prevents filters from disappearing on page refresh
-            // CRITICAL FIX: Clear vendor filter on page load so users see all tags by default
             const savedFilters = this.loadFiltersFromStorage();
             if (savedFilters && Object.keys(savedFilters).length > 0) {
                 console.log('⚡ Restoring filters from localStorage:', savedFilters);
-                // CRITICAL FIX: Always clear vendor filter on page load - remove it from saved filters
-                if (savedFilters.vendor) {
-                    console.log('🔄 Clearing vendor filter on page load to show all tags');
-                    delete savedFilters.vendor; // Remove vendor from saved filters
-                    // Save cleared filters back to localStorage (without vendor)
-                    this.saveFiltersToStorage();
-                }
                 // Apply saved filters to dropdowns immediately
                 Object.entries(savedFilters).forEach(([key, value]) => {
                     const filterElement = document.getElementById(`${key}Filter`);
-                    if (filterElement && value && value !== 'All') {
+                    if (filterElement && value) {
                         filterElement.value = value;
                     }
                 });
-            }
-            
-            // CRITICAL FIX: Always ensure vendor filter is empty on page load, regardless of saved filters
-            const vendorFilterElement = document.getElementById('vendorFilter');
-            if (vendorFilterElement) {
-                vendorFilterElement.value = '';
-                console.log('✅ Vendor filter cleared on page load');
             }
 
             // CRITICAL FIX: Only fetch filter options from API if we didn't populate from cache
@@ -12063,7 +10992,6 @@ const TagManager = {
         });
         
         // GUARANTEED FIX: Restore filters from localStorage on page load
-        // CRITICAL FIX: Clear vendor filter on page load so users see all tags by default
         const savedFilters = this.loadFiltersFromStorage();
         this.state.filters = savedFilters || {
             vendor: 'All',
@@ -12072,13 +11000,6 @@ const TagManager = {
             lineage: 'All',
             weight: 'All'
         };
-        
-        // CRITICAL FIX: Clear vendor filter on page load to show all tags
-        // Users can still select a vendor filter if they want, but by default show all
-        if (this.state.filters.vendor && this.state.filters.vendor !== 'All') {
-            console.log('🔄 Clearing vendor filter on page load to show all tags');
-            this.state.filters.vendor = 'All';
-        }
         
         // Set each filter dropdown to saved value or 'All' (or '')
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
@@ -12096,20 +11017,13 @@ const TagManager = {
             if (el) {
                 const filterKey = filterMap[id];
                 const savedValue = this.state.filters[filterKey];
-                // CRITICAL FIX: Always set vendor filter to empty/All on page load
-                if (filterKey === 'vendor') {
-                    el.value = '';
-                } else if (savedValue && savedValue !== 'All') {
+                if (savedValue && savedValue !== 'All') {
                     el.value = savedValue;
                 } else {
                     el.value = '';
                 }
             }
         });
-        
-        // CRITICAL FIX: Save cleared vendor filter to localStorage
-        this.saveFiltersToStorage();
-        
         // Don't apply filters immediately - let checkForExistingData handle it
         // this.applyFilters();
         
@@ -12126,12 +11040,6 @@ const TagManager = {
         
         // Add search event listeners
         this.setupSearchEventListeners();
-        
-        // Also set up search listeners after a short delay as backup (in case search inputs aren't ready yet)
-        setTimeout(() => {
-            verboseLog('=== BACKUP: RE-CHECKING SEARCH EVENT LISTENERS ===');
-            this.setupSearchEventListeners();
-        }, 100);
         
         // Skip PC compatibility for Mac-like speed
         // this.initializePCCompatibility();
@@ -12213,7 +11121,6 @@ const TagManager = {
     // Continue initialization without showing splash (for cache hits)
     _continueInitWithoutSplash() {
         // GUARANTEED FIX: Restore filters from localStorage on page load
-        // CRITICAL FIX: Clear vendor filter on page load so users see all tags by default
         const savedFilters = this.loadFiltersFromStorage();
         this.state.filters = savedFilters || {
             vendor: 'All',
@@ -12222,13 +11129,6 @@ const TagManager = {
             lineage: 'All',
             weight: 'All'
         };
-        
-        // CRITICAL FIX: Clear vendor filter on page load to show all tags
-        // Users can still select a vendor filter if they want, but by default show all
-        if (this.state.filters.vendor && this.state.filters.vendor !== 'All') {
-            console.log('🔄 Clearing vendor filter on page load to show all tags');
-            this.state.filters.vendor = 'All';
-        }
         
         // Set each filter dropdown to saved value or 'All' (or '')
         const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
@@ -12246,19 +11146,13 @@ const TagManager = {
             if (el) {
                 const filterKey = filterMap[id];
                 const savedValue = this.state.filters[filterKey];
-                // CRITICAL FIX: Always set vendor filter to empty/All on page load
-                if (filterKey === 'vendor') {
-                    el.value = '';
-                } else if (savedValue && savedValue !== 'All') {
+                if (savedValue && savedValue !== 'All') {
                     el.value = savedValue;
                 } else {
                     el.value = '';
                 }
             }
         });
-        
-        // CRITICAL FIX: Save cleared vendor filter to localStorage
-        this.saveFiltersToStorage();
         
         // Add filter change event listeners immediately
         verboseLog('=== SETTING UP FILTER EVENT LISTENERS ===');
@@ -12369,67 +11263,8 @@ const TagManager = {
         }
     },
 
-    // Helper function to show loading state or upload prompt based on fetch status
-    _showLoadingOrUploadPrompt(container) {
-        if (!container) return;
-        
-        // CRITICAL FIX: Never show upload prompt if tags exist in state
-        const hasTagsInState = this.state.tags && this.state.tags.length > 0;
-        if (hasTagsInState) {
-            verboseLog('Tags exist in state, skipping upload prompt');
-            return false; // Don't show anything, tags should be displayed
-        }
-        
-        // Check if tags are being fetched - show loading instead of upload prompt
-        const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData;
-        
-        if (isFetchingTags) {
-            // Show loading indicator while tags are being fetched
-            container.innerHTML = `
-                <div style="
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    min-height: 400px;
-                    padding: 3rem 2rem;
-                ">
-                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin-bottom: 1.5rem;">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <h5 style="color: #ffffff; margin-bottom: 0.5rem;">Loading tags...</h5>
-                    <p style="color: rgba(255, 255, 255, 0.7); font-size: 0.95rem;">Please wait while we load your product data</p>
-                </div>
-            `;
-            return true; // Indicates loading state was shown
-        }
-        
-        // No fetch in progress, show upload prompt
-        container.innerHTML = `
-            <div class="text-center py-5">
-                <div class="upload-prompt">
-                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                    <h5 class="text-muted">No product data loaded</h5>
-                    <p class="text-muted">Upload an Excel file to get started</p>
-                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                        <i class="fas fa-upload me-2"></i>Upload Excel File
-                    </button>
-                </div>
-            </div>
-        `;
-        return false; // Indicates upload prompt was shown
-    },
-
     // Hide loading indicator
     hideLoadingIndicator() {
-        // CRITICAL FIX: Reset fetching flags when hiding loading indicator
-        // This prevents stuck state after clear/undo operations
-        if (!this._fetchingAvailableTags && !this._checkingExistingData) {
-            // Only reset if we're not actively fetching - don't interrupt in-progress operations
-            this._fetchingAvailableTags = false;
-            this._checkingExistingData = false;
-        }
-        
         const availableTagsContainer = document.getElementById('availableTags');
         if (availableTagsContainer) {
             // Check if we have any tags loaded
@@ -12438,8 +11273,19 @@ const TagManager = {
                 return;
             }
             
-            // Use helper function to show appropriate state
-            this._showLoadingOrUploadPrompt(availableTagsContainer);
+            // No data loaded, show upload prompt
+            availableTagsContainer.innerHTML = `
+                <div class="text-center py-5">
+                    <div class="upload-prompt">
+                        <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">No product data loaded</h5>
+                        <p class="text-muted">Upload an Excel file to get started</p>
+                        <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                            <i class="fas fa-upload me-2"></i>Upload Excel File
+                        </button>
+                    </div>
+                </div>
+            `;
         }
     },
 
@@ -12578,12 +11424,11 @@ const TagManager = {
                     // Update file info
                     const fileInfoText = document.getElementById('fileInfoText');
                     if (fileInfoText) {
-                        // Prefer full file path if available
-                        fileInfoText.textContent = fileData.file_path || fileData.filename;
+                        fileInfoText.textContent = fileData.filename;
                     }
                     const currentFileInfo = document.getElementById('currentFileInfo');
                     if (currentFileInfo) {
-                        currentFileInfo.textContent = fileData.file_path || fileData.filename;
+                        currentFileInfo.textContent = fileData.filename;
                     }
                     verboseLog(`File info updated: ${fileData.filename} (${fileData.row_count || 0} rows)`);
                 }
@@ -12664,17 +11509,6 @@ const TagManager = {
         // PERFORMANCE FIX: Try cache first for instant load
         const cachedTags = this.loadAvailableTagsFromCache();
         if (cachedTags && cachedTags.length > 0) {
-            // CRITICAL FIX: Preserve vendor data when loading from cache
-            // This ensures vendor is available when tags are organized
-            cachedTags.forEach(tag => {
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
-                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
-                    // Preserve vendor in all possible field names for extraction
-                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
-                    if (!tag['Vendor']) tag['Vendor'] = vendor;
-                    if (!tag.vendor) tag.vendor = vendor;
-                }
-            });
             console.log(`⚡ INSTANT CACHE LOAD: ${cachedTags.length} tags available`);
             // Render cached tags IMMEDIATELY for instant display
             this.state.tags = [...cachedTags];
@@ -12697,13 +11531,6 @@ const TagManager = {
 
             // Continue loading fresh data in background (non-blocking)
             console.log('📡 Background: Fetching selected tags and filters');
-            
-            // PERFORMANCE FIX: Check if we need to refresh tags in background for fresh lineage
-            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-            const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
-            const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
-            const needsBackgroundRefresh = shouldLoadFromDatabase || (lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000);
-            
             // CRITICAL FIX: Fetch filters AFTER selected tags to ensure data is ready
             Promise.allSettled([
                 this.fetchAndUpdateSelectedTags()
@@ -12715,15 +11542,6 @@ const TagManager = {
                 return this.fetchAndPopulateFilters();
             }).then(() => {
                 console.log('✅ Background: Selected tags and filters loaded');
-                
-                // PERFORMANCE FIX: Refresh tags in background if needed for fresh lineage
-                // This ensures fast page loads while still getting fresh database lineage
-                if (needsBackgroundRefresh) {
-                    console.log('🔄 Background: Refreshing tags for fresh database lineage...');
-                    this.fetchAndUpdateAvailableTags(true).catch(err => {
-                        console.warn('Background tag refresh error (non-critical):', err);
-                    });
-                }
             }).catch(err => {
                 console.warn('Background load error (non-critical):', err);
             });
@@ -12784,11 +11602,11 @@ const TagManager = {
         }, 60000); // 60 second safety net - increased for large files
 
         try {
-            // CRITICAL FIX: Load WITH lineage enrichment to ensure dropdowns show correct values
-            // Previously used fast_load=1 which skipped lineage, causing empty dropdowns when filtering by product type
-            // Removing fast_load ensures all tags have database lineage from the start
+            // PERFORMANCE FIX: Use fast_load=1 for initial loads to skip expensive lineage alignment
+            // This dramatically speeds up initial tag loading
+            // CRITICAL FIX: Add timeout to prevent hanging - if API takes too long, complete initialization anyway
             const response = await Promise.race([
-                fetch('/api/initial-data'),
+                fetch('/api/initial-data?fast_load=1'),
                 timeoutPromise
             ]).catch(err => {
                 // If fetch fails or times out, complete initialization anyway
@@ -12801,10 +11619,21 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                // Show loading or upload prompt based on fetch status
+                // Show upload prompt
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
-                    this._showLoadingOrUploadPrompt(availableTagsContainer);
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
+                        </div>
+                    `;
                 }
                 this.initializeEmptyState();
                 this._checkingExistingData = false;
@@ -12815,75 +11644,9 @@ const TagManager = {
             if (response.ok) {
                 const data = await response.json();
                 verboseLog('Initial data response:', data);
-                // CRITICAL: Check data_loaded flag first - if false, show loading splash while checking
-                // This prevents showing misleading upload prompt when tags are loading asynchronously
+                // CRITICAL: Check data_loaded flag first - if false, show upload prompt even if success
                 if (data.success && data.data_loaded === false) {
-                    verboseLog('No data loaded (data_loaded=false), checking if tags are loading...');
-                    
-                    // CRITICAL FIX: Show loading splash instead of upload prompt while checking
-                    const availableTagsContainer = document.getElementById('availableTags');
-                    if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div class="text-center py-5">
-                                <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                                    <span class="visually-hidden">Loading...</span>
-                                </div>
-                                <p class="mt-3 text-white">Loading tags...</p>
-                            </div>
-                        `;
-                    }
-                    
-                    // Show action splash to indicate loading
-                    if (this.showActionSplash) {
-                        this.showActionSplash('Loading tags...');
-                    }
-                    
-                    // CRITICAL FIX: Wait briefly to allow async tag loading to complete
-                    // This prevents showing upload prompt when tags are loading in background
-                    await new Promise(resolve => setTimeout(resolve, 1500)); // Wait 1.5 seconds
-                    
-                    // Check again if tags have loaded in the meantime
-                    if (this.state.tags && this.state.tags.length > 0) {
-                        verboseLog('Tags loaded during wait, skipping upload prompt');
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                        this._checkingExistingData = false;
-                        return;
-                    }
-                    
-                    // Also check if fetchAndUpdateAvailableTags is in progress
-                    if (this._fetchingAvailableTags) {
-                        verboseLog('Tag fetch in progress, waiting for completion...');
-                        // Update loading message
-                        if (availableTagsContainer) {
-                            availableTagsContainer.innerHTML = `
-                                <div class="text-center py-5">
-                                    <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                                        <span class="visually-hidden">Loading...</span>
-                                    </div>
-                                    <p class="mt-3 text-white">Loading tags from server...</p>
-                                </div>
-                            `;
-                        }
-                        // Wait up to 3 seconds for fetch to complete
-                        let waitCount = 0;
-                        while (this._fetchingAvailableTags && waitCount < 30) {
-                            await new Promise(resolve => setTimeout(resolve, 100));
-                            waitCount++;
-                        }
-                        // Check again after waiting
-                        if (this.state.tags && this.state.tags.length > 0) {
-                            verboseLog('Tags loaded after waiting for fetch, skipping upload prompt');
-                            if (this.hideActionSplash) {
-                                this.hideActionSplash();
-                            }
-                            this._checkingExistingData = false;
-                            return;
-                        }
-                    }
-                    
-                    verboseLog('No data loaded after wait period, showing upload prompt');
+                    verboseLog('No data loaded (data_loaded=false), showing upload prompt');
                     // Complete splash loading when no data
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
@@ -12894,14 +11657,21 @@ const TagManager = {
                         this.hideActionSplash();
                     }
                     
-                    // Show loading or upload prompt based on fetch status
+                    // Show upload prompt in Current Inventory when no file/data
+                    const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
-                        const showingLoading = this._showLoadingOrUploadPrompt(availableTagsContainer);
-                        // If showing loading, don't initialize empty state yet - wait for tags
-                        if (showingLoading) {
-                            // Continue waiting for tags to load
-                            return;
-                        }
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-5">
+                                <div class="upload-prompt">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No product data loaded</h5>
+                                    <p class="text-muted">Upload an Excel file to get started</p>
+                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                        <i class="fas fa-upload me-2"></i>Upload Excel File
+                                    </button>
+                                </div>
+                            </div>
+                        `;
                     }
                     
                     this.initializeEmptyState();
@@ -13019,15 +11789,21 @@ const TagManager = {
                         this.hideActionSplash();
                     }
                     
-                    // Show loading or upload prompt based on fetch status
+                    // Show upload prompt in Current Inventory when no file/data
                     const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
-                        const showingLoading = this._showLoadingOrUploadPrompt(availableTagsContainer);
-                        // If showing loading, don't initialize empty state yet - wait for tags
-                        if (showingLoading) {
-                            // Continue waiting for tags to load
-                            return;
-                        }
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-5">
+                                <div class="upload-prompt">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No product data loaded</h5>
+                                    <p class="text-muted">Upload an Excel file to get started</p>
+                                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                        <i class="fas fa-upload me-2"></i>Upload Excel File
+                                    </button>
+                                </div>
+                            </div>
+                        `;
                     }
                     
                     // FIXED: Initialize empty state instead of loading test data
@@ -13048,10 +11824,21 @@ const TagManager = {
                     this.hideActionSplash();
                 }
                 
-                // Show loading or upload prompt based on fetch status
+                // Show upload prompt in Current Inventory on error (likely no file)
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
-                    this._showLoadingOrUploadPrompt(availableTagsContainer);
+                    availableTagsContainer.innerHTML = `
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
+                        </div>
+                    `;
                 }
                 
                 // FIXED: Initialize empty state instead of loading test data
@@ -13281,34 +12068,6 @@ const TagManager = {
         const checkedFromUI = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"].tag-checkbox:checked')).map(cb => cb.value);
         if (checkedFromUI.length > 0) {
             this.state.persistentSelectedTags = checkedFromUI;
-        }
-
-        // CRITICAL FIX: Wait for any pending lineage updates to complete before generating
-        // This ensures lineage changes made right before clicking generate are saved
-        if (this._lineageUpdateTimeout || this._lineageUpdateProcessing) {
-            console.log('⏳ Waiting for pending lineage updates to complete before generating...');
-            const generateBtn = document.getElementById('generateBtn');
-            if (generateBtn) {
-                generateBtn.disabled = true;
-                generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving lineage...';
-            }
-
-            // Wait for debounce timeout to trigger processing
-            if (this._lineageUpdateTimeout) {
-                await new Promise(resolve => setTimeout(resolve, 600)); // Wait for 500ms debounce + 100ms buffer
-            }
-
-            // Wait for processing to complete (max 10 seconds)
-            const maxWait = 10000;
-            const startWait = Date.now();
-            while (this._lineageUpdateProcessing && (Date.now() - startWait) < maxWait) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-
-            console.log('✅ Lineage updates complete, proceeding with generation');
-            if (generateBtn) {
-                generateBtn.innerHTML = 'Generate Tags';
-            }
         }
 
         console.time('debouncedGenerate');
@@ -14026,11 +12785,6 @@ const TagManager = {
                 checkbox.click();
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
-                    // CRITICAL FIX: Re-enable checkbox and reattach handlers after undo
-                    this._ensureCheckboxesEnabled();
-                    if (typeof this._reinitializeCheckboxHandlers === 'function') {
-                        this._reinitializeCheckboxHandlers();
-                    }
                 }, 100);
 
                 if (window.Toast) {
@@ -14133,11 +12887,6 @@ const TagManager = {
                 checkbox.click();
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
-                    // CRITICAL FIX: Re-enable checkbox and reattach handlers after redo
-                    this._ensureCheckboxesEnabled();
-                    if (typeof this._reinitializeCheckboxHandlers === 'function') {
-                        this._reinitializeCheckboxHandlers();
-                    }
                 }, 100);
 
                 if (window.Toast) {
@@ -14162,16 +12911,12 @@ const TagManager = {
     },
 
     async clearSelected() {
-        // CRITICAL DEBUG: Log who's calling clearSelected
-        console.log('🗑️ clearSelected() called - USER INTENTIONALLY CLEARING TAGS');
-        console.log('📍 Call stack:', new Error().stack);
-
         // Prevent multiple simultaneous calls
         if (this.state.isClearing) {
             verboseLog('⚠️ Clear operation already in progress, ignoring duplicate call');
             return;
         }
-
+        
         this.state.isClearing = true;
         this.clearAvailableTagsCache();
         
@@ -14357,45 +13102,15 @@ const TagManager = {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     waitCount++;
                 }
-
-                // CRITICAL FIX: If still fetching after timeout, force reset the flag
-                if (this._fetchingAvailableTags) {
-                    console.warn('⚠️ Force resetting _fetchingAvailableTags flag after clear/reset timeout');
-                    this._fetchingAvailableTags = false;
-                    this._fetchingAvailableTagsStartTime = null;
-                }
-
-                // CRITICAL FIX: Clear rate limiting to allow immediate fetch after clear/reset
-                this._lastFetchTime = 0;
-
+                
                 // Now refresh tags
                 verboseLog('Refreshing available tags with full Excel data...');
                 if (this.fetchAndUpdateAvailableTags) {
                     try {
-                        // CRITICAL FIX: Add timeout to prevent infinite hang
-                        const fetchPromise = this.fetchAndUpdateAvailableTags();
-                        const timeoutPromise = new Promise((_, reject) =>
-                            setTimeout(() => {
-                                // Force reset the flag on timeout
-                                this._fetchingAvailableTags = false;
-                                this._fetchingAvailableTagsStartTime = null;
-                                reject(new Error('Tag refresh timeout after clear/reset'));
-                            }, 15000)
-                        );
-
-                        await Promise.race([fetchPromise, timeoutPromise]);
-                        console.log('✅ Tags refreshed successfully after clear/reset');
+                        await this.fetchAndUpdateAvailableTags();
                     } catch (fetchError) {
                         console.error('Error refreshing available tags:', fetchError);
-                        // CRITICAL FIX: Force reset ALL flags to ensure app doesn't stay stuck
-                        this._fetchingAvailableTags = false;
-                        this._fetchingAvailableTagsStartTime = null;
-                        this.state.isClearing = false;
-
-                        // CRITICAL FIX: Show error message to user if refresh fails
-                        if (window.Toast && window.Toast.show) {
-                            window.Toast.show('warning', 'Tags may not have refreshed. Try reloading the page.', { duration: 3000 });
-                        }
+                        this.state.isClearing = false; // Ensure flag is reset
                     }
                 }
             };
@@ -14646,37 +13361,6 @@ const TagManager = {
 
     // Action splash screen for clear/undo operations
     showActionSplash(message) {
-        // CRITICAL FIX: Don't show loading splash if store selection modal is visible or store not confirmed
-        const storeModal = document.getElementById('storeSelectionModal');
-        
-        // Check if store modal is visible using multiple methods
-        let isStoreModalVisible = false;
-        if (storeModal) {
-            // Check Bootstrap modal state
-            if (typeof bootstrap !== 'undefined') {
-                const modalInstance = bootstrap.Modal.getInstance(storeModal);
-                if (modalInstance && modalInstance._isShown) {
-                    isStoreModalVisible = true;
-                }
-            }
-            // Fallback: check DOM classes and styles
-            if (!isStoreModalVisible) {
-                isStoreModalVisible = storeModal.classList.contains('show') || 
-                                     (storeModal.style.display !== 'none' && storeModal.offsetParent !== null);
-            }
-        }
-        
-        // Also check if store is not confirmed
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
-        // CRITICAL: Also check if we're in the middle of store selection process
-        const isCheckingStore = window.checkingStoreRequired === true;
-        
-        if (isStoreModalVisible || !storeConfirmed || isCheckingStore) {
-            verboseLog('Store modal visible or not confirmed - skipping action splash:', message);
-            return;
-        }
         // Create splash if it doesn't exist
         let splash = document.getElementById('actionSplash');
         if (!splash) {
@@ -15027,12 +13711,6 @@ const TagManager = {
         // CRITICAL: First sync all available tag checkboxes with persistentSelectedTags state
         const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
         availableCheckboxes.forEach(checkbox => {
-            // CRITICAL FIX: Ensure checkbox is enabled and clickable before syncing state
-            checkbox.disabled = false;
-            checkbox.style.pointerEvents = 'auto';
-            checkbox.removeAttribute('data-drag-disabled');
-            checkbox.removeAttribute('data-reordering');
-            
             const tagName = checkbox.value;
             const shouldBeChecked = this.state.persistentSelectedTags.includes(tagName);
             if (checkbox.checked !== shouldBeChecked) {
@@ -15241,13 +13919,10 @@ const TagManager = {
             // CRITICAL: Clear cache but PRESERVE selected tags during upload
             this._lastUploadTime = Date.now();
             this.state.hydratedFromCache = false; // Force fresh data load
-
+            
             // CRITICAL: Save selected tags before clearing cache
             const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
             verboseLog('💾 Preserving selected tags before upload:', savedSelectedTags);
-
-            // CRITICAL FIX: Set flag to prevent validation from clearing tags during upload
-            this._isUploadInProgress = true;
             
             this.state.tags = []; // Clear in-memory tags
             this.state.originalTags = []; // Clear original tags
@@ -15362,8 +14037,7 @@ const TagManager = {
             // Update file info immediately
             const fileInfoText = document.getElementById('fileInfoText');
             if (fileInfoText) {
-                // Prefer server-returned full path when available
-                fileInfoText.textContent = uploadData?.file_path || file.name;
+                fileInfoText.textContent = file.name;
             }
             
             // CRITICAL FIX: Save filename to sessionStorage for cache key generation
@@ -15393,11 +14067,6 @@ const TagManager = {
                 try {
                     await this.fetchAndUpdateAvailableTags();
                     tagsLoaded = true;
-
-                    // CRITICAL FIX: Clear upload flag now that tags are loaded
-                    this._isUploadInProgress = false;
-                    verboseLog('✅ Upload complete - tag validation re-enabled');
-
                     verboseLog('✅ Tags loaded via standard fallback');
                 } catch (fallbackError) {
                     console.error('⚠️ Standard tag loading via fallback failed:', fallbackError);
@@ -15541,11 +14210,6 @@ const TagManager = {
                             }
 
                             tagsLoaded = true;
-
-                            // CRITICAL FIX: Clear upload flag now that tags are loaded
-                            this._isUploadInProgress = false;
-                            verboseLog('✅ Upload complete - tag validation re-enabled');
-
                             // Update upload UI to show completion
                             // Update file info text to show completion
                             const fileInfoElement = document.getElementById('fileInfoText');
@@ -15618,11 +14282,6 @@ const TagManager = {
                 try {
                     await this.fetchAndUpdateAvailableTags();
                     tagsLoaded = true;
-
-                    // CRITICAL FIX: Clear upload flag now that tags are loaded
-                    this._isUploadInProgress = false;
-                    verboseLog('✅ Upload complete - tag validation re-enabled');
-
                     verboseLog('✅ Tags loaded using standard method');
                 } catch (fallbackError) {
                     console.error('⚠️ Standard tag loading failed:', fallbackError);
@@ -15637,11 +14296,6 @@ const TagManager = {
             return; // Success!
         } catch (error) {
             console.error('⚡ Lightning upload error:', error);
-
-            // CRITICAL FIX: Clear upload flag on error
-            this._isUploadInProgress = false;
-            verboseLog('❌ Upload failed - tag validation re-enabled');
-
             // CRITICAL: Always hide splash on error
             this.hideExcelLoadingSplash();
             // Also hide action splash if it's showing
@@ -16285,84 +14939,48 @@ const TagManager = {
             };
         }
         
-        // CRITICAL FIX: Create debounced functions as instance properties so we can properly remove them
-        // Only create them once, reuse if they already exist
-        if (!this._debouncedAvailableSearch) {
-            this._debouncedAvailableSearch = (event) => {
-                if (this._searchDebounceTimers.available) {
-                    clearTimeout(this._searchDebounceTimers.available);
-                }
-                this._searchDebounceTimers.available = setTimeout(() => {
-                    this.handleAvailableTagsSearch(event);
-                }, 300); // 300ms debounce delay
-            };
-        }
+        // Debounced search handler for available tags
+        const debouncedAvailableSearch = (event) => {
+            if (this._searchDebounceTimers.available) {
+                clearTimeout(this._searchDebounceTimers.available);
+            }
+            this._searchDebounceTimers.available = setTimeout(() => {
+                this.handleAvailableTagsSearch(event);
+            }, 300); // 300ms debounce delay
+        };
         
-        if (!this._debouncedSelectedSearch) {
-            this._debouncedSelectedSearch = (event) => {
-                if (this._searchDebounceTimers.selected) {
-                    clearTimeout(this._searchDebounceTimers.selected);
-                }
-                this._searchDebounceTimers.selected = setTimeout(() => {
-                    this.handleSelectedTagsSearch(event);
-                }, 300); // 300ms debounce delay
-            };
-        }
-        
-        let foundCount = 0;
+        // Debounced search handler for selected tags
+        const debouncedSelectedSearch = (event) => {
+            if (this._searchDebounceTimers.selected) {
+                clearTimeout(this._searchDebounceTimers.selected);
+            }
+            this._searchDebounceTimers.selected = setTimeout(() => {
+                this.handleSelectedTagsSearch(event);
+            }, 300); // 300ms debounce delay
+        };
         
         // Add search event listeners for available tags
         const availableTagsSearch = document.getElementById('availableTagsSearch');
         if (availableTagsSearch) {
-            // Remove old listeners if they exist (using stored function reference)
-            if (this._boundAvailableSearch) {
-                availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
-            }
-            // Remove the debounced function if it was previously added
-            if (this._debouncedAvailableSearch) {
-                availableTagsSearch.removeEventListener('input', this._debouncedAvailableSearch);
-            }
-            
-            // Store bound function and add new listener
-            this._boundAvailableSearch = this._debouncedAvailableSearch;
-            availableTagsSearch.addEventListener('input', this._debouncedAvailableSearch);
-            foundCount++;
-            verboseLog('✅ Added debounced event listener to availableTagsSearch');
+            availableTagsSearch.removeEventListener('input', this._boundAvailableSearch);
+            availableTagsSearch.removeEventListener('input', debouncedAvailableSearch);
+            this._boundAvailableSearch = debouncedAvailableSearch;
+            availableTagsSearch.addEventListener('input', debouncedAvailableSearch);
+            verboseLog('Added debounced event listener to availableTagsSearch');
         } else {
-            console.warn('⚠️ Available tags search element not found');
+            console.warn('Available tags search element not found');
         }
         
         // Add search event listeners for selected tags
         const selectedTagsSearch = document.getElementById('selectedTagsSearch');
         if (selectedTagsSearch) {
-            // Remove old listeners if they exist (using stored function reference)
-            if (this._boundSelectedSearch) {
-                selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
-            }
-            // Remove the debounced function if it was previously added
-            if (this._debouncedSelectedSearch) {
-                selectedTagsSearch.removeEventListener('input', this._debouncedSelectedSearch);
-            }
-            
-            // Store bound function and add new listener
-            this._boundSelectedSearch = this._debouncedSelectedSearch;
-            selectedTagsSearch.addEventListener('input', this._debouncedSelectedSearch);
-            foundCount++;
-            verboseLog('✅ Added debounced event listener to selectedTagsSearch');
+            selectedTagsSearch.removeEventListener('input', this._boundSelectedSearch);
+            selectedTagsSearch.removeEventListener('input', debouncedSelectedSearch);
+            this._boundSelectedSearch = debouncedSelectedSearch;
+            selectedTagsSearch.addEventListener('input', debouncedSelectedSearch);
+            verboseLog('Added debounced event listener to selectedTagsSearch');
         } else {
-            console.warn('⚠️ Selected tags search element not found');
-        }
-        
-        if (foundCount === 0) {
-            console.error('❌ No search input elements found! Search will not work. Retrying in 500ms...');
-            setTimeout(() => {
-                console.log('🔄 Retrying search event listener setup...');
-                this.setupSearchEventListeners();
-            }, 500);
-        } else if (foundCount < 2) {
-            console.warn(`⚠️ Only ${foundCount}/2 search inputs found. Some search functionality may not work.`);
-        } else {
-            verboseLog(`✅ All ${foundCount} search event listeners attached successfully`);
+            console.warn('Selected tags search element not found');
         }
     },
 
@@ -16481,11 +15099,6 @@ const TagManager = {
         verboseLog('🔄 Clearing all filters...');
         
         try {
-            // CRITICAL FIX: Reset stuck flags that might prevent tag refresh
-            this._fetchingAvailableTags = false;
-            this._checkingExistingData = false;
-            verboseLog('✅ Reset fetching flags');
-            
             // CRITICAL FIX: Prevent infinite recursion - don't call performFullAppReset which calls this again
             // Instead, do the filter clearing directly
             
@@ -16606,17 +15219,11 @@ const TagManager = {
 
     // Clear all UI state when a new file is uploaded
     clearUIStateForNewFile(preserveFilters = false) {
-        // CRITICAL DEBUG: Log stack trace to track who's calling this
-        console.log('⚠️ clearUIStateForNewFile called, preserveFilters:', preserveFilters);
-        console.log('📍 Call stack:', new Error().stack);
-
         verboseLog('Clearing UI state for new file upload, preserveFilters:', preserveFilters);
-
+        
         // Clear persistent selected tags
-        console.log('🗑️ CLEARING SELECTED TAGS - count before clear:', this.state.persistentSelectedTags.length);
         this.state.persistentSelectedTags = [];
         this.state.selectedTags.clear();
-        console.log('🗑️ Selected tags cleared');
         
         // Clear tag displays
         const availableContainer = document.getElementById('availableTags');
@@ -16683,12 +15290,6 @@ const TagManager = {
             verboseLog('⏭️ Skipping validateSelectedTags - operation in progress');
             return;
         }
-
-        // CRITICAL FIX: Don't validate during file upload to prevent tag loss
-        if (this._isUploadInProgress) {
-            verboseLog('⏭️ Skipping validateSelectedTags - upload in progress, preserving selected tags');
-            return;
-        }
         
         // Add safeguard to prevent clearing tags that were just added via JSON matching
         const hasJsonMatchedTags = this.state.persistentSelectedTags.length > 0;
@@ -16749,11 +15350,8 @@ const TagManager = {
         // This prevents clearing when data is still loading
         if (invalidTags.length > 0 && invalidTags.length > this.state.persistentSelectedTags.length * 0.5) {
             // More than 50% invalid - likely a data mismatch, clean up
-            console.log('🗑️ validateSelectedTags - CLEARING TAGS due to >50% invalid');
-            console.log('📍 Invalid tags:', invalidTags);
-            console.log('📍 Call stack:', new Error().stack);
             verboseLog(`Cleaning up ${invalidTags.length} invalid tags (${(invalidTags.length / this.state.persistentSelectedTags.length * 100).toFixed(1)}% of selections)`);
-
+            
             // Remove invalid tags and update with corrected case
             this.state.persistentSelectedTags = [];
             correctedTags.forEach(tagName => {
@@ -17025,143 +15623,37 @@ const TagManager = {
 
     // CRITICAL FIX: Add init function that loads tags automatically
     async init() {
-        // CRITICAL FIX: Add safeguard timeout to ensure splash completes even if init hangs
-        // Declare at function level so it's accessible in all catch blocks
-        let splashTimeout = setTimeout(() => {
-            console.warn('⚠️ TagManager.init() taking too long - forcing splash to complete');
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-        }, 15000); // 15 second timeout
-        
         try {
             console.log('🚀 TagManager.init() called');
-
-            // CRITICAL FIX: Reset upload flag in case it got stuck from a previous error
-            this._uploadInProgress = false;
-
+            
             // Mark as initialized
             this.state.initialized = true;
-
-            // CRITICAL FIX: Setup filter event listeners IMMEDIATELY
-            // This ensures filters work on initial load regardless of cache state
-            console.log('🔧 Setting up filter event listeners in init()...');
-            if (typeof this.setupFilterEventListeners === 'function') {
-                this.setupFilterEventListeners();
-                console.log('✅ Filter event listeners setup complete in init()');
-            } else {
-                console.error('❌ setupFilterEventListeners method not found!');
+            
+            // Try to hydrate from cache first
+            const hydrated = this.hydrateAvailableTagsFromCache();
+            if (hydrated) {
+                console.log('✅ Tags loaded from cache in init()');
+                return true;
             }
-
-            // PERFORMANCE: Populate lineage dropdown from cache first (non-blocking), then refresh in background
-            // This ensures lineages appear quickly while tags load
-            console.log('🔧 Populating lineage dropdown (non-blocking)...');
-            // Start this async but don't wait for it - tags loading is more important
-            (async () => {
-                try {
-                    // PERFORMANCE: Use cache first for instant dropdown population, refresh in background
-                    const filterResp = await fetch('/api/filter-options?t=' + Date.now());
-                    const filterData = await filterResp.json();
-                    const lineages = filterData.lineage || [];
-
-                if (lineages.length > 0) {
-                    const lineageFilter = document.getElementById('lineageFilter');
-                    if (lineageFilter) {
-                        // Clear existing options
-                        lineageFilter.innerHTML = '';
-
-                        // Add "All" option
-                        const allOpt = document.createElement('option');
-                        allOpt.value = '';
-                        allOpt.textContent = 'All';
-                        lineageFilter.appendChild(allOpt);
-
-                        // Add lineage options in proper order
-                        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED'];
-                        const sortedLineages = lineages.sort((a, b) => {
-                            const aIndex = lineageOrder.indexOf(a);
-                            const bIndex = lineageOrder.indexOf(b);
-                            if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-                            if (aIndex !== -1) return -1;
-                            if (bIndex !== -1) return 1;
-                            return a.localeCompare(b);
-                        });
-
-                        sortedLineages.forEach(lineage => {
-                            const opt = document.createElement('option');
-                            opt.value = lineage;
-                            opt.textContent = lineage;
-                            lineageFilter.appendChild(opt);
-                        });
-
-                        console.log(`✅ Populated lineage dropdown with ${lineages.length} options:`, lineages);
-                    } else {
-                        console.warn('⚠️ lineageFilter element not found');
-                    }
-                } else {
-                    console.warn('⚠️ No lineages returned from API');
-                }
-                } catch (error) {
-                    console.error('❌ Error populating lineage dropdown:', error);
-                }
-            })(); // Non-blocking - don't await
-
-            // PERFORMANCE: Show cached data immediately, then refresh in background
-            // This provides instant UI while ensuring fresh data
-            console.log('📊 Loading tags (showing cache immediately, refreshing in background)...');
+            
+            // If no cache, fetch from database/API
+            console.log('📊 No cache found in init(), fetching tags from database...');
             try {
-                // Try to show cached data first for instant display
-                const cachedTags = this.hydrateAvailableTagsFromCache();
-                if (cachedTags && cachedTags.length > 0) {
-                    console.log(`⚡ Showing ${cachedTags.length} cached tags immediately`);
-                    this.state.tags = [...cachedTags];
-                    this.state.originalTags = [...cachedTags];
-                    this._updateAvailableTags(cachedTags, null);
-                }
-                
-                // Then fetch fresh data in background
                 const loaded = await this.fetchAndUpdateAvailableTags();
                 if (loaded) {
                     console.log('✅ Tags loaded from database in init()');
                 } else {
                     console.warn('⚠️ Tags not loaded in init()');
                 }
-                
-                // CRITICAL FIX: Clear splash timeout since we completed successfully
-                clearTimeout(splashTimeout);
-                
-                // CRITICAL FIX: Ensure splash completes even if fetchAndUpdateAvailableTags didn't do it
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    console.log('🔧 Ensuring AppLoadingSplash completes after init()');
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
-                
                 return loaded;
             } catch (error) {
                 console.error('❌ Error loading tags in init():', error);
-                // CRITICAL FIX: Clear splash timeout and ensure splash completes on error
-                clearTimeout(splashTimeout);
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    console.log('🔧 Ensuring AppLoadingSplash completes after init() error');
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
-                }
                 // Don't throw - allow app to continue even if tags fail to load
-                // If we have cached data, that's better than nothing
-                return this.state.tags && this.state.tags.length > 0;
+                return false;
             }
         } catch (error) {
             console.error('❌ CRITICAL: Error in TagManager.init():', error);
             console.error('Stack trace:', error.stack);
-            // CRITICAL FIX: Ensure splash completes even on critical error
-            clearTimeout(splashTimeout);
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                console.log('🔧 Ensuring AppLoadingSplash completes after critical init() error');
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
             // Mark as initialized anyway to prevent infinite retry loops
             this.state.initialized = true;
             return false;
@@ -17169,50 +15661,15 @@ const TagManager = {
     }
 };
 
-// CRITICAL FIX: Assign TagManager to window IMMEDIATELY after object definition
-// This ensures it's available even if there are errors later in the file
-try {
-    if (typeof window !== 'undefined') {
-        window.TagManager = TagManager;
-        window.tagManagerLoaded = true;
-        console.log('✅ TagManager assigned to window.TagManager (immediate assignment)');
-        
-        // DIAGNOSTIC: Log what methods are available
-        if (TagManager) {
-            console.log('✅ TagManager object exists with methods:', {
-                init: typeof TagManager.init === 'function',
-                uploadFile: typeof TagManager.uploadFile === 'function',
-                createTagElement: typeof TagManager.createTagElement === 'function'
-            });
-        } else {
-            console.error('❌ CRITICAL: TagManager object is null or undefined!');
-        }
-    } else {
-        console.error('❌ CRITICAL: window is undefined - running in non-browser environment?');
-    }
-} catch (error) {
-    console.error('❌ CRITICAL: Failed to assign TagManager immediately:', error);
-    console.error('❌ Error stack:', error.stack);
-    
-    // Try one more time as a last resort
-    try {
-        if (typeof window !== 'undefined') {
-            window.TagManager = TagManager;
-            console.log('✅ TagManager assigned in fallback attempt');
-        }
-    } catch (fallbackError) {
-        console.error('❌ CRITICAL: Even fallback assignment failed:', fallbackError);
-    }
-}
-
-// CRITICAL FIX: Expose TagManager to global scope IMMEDIATELY after object creation
-// This MUST happen right after TagManager is defined to ensure it's available early
+// CRITICAL FIX: Expose TagManager to global scope IMMEDIATELY
+// This must happen as soon as the TagManager object is created, not at the end
+// This allows initializeFileUpload and other scripts to detect TagManager early
 try {
     if (typeof window !== 'undefined') {
         window.TagManager = TagManager;
         // Also set a flag to indicate TagManager is loaded
         window.tagManagerLoaded = true;
-        console.log('✅ TagManager assigned to window.TagManager (early assignment)');
+        console.log('✅ TagManager assigned to window.TagManager');
 
         // Note: Cache hydration now happens in the inline script in index.html
         // right after this script loads, to ensure DOM is ready
@@ -17226,15 +15683,6 @@ try {
         }
         if (TagManager.fetchAndUpdateSelectedTags) {
             window.fetchAndUpdateSelectedTags = TagManager.fetchAndUpdateSelectedTags.bind(TagManager);
-        }
-        // Expose force reload function for easy debugging and recovery
-        if (TagManager.forceReloadTags) {
-            window.forceReloadTags = TagManager.forceReloadTags.bind(TagManager);
-            console.log('✅ forceReloadTags() available globally - call it to force reload tags');
-            console.log('💡 Tip: Press Ctrl+Shift+R (or Cmd+Shift+R on Mac) to force reload tags');
-        }
-        if (TagManager.retryLoadTags) {
-            window.retryLoadTags = TagManager.retryLoadTags.bind(TagManager);
         }
     }
 } catch (error) {
@@ -17545,9 +15993,6 @@ async function handleJsonPasteInput(input) {
                     // Now call updateSelectedTags with tag objects
                     TagManager.updateSelectedTags(selectedTagObjects);
                 } else {
-                    console.log('🗑️ JSON MATCH - CLEARING TAGS: No valid tag objects found');
-                    console.log('📍 matchResult.selected_tags:', matchResult.selected_tags);
-                    console.log('📍 selectedTagObjects.length:', selectedTagObjects.length);
                     verboseLog('No valid tag objects found for selected tags');
                     TagManager.state.persistentSelectedTags = [];
                     TagManager.state.selectedTags = new Set();
@@ -17559,8 +16004,6 @@ async function handleJsonPasteInput(input) {
                     }
                 }
             } else {
-                console.log('🗑️ JSON MATCH - CLEARING TAGS: No selected tags in response');
-                console.log('📍 matchResult:', matchResult);
                 verboseLog('No selected tags in response, clearing selected tags');
                 TagManager.state.persistentSelectedTags = [];
                 TagManager.state.selectedTags = new Set();
@@ -17734,76 +16177,63 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // CRITICAL FIX: Add safeguard to ensure tags always load after page refresh
     // Check after 5 seconds if tags are loaded, and retry if not
-    // CRITICAL: Only run once - use a flag to prevent repeated checks
-    if (!window._safeguardChecked) {
-        window._safeguardChecked = true;
-        setTimeout(() => {
-            if (window.TagManager && window.TagManager.state) {
-                const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
-                const isInitialized = window.TagManager.state.initialized;
-                const isChecking = window.TagManager._checkingExistingData;
-                const isFetching = window.TagManager._fetchingAvailableTags;
+    setTimeout(() => {
+        if (window.TagManager && window.TagManager.state) {
+            const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
+            const isInitialized = window.TagManager.state.initialized;
+            const isChecking = window.TagManager._checkingExistingData;
 
-                // Check if tags are actually rendered in the DOM (more reliable than just checking cache)
-                const availableContainer = document.getElementById('availableTags');
-                const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
+            // Check if tags are actually rendered in the DOM (more reliable than just checking cache)
+            const availableContainer = document.getElementById('availableTags');
+            const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-                // CRITICAL: Only retry if tags are truly missing AND not currently being fetched/checked
-                if (!hasTags && !hasRenderedTags && isInitialized && !isChecking && !isFetching) {
-                    console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no rendered tags found, attempting retry...');
-                    // Reset flags to allow retry
-                    window.TagManager._checkingExistingData = false;
-                    window.TagManager._fetchingAvailableTags = false;
-                    window.TagManager.state.initialDataAttempts = 0;
-                    // Try to load tags
-                    if (typeof window.TagManager.checkForExistingData === 'function') {
-                        window.TagManager.checkForExistingData().catch(err => {
-                            console.error('Safeguard retry failed:', err);
-                        });
-                    }
-                } else if (hasTags || hasRenderedTags) {
-                    console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
-                } else if (isChecking || isFetching) {
-                    console.log('✅ SAFEGUARD: Tags are currently being loaded, skipping retry');
+            if (!hasTags && !hasRenderedTags && isInitialized && !isChecking) {
+                console.warn('⚠️ SAFEGUARD: Tags not loaded after 5 seconds and no rendered tags found, attempting retry...');
+                // Reset flags to allow retry
+                window.TagManager._checkingExistingData = false;
+                window.TagManager.state.initialDataAttempts = 0;
+                // Try to load tags
+                if (typeof window.TagManager.checkForExistingData === 'function') {
+                    window.TagManager.checkForExistingData().catch(err => {
+                        console.error('Safeguard retry failed:', err);
+                        // Last resort: try direct fetch
+                        if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                            window.TagManager.fetchAndUpdateAvailableTags().catch(e => {
+                                console.error('Safeguard direct fetch also failed:', e);
+                            });
+                        }
+                    });
                 }
+            } else if (hasTags || hasRenderedTags) {
+                console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
             }
-        }, 5000);
-        
-        // Additional safeguard after 10 seconds - only if first one didn't trigger
-        setTimeout(() => {
-            if (window.TagManager && window.TagManager.state) {
-                const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
-                const isChecking = window.TagManager._checkingExistingData;
-                const isFetching = window.TagManager._fetchingAvailableTags;
-                const availableContainer = document.getElementById('availableTags');
-                const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
+        }
+    }, 5000);
+    
+    // Additional safeguard after 10 seconds
+    setTimeout(() => {
+        if (window.TagManager && window.TagManager.state) {
+            const hasTags = window.TagManager.state.tags && window.TagManager.state.tags.length > 0;
+            const availableContainer = document.getElementById('availableTags');
+            const hasRenderedTags = availableContainer && availableContainer.querySelectorAll('.tag-item').length > 0;
 
-                // CRITICAL: Only force reload if tags are truly missing AND not currently being fetched/checked
-                if (!hasTags && !hasRenderedTags && !isChecking && !isFetching) {
-                    console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing reload');
-                    // Force reset all flags
-                    window.TagManager._checkingExistingData = false;
-                    window.TagManager._fetchingAvailableTags = false;
-                    window.TagManager.state.initialDataAttempts = 0;
-                    // Force reload using forceReloadTags to bypass all restrictions
-                    if (typeof window.TagManager.forceReloadTags === 'function') {
-                        console.log('🔄 CRITICAL SAFEGUARD: Using forceReloadTags to bypass all restrictions');
-                        window.TagManager.forceReloadTags().catch(e => {
-                            console.error('Critical safeguard force reload failed:', e);
-                        });
-                    } else if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
-                        window.TagManager.fetchAndUpdateAvailableTags(true).catch(e => {
-                            console.error('Critical safeguard fetch failed:', e);
-                        });
-                    }
-                } else if (hasTags || hasRenderedTags) {
-                    console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
-                } else if (isChecking || isFetching) {
-                    console.log('✅ 10s SAFEGUARD: Tags are currently being loaded - skipping force fetch');
+            if (!hasTags && !hasRenderedTags) {
+                console.error('❌ CRITICAL: Tags still not loaded after 10 seconds and no rendered tags found - forcing direct fetch');
+                // Force reset all flags
+                window.TagManager._checkingExistingData = false;
+                window.TagManager._fetchingAvailableTags = false;
+                window.TagManager.state.initialDataAttempts = 0;
+                // Force direct fetch
+                if (typeof window.TagManager.fetchAndUpdateAvailableTags === 'function') {
+                    window.TagManager.fetchAndUpdateAvailableTags().catch(e => {
+                        console.error('Critical safeguard fetch failed:', e);
+                    });
                 }
+            } else if (hasTags || hasRenderedTags) {
+                console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
             }
-        }, 10000);
-    }
+        }
+    }, 10000);
     
     // CRITICAL FIX: Reset stuck flags when page becomes visible (user switches tabs)
     // This prevents flags from being stuck if user switches tabs during loading
@@ -17842,25 +16272,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             } else if (hasTags || hasRenderedTags) {
                 console.log('✅ VISIBILITY: Tags already loaded or rendered, skipping reload');
-            }
-        }
-    });
-    
-    // Add keyboard shortcut for force reload (Ctrl+Shift+R or Cmd+Shift+R)
-    document.addEventListener('keydown', (e) => {
-        // Ctrl+Shift+R (Windows/Linux) or Cmd+Shift+R (Mac)
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'R') {
-            // Prevent browser reload
-            e.preventDefault();
-            e.stopPropagation();
-            
-            if (window.TagManager && typeof window.TagManager.forceReloadTags === 'function') {
-                console.log('🔄 Keyboard shortcut triggered: Force reloading tags...');
-                window.TagManager.forceReloadTags().catch(err => {
-                    console.error('Force reload from keyboard shortcut failed:', err);
-                });
-            } else {
-                console.warn('⚠️ TagManager.forceReloadTags not available');
             }
         }
     });

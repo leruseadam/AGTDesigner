@@ -17,19 +17,12 @@ logger = logging.getLogger(__name__)
 # Try to import cachetools, fall back to simple dict if not available
 try:
     from cachetools import TTLCache
-    # PERFORMANCE: Increased cache from 100 to 500 entries for better hit rate
-    _generation_cache = TTLCache(maxsize=500, ttl=300)  # 5-minute cache
+    _generation_cache = TTLCache(maxsize=100, ttl=300)  # 5-minute cache
     HAS_CACHETOOLS = True
 except ImportError:
     logger.warning("cachetools not available, using simple dict cache (install with: pip install cachetools)")
     _generation_cache = {}  # Simple dict fallback
     HAS_CACHETOOLS = False
-
-# CRITICAL FIX: Clear cache on module load to remove documents with markers
-# Cache version: increment this when cleanup logic changes to invalidate old cache
-CACHE_VERSION = "v2.2"  # Updated when marker cleanup changes - force cache invalidation
-logger.warning(f"🧹 CLEARING GENERATION CACHE (version {CACHE_VERSION}) - Removing old cached documents with markers")
-_generation_cache.clear()
 
 _template_buffer_cache = {}  # Persistent cache for template buffers
 _cache_timestamps = {}  # Track cache entry times for manual TTL
@@ -64,8 +57,7 @@ class FastGenerationEngine:
                 for r in records
             ],
             'template': template_type,
-            'scale': scale_factor,
-            'cache_version': CACHE_VERSION  # Include cache version to invalidate old caches
+            'scale': scale_factor
         }
         cache_str = json.dumps(cache_data, sort_keys=True)
         return hashlib.md5(cache_str.encode()).hexdigest()
@@ -102,159 +94,20 @@ class FastGenerationEngine:
         
         if cache_key in _generation_cache:
             self.cache_hits += 1
-            logger.warning(f"⚡⚡⚡ CACHE HIT PATH - RETURNING CACHED DOC FOR {len(records)} RECORDS ⚡⚡⚡")
+            logger.info(f"⚡ CACHE HIT: Returning cached generation for {len(records)} records")
             
             # Return a copy of the cached document
             cached_bytes = _generation_cache[cache_key]
-            cached_doc = Document(BytesIO(cached_bytes))
-            
-            # CRITICAL: Clean markers from cached document too
-            logger.warning("🧹🧹🧹 ABOUT TO CALL CLEANUP ON CACHED DOC")
-            
-            # DEBUG: Check for markers before cleanup - scan ALL cells
-            marker_count = 0
-            marker_samples = []
-            cells_checked = 0
-            
-            # Check all tables, all rows, all cells - check BOTH cell.text AND paragraph.text
-            import re
-            for table_idx, table in enumerate(cached_doc.tables):
-                for row_idx, row in enumerate(table.rows):
-                    for cell_idx, cell in enumerate(row.cells):
-                        cells_checked += 1
-                        
-                        # Check cell.text (aggregated text)
-                        cell_text = cell.text or ''
-                        # Also check all paragraph texts individually (more reliable)
-                        para_texts = []
-                        for para in cell.paragraphs:
-                            para_text = para.text or ''
-                            para_texts.append(para_text)
-                        # Combine all paragraph texts
-                        all_text = cell_text + ' ' + ' '.join(para_texts)
-                        text_upper = all_text.upper()
-                        
-                        if not text_upper.strip():
-                            continue
-                        
-                        # Count all marker types
-                        markers_found = []
-                        if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
-                            count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
-                            marker_count += count
-                            markers_found.append(f'DESC({count})')
-                        
-                        if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
-                            count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
-                            marker_count += count
-                            markers_found.append(f'PRICE({count})')
-                        
-                        # Check for any _START or _END pattern
-                        if re.search(r'\w+_(?:START|END)', text_upper):
-                            count = len(re.findall(r'\w+_(?:START|END)', text_upper))
-                            marker_count += count
-                            markers_found.append(f'OTHER({count})')
-                        
-                        if markers_found and len(marker_samples) < 5:
-                            marker_samples.append({
-                                'table': table_idx,
-                                'row': row_idx,
-                                'cell': cell_idx,
-                                'markers': markers_found,
-                                'cell_text': cell_text[:100],
-                                'para_texts': [p[:50] for p in para_texts[:2]]
-                            })
-            
-            if marker_count > 0:
-                logger.error(f"❌ FOUND {marker_count} MARKERS IN CACHED DOC BEFORE CLEANUP! Checked {cells_checked} cells. Samples: {marker_samples}")
-            else:
-                logger.debug(f"✅ No markers found in cached doc before cleanup (checked {cells_checked} cells)")
-            
-            try:
-                self.template_processor._final_marker_cleanup(cached_doc)
-                logger.warning("🧹 FIRST CLEANUP DONE")
-                self.template_processor._nuclear_marker_cleanup(cached_doc)
-                logger.warning("🧹 NUCLEAR CLEANUP DONE")
-                self.template_processor._ultimate_marker_cleanup(cached_doc)
-                logger.warning("🧹 ULTIMATE CLEANUP DONE")
-                
-                # DEBUG: Check for markers after cleanup - scan ALL cells
-                marker_count_after = 0
-                marker_samples_after = []
-                cells_checked_after = 0
-                import re
-                
-                for table_idx, table in enumerate(cached_doc.tables):
-                    for row_idx, row in enumerate(table.rows):
-                        for cell_idx, cell in enumerate(row.cells):
-                            cells_checked_after += 1
-                            
-                            # Check cell.text AND paragraph.text
-                            cell_text = cell.text or ''
-                            para_texts = []
-                            for para in cell.paragraphs:
-                                para_texts.append(para.text or '')
-                            all_text = cell_text + ' ' + ' '.join(para_texts)
-                            text_upper = all_text.upper()
-                            
-                            if not text_upper.strip():
-                                continue
-                            
-                            # Count all marker types
-                            markers_found = []
-                            if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
-                                count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
-                                marker_count_after += count
-                                markers_found.append(f'DESC({count})')
-                            
-                            if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
-                                count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
-                                marker_count_after += count
-                                markers_found.append(f'PRICE({count})')
-                            
-                            # Check for any _START or _END pattern
-                            if re.search(r'\w+_(?:START|END)', text_upper):
-                                count = len(re.findall(r'\w+_(?:START|END)', text_upper))
-                                marker_count_after += count
-                                markers_found.append(f'OTHER({count})')
-                            
-                            if markers_found and len(marker_samples_after) < 5:
-                                marker_samples_after.append({
-                                    'table': table_idx,
-                                    'row': row_idx,
-                                    'cell': cell_idx,
-                                    'markers': markers_found,
-                                    'cell_text': cell_text[:100],
-                                    'para_texts': [p[:50] for p in para_texts[:2]]
-                                })
-                
-                if marker_count_after > 0:
-                    logger.error(f"❌❌❌ CLEANUP FAILED: {marker_count_after} markers still present after cleanup! Checked {cells_checked_after} cells. Samples: {marker_samples_after}")
-                else:
-                    logger.debug(f"✅ Cleanup successful: all markers removed (checked {cells_checked_after} cells)")
-            except Exception as e:
-                logger.error(f"❌❌❌ CLEANUP FAILED: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-            
-            logger.warning("⚡ RETURNING CACHED DOC AFTER CLEANUP")
-            return cached_doc
+            return Document(BytesIO(cached_bytes))
         
         self.cache_misses += 1
-        logger.warning(f"⚡⚡⚡ CACHE MISS PATH - GENERATING NEW DOC FOR {len(records)} RECORDS ⚡⚡⚡")
+        logger.info(f"⚡ CACHE MISS: Generating labels for {len(records)} records")
         
         # Generate the document
         final_doc = self.template_processor.process_records(records)
         if final_doc is None:
             logger.error("❌ FastGenerationEngine: process_records returned None (no document generated)")
             raise RuntimeError("Failed to generate document: no valid records or template error.")
-
-        # CRITICAL: Remove markers before caching
-        logger.warning("🧹 FastGenerationEngine: Calling marker cleanup before caching")
-        self.template_processor._final_marker_cleanup(final_doc)
-        self.template_processor._nuclear_marker_cleanup(final_doc)
-        self.template_processor._ultimate_marker_cleanup(final_doc)
-        logger.warning("🧹 FastGenerationEngine: All marker cleanup done")
 
         # Cache the result
         buffer = BytesIO()
@@ -265,8 +118,8 @@ class FastGenerationEngine:
         # Track timestamp for manual TTL
         if not HAS_CACHETOOLS:
             _cache_timestamps[cache_key] = time.time()
-            # PERFORMANCE: Increased cache limit from 100 to 500 for better hit rate
-            if len(_generation_cache) > 500:
+            # Clean up old entries if cache is too large
+            if len(_generation_cache) > 100:
                 self._cleanup_cache()
 
         generation_time = time.time() - start_time

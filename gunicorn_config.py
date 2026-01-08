@@ -37,13 +37,11 @@ limit_request_field_size = 8190
 # PythonAnywhere specific settings
 if IS_PYTHONANYWHERE:
     # PythonAnywhere limitations
-    workers = 1  # Free/Basic tier only allows 1 worker
+    workers = 1
     worker_connections = 100
-    timeout = 600  # Increased to 10 minutes for large label generation (was 300)
+    timeout = 60
     max_requests = 500
     print("🐍 PythonAnywhere Gunicorn configuration applied")
-    print("⚠️  WARNING: 1 worker means all requests are queued during label generation")
-    print("⚠️  Consider upgrading PythonAnywhere tier for better concurrency")
 else:
     print("🖥️  Local/Production Gunicorn configuration applied")
 

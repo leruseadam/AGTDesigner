@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>AGT Label Maker - Professional Cannabis Label Generation</title>
+  <title>AGT Label Maker - Professional Cannabis Label Generation - UPDATED</title>
   
   <!-- ⚡ PERFORMANCE: Preload critical resources -->
   <link rel="preload" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}" as="style">
@@ -87,25 +87,6 @@
             <p style="color: rgba(255, 255, 255, 0.8); font-size: 1rem; margin: 0;">Please wait while we load your store data</p>
           </div>
         `;
-        
-        // CRITICAL FIX: Add timeout to force hide modal if it hangs
-        const modalTimeout = setTimeout(() => {
-          console.warn('⚠️ Store selection taking too long (15 seconds), forcing modal close and reload...');
-          // Store is probably set, just reload
-          if (sessionStorage.getItem('selected_store') === storeValue) {
-            console.log('✅ Store already in sessionStorage, reloading...');
-            window.location.reload();
-          } else {
-            // Restore modal and show error
-            if (modalBody && modalBody.dataset.originalContent) {
-              modalBody.innerHTML = modalBody.dataset.originalContent;
-            }
-            alert('Store selection timed out. Please try again or refresh the page.');
-          }
-        }, 15000); // 15 second timeout
-        
-        // Store timeout ID so we can clear it on success
-        modalBody.dataset.modalTimeout = modalTimeout;
       }
 
       // Get reference to main content
@@ -114,16 +95,6 @@
       // Don't check if it's the same store - just always proceed
       // This ensures the selection always works even if there's a mismatch
       console.log('Processing store selection:', storeValue);
-      
-      // CRITICAL FIX: Add timeout to prevent hanging
-      const fetchTimeout = setTimeout(() => {
-        console.error('❌ Store selection fetch timed out after 10 seconds');
-        // Restore modal and show error
-        if (modalBody && modalBody.dataset.originalContent) {
-          modalBody.innerHTML = modalBody.dataset.originalContent;
-        }
-        alert('Store selection timed out. The store may still have been set. Please refresh the page.');
-      }, 10000); // 10 second timeout
       
       // Set the store via API
       fetch('/api/set-store', {
@@ -135,7 +106,6 @@
         body: JSON.stringify({ store: storeValue })
       })
       .then(response => {
-        clearTimeout(fetchTimeout);
         console.log('✅ Fetch completed - Response status:', response.status);
         if (!response.ok) {
           console.error('❌ Response not OK:', response.status, response.statusText);
@@ -145,12 +115,6 @@
         return response.json();
       })
       .then(data => {
-        // Clear modal timeout on success
-        if (modalBody && modalBody.dataset.modalTimeout) {
-          clearTimeout(parseInt(modalBody.dataset.modalTimeout));
-          delete modalBody.dataset.modalTimeout;
-        }
-        
         console.log('✅ JSON parsed successfully');
         console.log('Response data:', data);
         console.log('data.success =', data.success);
@@ -206,22 +170,8 @@
 
           // CRITICAL FIX: Reload the page so backend + frontend state stay in sync
           console.log('🔄 Reloading page to apply store change...');
-          
-          // CRITICAL FIX: Force reload after timeout even if something hangs
-          const reloadTimeout = setTimeout(() => {
-            console.warn('⚠️ Force reloading after 2 seconds (backup reload)');
-            window.location.reload();
-          }, 2000);
-          
           setTimeout(() => {
-            clearTimeout(reloadTimeout);
-            try {
-              window.location.reload();
-            } catch (reloadError) {
-              console.error('❌ Error reloading page:', reloadError);
-              // Fallback: force reload using location.href
-              window.location.href = window.location.href;
-            }
+            window.location.reload();
           }, 500);
         } else {
           console.error('❌ Error setting store:', data.error || 'Unknown error');
@@ -235,13 +185,6 @@
         }
       })
       .catch(error => {
-        clearTimeout(fetchTimeout);
-        // Clear modal timeout on error
-        if (modalBody && modalBody.dataset.modalTimeout) {
-          clearTimeout(parseInt(modalBody.dataset.modalTimeout));
-          delete modalBody.dataset.modalTimeout;
-        }
-        
         console.error('❌ Fetch error:', error);
         console.error('Error stack:', error.stack);
         
@@ -250,17 +193,7 @@
           modalBody.innerHTML = modalBody.dataset.originalContent;
         }
         
-        // CRITICAL FIX: Even on error, try to reload if store was set in sessionStorage
-        // Sometimes the store is set even if the response fails
-        const storedStore = sessionStorage.getItem('selected_store');
-        if (storedStore === storeValue) {
-          console.log('⚠️ Fetch failed but store appears to be set - reloading anyway');
-          setTimeout(() => {
-            window.location.reload();
-          }, 1000);
-        } else {
-          alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
-        }
+        alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
       });
     };
     
@@ -846,61 +779,22 @@
             console.log('✅ Content shown, modal hidden');
             
             // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
-            // Add timeout to prevent hanging
-            const callbackTimeout = setTimeout(() => {
-              console.warn('⚠️ onStoreConfirmed taking too long, forcing TagManager init...');
-              if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
-                try {
-                  window.TagManager.init();
-                } catch (e) {
-                  console.error('❌ Error forcing TagManager init:', e);
-                }
-              }
-            }, 5000); // 5 second timeout
-            
             if (typeof onStoreConfirmed === 'function') {
               console.log('🔄 Store confirmed, calling initialization callback...');
-              window._tagManagerInitStarted = true; // Mark that initialization has started
               setTimeout(() => {
                 try {
-                  clearTimeout(callbackTimeout);
                   onStoreConfirmed();
                 } catch (initError) {
-                  clearTimeout(callbackTimeout);
                   console.error('❌ Error in onStoreConfirmed callback:', initError);
-                  // Still try to init TagManager even if callback fails
-                  if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
-                    try {
-                      window.TagManager.init();
-                    } catch (e) {
-                      console.error('❌ Error initializing TagManager after callback error:', e);
-                    }
-                  }
                 }
               }, 100);
             } else {
-              clearTimeout(callbackTimeout);
               console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
-              // Still try to init TagManager
-              if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
-                setTimeout(() => {
-                  try {
-                    window.TagManager.init();
-                  } catch (e) {
-                    console.error('❌ Error initializing TagManager:', e);
-                  }
-                }, 200);
-              }
             }
-
+            
             // CRITICAL FIX: Also trigger TagManager initialization directly if callback didn't work
             // This ensures TagManager initializes even if the callback path fails
             setTimeout(() => {
-              // Skip if initialization already started via callback
-              if (window._tagManagerInitStarted) {
-                console.log('⏭️ Skipping direct init - callback path already started');
-                return;
-              }
               if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
                 console.log('🔄 Store confirmed - directly initializing TagManager...');
                 try {
@@ -4985,7 +4879,7 @@
       font-size: 15px;
       font-weight: 700;
       color: rgba(255, 255, 255, 0.95);
-      margin-bottom: 4px;
+      margin-bottom: 6px;
       margin-top: 0;
       padding-top: 2px;
       padding-bottom: 2px;
@@ -5125,18 +5019,6 @@
     .control-section .filter-label {
       text-align: center !important;
       width: 100% !important;
-      margin-bottom: 0.25rem !important;
-    }
-    
-    /* Reduce spacing above template select */
-    .control-section:first-of-type {
-      margin-top: 0 !important;
-      padding-top: 0 !important;
-    }
-    
-    /* Reduce spacing between control sections */
-    .control-section {
-      margin-top: 0.5rem !important;
     }
 
     .filter-select option {
@@ -5921,7 +5803,7 @@
                     </div>
                     <div class="filter-group">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
-                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 12px !important; line-height: 1.4 !important; width: 100% !important; min-width: 280px !important;">
+                      <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 18px !important; line-height: 1.4 !important; width: 100% !important; min-width: 280px !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
@@ -5933,7 +5815,7 @@
                     </div>
                     <div class="filter-group">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
-                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 12px !important; line-height: 1.4 !important; min-width: 280px !important;">
+                      <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 1.25rem !important; font-size: 18px !important; line-height: 1.4 !important; min-width: 280px !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
@@ -5995,9 +5877,9 @@
             <!-- Controls -->
             <div class="control-panel" style="width: 100%;">
               <!-- Template Section -->
-              <div class="control-section mb-1">
+              <div class="control-section mb-2">
                 <label for="templateSelect" class="filter-label">TEMPLATE</label>
-                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 2rem 1rem 1.25rem !important; font-size: 18px !important; line-height: 1.5 !important; width: auto !important; min-width: 250px !important; max-width: none !important; margin: 0 auto !important; display: block !important; overflow: visible !important; text-align: center !important; text-align-last: center !important;">
+                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 48px 1rem 48px !important; font-size: 18px !important; line-height: 1.5 !important; width: auto !important; min-width: 250px !important; max-width: none !important; margin: 0 auto !important; display: block !important; overflow: visible !important; text-align: center !important; text-align-last: center !important;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
@@ -6006,7 +5888,7 @@
                   <option value="inventory">Inventory</option>
                 </select>
 
-                <button id="generateBtn" class="btn-generate-themed mt-2" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 85% !important; max-width: 85% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 1.5rem auto 0 auto !important; display: block !important;">
+                <button id="generateBtn" class="btn-generate-themed mt-2" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 85% !important; max-width: 85% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 0 auto !important; display: block !important;">
                   Generate Tags
                 </button>
 
@@ -6022,7 +5904,7 @@
                 </select>
               </div>
               <!-- Controls Section -->
-              <div class="control-section mb-1">
+              <div class="control-section mb-2">
                 <label class="filter-label">Controls</label>
                 <div class="d-grid controls-buttons-container w-100">
                   <!-- Undo on top of redo (stacked) -->
@@ -7635,10 +7517,10 @@
       }
     };
   </script>
-
-  <!-- REMOVED: Duplicate Bootstrap and Chart.js loads (already loaded in <head>) -->
-  <!-- Bootstrap loaded at line 44, Chart.js at line 47 -->
-
+  
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
   <!-- ⚡ PERFORMANCE: Service Worker Registration -->
   <script>
     if ('serviceWorker' in navigator) {
@@ -7658,9 +7540,9 @@
       });
     }
   </script>
-
-  <!-- REMOVED: Duplicate performance.js load (already loaded in <head> at line 50) -->
-
+  <!-- ⚡ PERFORMANCE: Load performance optimizer first -->
+  <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}" defer></script>
+  
   <!-- ⚡ PERFORMANCE: Fast page load optimization -->
   <script src="{{ url_for('static', filename='js/fast-page-load.js') }}?v={{ cache_bust }}"></script>
   
@@ -7693,127 +7575,75 @@
     window.mainJsLoaded = true;
     console.log('✅ main.js script tag executed');
 
-    // DISABLED: Early cache hydration can show stale/old tags before fresh data loads
-    // Let init() handle loading fresh data from the server instead
-    // This ensures the tag list always shows current Excel data, not cached stale data
-    console.log('⚡ Skipping early cache hydration - will load fresh data from server in init()');
+    // CRITICAL: Hydrate tags from cache IMMEDIATELY for instant page load
+    // This must happen right after main.js loads, before any other initialization
+    if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
+      try {
+        console.log('⚡ Attempting to hydrate tags from cache...');
+
+        // Debug: Check what's available in localStorage and sessionStorage
+        const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
+        console.log('📦 Expected cache key:', cacheKey);
+
+        const localStorageKeys = [];
+        const sessionStorageKeys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.includes('agt_available_tags')) {
+            localStorageKeys.push(key);
+          }
+        }
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key && key.includes('agt_available_tags')) {
+            sessionStorageKeys.push(key);
+          }
+        }
+        console.log('📦 LocalStorage tag cache keys:', localStorageKeys);
+        console.log('📦 SessionStorage tag cache keys:', sessionStorageKeys);
+
+        const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
+        if (hydrated) {
+          console.log('✅ INSTANT: Tags hydrated from cache immediately after main.js load');
+        } else {
+          console.warn('⚠️ Cache hydration returned false - no cache available or cache check failed');
+        }
+      } catch (err) {
+        console.error('❌ Cache hydration failed:', err);
+      }
+    } else {
+      console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
+    }
 
     // Check TagManager immediately after script loads (synchronous execution)
     (function checkTagManager() {
-      // Give it a tiny delay to ensure script execution completed
-      setTimeout(() => {
-        if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
-          console.log('✅ TagManager is available immediately after main.js execution');
-          console.log('✅ TagManager methods confirmed:', {
-            createTagElement: typeof window.TagManager.createTagElement === 'function',
-            init: typeof window.TagManager.init === 'function',
-            uploadFile: typeof window.TagManager.uploadFile === 'function'
-          });
+      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+        console.log('✅ TagManager is available immediately after main.js execution');
+        console.log('✅ TagManager methods confirmed:', {
+          createTagElement: typeof window.TagManager.createTagElement === 'function',
+          init: typeof window.TagManager.init === 'function',
+          uploadFile: typeof window.TagManager.uploadFile === 'function'
+        });
+      } else {
+        console.error('❌ CRITICAL: TagManager not available after main.js execution');
+        console.error('❌ TagManager exists:', !!window.TagManager);
+        if (window.TagManager) {
+          console.error('❌ TagManager type:', typeof window.TagManager);
+          console.error('❌ TagManager has createTagElement:', typeof window.TagManager.createTagElement);
+          console.error('❌ TagManager keys (first 20):', Object.keys(window.TagManager).slice(0, 20));
+          console.error('❌ This suggests main.js executed but TagManager was not assigned to window.TagManager');
         } else {
-          console.error('❌ CRITICAL: TagManager not available after main.js execution');
-          console.error('❌ TagManager exists:', !!window.TagManager);
-          console.error('❌ window.tagManagerLoaded:', window.tagManagerLoaded);
-          
-          if (window.TagManager) {
-            console.error('❌ TagManager type:', typeof window.TagManager);
-            console.error('❌ TagManager has createTagElement:', typeof window.TagManager.createTagElement);
-            console.error('❌ TagManager has uploadFile:', typeof window.TagManager.uploadFile);
-            console.error('❌ TagManager keys (first 30):', Object.keys(window.TagManager).slice(0, 30));
-            console.error('❌ This suggests main.js executed but TagManager was not fully initialized');
-          } else {
-            console.error('❌ TagManager is completely undefined');
-            console.error('❌ This suggests main.js either:');
-            console.error('   1. Failed to load (check Network tab in DevTools)');
-            console.error('   2. Has a JavaScript syntax error preventing execution (check Console for red errors)');
-            console.error('   3. TagManager object was never created or assigned to window');
-            console.error('   4. Script execution was blocked or timed out');
-            
-            // Try to detect if main.js loaded
-            const scripts = Array.from(document.getElementsByTagName('script'));
-            const mainJsScript = scripts.find(s => s.src && s.src.includes('main.js'));
-            if (mainJsScript) {
-              console.error('   - main.js script tag found in DOM:', mainJsScript.src);
-            } else {
-              console.error('   - main.js script tag NOT found in DOM!');
-            }
-          }
-          window.mainJsError = 'TagManager not available after main.js execution';
+          console.error('❌ TagManager is completely undefined');
+          console.error('❌ This suggests main.js either:');
+          console.error('   1. Failed to load (check Network tab)');
+          console.error('   2. Has a JavaScript error preventing execution (check Console for red errors)');
+          console.error('   3. TagManager object was never created or assigned');
         }
-      }, 10); // Small delay to ensure script execution completes
-    })();
-  </script>
-
-  <!-- CRITICAL FIX: Force-populate lineage dropdown on every page load -->
-  <script>
-    (async function forcePopulateLineageDropdown() {
-      console.log('🔧 [LINEAGE FIX] Force-populating lineage dropdown...');
-
-      // Wait for DOM to be ready
-      if (document.readyState === 'loading') {
-        await new Promise(resolve => document.addEventListener('DOMContentLoaded', resolve, { once: true }));
-      }
-
-      try {
-        // Fetch lineages from API with cache busting
-        const timestamp = Date.now();
-        const response = await fetch(`/api/filter-options?refresh=true&nocache=1&t=${timestamp}`);
-        const data = await response.json();
-        const lineages = data.lineage || [];
-
-        if (lineages.length === 0) {
-          console.warn('⚠️ [LINEAGE FIX] No lineages returned from API');
-          return;
-        }
-
-        console.log(`✅ [LINEAGE FIX] Fetched ${lineages.length} lineages from API:`, lineages);
-
-        // Get lineage dropdown element
-        const lineageFilter = document.getElementById('lineageFilter');
-        if (!lineageFilter) {
-          console.error('❌ [LINEAGE FIX] lineageFilter element not found!');
-          return;
-        }
-
-        // Clear existing options
-        lineageFilter.innerHTML = '';
-
-        // Add "All" option
-        const allOption = document.createElement('option');
-        allOption.value = '';
-        allOption.textContent = 'All';
-        lineageFilter.appendChild(allOption);
-
-        // Sort lineages in proper order
-        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA'];
-        const sortedLineages = lineages.sort((a, b) => {
-          const aIndex = lineageOrder.indexOf(a.toUpperCase());
-          const bIndex = lineageOrder.indexOf(b.toUpperCase());
-          if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-          if (aIndex !== -1) return -1;
-          if (bIndex !== -1) return 1;
-          return a.localeCompare(b);
-        });
-
-        // Add lineage options
-        sortedLineages.forEach(lineage => {
-          const option = document.createElement('option');
-          option.value = lineage;
-          option.textContent = lineage;
-          lineageFilter.appendChild(option);
-        });
-
-        console.log(`✅ [LINEAGE FIX] Successfully populated lineage dropdown with ${lineages.length} options`);
-
-        // Visual confirmation - briefly highlight the dropdown
-        lineageFilter.style.border = '2px solid green';
-        setTimeout(() => { lineageFilter.style.border = ''; }, 2000);
-
-      } catch (error) {
-        console.error('❌ [LINEAGE FIX] Error populating lineage dropdown:', error);
+        window.mainJsError = 'TagManager not available after main.js execution';
       }
     })();
   </script>
-
+  
   <!-- ⚡ PERFORMANCE: Defer non-critical scripts -->
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}?v={{ cache_bust }}" defer></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}" defer></script>
@@ -8026,76 +7856,22 @@
         
         if (window.TagManager && typeof window.TagManager.init === 'function') {
           console.log('🚀 Calling TagManager.init()...');
-          
-          // CRITICAL FIX: Add timeout to prevent app from being stuck
-          const initTimeout = setTimeout(() => {
-            console.warn('⚠️ TagManager.init() taking too long, forcing completion...');
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-              AppLoadingSplash.stopAutoAdvance();
-              AppLoadingSplash.complete();
-            }
-            // Ensure file upload is initialized even if TagManager.init() is slow
-            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-              window.fileUploadInitAttempts = 0;
-              setTimeout(window.initializeFileUpload, 200);
-            }
-          }, 30000); // 30 second timeout (increased for large datasets)
-          
           try {
-            // CRITICAL FIX: TagManager.init() is async - handle it properly
-            const initResult = TagManager.init();
-            if (initResult && typeof initResult.then === 'function') {
-              // It's a Promise - await it with timeout
-              Promise.race([
-                initResult,
-                new Promise((_, reject) =>
-                  setTimeout(() => reject(new Error('TagManager.init() timeout')), 30000)
-                )
-              ])
-              .then(() => {
-                clearTimeout(initTimeout);
-                console.log('✅ TagManager.init() completed successfully');
-                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
-                  window.fileUploadInitAttempts = 0;
-                  setTimeout(window.initializeFileUpload, 200);
-                }
-              })
-              .catch((initError) => {
-                clearTimeout(initTimeout);
-                console.error('❌ TagManager.init() failed:', initError);
-                // Force hide splash even on error
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                  AppLoadingSplash.stopAutoAdvance();
-                  AppLoadingSplash.complete();
-                }
-                // Still try to initialize file upload
-                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-                  window.fileUploadInitAttempts = 0;
-                  setTimeout(window.initializeFileUpload, 200);
-                }
-              });
-            } else {
-              // Synchronous init - clear timeout and proceed
-              clearTimeout(initTimeout);
-              console.log('✅ TagManager.init() called successfully (synchronous)');
-              setTimeout(() => {
-                if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-                  console.log('🔄 TagManager initialized - retrying file upload initialization...');
-                  window.fileUploadInitAttempts = 0;
-                  setTimeout(window.initializeFileUpload, 200);
-                }
-              }, 500);
-            }
+            TagManager.init();
+            console.log('✅ TagManager.init() called successfully');
+            
+            // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
+            // Give it a moment for init to complete
+            setTimeout(() => {
+              if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+                console.log('🔄 TagManager initialized - retrying file upload initialization...');
+                window.fileUploadInitAttempts = 0; // Reset counter
+                setTimeout(window.initializeFileUpload, 200);
+              }
+            }, 500);
           } catch (initError) {
-            clearTimeout(initTimeout);
             console.error('❌ Error calling TagManager.init():', initError);
             console.error('Stack trace:', initError.stack);
-            // Force hide splash even on error
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-              AppLoadingSplash.stopAutoAdvance();
-              AppLoadingSplash.complete();
-            }
           }
         } else {
           console.error('❌ TagManager.init is not available');
@@ -8290,18 +8066,6 @@
         // CRITICAL FIX: Check if TagManager is loaded and has uploadFile method
         // uploadFile exists on TagManager even before init() is called
         // We just need TagManager to be loaded from main.js
-        // Also check if main.js has an error preventing TagManager from loading
-        if (window.mainJsError) {
-          console.error('❌ CRITICAL: main.js has an error preventing TagManager from loading:', window.mainJsError);
-          console.error('❌ This means TagManager will never be available. Please refresh the page.');
-          // Force hide splash and stop retrying
-          if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-            AppLoadingSplash.stopAutoAdvance();
-            AppLoadingSplash.complete();
-          }
-          return;
-        }
-        
         const tagManagerReady = window.TagManager && 
                                 typeof window.TagManager.uploadFile === 'function';
         
@@ -8309,102 +8073,49 @@
           console.log('✓ TagManager ready and initialized, attaching file upload listener');
           window.fileUploadInitialized = true; // Mark as initialized to prevent retries
           
-          // CRITICAL FIX: Clone fileInput to remove any stale handlers from earlier initialization attempts
-          // enhanced-ui.js handler will check for TagManager and delegate to it, so having both is OK
+          // Remove any existing listeners to prevent duplicates
           const newFileInput = fileInput.cloneNode(true);
           fileInput.parentNode.replaceChild(newFileInput, fileInput);
           
           newFileInput.addEventListener('change', function(e) {
-            console.log('🔵 File input change event triggered');
             const file = e.target.files[0];
             if (file) {
-              console.log('✅ File selected:', file.name, 'Size:', file.size, 'bytes');
-              console.log('📤 Attempting to upload file...');
+              console.log('File selected:', file.name);
               try {
-                if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
-                  console.log('✅ TagManager.uploadFile is available, calling it now');
-                  window.TagManager.uploadFile(file);
-                } else {
-                  console.error('❌ TagManager.uploadFile is not available!');
-                  console.error('  - window.TagManager exists:', !!window.TagManager);
-                  if (window.TagManager) {
-                    console.error('  - uploadFile type:', typeof window.TagManager.uploadFile);
-                  }
-                  alert('Error: Upload functionality not initialized. Please refresh the page.');
-                }
+                window.TagManager.uploadFile(file);
               } catch (error) {
-                console.error('❌ Error uploading file:', error);
-                console.error('Error stack:', error.stack);
-                alert('Error uploading file: ' + error.message + '\n\nPlease try again or refresh the page.');
+                console.error('Error uploading file:', error);
+                alert('Error uploading file. Please try again or refresh the page.');
               }
-            } else {
-              console.warn('⚠️ No file selected (files array is empty)');
             }
           });
         } else if (window.fileUploadInitAttempts < window.MAX_FILE_UPLOAD_ATTEMPTS) {
-          // Check for JavaScript errors that prevent TagManager from loading
-          if (window.mainJsError) {
-            console.error('❌ CRITICAL: main.js error detected:', window.mainJsError);
-            console.error('❌ TagManager cannot load - JavaScript error in main.js. Please refresh the page.');
-            // Force hide splash and stop retrying
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-              AppLoadingSplash.stopAutoAdvance();
-              AppLoadingSplash.complete();
-            }
-            return;
-          }
-          
           // Only log every 10th attempt to reduce console spam
           if (window.fileUploadInitAttempts % 10 === 0 || window.fileUploadInitAttempts <= 5) {
             const reason = !window.TagManager ? 'TagManager not loaded from main.js' :
                           !window.TagManager.uploadFile ? 'uploadFile method not available' : 'unknown';
             console.warn(`⏳ TagManager not ready yet (attempt ${window.fileUploadInitAttempts}/${window.MAX_FILE_UPLOAD_ATTEMPTS}): ${reason}`);
-            
-            // After 30 attempts, check for specific issues
-            if (window.fileUploadInitAttempts >= 30) {
-              console.error('❌ DIAGNOSTIC: TagManager still not available after 30 attempts');
-              console.error('❌ Checking main.js loading status...');
-              console.error('  - window.mainJsLoaded:', window.mainJsLoaded);
-              console.error('  - window.mainJsError:', window.mainJsError);
-              console.error('  - window.TagManager exists:', !!window.TagManager);
-              console.error('  - window.tagManagerLoaded:', window.tagManagerLoaded);
-              if (!window.mainJsLoaded && !window.mainJsError) {
-                console.error('❌ main.js may not have loaded - check Network tab for 404 or other errors');
-              }
-            }
           }
           // Retry after a short delay
           setTimeout(initializeFileUpload, 100);
         } else {
           // CRITICAL FIX: Stop retrying after max attempts to prevent memory buildup
-          // Set a hard limit of 20 slow retries (5 seconds) instead of 50
+          // Set a hard limit of 100 total retries (50 fast + 50 slow)
           if (!window.fileUploadSlowRetries) {
             window.fileUploadSlowRetries = 0;
           }
           window.fileUploadSlowRetries++;
 
-          if (window.fileUploadSlowRetries < 20) {
-            // Continue retrying with longer intervals for up to 20 more attempts (40 seconds total)
-            // Only log every 5th attempt to reduce spam
-            if (window.fileUploadSlowRetries % 5 === 0 || window.fileUploadSlowRetries <= 3) {
-              console.warn(`⚠️ File upload initialization delayed - TagManager not ready yet (slow retry ${window.fileUploadSlowRetries}/20)`);
-              console.warn('⚠️ TagManager available:', !!window.TagManager);
-              console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
-            }
+          if (window.fileUploadSlowRetries < 50) {
+            // Continue retrying with longer intervals for up to 50 more attempts (100 seconds)
+            console.warn(`⚠️ File upload initialization delayed - TagManager not ready yet (slow retry ${window.fileUploadSlowRetries}/50)`);
+            console.warn('⚠️ TagManager available:', !!window.TagManager);
+            console.warn('⚠️ TagManager.uploadFile available:', !!(window.TagManager && typeof window.TagManager.uploadFile === 'function'));
             setTimeout(initializeFileUpload, 2000);
           } else {
-            // Give up after 20 slow retries (50 fast + 20 slow = 70 total attempts)
-            console.error('❌ File upload initialization failed - TagManager never became ready after 70 attempts');
-            console.error('❌ This may indicate a JavaScript loading error. The app will continue, but file upload may not work.');
-            console.error('❌ TagManager exists:', !!window.TagManager);
-            if (window.TagManager) {
-              console.error('❌ TagManager keys:', Object.keys(window.TagManager).slice(0, 10));
-            }
-            // CRITICAL: Hide splash screen even if initialization fails
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-              AppLoadingSplash.stopAutoAdvance();
-              AppLoadingSplash.complete();
-            }
+            // Give up after 100 total attempts to prevent infinite loop
+            console.error('❌ File upload initialization failed - TagManager never became ready after 100 attempts');
+            console.error('❌ This may indicate a JavaScript loading error. Please refresh the page.');
           }
         }
       }
@@ -8416,8 +8127,6 @@
       // On Windows, use File System Access API to open Downloads folder
       // On Mac, regular file input already opens to Downloads
       async function handleFileUploadClick() {
-        console.log('🔵 handleFileUploadClick() called');
-
         // CRITICAL FIX: Prevent multiple uploads
         const uploadBtn = document.getElementById('uploadTriggerBtn');
         if (uploadBtn && uploadBtn.disabled) {
@@ -8425,18 +8134,12 @@
           return;
         }
 
-        console.log('✅ Upload button check passed, proceeding with upload');
         const isWindows = navigator.platform.toLowerCase().includes('win') ||
                          navigator.userAgent.toLowerCase().includes('windows');
-        console.log('🖥️ Platform detected:', isWindows ? 'Windows' : 'Mac/Other');
 
-        // CRITICAL FIX FOR WINDOWS: For synced Chrome browsers, File System Access API may not work
-        // Always prefer regular file input on Windows for reliability, especially with synced browsers
-        // Skip File System Access API on Windows to avoid issues with synced browsers
-        const useFileSystemAPI = false; // Disabled for Windows reliability - always use regular file input
-        
-        // Try to use File System Access API on Windows (if supported and not synced browser)
-        if (useFileSystemAPI) {
+        // Try to use File System Access API on Windows (if supported)
+        // This API allows specifying a suggested start directory
+        if (isWindows && 'showOpenFilePicker' in window) {
           try {
             const fileHandles = await window.showOpenFilePicker({
               types: [{
@@ -8470,13 +8173,13 @@
 
               // CRITICAL FIX: Use setTimeout to ensure UI updates before processing
               setTimeout(() => {
-                // CRITICAL FIX: Always prefer TagManager.uploadFile for consistency
-                if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
-                  console.log('📤 PC UPLOAD: Calling TagManager.uploadFile');
-                  window.TagManager.uploadFile(file);
-                } else if (typeof handleFiles === 'function') {
+                // CRITICAL FIX: Always use handleFiles from enhanced-ui.js for consistent upload handling
+                if (typeof handleFiles === 'function') {
                   console.log('📤 PC UPLOAD: Calling handleFiles');
                   handleFiles([file]);
+                } else if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
+                  console.log('📤 PC UPLOAD: Calling TagManager.uploadFile');
+                  window.TagManager.uploadFile(file);
                 } else {
                   console.log('📤 PC UPLOAD: Using fileInput change event fallback');
                   // Fallback to regular file input if neither is available
@@ -8493,78 +8196,16 @@
             return;
           } catch (error) {
             // User cancelled or API not fully supported, fall back to regular input
-            if (error.name !== 'AbortError' && error.name !== 'NotAllowedError') {
-              console.log('File System Access API failed, using regular file input:', error);
-            } else if (error.name === 'NotAllowedError') {
-              console.log('File System Access API not allowed (likely synced browser), using regular file input');
+            if (error.name !== 'AbortError') {
+              console.log('File System Access API not available, using regular file input:', error);
             }
-            // Continue to fallback below
           }
         }
         
-        // CRITICAL FIX FOR WINDOWS: Always use regular file input as reliable fallback
-        // This works on both Mac and Windows, including synced Chrome browsers
-        console.log('📂 Using regular file input dialog (works on all platforms including synced browsers)');
+        // Fallback to regular file input (works on Mac and Windows without API support)
         const fileInput = document.getElementById('fileInput');
         if (fileInput) {
-          console.log('✅ fileInput element found, triggering click');
-          
-          // CRITICAL FIX: Ensure file input is properly initialized before clicking
-          fileInput.disabled = false;
-          fileInput.style.display = 'none'; // Keep hidden but functional
-          
-          // CRITICAL FIX: Force re-initialization of file upload handler if not ready
-          // This ensures the change event handler is attached even if TagManager wasn't ready earlier
-          if (!window.fileUploadInitialized && window.initializeFileUpload) {
-            console.log('⚠️ File upload not initialized yet, initializing now...');
-            window.initializeFileUpload();
-            // Wait a tiny bit for handler to attach
-            setTimeout(() => {
-              fileInput.click();
-            }, 50);
-            return;
-          }
-          
-          // CRITICAL FIX: Clear any previous file selection to ensure change event fires
-          // On Windows, this is important to trigger the change event
-          fileInput.value = '';
-          
-          // CRITICAL FIX: Add a direct fallback handler if TagManager still isn't ready
-          // This ensures upload works even if initialization failed
-          const fallbackHandler = function(e) {
-            const file = e.target.files[0];
-            if (file) {
-              console.log('🔵 Fallback handler: File selected:', file.name);
-              // Remove this handler to prevent duplicates
-              fileInput.removeEventListener('change', fallbackHandler);
-              // Try TagManager first, then handleFiles
-              if (window.TagManager && typeof window.TagManager.uploadFile === 'function') {
-                console.log('✅ Fallback: Using TagManager.uploadFile');
-                window.TagManager.uploadFile(file);
-              } else if (typeof handleFiles === 'function') {
-                console.log('✅ Fallback: Using handleFiles');
-                handleFiles([file]);
-              } else {
-                alert('Error: Upload functionality not available. Please refresh the page.');
-              }
-            }
-          };
-          
-          // Add fallback handler temporarily
-          fileInput.addEventListener('change', fallbackHandler, { once: true });
-          
-          // Trigger click
-          try {
-            fileInput.click();
-            console.log('✅ File input click triggered successfully');
-          } catch (clickError) {
-            console.error('❌ Error triggering file input click:', clickError);
-            fileInput.removeEventListener('change', fallbackHandler);
-            alert('Error: Could not open file dialog. Please try refreshing the page.');
-          }
-        } else {
-          console.error('❌ fileInput element not found!');
-          alert('Error: File input element not found. Please refresh the page.');
+          fileInput.click();
         }
       }
       
@@ -8675,8 +8316,8 @@
         try {
           var data = JSON.parse(initialData.getAttribute('data-initial'));
           if (data && data.filepath) {
-            // Prefer showing the full file path so the user knows what's loaded
-            var fileName = data.filepath;
+            // Show only the file name, not the full path
+            var fileName = data.filepath.split(/[\\/]/).pop();
             
             // Update the unified upload container
             if (window.TagManager) {
@@ -8694,19 +8335,6 @@
           }
         } catch (e) {}
       }
-      
-      // Also sync file path from hidden input if present
-      (function syncFilePathFromHidden() {
-        try {
-          var hiddenPathEl = document.getElementById('current-filepath');
-          var fileInfoText = document.getElementById('fileInfoText');
-          if (hiddenPathEl && hiddenPathEl.value && fileInfoText) {
-            fileInfoText.textContent = hiddenPathEl.value;
-          }
-        } catch (e) {
-          console.warn('Could not sync file path from hidden input:', e);
-        }
-      })();
     });
 
     // CRITICAL FIX: Disabled fallback morphing background - lava background placeholder handles it now

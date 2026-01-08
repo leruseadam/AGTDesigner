@@ -113,10 +113,9 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Prioritize sovereign_lineage first (manual user edits), then database fields
-  // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage/Lineage* > lineage
-  // This ensures UI matches exactly what tag generation uses for colors
-  const rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
+  // CRITICAL: Use database lineage directly - canonical_lineage/currentLineage is source of truth
+  // Respect database values - don't convert unless absolutely necessary
+  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -285,10 +284,9 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Prioritize sovereign_lineage first (manual user edits), then database fields
-  // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage/Lineage* > lineage
-  // This ensures UI matches exactly what tag generation uses for colors
-  const rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
+  // CRITICAL: Use database lineage directly - canonical_lineage/currentLineage is source of truth
+  // Respect database values - don't convert unless absolutely necessary
+  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -1399,10 +1397,10 @@ class TagsTable {
     
     // Performance optimization: Render tags in batches to keep UI responsive
     // OPTIMIZATION: Increased batch sizes and improved progressive rendering for faster initial display
-    // For small lists (< 200), render all at once for better performance
+    // For small lists (< 500), render all at once for better performance
     // For larger lists, use progressive rendering with larger initial batch
-    const batchSize = tags.length > 200 ? 100 : tags.length;
-    const initialBatchSize = tags.length > 200 ? 150 : tags.length; // Show more tags immediately
+    const batchSize = tags.length > 500 ? 200 : tags.length;
+    const initialBatchSize = tags.length > 500 ? 300 : tags.length; // Show more tags immediately
     
     if (tags.length <= batchSize) {
       // Small list: render all at once using DocumentFragment for efficiency

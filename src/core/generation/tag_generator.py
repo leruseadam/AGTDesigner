@@ -902,46 +902,19 @@ def process_chunk(args):
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     placeholders = ','.join(['?'] * len(product_names))
-                    # CRITICAL FIX: Priority: p.sovereign_lineage (user changes) > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
-                    # This ensures lineage updates from /api/update-lineage are used in generation
                     batch_lineage_query = f'''
-                        SELECT p."Product Name*", 
-                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                               p.strain_id,
-                               p.sovereign_lineage,
-                               s.sovereign_lineage as strain_sovereign,
-                               s.canonical_lineage as strain_canonical,
-                               p."Lineage" as product_lineage
-                        FROM products p
-                        LEFT JOIN strains s ON p.strain_id = s.id
-                        WHERE p."Product Name*" IN ({placeholders})
-                        ORDER BY p.id DESC
+                        SELECT "Product Name*", "Lineage"
+                        FROM products
+                        WHERE "Product Name*" IN ({placeholders})
+                        ORDER BY id DESC
                     '''
                     cur.execute(batch_lineage_query, product_names)
-                    results_count = 0
                     for row_result in cur.fetchall():
-                        results_count += 1
-                        pname = row_result[0]
-                        lineage = row_result[1]
-                        strain_id = row_result[2]
-                        p_sovereign = row_result[3]
-                        s_sovereign = row_result[4]
-                        s_canonical = row_result[5]
-                        p_lineage = row_result[6]
-                        
-                        logger.info(f"🔍 DB LINEAGE QUERY: '{pname}' -> Final: '{lineage}' | strain_id: {strain_id} | p.sovereign: '{p_sovereign}' | s.sovereign: '{s_sovereign}' | s.canonical: '{s_canonical}' | p.Lineage: '{p_lineage}'")
-                        
+                        pname, lineage = row_result
                         if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
                             product_lineage_cache[pname] = str(lineage).strip().upper()
-                            logger.info(f"✅ CACHED DB LINEAGE: '{pname}' -> '{product_lineage_cache[pname]}'")
-                        else:
-                            logger.warning(f"⚠️ NO DB LINEAGE: '{pname}' - lineage value was empty or invalid: '{lineage}'")
-                    
-                    logger.info(f"📊 BATCH LINEAGE QUERY: Processed {results_count} products, cached {len(product_lineage_cache)} lineages")
                 except Exception as batch_err:
-                    logger.error(f"❌ Batch product lineage query failed: {batch_err}")
-                    import traceback
-                    logger.error(traceback.format_exc())
+                    logger.warning(f"Batch product lineage query failed: {batch_err}")
             
             # Batch query for strain info
             if strain_names:
@@ -1315,31 +1288,6 @@ def process_chunk(args):
             
             label_data["DescAndWeight"] = wrap_with_marker(combined, "DESC")
             
-            # CRITICAL FIX: Set ProductVendor in label_data so {{Label1.ProductVendor}} placeholder gets replaced
-            # Get vendor from row data (check multiple field names)
-            vendor_val = (row.get("Vendor/Supplier*") or 
-                         row.get("Vendor/Supplier") or 
-                         row.get("Vendor") or 
-                         row.get("ProductVendor") or 
-                         "")
-            # Clean up vendor value
-            if vendor_val:
-                vendor_val = str(vendor_val).strip()
-                if vendor_val.lower() in ['nan', 'none', 'null', '']:
-                    vendor_val = ""
-            else:
-                vendor_val = ""
-            
-            # Set ProductVendor in label_data - template processor will handle proper formatting
-            # For classic types, ProductVendor should show vendor; for non-classic types, it should be empty
-            if is_classic_type and vendor_val:
-                label_data["ProductVendor"] = vendor_val
-                logger.debug(f"Set ProductVendor to '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
-            else:
-                # Non-classic types don't use ProductVendor, or no vendor available
-                label_data["ProductVendor"] = ""
-                logger.debug(f"Set ProductVendor to empty for product '{product_name}' (is_classic: {is_classic_type}, vendor: '{vendor_val}')")
-            
             context[f"Label{i+1}"] = label_data
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
@@ -1350,29 +1298,15 @@ def process_chunk(args):
     tpl.render(context)
     if DEBUG_ENABLED:
         logger.debug("Template rendered successfully")
-
-    # Save rendered template to buffer first
+    
+    # Save to buffer
     buffer = BytesIO()
     tpl.save(buffer)
     buffer.seek(0)
     if DEBUG_ENABLED:
         logger.debug("Template saved to buffer")
-
-    # CRITICAL FIX: Load the saved document and clean up markers
-    from docx import Document
-    doc = Document(buffer)
-    _final_marker_cleanup(doc)
-    if DEBUG_ENABLED:
-        logger.debug("Marker cleanup completed")
-
-    # Save the cleaned document to final buffer
-    final_buffer = BytesIO()
-    doc.save(final_buffer)
-    final_buffer.seek(0)
-    if DEBUG_ENABLED:
-        logger.debug("Cleaned document saved to final buffer")
-
-    return final_buffer.getvalue()
+    
+    return buffer.getvalue()
 
 def combine_documents(docs):
     """Combine multiple documents into one using a safer method."""
@@ -1404,9 +1338,6 @@ def combine_documents(docs):
                 logger.error(f"Error combining document: {e}")
                 # Continue with other documents instead of failing completely
                 continue
-
-        # CRITICAL FIX: Remove all markers from the combined document before saving
-        _final_marker_cleanup(master_doc)
 
         # Save final document to bytes
         final_buffer = BytesIO()
@@ -1620,9 +1551,6 @@ def generate_multiple_label_tables(records, template_path):
         from src.core.generation.docx_formatting import enforce_arial_bold_all_text
         enforce_arial_bold_all_text(final_doc)
         
-        # CRITICAL FIX: Remove all markers from the final document before saving
-        _final_marker_cleanup(final_doc)
-        
         # Save final document
         output = BytesIO()
         final_doc.save(output)
@@ -1657,182 +1585,6 @@ def set_table_borders(table):
         tblBorders.append(bd)
         
     tblPr.append(tblBorders)
-
-def _final_marker_cleanup(doc):
-    """
-    Final marker cleanup to ensure ALL markers are stripped from the final output.
-    This method runs after all other processing to catch any remaining markers.
-    Handles markers that may be split across multiple text runs.
-    """
-    try:
-        # ALL marker types including corrupted/partial variations
-        # Based on screenshot: PRICE_START, RICE_END, DESC_START, tgDESC_END, etc.
-        marker_patterns = [
-            # Full markers with START/END
-            r'PRODUCTNAME_START',
-            r'PRODUCTNAME_END',
-            r'PRODUCTBRAND_START',
-            r'PRODUCTBRAND_END',
-            r'PRODUCTBRAND_CENTER_START',
-            r'PRODUCTBRAND_CENTER_END',
-            r'PRODUCTSTRAIN_START',
-            r'PRODUCTSTRAIN_END',
-            r'PRODUCTTYPE_START',
-            r'PRODUCTTYPE_END',
-            r'PRODUCTVENDOR_START',
-            r'PRODUCTVENDOR_END',
-            r'LINEAGE_START',
-            r'LINEAGE_END',
-            r'WEIGHTUNITS_START',
-            r'WEIGHTUNITS_END',
-            r'PRICE_START',
-            r'PRICE_END',
-            r'DESC_START',
-            r'DESC_END',
-            r'THC_CBD_START',
-            r'THC_CBD_END',
-            r'RATIO_START',
-            r'RATIO_END',
-            r'JOINT_RATIO_START',
-            r'JOINT_RATIO_END',
-            r'THC_START',
-            r'THC_END',
-            r'CBD_START',
-            r'CBD_END',
-            r'DOH_START',
-            r'DOH_END',
-            # Partial/corrupted markers (like RICE_END instead of PRICE_END)
-            r'RICE_START',
-            r'RICE_END',
-            # Prefixed markers (like tgDESC_END)
-            r'tgDESC_START',
-            r'tgDESC_END',
-            r'tgPRICE_START',
-            r'tgPRICE_END',
-        ]
-
-        def clean_text(text):
-            """Clean text by removing all marker patterns while preserving content between markers."""
-            if not text:
-                return text
-
-            cleaned = text
-
-            # PRIORITY 1: Extract and preserve content between paired markers
-            # LINEAGE: Keep the lineage value
-            lineage_match = re.search(r'LINEAGE_START\s*(.+?)\s*LINEAGE_END', cleaned, re.IGNORECASE | re.DOTALL)
-            if lineage_match:
-                lineage_content = lineage_match.group(1).strip()
-                cleaned = re.sub(r'LINEAGE_START\s*.+?\s*LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            # PRODUCTBRAND/PRODUCTBRAND_CENTER: Keep the brand name
-            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START\s*(.+?)\s*PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE | re.DOTALL)
-            if brand_match:
-                brand_content = brand_match.group(1).strip()
-                cleaned = re.sub(r'PRODUCTBRAND(?:_CENTER)?_START\s*.+?\s*PRODUCTBRAND(?:_CENTER)?_END', brand_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            # PRODUCTSTRAIN: Keep the strain name
-            strain_match = re.search(r'PRODUCTSTRAIN_START\s*(.+?)\s*PRODUCTSTRAIN_END', cleaned, re.IGNORECASE | re.DOTALL)
-            if strain_match:
-                strain_content = strain_match.group(1).strip()
-                cleaned = re.sub(r'PRODUCTSTRAIN_START\s*.+?\s*PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            # PRICE: Keep the price value
-            price_match = re.search(r'PRICE_START\s*(.+?)\s*(?:PRICE_END|RICE_END)', cleaned, re.IGNORECASE | re.DOTALL)
-            if price_match:
-                price_content = price_match.group(1).strip()
-                cleaned = re.sub(r'PRICE_START\s*.+?\s*(?:PRICE_END|RICE_END)', price_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            # DESC: Keep the description
-            desc_match = re.search(r'DESC_START\s*(.+?)\s*(?:DESC_END|tgDESC_END)', cleaned, re.IGNORECASE | re.DOTALL)
-            if desc_match:
-                desc_content = desc_match.group(1).strip()
-                cleaned = re.sub(r'DESC_START\s*.+?\s*(?:DESC_END|tgDESC_END)', desc_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            # THC_CBD/RATIO: Keep the content
-            thc_cbd_match = re.search(r'THC_CBD_START\s*(.+?)\s*THC_CBD_END', cleaned, re.IGNORECASE | re.DOTALL)
-            if thc_cbd_match:
-                thc_cbd_content = thc_cbd_match.group(1).strip()
-                cleaned = re.sub(r'THC_CBD_START\s*.+?\s*THC_CBD_END', thc_cbd_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            ratio_match = re.search(r'RATIO_START\s*(.+?)\s*RATIO_END', cleaned, re.IGNORECASE | re.DOTALL)
-            if ratio_match:
-                ratio_content = ratio_match.group(1).strip()
-                cleaned = re.sub(r'RATIO_START\s*.+?\s*RATIO_END', ratio_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            # WEIGHTUNITS: Keep the weight
-            weight_match = re.search(r'WEIGHTUNITS_START\s*(.+?)\s*WEIGHTUNITS_END', cleaned, re.IGNORECASE | re.DOTALL)
-            if weight_match:
-                weight_content = weight_match.group(1).strip()
-                cleaned = re.sub(r'WEIGHTUNITS_START\s*.+?\s*WEIGHTUNITS_END', weight_content, cleaned, flags=re.IGNORECASE | re.DOTALL)
-
-            # PRIORITY 2: Remove any remaining standalone markers
-            for marker in marker_patterns:
-                # Remove the marker with optional whitespace
-                cleaned = re.sub(r'\s*' + marker + r'\s*', ' ', cleaned, flags=re.IGNORECASE)
-
-            # PRIORITY 3: Remove any residual marker-like patterns
-            # This catches things like "bis" from "PRODUCTBRAND_END" split across runs
-            cleaned = re.sub(r'\b(?:bis|tg)\b', '', cleaned, flags=re.IGNORECASE)
-
-            # Clean up excessive whitespace
-            cleaned = re.sub(r'\s+', ' ', cleaned)
-            cleaned = cleaned.strip()
-
-            return cleaned
-
-        # Clean markers in all tables (where the labels are)
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        # Get the full text from all runs
-                        original_text = paragraph.text
-                        if not original_text:
-                            continue
-
-                        # Clean the text
-                        cleaned_text = clean_text(original_text)
-
-                        # If text changed, update the paragraph
-                        if cleaned_text != original_text:
-                            # Preserve formatting by keeping first run and clearing others
-                            if paragraph.runs:
-                                # Store formatting from first run
-                                first_run = paragraph.runs[0]
-                                font = first_run.font
-
-                                # Clear all runs
-                                for run in paragraph.runs[1:]:
-                                    run.text = ''
-
-                                # Set cleaned text in first run
-                                first_run.text = cleaned_text
-                            elif cleaned_text:
-                                # No runs exist, create one
-                                paragraph.add_run(cleaned_text)
-
-        # Clean markers in paragraphs outside tables
-        for paragraph in doc.paragraphs:
-            original_text = paragraph.text
-            if not original_text:
-                continue
-
-            cleaned_text = clean_text(original_text)
-
-            if cleaned_text != original_text:
-                if paragraph.runs:
-                    first_run = paragraph.runs[0]
-                    for run in paragraph.runs[1:]:
-                        run.text = ''
-                    first_run.text = cleaned_text
-                elif cleaned_text:
-                    paragraph.add_run(cleaned_text)
-
-        logger.info("✅ Final marker cleanup completed successfully")
-
-    except Exception as e:
-        logger.warning(f"⚠️ Error in final marker cleanup: {e}")
 
 def debug_markers(text):
     """Debug helper to identify marker issues."""

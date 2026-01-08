@@ -29,13 +29,13 @@
   
   --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: calc(78rem + 0.5cm);     /* Height of center control panel */
+  --center-panel-height: 78rem;     /* Height of center control panel */
   --tag-list-scroll-padding: 1rem;
 }
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin: 1.5rem 0 1.5rem 0 !important;
+  margin: 0.5rem 0 1rem 0 !important;
   padding: 0 !important;
   display: flex !important;
   justify-content: center !important;
@@ -45,7 +45,7 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin: 1.5rem 0 1.5rem 0 !important;
+    margin: 0.5rem 0 1rem 0 !important;
     padding: 0 !important;
   }
 }
@@ -717,13 +717,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
 }
 
@@ -731,7 +731,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -742,7 +742,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -787,22 +787,17 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 72vh);
-    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
+    --center-panel-height: max(78rem, var(--tag-list-height));
   }
   @supports (height: 100dvh) {
     :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(78rem, var(--tag-list-height)); }
   }
+  .control-panel,
   .center-panel,
   #availableTags,
   #selectedTags {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
-  }
-  /* Center column should not scroll */
-  .control-panel,
-  [data-container-type="center"] {
-    overflow-y: visible !important;
-    overflow-x: hidden !important;
   }
   .header-buttons-container { margin-top: 0.25rem !important; }
 }
@@ -824,7 +819,7 @@ body.modal-open #mainContent.store-selection-disabled,
   overflow-x: hidden !important;
   height: auto !important;
   min-height: auto !important;
-  padding-bottom: 0 !important;
+  padding-bottom: 1.5rem !important;
 }
 
 /* FORCE control-section to center its children, especially template select */
@@ -843,7 +838,7 @@ body.modal-open #mainContent.store-selection-disabled,
   flex-direction: column !important;
   align-items: center !important;
   width: 100% !important;
-  padding-bottom: 0 !important;
+  padding-bottom: 1.5rem !important;
   position: relative !important;
 }
 
@@ -913,7 +908,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 1.5rem 0 1.5rem 0 !important;
+  margin: 0.5rem 0 1rem 0 !important;
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -959,7 +954,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: calc(57rem + 0.5cm);     /* Height of center control panel */
+    --center-panel-height: 57rem;     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
 
     /* Dynamic filter border sizing */
@@ -3003,7 +2998,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 1.5rem 0 1.5rem 0 !important;
+    margin: 0.5rem 0 1rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -4338,7 +4333,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .brand-header label {
     margin: 0;
     font-weight: 600;
-    font-size: 1.3rem; /* Increased from 1rem for better visibility */
+    font-size: 1rem;
     color: white;
     cursor: pointer;
   }
@@ -6165,12 +6160,6 @@ body.modal-open #mainContent.store-selection-disabled,
       justify-content: flex-start !important;
   }
 
-  /* Brand header - larger and bolder */
-  .brand-header {
-      font-size: 1.3rem !important; /* Significantly bigger than default 0.85rem for better visibility */
-      font-weight: 700 !important;
-  }
-
   /* Container for header + checkbox/value */
   .tag-row {
       display: flex;
@@ -6620,7 +6609,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .vendor-section > .vendor-header.d-flex,
   .vendor-section > .vendor-header.mb-2,
   .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.25em !important; /* Increased substantially */
+    font-size: 1.65em !important; /* Increased substantially */
     font-weight: 700 !important;
   }
 
@@ -6630,14 +6619,14 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags .vendor-section > .vendor-header.d-flex,
   #selectedTags .vendor-section > .vendor-header.mb-2,
   #selectedTags .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1.225em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.25em; /* Increased substantially */
-    font-weight: 700;
+    font-size: 1.4em; /* Increased substantially */
+    font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
     letter-spacing: 0.03em;
@@ -6930,7 +6919,7 @@ body.modal-open #mainContent.store-selection-disabled,
     width: 70% !important; /* Reduced from 85% to match other buttons */
     max-width: 70% !important; /* Reduced from 85% */
     height: 220px !important; /* Doubled from 110px - twice as tall */
-    margin: 1.5rem auto 0.2rem auto !important; /* Increased top margin for healthy spacing from template select */
+    margin: 0.2rem auto !important;
     padding: 4.4rem 1.2rem !important; /* Doubled vertical padding from 2.2rem */
     font-size: 1rem !important;
     font-weight: 700 !important;
@@ -7889,7 +7878,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 1.5rem 0 1.5rem 0 !important;
+    margin: 0.5rem 0 1rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -11013,24 +11002,6 @@ body.modal-open #mainContent.store-selection-disabled,
   margin-top: 10px !important;
   position: relative !important;
   top: 5px !important;
-}
-
-/* Add more top padding on larger screens to prevent Template header cutoff */
-@media (min-width: 992px) {
-  [data-container-type="center"] .control-panel {
-    padding-top: 0 !important;
-  }
-  
-  [data-container-type="center"] .control-section:first-child {
-    margin-top: 0 !important;
-  }
-}
-
-/* Prevent center column from scrolling */
-[data-container-type="center"],
-[data-container-type="center"] .control-panel {
-  overflow-y: visible !important;
-  overflow-x: hidden !important;
 }
 
 /* Scale-to-fit support - REMOVED transform-origin from html/body to fix canvas positioning */

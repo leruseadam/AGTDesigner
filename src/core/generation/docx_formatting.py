@@ -206,28 +206,10 @@ def apply_lineage_colors(doc):
                     if color_hex:
                         logger.info(f"LINEAGE COLOR: '{text}' -> {lineage_matched} -> #{color_hex}")
                         colors_applied += 1
-                        
-                        # CRITICAL: Set alignment RIGHT HERE before anything else can interfere
-                        # Force LEFT alignment for all lineage cells immediately after setting color
-                        # DO NOT change font size - preserve whatever size was already set during template rendering
-                        try:
-                            for paragraph in cell.paragraphs:
-                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                # Set font color and bold - but preserve existing size
-                                for run in paragraph.runs:
-                                    run.font.color.rgb = RGBColor(255, 255, 255)
-                                    run.font.bold = True
-                                    # DO NOT modify font.size - preserve existing size
-                                logger.info(f"⚡⚡⚡ FORCED LEFT ALIGNMENT (preserved font size): '{text[:40]}'")
-                        except Exception as align_err:
-                            logger.error(f"Failed to set alignment: {align_err}")
                     else:
                         logger.debug(f"NO LINEAGE MATCH: '{text}' (classic: {is_classic_type}, strain_cbd: {is_product_strain_cbd})")
                     
-                    logger.warning(f"🔍 DEBUG: About to apply color - color_hex={color_hex}, text.strip()='{text.strip()[:30] if text.strip() else 'EMPTY'}'")
-                    
                     if color_hex and text.strip():
-                        logger.warning(f"🎨 APPLYING COLOR AND ALIGNMENT for: '{text[:40]}'")
                         # Final safety check: only apply color if there's actual content
                         # Set cell background color
                         tc = cell._tc
@@ -239,9 +221,16 @@ def apply_lineage_colors(doc):
                         shd.set(qn('w:val'), 'clear')
                         shd.set(qn('w:color'), 'auto')
                         tcPr.append(shd)
-                        
-                        # NOTE: Font size and alignment are already set in the first block (lines 206-225)
-                        # No need to set them again here
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                # Preserve existing font size to maintain ProductStrain 1pt sizing
+                                existing_font_size = run.font.size
+                                run.font.color.rgb = RGBColor(255, 255, 255)
+                                run.font.bold = True
+                                run.font.name = "Arial"
+                                # Restore the original font size if it was set
+                                if existing_font_size is not None:
+                                    run.font.size = existing_font_size
                     elif not text.strip():
                         # Final safety: if text is empty after all processing, ensure white background
                         tc = cell._tc
@@ -480,15 +469,7 @@ def set_cell_background(cell, color_hex):
         shd.set(qn('w:themeFill'), '0')
         tcPr.append(shd)
         for paragraph in cell.paragraphs:
-            # Check if this cell contains PRODUCTBRAND_CENTER markers (brand names should be centered)
-            # Otherwise use left alignment for lineage (strain types like HYBRID, INDICA)
-            cell_text = ''.join(run.text for run in paragraph.runs)
-            if 'PRODUCTBRAND_CENTER_START' in cell_text or 'PRODUCTBRAND_CENTER_END' in cell_text:
-                logger.info(f"⚡ ALIGNMENT: Setting CENTER for PRODUCTBRAND_CENTER cell: '{cell.text[:40]}'...")
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            else:
-                logger.info(f"⚡ ALIGNMENT: Setting LEFT for lineage cell: '{cell.text[:40]}'...")
-                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             for run in paragraph.runs:
                 run.font.color.rgb = RGBColor(255, 255, 255)
                 run.font.bold = True
@@ -1360,32 +1341,8 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                     paragraph.paragraph_format.space_after = Pt(0)
                                     paragraph.paragraph_format.line_spacing = 1.0
                                     
-                                    # CRITICAL FIX: DON'T override paragraph alignment for cells with lineage colors
-                                    # The apply_lineage_colors function already set the correct alignment
-                                    # (LEFT for classic types, CENTER for PRODUCTBRAND_CENTER)
-                                    # Only set alignment for non-lineage cells
-                                    has_lineage_color = False
-                                    try:
-                                        tc = cell._tc
-                                        tcPr = tc.find(qn('w:tcPr'))
-                                        if tcPr is not None:
-                                            shd = tcPr.find(qn('w:shd'))
-                                            if shd is not None:
-                                                fill_color = shd.get(qn('w:fill'))
-                                                # Check if color matches any lineage color (not white/auto)
-                                                if fill_color and fill_color not in ['FFFFFF', 'auto', 'none', '']:
-                                                    has_lineage_color = True
-                                    except Exception:
-                                        pass
-                                    
-                                    # CRITICAL: Only set alignment for NON-lineage cells
-                                    # Lineage cells already have correct alignment from apply_lineage_colors
-                                    if not has_lineage_color:
-                                        logger.debug(f"Setting LEFT alignment for non-lineage cell: '{cell.text[:30]}'...")
-                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                    else:
-                                        # DON'T TOUCH alignment for lineage cells - it's already set correctly
-                                        logger.warning(f"✋ PRESERVING alignment for lineage cell (color={fill_color}): '{cell.text[:30]}'...")
+                                    # CRITICAL: Set paragraph alignment to prevent expansion
+                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                     
                                     # CRITICAL: Enable text wrapping but keep words together (never split mid-word)
                                     pPr = paragraph._element.get_or_add_pPr()
@@ -2087,32 +2044,8 @@ def prevent_table_expansion_enhanced(doc, template_type=None):
                                 paragraph.paragraph_format.space_after = Pt(0)
                                 paragraph.paragraph_format.line_spacing = 1.0
                                 
-                                # CRITICAL FIX: DON'T override paragraph alignment for cells with lineage colors
-                                # The apply_lineage_colors function already set the correct alignment
-                                # (LEFT for classic types, CENTER for PRODUCTBRAND_CENTER)
-                                # Only set alignment for non-lineage cells
-                                has_lineage_color = False
-                                try:
-                                    tc = cell._tc
-                                    tcPr_check = tc.find(qn('w:tcPr'))
-                                    if tcPr_check is not None:
-                                        shd = tcPr_check.find(qn('w:shd'))
-                                        if shd is not None:
-                                            fill_color = shd.get(qn('w:fill'))
-                                            # Check if color matches any lineage color (not white/auto)
-                                            if fill_color and fill_color not in ['FFFFFF', 'auto', 'none', '']:
-                                                has_lineage_color = True
-                                except Exception:
-                                    pass
-                                
-                                # CRITICAL: Only set alignment for NON-lineage cells
-                                # Lineage cells already have correct alignment from apply_lineage_colors
-                                if not has_lineage_color:
-                                    logger.debug(f"Setting LEFT alignment for non-lineage cell: '{cell.text[:30]}'...")
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                else:
-                                    # DON'T TOUCH alignment for lineage cells - it's already set correctly
-                                    logger.warning(f"✋ PRESERVING alignment for lineage cell (color={fill_color}): '{cell.text[:30]}'...")
+                                # Force left alignment to prevent expansion
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                 
                                 # Add text wrapping controls at XML level
                                 pPr = paragraph._element.get_or_add_pPr()

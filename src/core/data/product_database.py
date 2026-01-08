@@ -3,7 +3,6 @@ import sqlite3
 import json
 import logging
 import time
-import re
 from typing import Dict, List, Optional, Tuple, Any, Set
 from datetime import datetime
 import pandas as pd
@@ -89,28 +88,6 @@ def _set_cached_lineage(product_name: str, lineage: Optional[str]):
             for key, _ in sorted_keys[:1000]:
                 del _lineage_cache[key]
                 del _lineage_cache_timestamps[key]
-
-def clear_lineage_cache(product_name: Optional[str] = None):
-    """Clear lineage cache for a specific product or all products.
-    
-    Args:
-        product_name: If provided, clears cache for that product only.
-                     If None, clears the entire lineage cache.
-    """
-    with _lineage_cache_lock:
-        if product_name:
-            cache_key = product_name.strip().lower()
-            if cache_key in _lineage_cache:
-                del _lineage_cache[cache_key]
-                logger.info(f"Cleared lineage cache for product: {product_name}")
-            if cache_key in _lineage_cache_timestamps:
-                del _lineage_cache_timestamps[cache_key]
-        else:
-            # Clear entire cache
-            cleared_count = len(_lineage_cache)
-            _lineage_cache.clear()
-            _lineage_cache_timestamps.clear()
-            logger.info(f"Cleared entire lineage cache ({cleared_count} entries)")
 
 def _get_cached_fuzzy_match(product_name: str) -> Optional[Dict[str, Any]]:
     """Get cached fuzzy match result if available and not expired."""
@@ -227,12 +204,6 @@ class ProductDatabase:
         # Corruption recovery flag to prevent infinite loops
         self._corruption_recovery_attempted = False
         self._corruption_recovery_lock = threading.Lock()
-        
-        # Cache for get_all_products() to avoid repeated expensive queries (especially slow on PythonAnywhere)
-        # Cache is instance-level and thread-safe via locks
-        self._cached_all_products = None
-        self._cached_all_products_timestamp = None
-        self._all_products_cache_ttl = 300  # Cache for 5 minutes
     
     def _is_corruption_error(self, error: Exception) -> bool:
         """Check if an error indicates database corruption."""
@@ -682,37 +653,18 @@ class ProductDatabase:
                 
                 # Create indexes for better performance
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_strains_normalized ON strains(normalized_name)')
-
+                
                 # Only create normalized_name index if the column exists
                 cursor.execute("PRAGMA table_info(products)")
                 product_columns = [col[1] for col in cursor.fetchall()]
                 if 'normalized_name' in product_columns:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized ON products(normalized_name)')
-
+                
                 # Only create strain_id index if the column exists
                 if 'strain_id' in product_columns:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain_id)')
-
+                    
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
-
-                # Performance optimization: Add indexes for frequently queried columns
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_product_type ON products("Product Type*")')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_lineage ON products("Lineage")')
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor ON products("Vendor/Supplier*")')
-                if 'canonical_lineage' in product_columns:
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_canonical_lineage ON products(canonical_lineage)')
-
-                # CRITICAL PERFORMANCE FIX: Add index on "Product Name*" for exact matching in web endpoint lineage queries
-                # Web endpoint uses: WHERE p."Product Name*" IN (...) for batch lineage lookups
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_product_name ON products("Product Name*")')
-                
-                # CRITICAL PERFORMANCE FIX: Add index on LOWER("Product Name*") for tag enrichment queries
-                # This prevents full table scans during tag generation (5-minute delay fix)
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_name_lower ON products(LOWER("Product Name*"))')
-                
-                # CRITICAL PERFORMANCE FIX: Add index on normalized_name for fast get_products_by_names queries
-                # This is critical for tag generation performance on PythonAnywhere
-                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized_name ON products(normalized_name)')
                 
                 conn.commit()
                 
@@ -854,50 +806,11 @@ class ProductDatabase:
                     except Exception as e:
                         logger.warning(f"Could not add essential column {col_name}: {e}")
             
-            # PERFORMANCE FIX: Add normalized_product_strain column for fast joins
-            if 'normalized_product_strain' not in existing_columns:
-                try:
-                    cursor.execute('ALTER TABLE products ADD COLUMN normalized_product_strain TEXT')
-                    logger.info("Added normalized_product_strain column for performance optimization")
-                    added_columns.append('normalized_product_strain')
-                except Exception as e:
-                    logger.warning(f"Could not add normalized_product_strain column: {e}")
-            
             if added_columns:
                 conn.commit()
                 logger.info(f"Added {len(added_columns)} essential columns to products table")
             else:
                 logger.debug("All essential columns already exist")
-            
-            # PERFORMANCE FIX: Populate normalized_product_strain if column exists but is empty
-            cursor.execute("PRAGMA table_info(products)")
-            product_columns = {row[1] for row in cursor.fetchall()}
-            if 'normalized_product_strain' in product_columns:
-                try:
-                    # Check if column needs population
-                    cursor.execute('SELECT COUNT(*) FROM products WHERE normalized_product_strain IS NULL AND "Product Strain" IS NOT NULL AND "Product Strain" != ""')
-                    count_result = cursor.fetchone()
-                    needs_population = count_result and count_result[0] > 0
-                    if needs_population:
-                        logger.info(f"Populating normalized_product_strain for {count_result[0]} products...")
-                        cursor.execute('SELECT id, "Product Strain" FROM products WHERE normalized_product_strain IS NULL AND "Product Strain" IS NOT NULL AND "Product Strain" != ""')
-                        products_to_update = cursor.fetchall()
-                        updated_count = 0
-                        for product_id, product_strain in products_to_update:
-                            if product_strain:
-                                normalized_strain = self._normalize_strain_name(str(product_strain).strip())
-                                if normalized_strain:
-                                    cursor.execute('UPDATE products SET normalized_product_strain = ? WHERE id = ?', (normalized_strain, product_id))
-                                    updated_count += 1
-                        conn.commit()
-                        logger.info(f"✅ Populated normalized_product_strain for {updated_count} products")
-                    
-                    # Create index for fast joins
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_normalized_strain ON products(normalized_product_strain)')
-                    conn.commit()
-                    logger.info("✅ Created index on normalized_product_strain")
-                except Exception as e:
-                    logger.warning(f"Could not populate normalized_product_strain: {e}")
             
             # Ensure lineage_history table exists even on legacy databases
             cursor.execute('''
@@ -1462,9 +1375,7 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                # Only log the first rejection, then a summary will be logged at the end
-                if self._rejected_blank_names == 1:
-                    logger.warning(f"⚠️ Rejecting products with blank/empty product names (logging suppressed, will show total at end)")
+                logger.warning(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
                 return None
             
             # Check for invalid values
@@ -1627,19 +1538,15 @@ class ProductDatabase:
                     values_to_insert = []
                     
                     # Map of data to potential column names
-                    product_strain = self._calculate_product_strain_original(
-                        product_data.get('Product Type*', ''),
-                        product_data.get('Product Name*', ''),
-                        product_data.get('Description', ''),
-                        product_data.get('Ratio', '')
-                    )
-                    normalized_product_strain = self._normalize_strain_name(product_strain) if product_strain else None
-                    
                     column_data_map = {
                         'Product Name*': product_name,
                         'normalized_name': normalized_name,
-                        'Product Strain': product_strain,
-                        'normalized_product_strain': normalized_product_strain,
+                        'Product Strain': self._calculate_product_strain_original(
+                            product_data.get('Product Type*', ''),
+                            product_data.get('Product Name*', ''),
+                            product_data.get('Description', ''),
+                            product_data.get('Ratio', '')
+                        ),
                         'Product Type*': product_data.get('Product Type*'),  # EXCEL PRIORITY: Excel Product Type (High THC/CBD) always overwrites DB
                         'Vendor/Supplier*': product_data.get('Vendor/Supplier*'),
                         'Product Brand': product_data.get('Product Brand'),
@@ -1739,7 +1646,6 @@ class ProductDatabase:
                         cursor.execute(insert_query, values_to_insert)
                         product_id = cursor.lastrowid
                         conn.commit()
-                        self._invalidate_all_products_cache()  # Invalidate cache after adding product
                         logger.info(f"✅ ADDED NEW product '{product_name}' (ID: {product_id}, Vendor: {vendor_value}, Brand: {brand_value})")
                         return product_id
                     except sqlite3.IntegrityError as e:
@@ -1763,7 +1669,6 @@ class ProductDatabase:
                                 try:
                                     self._update_existing_product(cursor, product_id, product_data)
                                     conn.commit()
-                                    self._invalidate_all_products_cache()  # Invalidate cache after updating product
                                     logger.info(f"Successfully updated product '{existing_name}' after UNIQUE constraint violation")
                                     return product_id
                                 except Exception as update_error:
@@ -2416,11 +2321,6 @@ class ProductDatabase:
             excluded_count = len(df) - len(filtered_df)
             blank_entries_skipped = len(df) - len(filtered_df) - excluded_count
             
-            # Invalidate cache if products were stored or updated
-            if stored_count > 0 or updated_count > 0:
-                self._invalidate_all_products_cache()
-                logger.debug(f"Invalidated all_products cache after storing {stored_count} new and updating {updated_count} products")
-            
             result = {
                 'stored': stored_count,
                 'updated': updated_count,
@@ -2539,8 +2439,6 @@ class ProductDatabase:
                     deleted_count += len(ids_to_delete)
             
             conn.commit()
-            if deleted_count > 0:
-                self._invalidate_all_products_cache()  # Invalidate cache after deleting products
             
             # Get final product count
             cursor.execute("SELECT COUNT(*) FROM products")
@@ -3401,35 +3299,20 @@ class ProductDatabase:
                 except ValueError:
                     continue
         
-        # If no pattern found, try to generate from weight (e.g., "5g" -> "1g x 5 Pack")
+        # If no pattern found, try to generate from weight
         if weight and str(weight).strip() != '' and str(weight).lower() != 'nan':
             try:
-                # Extract numeric value from weight string (handle "5g", "5 g", etc.)
-                weight_str = str(weight).strip().lower()
-                weight_match = re.search(r'(\d+(?:\.\d+)?)', weight_str)
-                if weight_match:
-                    weight_float = float(weight_match.group(1))
-                    
-                    # Convert to joint ratio format: "5g" -> "1g x 5 Pack"
-                    if weight_float >= 1.0:
-                        # For weights >= 1g, assume 1g per joint
-                        count = int(weight_float) if weight_float.is_integer() else weight_float
-                        if count == 1:
-                            return "1g"
-                        else:
-                            return f"1g x {int(count)} Pack"
+                weight_float = float(weight)
+                if weight_float == 1.0:
+                    return "1g"
+                else:
+                    # Format weight similar to price formatting - no decimals unless original has decimals
+                    if weight_float.is_integer():
+                        formatted_weight = f"{int(weight_float)}g"
                     else:
-                        # For weights < 1g (e.g., 0.5g), assume that weight per joint
-                        # Try to figure out pack count from total weight
-                        # Common: 0.5g x 2 Pack = 1g total, 0.5g x 4 Pack = 2g total
-                        if weight_float == 0.5:
-                            # 0.5g could be 0.5g x 2 Pack (1g total) or just 0.5g single
-                            # Default to 0.5g x 2 Pack
-                            return "0.5g x 2 Pack"
-                        else:
-                            # For other fractional weights, return as-is
-                            formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
-                            return formatted_weight
+                        # Round to 2 decimal places and remove trailing zeros
+                        formatted_weight = f"{weight_float:.2f}".rstrip("0").rstrip(".") + "g"
+                    return formatted_weight
             except (ValueError, TypeError):
                 pass
         
@@ -4346,18 +4229,12 @@ class ProductDatabase:
                     elif col_name == 'AJ':
                         update_values.append(product_data.get('THC Content', ''))
                     elif col_name == 'Product Strain':
-                        product_strain = self._calculate_product_strain_original(
+                        update_values.append(self._calculate_product_strain_original(
                             product_data.get('Product Type*', ''),
                             product_data.get('Product Name*', ''),
                             product_data.get('Description', ''),
                             product_data.get('Ratio', '')
-                        )
-                        update_values.append(product_strain)
-                        # Also update normalized_product_strain if column exists
-                        if 'normalized_product_strain' in available_columns:
-                            normalized_strain = self._normalize_strain_name(product_strain) if product_strain else None
-                            update_fields.append('"normalized_product_strain" = ?')
-                            update_values.append(normalized_strain)
+                        ))
                     else:
                         update_values.append(col_value)
             
@@ -5049,7 +4926,6 @@ class ProductDatabase:
                 logger.warning(f"No product found in database to update: '{product_name}' (vendor={vendor}, brand={brand})")
             else:
                 logger.info(f"Successfully updated {rows_updated} row(s) for product '{product_name}'")
-                self._invalidate_all_products_cache()  # Invalidate cache after updating lineage
 
                 # CRITICAL FIX: Clear lineage cache for this product to force fresh lookup
                 # Without this, get_product_lineage() will return the old cached value
@@ -5065,23 +4941,17 @@ class ProductDatabase:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
             return False 
 
-    def get_product_lineage(self, product_name: str, bypass_cache: bool = False) -> Optional[str]:
+    def get_product_lineage(self, product_name: str) -> Optional[str]:
         """Get the lineage for a specific product by name.
 
         Uses case-insensitive and whitespace-insensitive matching to ensure
         updates are found even if there are minor differences in formatting.
         Also applies sativa hybrid override for known sativa hybrid strains.
-        
-        Args:
-            product_name: The product name to look up
-            bypass_cache: If True, bypasses the cache and always fetches fresh from database.
-                         Use this when sovereign_lineage may have been updated.
         """
-        # PERFORMANCE: Check cache first (unless bypassing for fresh sovereign lineage)
-        if not bypass_cache:
-            cached_result = _get_cached_lineage(product_name)
-            if cached_result is not None:
-                return cached_result
+        # PERFORMANCE: Check cache first
+        cached_result = _get_cached_lineage(product_name)
+        if cached_result is not None:
+            return cached_result
 
         try:
             self.init_database()
@@ -5112,16 +4982,11 @@ class ProductDatabase:
             # Try exact match first (fastest) - also get strain for sativa hybrid check
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
-            # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
-            # Also handle case where normalized_product_strain is NULL - fall back to name-based join
-            # FIX: Use LOWER(TRIM()) to normalize Product Strain on-the-fly since normalized_product_strain column doesn't exist
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
-                LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = s2.normalized_name
-                LEFT JOIN strains s3 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" = ? OR p."ProductName" = ?
                 ORDER BY p.id DESC
                 LIMIT 1
@@ -5131,11 +4996,6 @@ class ProductDatabase:
             if result and result[0] and str(result[0]).strip():
                 lineage = str(result[0]).strip()
                 product_strain = result[1] if len(result) > 1 and result[1] else None
-                
-                # If caller explicitly bypasses cache, return the exact database value without overrides
-                if bypass_cache:
-                    _set_cached_lineage(product_name, lineage)
-                    return lineage
                 
                 # CRITICAL FIX: Apply sativa hybrid override if product has a known sativa hybrid strain or name
                 is_known_sativa_hybrid = False
@@ -5164,16 +5024,11 @@ class ProductDatabase:
             # Fallback: Case-insensitive and whitespace-insensitive match
             # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
             # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
-            # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
-            # Also handle case where normalized_product_strain is NULL - fall back to name-based join
-            # FIX: Use LOWER(TRIM()) to normalize Product Strain on-the-fly since normalized_product_strain column doesn't exist
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p."Product Strain"
                 FROM products p
-                LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = s2.normalized_name
-                LEFT JOIN strains s3 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE TRIM(LOWER(p."Product Name*")) = TRIM(LOWER(?))
                    OR TRIM(LOWER(p."ProductName")) = TRIM(LOWER(?))
                 ORDER BY p.id DESC
@@ -5184,11 +5039,6 @@ class ProductDatabase:
             if result and result[0] and str(result[0]).strip():
                 lineage = str(result[0]).strip()
                 product_strain = result[1] if len(result) > 1 and result[1] else None
-                
-                # If caller explicitly bypasses cache, return the exact database value without overrides
-                if bypass_cache:
-                    _set_cached_lineage(product_name, lineage)
-                    return lineage
                 
                 # CRITICAL FIX: Apply sativa hybrid override
                 if product_strain and str(product_strain).strip():
@@ -5222,11 +5072,6 @@ class ProductDatabase:
             if result and result[0] and str(result[0]).strip():
                 lineage = str(result[0]).strip()
                 product_strain = result[1] if len(result) > 1 and result[1] else None
-                
-                # If caller explicitly bypasses cache, return the exact database value without overrides
-                if bypass_cache:
-                    _set_cached_lineage(product_name, lineage)
-                    return lineage
                 
                 # CRITICAL FIX: Apply sativa hybrid override
                 if product_strain and str(product_strain).strip():
@@ -5418,8 +5263,6 @@ class ProductDatabase:
             
             if rows_updated == 0:
                 logger.warning(f"⚠️ DOH UPDATE: No product found in database to update DOH: '{product_name}' (vendor={vendor}, brand={brand})")
-            else:
-                self._invalidate_all_products_cache()  # Invalidate cache after updating DOH
             
             return rows_updated > 0
         except Exception as e:
@@ -5807,121 +5650,7 @@ class ProductDatabase:
             logger.error(f"Error adding missing columns: {e}")
             raise
 
-    @timed_operation("get_products_by_names_fast")
-    def get_products_by_names_fast(self, product_names: List[str], fields: List[str] = None) -> List[Dict[str, Any]]:
-        """
-        Fast version that only selects needed fields for tag enrichment.
-        Use this instead of get_products_by_names when you only need lineage, DOH, price, THC/CBD.
-        
-        Args:
-            product_names: List of product names to look up
-            fields: Optional list of specific fields to select. If None, selects only enrichment fields.
-        
-        Returns:
-            List of product dictionaries with requested fields
-        """
-        try:
-            self.init_database()
-            
-            if not product_names:
-                return []
-            
-            # Normalize all product names
-            normalized_names = [self._normalize_product_name(name) for name in product_names]
-            
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            # PERFORMANCE FIX: Only select fields needed for tag enrichment by default
-            # This reduces query time from seconds to milliseconds on PythonAnywhere
-            if fields is None:
-                # Default: only fields needed for tag enrichment (lineage, DOH, price, THC/CBD)
-                fields = [
-                    '"Product Name*"', 'normalized_name', '"Lineage"', 'sovereign_lineage',
-                    '"DOH"', '"DOH Compliant (Yes/No)"', '"Price"',
-                    '"THC test result"', '"CBD test result"'
-                ]
-            
-            # Use placeholders for the IN clause
-            placeholders = ','.join(['?' for _ in normalized_names])
-            fields_str = ', '.join(fields)
-            
-            # PERFORMANCE: Optimized query with only needed columns
-            cursor.execute(f'''
-                SELECT {fields_str}
-                FROM products
-                WHERE normalized_name IN ({placeholders})
-            ''', normalized_names)
-            
-            results = cursor.fetchall()
-            
-            # Create a mapping from normalized names to results
-            products_map = {}
-            for result in results:
-                # Find normalized_name column index
-                normalized_name_idx = fields.index('normalized_name') if 'normalized_name' in fields else 1
-                normalized_name = result[normalized_name_idx]
-                if normalized_name not in products_map:
-                    products_map[normalized_name] = []
-                products_map[normalized_name].append(result)
-            
-            # Build the final list maintaining the order of requested product names
-            products = []
-            for i, product_name in enumerate(product_names):
-                normalized_name = normalized_names[i]
-                if normalized_name in products_map:
-                    result = products_map[normalized_name][0]
-                    
-                    # Build product dict based on available fields
-                    product_info = {}
-                    for idx, field in enumerate(fields):
-                        field_clean = field.strip('"')
-                        if field_clean == 'Product Name*':
-                            product_info['Product Name*'] = result[idx]
-                            product_info['ProductName'] = result[idx]
-                        elif field_clean == 'normalized_name':
-                            product_info['normalized_name'] = result[idx]
-                        elif field_clean == 'Lineage':
-                            product_info['Lineage'] = result[idx]
-                        elif field_clean == 'sovereign_lineage':
-                            product_info['sovereign_lineage'] = result[idx]
-                            # Use sovereign_lineage if available, otherwise use Lineage
-                            if result[idx] and str(result[idx]).strip() not in ['', 'None', 'nan']:
-                                product_info['canonical_lineage'] = result[idx]
-                                product_info['Lineage'] = result[idx]
-                        elif field_clean in ['DOH', 'DOH Compliant (Yes/No)']:
-                            product_info[field_clean] = result[idx]
-                            if field_clean == 'DOH Compliant (Yes/No)':
-                                product_info['DOH'] = result[idx]
-                        elif field_clean == 'Price':
-                            product_info['Price'] = result[idx]
-                        elif field_clean == 'THC test result':
-                            product_info['THC test result'] = result[idx]
-                            product_info['THC'] = result[idx]
-                        elif field_clean == 'CBD test result':
-                            product_info['CBD test result'] = result[idx]
-                            product_info['CBD'] = result[idx]
-                    
-                    # Ensure canonical_lineage is set
-                    if 'canonical_lineage' not in product_info:
-                        product_info['canonical_lineage'] = product_info.get('Lineage', 'MIXED')
-                    
-                    products.append(product_info)
-                else:
-                    # Product not found - return minimal placeholder
-                    products.append({
-                        'Product Name*': product_name,
-                        'ProductName': product_name,
-                        'Lineage': 'MIXED',
-                        'canonical_lineage': 'MIXED'
-                    })
-            
-            return products
-            
-        except Exception as e:
-            logger.error(f"Error in get_products_by_names_fast: {e}")
-            return []
-
+    @timed_operation("get_products_by_names")
     def get_products_by_names(self, product_names: List[str]) -> List[Dict[str, Any]]:
         """Get information about multiple products by their names (with caching)."""
         try:
@@ -7519,7 +7248,6 @@ class ProductDatabase:
             cursor.execute("DELETE FROM sqlite_sequence WHERE name='strains'")
             
             conn.commit()
-            self._invalidate_all_products_cache()  # Invalidate cache after clearing all products
             logging.info("All database data cleared successfully")
             
         except Exception as e:
@@ -7527,27 +7255,8 @@ class ProductDatabase:
             raise
 
     def get_all_products(self) -> List[Dict[str, Any]]:
-        """Get all products from the database for export. Results are cached for 5 minutes."""
+        """Get all products from the database for export."""
         try:
-            import time
-            current_time = time.time()
-            
-            # PERFORMANCE FIX: Check cache first to avoid expensive database queries
-            # This is especially important on PythonAnywhere where database access is slower
-            with self._cache_lock:
-                if (self._cached_all_products is not None and 
-                    self._cached_all_products_timestamp is not None and
-                    (current_time - self._cached_all_products_timestamp) < self._all_products_cache_ttl):
-                    cache_age = current_time - self._cached_all_products_timestamp
-                    logger.debug(f"Using cached all_products ({len(self._cached_all_products)} products, cached {cache_age:.1f}s ago)")
-                    self._timing_stats['cache_hits'] += 1
-                    # Return a copy to avoid mutation issues
-                    return list(self._cached_all_products)
-            
-            # Cache miss - query database
-            self._timing_stats['cache_misses'] += 1
-            logger.debug("Loading all products from database (cache miss)")
-            
             self.init_database()
             
             conn = self._get_connection()
@@ -7586,25 +7295,11 @@ class ProductDatabase:
                 
                 products.append(product)
             
-            # Cache the results (thread-safe)
-            with self._cache_lock:
-                self._cached_all_products = products
-                self._cached_all_products_timestamp = current_time
-            
-            logger.debug(f"Cached {len(products)} products for {self._all_products_cache_ttl}s")
-            
             return products
             
         except Exception as e:
             logger.error(f"Error getting all products: {e}")
             return []
-    
-    def _invalidate_all_products_cache(self):
-        """Invalidate the cached all_products result. Call this when products are added/updated/deleted."""
-        with self._cache_lock:
-            self._cached_all_products = None
-            self._cached_all_products_timestamp = None
-            logger.debug("Invalidated all_products cache")
     
     def update_all_product_strains(self) -> Dict[str, Any]:
         """Update all existing Product Strain column values using the _calculate_product_strain logic."""

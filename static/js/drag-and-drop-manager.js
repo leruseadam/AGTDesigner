@@ -144,24 +144,16 @@ class DragAndDropManager {
         // Add handles to all tag rows (the actual draggable containers)
         const allTagRows = container.querySelectorAll('.tag-row');
         const tagRows = Array.from(allTagRows).filter(row => row.querySelector('.tag-checkbox'));
-        // Only log during debug mode to reduce console noise
-        if (window.DEBUG_DRAG_DROP) {
-            console.log(`Found ${allTagRows.length} total tag rows, ${tagRows.length} with checkboxes`);
-        }
+        console.log(`Found ${allTagRows.length} total tag rows, ${tagRows.length} with checkboxes`);
         
         if (tagRows.length === 0) {
-            // Only warn if container has some tag rows but none with checkboxes (actual error)
-            // Don't warn during initial page load when tags haven't loaded yet
-            if (allTagRows.length > 0) {
-                console.warn('No tag rows with checkboxes found in container');
-                console.log('Available tag rows:', Array.from(allTagRows).map(row => ({
-                    text: row.textContent.trim().substring(0, 50),
-                    hasCheckbox: !!row.querySelector('.tag-checkbox'),
-                    classes: row.className,
-                    children: Array.from(row.children).map(child => child.className)
-                })));
-            }
-            // Silently return if no tags loaded yet (expected during initialization)
+            console.warn('No tag rows with checkboxes found in container');
+            console.log('Available tag rows:', Array.from(allTagRows).map(row => ({
+                text: row.textContent.trim().substring(0, 50),
+                hasCheckbox: !!row.querySelector('.tag-checkbox'),
+                classes: row.className,
+                children: Array.from(row.children).map(child => child.className)
+            })));
             return;
         }
         
@@ -366,9 +358,6 @@ class DragAndDropManager {
         // Store additional identifying information
         this.draggedElementId = tagRow.getAttribute('data-tag-id');
         
-        // CRITICAL: Store the immediate parent container to restrict dragging within it
-        this.immediateParentContainer = this.findParentContainer(tagRow);
-        
         // Store a snapshot of the element's state
         this.draggedElementSnapshot = {
             textContent: this.draggedElementText,
@@ -478,20 +467,8 @@ class DragAndDropManager {
         this.targetContainerId = targetContainerId;
         
         // If dragging within the same container, find reorder position
-        // CRITICAL FIX: Only allow reordering within the immediate parent container
         if (this.sourceContainerId === this.targetContainerId && this.sourceContainerId === 'selectedTags') {
-            // Check if mouse is over an element within the immediate parent container
-            const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
-            const targetParentContainer = elementUnderMouse ? this.findParentContainer(elementUnderMouse.closest('.tag-row')) : null;
-            
-            // Only allow reordering if target is within the same immediate parent container
-            if (this.immediateParentContainer && targetParentContainer === this.immediateParentContainer) {
-                this.findDropPosition(e.clientY);
-            } else {
-                // Mouse is outside immediate parent - clear drop indicators
-                this.targetPosition = null;
-                this.clearDropIndicators();
-            }
+            this.findDropPosition(e.clientY);
         } else {
             // Cross-list dragging - clear reorder indicators
             this.targetPosition = null;
@@ -629,51 +606,10 @@ class DragAndDropManager {
             }, 500);
         } else if (this.targetPosition !== null && this.targetPosition !== this.originalIndex && this.sourceContainerId === 'selectedTags') {
             // Same-list reordering (only for selected tags)
-            // CRITICAL FIX: Verify we're still within the immediate parent container
-            const elementUnderMouse = document.elementFromPoint(e.clientX, e.clientY);
-            const targetParentContainer = elementUnderMouse ? this.findParentContainer(elementUnderMouse.closest('.tag-row')) : null;
-            
-            if (this.immediateParentContainer && targetParentContainer === this.immediateParentContainer) {
-                // Still within immediate parent - verify element is still in DOM before reordering
-                if (this.draggedElement && this.draggedElement.parentNode) {
-                    // Element is still in DOM - safe to reorder
-                    console.log('Performing reorder from', this.originalIndex, 'to', this.targetPosition);
-                    this.performReorder();
-                    // Add success feedback
-                    this.showReorderSuccess();
-                } else {
-                    // Element was lost - restore from backup if available
-                    console.warn('⚠️ Dragged element was lost, attempting to restore from backup');
-                    if (this.draggedElementSnapshot && this.immediateParentContainer) {
-                        const restoredElement = this.draggedElementSnapshot.innerHTML ? 
-                            Object.assign(document.createElement('div'), {
-                                className: this.draggedElementSnapshot.className,
-                                innerHTML: this.draggedElementSnapshot.innerHTML
-                            }) : null;
-                        if (restoredElement) {
-                            const allTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row'));
-                            if (allTagRows.length > 0 && this.originalIndex < allTagRows.length) {
-                                const restoreBefore = allTagRows[this.originalIndex];
-                                if (restoreBefore && restoreBefore.parentNode) {
-                                    restoreBefore.parentNode.insertBefore(restoredElement, restoreBefore);
-                                } else {
-                                    this.immediateParentContainer.appendChild(restoredElement);
-                                }
-                            } else {
-                                this.immediateParentContainer.appendChild(restoredElement);
-                            }
-                            console.log('✅ Restored element from snapshot');
-                        }
-                    }
-                }
-            } else {
-                // Dropped outside immediate parent - cancel reorder
-                // CRITICAL FIX: Don't remove element if drop is outside immediate parent
-                console.warn('⚠️ Drop outside immediate parent container, canceling reorder');
-                // Element should still be in place since we didn't call performReorder
-                // Just clear any visual indicators and reset
-                this.clearDropIndicators();
-            }
+            console.log('Performing reorder from', this.originalIndex, 'to', this.targetPosition);
+            this.performReorder();
+            // Add success feedback
+            this.showReorderSuccess();
             // Reset drag state
             this.resetDragState();
         } else {
@@ -687,26 +623,19 @@ class DragAndDropManager {
         const container = document.querySelector('#selectedTags');
         if (!container) return;
         
-        // CRITICAL FIX: Only allow dragging within the immediate parent container
-        // This prevents tags from moving outside their immediate list (weight-section, vendor-section, etc.)
-        if (!this.immediateParentContainer) {
-            console.warn('No immediate parent container found, cannot find drop position');
-            return;
-        }
-        
-        // Get all tag rows ONLY within the immediate parent container
-        const allTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row')).filter(row => 
+        // Get all tag rows in the entire selected tags container
+        const allTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
             row.querySelector('.tag-checkbox')
         );
         
         if (allTagRows.length === 0) return;
         
-        console.log(`Found ${allTagRows.length} tag rows within immediate parent container`);
+        console.log(`Found ${allTagRows.length} total tag rows across all containers`);
         
         let targetIndex = 0;
-        let targetParent = this.immediateParentContainer;
+        let targetParent = null;
         
-        // Find the target position within the immediate parent container only
+        // Find the target position across all containers
         for (let i = 0; i < allTagRows.length; i++) {
             const item = allTagRows[i];
             const rect = item.getBoundingClientRect();
@@ -714,9 +643,11 @@ class DragAndDropManager {
             
             if (mouseY < itemMiddle) {
                 targetIndex = i;
+                targetParent = this.findParentContainer(item);
                 break;
             } else if (i === allTagRows.length - 1) {
                 targetIndex = allTagRows.length;
+                targetParent = this.findParentContainer(item);
             }
         }
         
@@ -725,7 +656,7 @@ class DragAndDropManager {
             targetIndex = this.originalIndex + 1;
         }
         
-        // Ensure target index is within bounds of the immediate parent container
+        // Ensure target index is within bounds
         targetIndex = Math.max(0, Math.min(targetIndex, allTagRows.length));
         
         if (this.targetPosition !== targetIndex) {
@@ -1022,14 +953,8 @@ class DragAndDropManager {
         const container = document.querySelector('#selectedTags');
         if (!container) return;
         
-        // CRITICAL FIX: Only reorder within the immediate parent container
-        if (!this.immediateParentContainer) {
-            console.error('❌ No immediate parent container found, cannot reorder');
-            return;
-        }
-        
-        // Get all tag rows ONLY within the immediate parent container BEFORE removing anything
-        const allTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row')).filter(row => 
+        // Get all tag rows BEFORE removing anything
+        const allTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
             row.querySelector('.tag-checkbox')
         );
         
@@ -1041,10 +966,6 @@ class DragAndDropManager {
             console.error('❌ Dragged element not found at index:', this.originalIndex);
             return;
         }
-        
-        // CRITICAL FIX: Store original position for restoration if needed
-        const originalNextSibling = draggedElement.nextSibling;
-        const originalParent = draggedElement.parentNode;
         
         // Get the checkbox value for debugging
         const draggedCheckbox = draggedElement.querySelector('.tag-checkbox');
@@ -1091,40 +1012,13 @@ class DragAndDropManager {
         // Ensure target position is within bounds
         adjustedTargetPosition = Math.max(0, Math.min(adjustedTargetPosition, allTagRows.length - 1));
         
-        // Get the target element after removal (only within immediate parent container)
-        const remainingTagRows = Array.from(this.immediateParentContainer.querySelectorAll('.tag-row')).filter(row => 
+        // Get the target element after removal
+        const remainingTagRows = Array.from(container.querySelectorAll('.tag-row')).filter(row => 
             row.querySelector('.tag-checkbox')
         );
         
-        // CRITICAL FIX: If no remaining tags or target position is invalid, restore to original position
-        if (remainingTagRows.length === 0 || adjustedTargetPosition < 0 || adjustedTargetPosition >= remainingTagRows.length) {
-            console.warn('⚠️ Invalid target position or no remaining tags, restoring to original position');
-            if (originalNextSibling && originalParent) {
-                originalParent.insertBefore(draggedElement, originalNextSibling);
-            } else if (originalParent) {
-                originalParent.appendChild(draggedElement);
-            } else {
-                this.immediateParentContainer.appendChild(draggedElement);
-            }
-            return;
-        }
-        
         const targetElement = remainingTagRows[adjustedTargetPosition];
-        // CRITICAL: targetParent should always be the immediate parent container
-        const targetParent = this.immediateParentContainer;
-        
-        // CRITICAL FIX: Verify target element is still within the immediate parent container
-        if (!this.immediateParentContainer.contains(targetElement)) {
-            console.warn('⚠️ Target element is outside immediate parent container, restoring to original position');
-            if (originalNextSibling && originalParent) {
-                originalParent.insertBefore(draggedElement, originalNextSibling);
-            } else if (originalParent) {
-                originalParent.appendChild(draggedElement);
-            } else {
-                this.immediateParentContainer.appendChild(draggedElement);
-            }
-            return;
-        }
+        const targetParent = targetElement ? this.findParentContainer(targetElement) : null;
         
         console.log('Target element parent:', targetParent);
         console.log('Adjusted target position:', adjustedTargetPosition);
@@ -1137,36 +1031,12 @@ class DragAndDropManager {
             if (elementData.backup) {
                 const restoredElement = elementData.backup.cloneNode(true);
                 if (targetParent) {
-                    if (targetElement && targetParent.contains(targetElement)) {
-                        // targetElement is a child of targetParent - safe to insert before
-                        try {
-                            targetParent.insertBefore(restoredElement, targetElement);
-                        } catch (e) {
-                            console.error('❌ Error inserting before target element:', e);
-                            // Fallback: append to parent
-                            targetParent.appendChild(restoredElement);
-                        }
-                    } else if (targetElement) {
-                        // targetElement exists but is not a child of targetParent
-                        // Find the correct parent of targetElement
-                        const correctParent = targetElement.parentNode;
-                        if (correctParent) {
-                            try {
-                                correctParent.insertBefore(restoredElement, targetElement);
-                            } catch (e) {
-                                console.error('❌ Error inserting before target element in correct parent:', e);
-                                correctParent.appendChild(restoredElement);
-                            }
-                        } else {
-                            // Fallback: append to targetParent
-                            targetParent.appendChild(restoredElement);
-                        }
+                    if (targetElement) {
+                        targetParent.insertBefore(restoredElement, targetElement);
                     } else {
-                        // No target element - append to parent
                         targetParent.appendChild(restoredElement);
                     }
                 } else {
-                    // No target parent - append to container
                     container.appendChild(restoredElement);
                 }
                 console.log('✅ Restored element from backup');
@@ -1180,31 +1050,12 @@ class DragAndDropManager {
         // Insert the dragged element at the correct position
         if (targetElement && targetParent) {
             // Insert before the target element
-            // CRITICAL FIX: Verify targetElement is actually a child of targetParent
-            if (targetParent.contains(targetElement)) {
-                // Safe to insert before
-                try {
-                    targetParent.insertBefore(draggedElement, targetElement);
-                } catch (e) {
-                    console.error('❌ Error inserting before target element:', e);
-                    // Fallback: append to parent
-                    targetParent.appendChild(draggedElement);
-                }
-            } else {
-                // targetElement is not a child of targetParent - find correct parent
-                const correctParent = targetElement.parentNode;
-                if (correctParent) {
-                    try {
-                        correctParent.insertBefore(draggedElement, targetElement);
-                    } catch (e) {
-                        console.error('❌ Error inserting before target element in correct parent:', e);
-                        // Fallback: append to correct parent
-                        correctParent.appendChild(draggedElement);
-                    }
-                } else {
-                    // Fallback: append to targetParent
-                    targetParent.appendChild(draggedElement);
-                }
+            try {
+                targetParent.insertBefore(draggedElement, targetElement);
+            } catch (e) {
+                console.error('❌ Error inserting before target element:', e);
+                // Fallback: append to parent
+                targetParent.appendChild(draggedElement);
             }
         } else if (targetParent) {
             // Append to the target parent
@@ -1438,7 +1289,6 @@ class DragAndDropManager {
         this.sourceContainerId = null;
         this.targetContainer = null;
         this.targetContainerId = null;
-        this.immediateParentContainer = null; // Reset immediate parent container
         
         // Remove dragging class from any elements and re-enable checkboxes
         const draggingElements = document.querySelectorAll('.tag-row.dragging');
