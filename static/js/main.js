@@ -13637,6 +13637,11 @@ const TagManager = {
                 checkbox.click();
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
+                    // CRITICAL FIX: Re-enable checkbox and reattach handlers after undo
+                    this._ensureCheckboxesEnabled();
+                    if (typeof this._reinitializeCheckboxHandlers === 'function') {
+                        this._reinitializeCheckboxHandlers();
+                    }
                 }, 100);
 
                 if (window.Toast) {
@@ -13739,6 +13744,11 @@ const TagManager = {
                 checkbox.click();
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
+                    // CRITICAL FIX: Re-enable checkbox and reattach handlers after redo
+                    this._ensureCheckboxesEnabled();
+                    if (typeof this._reinitializeCheckboxHandlers === 'function') {
+                        this._reinitializeCheckboxHandlers();
+                    }
                 }, 100);
 
                 if (window.Toast) {
