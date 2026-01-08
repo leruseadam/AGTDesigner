@@ -1343,9 +1343,6 @@ const TagManager = {
                 };
             });
 
-            // CRITICAL FIX: Store platform identifier to prevent Chrome sync conflicts
-            const currentPlatform = isWindows ? 'win' : 'mac';
-            
             const payload = {
                 timestamp: Date.now(),
                 tags: optimizedTags,
@@ -16518,9 +16515,33 @@ try {
         window.TagManager = TagManager;
         window.tagManagerLoaded = true;
         console.log('✅ TagManager assigned to window.TagManager (immediate assignment)');
+        
+        // DIAGNOSTIC: Log what methods are available
+        if (TagManager) {
+            console.log('✅ TagManager object exists with methods:', {
+                init: typeof TagManager.init === 'function',
+                uploadFile: typeof TagManager.uploadFile === 'function',
+                createTagElement: typeof TagManager.createTagElement === 'function'
+            });
+        } else {
+            console.error('❌ CRITICAL: TagManager object is null or undefined!');
+        }
+    } else {
+        console.error('❌ CRITICAL: window is undefined - running in non-browser environment?');
     }
 } catch (error) {
     console.error('❌ CRITICAL: Failed to assign TagManager immediately:', error);
+    console.error('❌ Error stack:', error.stack);
+    
+    // Try one more time as a last resort
+    try {
+        if (typeof window !== 'undefined') {
+            window.TagManager = TagManager;
+            console.log('✅ TagManager assigned in fallback attempt');
+        }
+    } catch (fallbackError) {
+        console.error('❌ CRITICAL: Even fallback assignment failed:', fallbackError);
+    }
 }
 
 // CRITICAL FIX: Expose TagManager to global scope IMMEDIATELY after object creation
