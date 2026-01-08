@@ -8039,7 +8039,7 @@
               window.fileUploadInitAttempts = 0;
               setTimeout(window.initializeFileUpload, 200);
             }
-          }, 10000); // 10 second timeout
+          }, 30000); // 30 second timeout (increased for large datasets)
           
           try {
             // CRITICAL FIX: TagManager.init() is async - handle it properly
@@ -8048,8 +8048,8 @@
               // It's a Promise - await it with timeout
               Promise.race([
                 initResult,
-                new Promise((_, reject) => 
-                  setTimeout(() => reject(new Error('TagManager.init() timeout')), 10000)
+                new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error('TagManager.init() timeout')), 30000)
                 )
               ])
               .then(() => {
