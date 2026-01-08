@@ -116,43 +116,54 @@ class FastGenerationEngine:
             marker_samples = []
             cells_checked = 0
             
-            # Check all tables, all rows, all cells
+            # Check all tables, all rows, all cells - check BOTH cell.text AND paragraph.text
+            import re
             for table_idx, table in enumerate(cached_doc.tables):
                 for row_idx, row in enumerate(table.rows):
                     for cell_idx, cell in enumerate(row.cells):
                         cells_checked += 1
-                        if cell.text:
-                            text = cell.text
-                            # Check for all marker variations (case-insensitive)
-                            text_upper = text.upper()
-                            
-                            # Count all marker types
-                            markers_found = []
-                            if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
-                                count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
-                                marker_count += count
-                                markers_found.append(f'DESC({count})')
-                            
-                            if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
-                                count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
-                                marker_count += count
-                                markers_found.append(f'PRICE({count})')
-                            
-                            # Check for any _START or _END pattern
-                            import re
-                            if re.search(r'\w+_(?:START|END)', text_upper):
-                                count = len(re.findall(r'\w+_(?:START|END)', text_upper))
-                                marker_count += count
-                                markers_found.append(f'OTHER({count})')
-                            
-                            if markers_found and len(marker_samples) < 5:
-                                marker_samples.append({
-                                    'table': table_idx,
-                                    'row': row_idx,
-                                    'cell': cell_idx,
-                                    'markers': markers_found,
-                                    'text': text[:150]
-                                })
+                        
+                        # Check cell.text (aggregated text)
+                        cell_text = cell.text or ''
+                        # Also check all paragraph texts individually (more reliable)
+                        para_texts = []
+                        for para in cell.paragraphs:
+                            para_text = para.text or ''
+                            para_texts.append(para_text)
+                        # Combine all paragraph texts
+                        all_text = cell_text + ' ' + ' '.join(para_texts)
+                        text_upper = all_text.upper()
+                        
+                        if not text_upper.strip():
+                            continue
+                        
+                        # Count all marker types
+                        markers_found = []
+                        if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
+                            count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
+                            marker_count += count
+                            markers_found.append(f'DESC({count})')
+                        
+                        if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
+                            count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
+                            marker_count += count
+                            markers_found.append(f'PRICE({count})')
+                        
+                        # Check for any _START or _END pattern
+                        if re.search(r'\w+_(?:START|END)', text_upper):
+                            count = len(re.findall(r'\w+_(?:START|END)', text_upper))
+                            marker_count += count
+                            markers_found.append(f'OTHER({count})')
+                        
+                        if markers_found and len(marker_samples) < 5:
+                            marker_samples.append({
+                                'table': table_idx,
+                                'row': row_idx,
+                                'cell': cell_idx,
+                                'markers': markers_found,
+                                'cell_text': cell_text[:100],
+                                'para_texts': [p[:50] for p in para_texts[:2]]
+                            })
             
             if marker_count > 0:
                 logger.error(f"❌ FOUND {marker_count} MARKERS IN CACHED DOC BEFORE CLEANUP! Checked {cells_checked} cells. Samples: {marker_samples}")
@@ -177,36 +188,45 @@ class FastGenerationEngine:
                     for row_idx, row in enumerate(table.rows):
                         for cell_idx, cell in enumerate(row.cells):
                             cells_checked_after += 1
-                            if cell.text:
-                                text = cell.text
-                                text_upper = text.upper()
-                                
-                                # Count all marker types
-                                markers_found = []
-                                if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
-                                    count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
-                                    marker_count_after += count
-                                    markers_found.append(f'DESC({count})')
-                                
-                                if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
-                                    count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
-                                    marker_count_after += count
-                                    markers_found.append(f'PRICE({count})')
-                                
-                                # Check for any _START or _END pattern
-                                if re.search(r'\w+_(?:START|END)', text_upper):
-                                    count = len(re.findall(r'\w+_(?:START|END)', text_upper))
-                                    marker_count_after += count
-                                    markers_found.append(f'OTHER({count})')
-                                
-                                if markers_found and len(marker_samples_after) < 5:
-                                    marker_samples_after.append({
-                                        'table': table_idx,
-                                        'row': row_idx,
-                                        'cell': cell_idx,
-                                        'markers': markers_found,
-                                        'text': text[:150]
-                                    })
+                            
+                            # Check cell.text AND paragraph.text
+                            cell_text = cell.text or ''
+                            para_texts = []
+                            for para in cell.paragraphs:
+                                para_texts.append(para.text or '')
+                            all_text = cell_text + ' ' + ' '.join(para_texts)
+                            text_upper = all_text.upper()
+                            
+                            if not text_upper.strip():
+                                continue
+                            
+                            # Count all marker types
+                            markers_found = []
+                            if 'DESC_START' in text_upper or 'DESC_END' in text_upper:
+                                count = text_upper.count('DESC_START') + text_upper.count('DESC_END')
+                                marker_count_after += count
+                                markers_found.append(f'DESC({count})')
+                            
+                            if 'PRICE_START' in text_upper or 'PRICE_END' in text_upper or 'PRICE_STARTS' in text_upper or 'RICE_END' in text_upper:
+                                count = text_upper.count('PRICE_START') + text_upper.count('PRICE_END') + text_upper.count('PRICE_STARTS') + text_upper.count('RICE_END')
+                                marker_count_after += count
+                                markers_found.append(f'PRICE({count})')
+                            
+                            # Check for any _START or _END pattern
+                            if re.search(r'\w+_(?:START|END)', text_upper):
+                                count = len(re.findall(r'\w+_(?:START|END)', text_upper))
+                                marker_count_after += count
+                                markers_found.append(f'OTHER({count})')
+                            
+                            if markers_found and len(marker_samples_after) < 5:
+                                marker_samples_after.append({
+                                    'table': table_idx,
+                                    'row': row_idx,
+                                    'cell': cell_idx,
+                                    'markers': markers_found,
+                                    'cell_text': cell_text[:100],
+                                    'para_texts': [p[:50] for p in para_texts[:2]]
+                                })
                 
                 if marker_count_after > 0:
                     logger.error(f"❌❌❌ CLEANUP FAILED: {marker_count_after} markers still present after cleanup! Checked {cells_checked_after} cells. Samples: {marker_samples_after}")
