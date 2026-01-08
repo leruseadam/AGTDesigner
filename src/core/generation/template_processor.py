@@ -1252,8 +1252,11 @@ class TemplateProcessor:
             if len(documents) == 1:
                 # CRITICAL FIX: Remove all markers from single document before returning
                 single_doc = documents[0]
+                self.logger.warning("🧹🧹🧹 FINAL CLEANUP: Running all 3 cleanup methods on single document")
                 self._final_marker_cleanup(single_doc)
                 self._nuclear_marker_cleanup(single_doc)
+                self._ultimate_marker_cleanup(single_doc)  # CRITICAL: Also run ultimate cleanup!
+                self.logger.warning("✅ FINAL CLEANUP: All cleanups complete")
                 return single_doc
             
             # Combine documents
@@ -1272,12 +1275,15 @@ class TemplateProcessor:
             final_doc = remove_all_headers_and_footers(final_doc)
             
             # CRITICAL FIX: Remove all markers from final document before returning
+            self.logger.warning("🧹🧹🧹 FINAL CLEANUP: Running all 3 cleanup methods on combined document")
             self._final_marker_cleanup(final_doc)
             self._nuclear_marker_cleanup(final_doc)
-            
+            self._ultimate_marker_cleanup(final_doc)  # CRITICAL: Also run ultimate cleanup!
+            self.logger.warning("✅ FINAL CLEANUP: All cleanups complete")
+
             total_time = time.time() - self.start_time
             self.logger.info(f"Template processing completed in {total_time:.2f}s for {len(records)} records")
-            
+
             return final_doc
         except Exception as e:
             self.logger.error(f"Error processing records: {e}\n{traceback.format_exc()}")
@@ -4535,20 +4541,69 @@ class TemplateProcessor:
             replacements_made = 0
             
             def clean_text(text):
-                """Clean text by removing all marker strings (case-insensitive)."""
+                """Clean text by removing all marker strings while preserving content between them."""
                 if not text:
                     return text
-                
+
                 cleaned = text
-                # Simple string replacement for each marker (case-insensitive)
+
+                # STEP 1: Extract content between paired markers BEFORE removing them
+                # This is CRITICAL - we must preserve the content between START and END markers
+
+                # Handle all field marker pairs - including split variations
+                marker_pairs = [
+                    ('PRICE_START', 'PRICE_END'),
+                    ('PRICE_START', 'RICE_END'),  # Split variation: P was separated
+                    ('PRICE_STARTS', 'PRICE_END'),  # Split variation: START + S
+                    ('PRICE_STARTS', 'RICE_END'),  # Both split
+                    ('DESC_START', 'DESC_END'),
+                    ('DESC_START', 'tgDESC_END'),  # Corrupted variation
+                    ('LINEAGE_START', 'LINEAGE_END'),
+                    ('PRODUCTBRAND_START', 'PRODUCTBRAND_END'),
+                    ('PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END'),
+                    ('PRODUCTSTRAIN_START', 'PRODUCTSTRAIN_END'),
+                    ('PRODUCTNAME_START', 'PRODUCTNAME_END'),
+                    ('WEIGHTUNITS_START', 'WEIGHTUNITS_END'),
+                    ('THC_CBD_START', 'THC_CBD_END'),
+                    ('RATIO_START', 'RATIO_END'),
+                    ('JOINT_RATIO_START', 'JOINT_RATIO_END'),
+                    ('DOH_START', 'DOH_END'),
+                    ('PRODUCTVENDOR_START', 'PRODUCTVENDOR_END'),
+                    ('PRODUCTTYPE_START', 'PRODUCTTYPE_END'),
+                ]
+
+                for start_marker, end_marker in marker_pairs:
+                    # Use case-insensitive regex to find and extract content
+                    # Handle markers that might have extra characters (split across runs)
+                    # e.g., PRICE_STARTS should match PRICE_START
+                    start_pattern = re.escape(start_marker)
+                    # Also match start_marker followed by any uppercase letters
+                    if start_marker.endswith('_START'):
+                        start_pattern = re.escape(start_marker.rstrip('_START')) + r'_START[A-Z]*'
+                    
+                    pattern = re.compile(
+                        start_pattern + r'(.*?)' + re.escape(end_marker),
+                        re.IGNORECASE | re.DOTALL
+                    )
+                    # Replace "START...content...END" with just "content"
+                    cleaned = pattern.sub(r'\1', cleaned)
+
+                # STEP 2: Remove any remaining standalone markers that don't have pairs
                 for marker in literal_markers:
-                    # Replace marker (case-insensitive)
                     pattern = re.compile(re.escape(marker), re.IGNORECASE)
                     cleaned = pattern.sub('', cleaned)
-                
-                # Also catch any remaining _START or _END patterns
-                cleaned = re.sub(r'\b\w+_(START|END)\b', '', cleaned, flags=re.IGNORECASE)
-                
+
+                # STEP 3: Catch any remaining _START or _END patterns
+                cleaned = re.sub(r'\b\w+_(?:START|END)\b', '', cleaned, flags=re.IGNORECASE)
+
+                # STEP 4: Remove common marker fragments that can be left behind
+                # (e.g., "tg" from "tgDESC_END", "bis" from "PRODUCTBRAND_END")
+                cleaned = re.sub(r'\btg\b', '', cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r'\bbis\b', '', cleaned, flags=re.IGNORECASE)
+
+                # STEP 5: Clean up whitespace
+                cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
                 return cleaned
             
             # Process all paragraphs - work with FULL TEXT to handle split runs
@@ -4594,9 +4649,10 @@ class TemplateProcessor:
                                             cleaned_text = clean_text(full_text)
                                             if cleaned_text == full_text:
                                                 continue
-                                            
+
                                             # Text will be cleaned, replace all runs
                                             replacements_made += 1
+                                            self.logger.warning(f"🧹 CLEANING: '{full_text[:100]}' → '{cleaned_text[:100]}'")
                                             if paragraph.runs:
                                                 paragraph.runs[0].text = cleaned_text
                                                 for run in paragraph.runs[1:]:
