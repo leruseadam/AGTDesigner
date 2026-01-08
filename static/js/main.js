@@ -10165,7 +10165,8 @@ const TagManager = {
                     // Also use prefer_db after recent lineage updates
                     const currentFile = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
                     const isDatabaseMode = !currentFile || currentFile === 'nofile' || currentFile === '' || currentFile === 'database';
-                    const hasRecentLineageUpdate = false; // Define to prevent ReferenceError
+                    const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
+                    const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
                     const forceDbLineage = this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate;
                     const useCache = retryCount === 0 && !forceDbLineage && !forceReload; // Don't use cache after upload or force reload
                     const cacheParam = useCache ? '' : '&nocache=1';
