@@ -7594,30 +7594,46 @@
 
     // Check TagManager immediately after script loads (synchronous execution)
     (function checkTagManager() {
-      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
-        console.log('✅ TagManager is available immediately after main.js execution');
-        console.log('✅ TagManager methods confirmed:', {
-          createTagElement: typeof window.TagManager.createTagElement === 'function',
-          init: typeof window.TagManager.init === 'function',
-          uploadFile: typeof window.TagManager.uploadFile === 'function'
-        });
-      } else {
-        console.error('❌ CRITICAL: TagManager not available after main.js execution');
-        console.error('❌ TagManager exists:', !!window.TagManager);
-        if (window.TagManager) {
-          console.error('❌ TagManager type:', typeof window.TagManager);
-          console.error('❌ TagManager has createTagElement:', typeof window.TagManager.createTagElement);
-          console.error('❌ TagManager keys (first 20):', Object.keys(window.TagManager).slice(0, 20));
-          console.error('❌ This suggests main.js executed but TagManager was not assigned to window.TagManager');
+      // Give it a tiny delay to ensure script execution completed
+      setTimeout(() => {
+        if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+          console.log('✅ TagManager is available immediately after main.js execution');
+          console.log('✅ TagManager methods confirmed:', {
+            createTagElement: typeof window.TagManager.createTagElement === 'function',
+            init: typeof window.TagManager.init === 'function',
+            uploadFile: typeof window.TagManager.uploadFile === 'function'
+          });
         } else {
-          console.error('❌ TagManager is completely undefined');
-          console.error('❌ This suggests main.js either:');
-          console.error('   1. Failed to load (check Network tab)');
-          console.error('   2. Has a JavaScript error preventing execution (check Console for red errors)');
-          console.error('   3. TagManager object was never created or assigned');
+          console.error('❌ CRITICAL: TagManager not available after main.js execution');
+          console.error('❌ TagManager exists:', !!window.TagManager);
+          console.error('❌ window.tagManagerLoaded:', window.tagManagerLoaded);
+          
+          if (window.TagManager) {
+            console.error('❌ TagManager type:', typeof window.TagManager);
+            console.error('❌ TagManager has createTagElement:', typeof window.TagManager.createTagElement);
+            console.error('❌ TagManager has uploadFile:', typeof window.TagManager.uploadFile);
+            console.error('❌ TagManager keys (first 30):', Object.keys(window.TagManager).slice(0, 30));
+            console.error('❌ This suggests main.js executed but TagManager was not fully initialized');
+          } else {
+            console.error('❌ TagManager is completely undefined');
+            console.error('❌ This suggests main.js either:');
+            console.error('   1. Failed to load (check Network tab in DevTools)');
+            console.error('   2. Has a JavaScript syntax error preventing execution (check Console for red errors)');
+            console.error('   3. TagManager object was never created or assigned to window');
+            console.error('   4. Script execution was blocked or timed out');
+            
+            // Try to detect if main.js loaded
+            const scripts = Array.from(document.getElementsByTagName('script'));
+            const mainJsScript = scripts.find(s => s.src && s.src.includes('main.js'));
+            if (mainJsScript) {
+              console.error('   - main.js script tag found in DOM:', mainJsScript.src);
+            } else {
+              console.error('   - main.js script tag NOT found in DOM!');
+            }
+          }
+          window.mainJsError = 'TagManager not available after main.js execution';
         }
-        window.mainJsError = 'TagManager not available after main.js execution';
-      }
+      }, 10); // Small delay to ensure script execution completes
     })();
   </script>
 
