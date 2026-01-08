@@ -5351,11 +5351,28 @@ class TemplateProcessor:
         if any(keyword in text_lower for keyword in ['oz', 'gram', 'g ', 'mg', 'ml']) or ':' in text:
             return 'ratio'
 
-        # Classic lineage values
+        # CRITICAL FIX: Check for classic lineage values - use 'lineage' field type (14-18pt) not 'brand' (6.5-10pt)
         classic_lineages = ['hybrid/sativa', 'hybrid/indica', 'sativa', 'indica', 'hybrid', 'cbd', 'mixed']
-        if text_stripped.upper() in [lineage.upper() for lineage in classic_lineages]:
-            self.logger.debug(f"🎯 DOUBLE LINEAGE DETECTED: '{text_stripped}' classified as lineage")
+        text_upper = text_stripped.upper()
+        
+        # Check for exact match first
+        if text_upper in [lineage.upper() for lineage in classic_lineages]:
+            self.logger.debug(f"🎯 DOUBLE CLASSIC LINEAGE DETECTED (exact): '{text_stripped}' classified as lineage")
             return 'lineage'
+        
+        # Check if text starts with or contains classic lineage values (handles cases with extra characters)
+        for lineage in classic_lineages:
+            lineage_upper = lineage.upper()
+            # Check if text starts with lineage (handles "HYBRID/SATIVA - extra text")
+            if text_upper.startswith(lineage_upper) or text_upper.replace(' ', '').startswith(lineage_upper.replace('/', '')):
+                self.logger.debug(f"🎯 DOUBLE CLASSIC LINEAGE DETECTED (starts with): '{text_stripped}' classified as lineage")
+                return 'lineage'
+            # Check if lineage appears as a word in the text
+            import re
+            if re.search(r'\b' + re.escape(lineage_upper) + r'\b', text_upper) or \
+               re.search(r'\b' + re.escape(lineage_upper.replace('/', '')) + r'\b', text_upper.replace('/', '')):
+                self.logger.debug(f"🎯 DOUBLE CLASSIC LINEAGE DETECTED (contains): '{text_stripped}' classified as lineage")
+                return 'lineage'
 
         # Detect obvious product strain tokens (e.g., "HYBRID" in non-classic contexts)
         if text_stripped.upper() in classic_lineages:
