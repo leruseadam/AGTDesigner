@@ -113,10 +113,10 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Match tag generation - use database fields first (canonical_lineage/currentLineage)
-  // Tag generation uses record.get('Lineage') which comes from database enrichment
+  // CRITICAL: Prioritize sovereign_lineage first (manual user edits), then database fields
+  // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage/Lineage* > lineage
   // This ensures UI matches exactly what tag generation uses for colors
-  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
+  const rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -285,10 +285,10 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Match tag generation - use database fields first (canonical_lineage/currentLineage)
-  // Tag generation uses record.get('Lineage') which comes from database enrichment
+  // CRITICAL: Prioritize sovereign_lineage first (manual user edits), then database fields
+  // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage/Lineage* > lineage
   // This ensures UI matches exactly what tag generation uses for colors
-  const rawLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
+  const rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag['Lineage*'] || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();

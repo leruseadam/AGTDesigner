@@ -90,6 +90,28 @@ def _set_cached_lineage(product_name: str, lineage: Optional[str]):
                 del _lineage_cache[key]
                 del _lineage_cache_timestamps[key]
 
+def clear_lineage_cache(product_name: Optional[str] = None):
+    """Clear lineage cache for a specific product or all products.
+    
+    Args:
+        product_name: If provided, clears cache for that product only.
+                     If None, clears the entire lineage cache.
+    """
+    with _lineage_cache_lock:
+        if product_name:
+            cache_key = product_name.strip().lower()
+            if cache_key in _lineage_cache:
+                del _lineage_cache[cache_key]
+                logger.info(f"Cleared lineage cache for product: {product_name}")
+            if cache_key in _lineage_cache_timestamps:
+                del _lineage_cache_timestamps[cache_key]
+        else:
+            # Clear entire cache
+            cleared_count = len(_lineage_cache)
+            _lineage_cache.clear()
+            _lineage_cache_timestamps.clear()
+            logger.info(f"Cleared entire lineage cache ({cleared_count} entries)")
+
 def _get_cached_fuzzy_match(product_name: str) -> Optional[Dict[str, Any]]:
     """Get cached fuzzy match result if available and not expired."""
     if not product_name:
@@ -5039,17 +5061,23 @@ class ProductDatabase:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
             return False 
 
-    def get_product_lineage(self, product_name: str) -> Optional[str]:
+    def get_product_lineage(self, product_name: str, bypass_cache: bool = False) -> Optional[str]:
         """Get the lineage for a specific product by name.
 
         Uses case-insensitive and whitespace-insensitive matching to ensure
         updates are found even if there are minor differences in formatting.
         Also applies sativa hybrid override for known sativa hybrid strains.
+        
+        Args:
+            product_name: The product name to look up
+            bypass_cache: If True, bypasses the cache and always fetches fresh from database.
+                         Use this when sovereign_lineage may have been updated.
         """
-        # PERFORMANCE: Check cache first
-        cached_result = _get_cached_lineage(product_name)
-        if cached_result is not None:
-            return cached_result
+        # PERFORMANCE: Check cache first (unless bypassing for fresh sovereign lineage)
+        if not bypass_cache:
+            cached_result = _get_cached_lineage(product_name)
+            if cached_result is not None:
+                return cached_result
 
         try:
             self.init_database()
@@ -5100,6 +5128,11 @@ class ProductDatabase:
                 lineage = str(result[0]).strip()
                 product_strain = result[1] if len(result) > 1 and result[1] else None
                 
+                # If caller explicitly bypasses cache, return the exact database value without overrides
+                if bypass_cache:
+                    _set_cached_lineage(product_name, lineage)
+                    return lineage
+                
                 # CRITICAL FIX: Apply sativa hybrid override if product has a known sativa hybrid strain or name
                 is_known_sativa_hybrid = False
                 if product_strain and str(product_strain).strip():
@@ -5148,6 +5181,11 @@ class ProductDatabase:
                 lineage = str(result[0]).strip()
                 product_strain = result[1] if len(result) > 1 and result[1] else None
                 
+                # If caller explicitly bypasses cache, return the exact database value without overrides
+                if bypass_cache:
+                    _set_cached_lineage(product_name, lineage)
+                    return lineage
+                
                 # CRITICAL FIX: Apply sativa hybrid override
                 if product_strain and str(product_strain).strip():
                     normalized_strain = self._normalize_strain_name(str(product_strain).strip())
@@ -5180,6 +5218,11 @@ class ProductDatabase:
             if result and result[0] and str(result[0]).strip():
                 lineage = str(result[0]).strip()
                 product_strain = result[1] if len(result) > 1 and result[1] else None
+                
+                # If caller explicitly bypasses cache, return the exact database value without overrides
+                if bypass_cache:
+                    _set_cached_lineage(product_name, lineage)
+                    return lineage
                 
                 # CRITICAL FIX: Apply sativa hybrid override
                 if product_strain and str(product_strain).strip():

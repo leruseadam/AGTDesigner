@@ -1887,16 +1887,15 @@ class ExcelProcessor:
                                 pattern = r'(\d*\.?\d+g)\s*x\s*(\d+)(?:\s*Pack)?'
                                 matches = product_names.str.extract(pattern, flags=re.IGNORECASE)
 
-                                # Where we have both weight and count, format as "weight x count"
+                                # Where we have both weight and count, format as "weight x count Pack"
                                 has_both = matches[0].notna() & matches[1].notna()
-                                df.loc[preroll_df[has_both].index, 'JointRatio'] = matches.loc[has_both, 0] + ' x ' + matches.loc[has_both, 1]
+                                if has_both.any():
+                                    joint_ratio_values = matches.loc[has_both, 0] + ' x ' + matches.loc[has_both, 1] + ' Pack'
+                                    df.loc[preroll_df[has_both].index, 'JointRatio'] = joint_ratio_values
+                                    self.logger.info(f"✅ Extracted JointRatio for {has_both.sum()} prerolls: {joint_ratio_values.tolist()[:5]}")
 
-                                # Where we only have weight pattern, extract just weight
-                                missing_ratio = ~has_both
-                                if missing_ratio.any():
-                                    weight_pattern = r'(\d*\.?\d+g)'
-                                    weight_only = product_names[missing_ratio].str.extract(weight_pattern, flags=re.IGNORECASE)[0]
-                                    df.loc[preroll_df[missing_ratio & weight_only.notna()].index, 'JointRatio'] = weight_only[weight_only.notna()]
+                                # Only extract from product name - don't calculate from weight
+                                # If JointRatio pattern is not in the title, leave it empty (will use weight directly later)
 
                         self.logger.info(f"JointRatio processing completed for pre-roll products (vectorized)")
 
@@ -3892,8 +3891,17 @@ class ExcelProcessor:
             enriched_tags = []
             enriched_count = 0
             for tag in tags:
-                # Skip enrichment if tag already has lineage (performance optimization)
-                if tag.get('canonical_lineage') or tag.get('currentLineage'):
+                # CRITICAL: Even if tag has lineage fields, ensure Lineage* is set from database
+                # This ensures UI shows database lineage, not Excel lineage
+                has_db_lineage_fields = tag.get('canonical_lineage') or tag.get('currentLineage')
+                
+                # If tag has lineage fields, try to ensure Lineage* matches (for UI display)
+                if has_db_lineage_fields:
+                    # Lineage* should match canonical_lineage/currentLineage for UI consistency
+                    db_lineage_value = tag.get('canonical_lineage') or tag.get('currentLineage')
+                    if db_lineage_value:
+                        db_lineage_clean = str(db_lineage_value).strip().upper()
+                        tag['Lineage*'] = db_lineage_clean  # CRITICAL: Ensure Lineage* matches database lineage
                     enriched_tags.append(tag)
                     continue
                 
@@ -3913,15 +3921,23 @@ class ExcelProcessor:
                     # Update tag with database values (database takes precedence for lineage, DOH, price, THC/CBD)
                     # Only update fields that are commonly changed in database (lineage, DOH, etc.)
                     # NEVER update Vendor fields - Excel is the source of truth
-                    # CRITICAL FIX: Priority order - sovereign_lineage (manual edits) > Lineage > lineage > canonical_lineage
+                    # CRITICAL FIX: Priority order - sovereign_lineage (manual edits) > canonical_lineage > Lineage
                     # sovereign_lineage is the highest priority as it represents manual user edits
-                    db_lineage_value = db_record.get('sovereign_lineage') or db_record.get('Lineage') or db_record.get('lineage') or db_record.get('canonical_lineage')
+                    sovereign_lineage = db_record.get('sovereign_lineage')
+                    db_lineage_value = sovereign_lineage or db_record.get('canonical_lineage') or db_record.get('currentLineage') or db_record.get('Lineage') or db_record.get('lineage')
                     if db_lineage_value:
                         db_lineage = str(db_lineage_value).strip().upper()
-                        tag['Lineage'] = db_lineage
-                        tag['lineage'] = db_lineage
-                        tag['canonical_lineage'] = db_lineage
-                        tag['currentLineage'] = db_lineage
+                        # CRITICAL: Set sovereign_lineage first if it exists, then use it as effective lineage
+                        effective_lineage = db_lineage
+                        if sovereign_lineage:
+                            tag['sovereign_lineage'] = str(sovereign_lineage).strip().upper()
+                            effective_lineage = tag['sovereign_lineage']  # Use sovereign as effective lineage
+                        
+                        tag['Lineage'] = effective_lineage
+                        tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI (prioritizes sovereign)
+                        tag['lineage'] = effective_lineage.lower()
+                        tag['canonical_lineage'] = effective_lineage
+                        tag['currentLineage'] = effective_lineage
                         enriched_count += 1
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):

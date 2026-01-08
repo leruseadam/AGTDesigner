@@ -29,13 +29,13 @@
   
   --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: 78rem;     /* Height of center control panel */
+  --center-panel-height: calc(78rem + 0.5cm);     /* Height of center control panel */
   --tag-list-scroll-padding: 1rem;
 }
 
 /* Final override for help button spacing/position */
 .help-button-container {
-  margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
+  margin: 1.5rem 0 1.5rem 0 !important;
   padding: 0 !important;
   display: flex !important;
   justify-content: center !important;
@@ -45,7 +45,7 @@
 
 @media (min-width: 992px) {
   .help-button-container {
-    margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
+    margin: 1.5rem 0 1.5rem 0 !important;
     padding: 0 !important;
   }
 }
@@ -717,13 +717,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
   }
 }
 
@@ -731,7 +731,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -742,7 +742,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
   }
   #availableTags,
   #selectedTags {
@@ -787,7 +787,7 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 72vh);
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: max(calc(78rem + 0.5cm), var(--tag-list-height));
   }
   @supports (height: 100dvh) {
     :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(78rem, var(--tag-list-height)); }
@@ -824,7 +824,7 @@ body.modal-open #mainContent.store-selection-disabled,
   overflow-x: hidden !important;
   height: auto !important;
   min-height: auto !important;
-  padding-bottom: 1.5rem !important;
+  padding-bottom: 0 !important;
 }
 
 /* FORCE control-section to center its children, especially template select */
@@ -843,7 +843,7 @@ body.modal-open #mainContent.store-selection-disabled,
   flex-direction: column !important;
   align-items: center !important;
   width: 100% !important;
-  padding-bottom: 1.5rem !important;
+  padding-bottom: 0 !important;
   position: relative !important;
 }
 
@@ -913,7 +913,7 @@ body.modal-open #mainContent.store-selection-disabled,
   left: auto !important;
   transform: none !important;
   bottom: auto !important;
-  margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
+  margin: 1.5rem 0 1.5rem 0 !important;
   width: 100% !important;
   display: flex !important;
   justify-content: center !important;
@@ -959,7 +959,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: 57rem;     /* Height of center control panel */
+    --center-panel-height: calc(57rem + 0.5cm);     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
 
     /* Dynamic filter border sizing */
@@ -3003,7 +3003,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
+    margin: 1.5rem 0 1.5rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -7889,7 +7889,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: auto !important;
     transform: none !important;
     bottom: auto !important;
-    margin: 0.5rem 0 0 0 !important; /* Removed bottom margin to move button up and center it */
+    margin: 1.5rem 0 1.5rem 0 !important;
     width: 100% !important;
     display: flex !important;
     justify-content: center !important;
@@ -11018,11 +11018,11 @@ body.modal-open #mainContent.store-selection-disabled,
 /* Add more top padding on larger screens to prevent Template header cutoff */
 @media (min-width: 992px) {
   [data-container-type="center"] .control-panel {
-    padding-top: 1.5rem !important;
+    padding-top: 0 !important;
   }
   
   [data-container-type="center"] .control-section:first-child {
-    margin-top: 0.5rem !important;
+    margin-top: 0 !important;
   }
 }
 

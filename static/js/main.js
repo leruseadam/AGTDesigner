@@ -1270,6 +1270,15 @@ const TagManager = {
                 return null;
             }
             
+            // PERFORMANCE: Check cache version but don't block - use old cache for instant display
+            // Will refresh in background to get sovereign_lineage
+            const cacheVersion = payload.cacheVersion || 1;
+            if (cacheVersion < 2) {
+                console.log(`ℹ️ Old cache format detected (version ${cacheVersion}) - using for instant display, will refresh in background for sovereign_lineage`);
+                // Mark for background refresh but still return cache for instant display
+                payload._needsBackgroundRefresh = true;
+            }
+            
             const age = Date.now() - payload.timestamp;
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
                 return null;
@@ -1342,6 +1351,8 @@ const TagManager = {
                     'Product Type*': tag['Product Type*'],
                     'Weight*': tag['Weight*'],
                     'Price*': tag['Price*'],
+                    // CRITICAL: Always preserve sovereign_lineage (highest priority - user-edited lineage)
+                    sovereign_lineage: tag.sovereign_lineage,
                     'Lineage*': tag['Lineage*'] || tag.Lineage || tag.canonical_lineage || tag.currentLineage,
                     canonical_lineage: tag.canonical_lineage || tag.currentLineage,
                     currentLineage: tag.currentLineage || tag.canonical_lineage,
@@ -1359,7 +1370,8 @@ const TagManager = {
                 timestamp: Date.now(),
                 tags: optimizedTags,
                 _optimized: true, // Flag to indicate this is optimized cache
-                platform: currentPlatform // Store platform to detect cross-platform cache conflicts
+                platform: currentPlatform, // Store platform to detect cross-platform cache conflicts
+                cacheVersion: 2 // Version 2: includes sovereign_lineage support
             };
 
             const payloadStr = JSON.stringify(payload);
@@ -1418,69 +1430,130 @@ const TagManager = {
         }
         console.log('🔄 hydrateAvailableTagsFromCache() called - attempting to hydrate...');
 
-        // CRITICAL FIX: Load from cache OR database
-        // Check if there's an Excel file OR if we should load from database
+        // CRITICAL FIX: Always check cache first, regardless of Excel file or database mode
+        // Only skip cache if lineage was recently updated (cache might have stale lineage)
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
         
-        // CRITICAL FIX: Check for recent lineage updates - show cache first, then refresh in background
-        // This ensures fast page loads while still getting fresh database lineage
+        // CRITICAL: After lineage updates, clear cache to force fresh fetch from database
+        // This ensures updated sovereign_lineage from database is loaded
         const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
-        const skipCacheDueToLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
-        
-        // PERFORMANCE FIX: Always show cache first for instant load, then refresh in background if needed
-        // This prevents slow page reloads while still ensuring fresh lineage data
-        const needsBackgroundRefresh = shouldLoadFromDatabase || skipCacheDueToLineageUpdate;
-        
-        if (needsBackgroundRefresh) {
-            if (shouldLoadFromDatabase) {
-                console.log('⚡ Showing cache immediately, will refresh from database in background for correct lineage');
-            } else {
-                console.log('⚡ Showing cache immediately, will refresh in background after recent lineage update');
+        const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
+
+        if (hasRecentLineageUpdate) {
+            console.log('🔄 Recent lineage update detected - clearing cache to force fresh database fetch');
+            // Clear the cache so fresh data with updated sovereign_lineage is fetched
+            const cacheKey = this.getAvailableTagsCacheKey();
+            try {
+                localStorage.removeItem(cacheKey);
+                sessionStorage.removeItem(cacheKey);
+                console.log('✅ Cleared frontend cache - will fetch fresh lineage from database');
+            } catch (e) {
+                console.warn('Could not clear cache:', e);
             }
-            // Don't return false - continue to show cache, but mark for background refresh
-            // The background refresh will happen in checkForExistingData or fetchAndUpdateAvailableTags
+            return false; // Skip cache, force fresh fetch
         }
+
+        // PERFORMANCE: Always check cache first (works for both Excel and database mode)
+        // This allows tags to load instantly on page refresh instead of waiting for API call
+        console.log(shouldLoadFromDatabase ? '📊 Database mode - checking cache first...' : '📊 Excel mode - checking cache first...');
+        const cachedTags = this.loadAvailableTagsFromCache();
         
-        // If no Excel file but we have database, try to load from cache first, then fetch from database
-        // NOTE: This path is only reached if shouldLoadFromDatabase is false (has Excel file) AND no recent lineage update
-        if (shouldLoadFromDatabase) {
-            console.log('📊 No Excel file, checking cache for database tags...');
-            // Still try to load from cache (might have database tags cached)
-            const cachedTags = this.loadAvailableTagsFromCache();
-            if (cachedTags && cachedTags.length) {
-                console.log(`✅ Found ${cachedTags.length} cached tags from database`);
-                // CRITICAL FIX: Preserve vendor data when loading from cache
-                // This ensures vendor is available when tags are organized
-                cachedTags.forEach(tag => {
-                    const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
-                    if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
-                        // Preserve vendor in all possible field names for extraction
-                        if (!tag['Vendor*']) tag['Vendor*'] = vendor;
-                        if (!tag['Vendor']) tag['Vendor'] = vendor;
-                        if (!tag.vendor) tag.vendor = vendor;
+        if (cachedTags && cachedTags.length > 0) {
+            // Cache found - use it for instant load (works for both Excel and database mode)
+            console.log(`✅ Found ${cachedTags.length} cached tags - using for instant load`);
+            
+            // PERFORMANCE: Check if cache needs background refresh (old format without sovereign_lineage)
+            // Still use cache for instant display - background refresh will update with sovereign_lineage
+            const needsBackgroundRefresh = cachedTags._needsBackgroundRefresh || false;
+            if (needsBackgroundRefresh) {
+                console.log('⚡ Using old cache for instant display - will refresh in background for sovereign_lineage');
+            }
+            
+            // PERFORMANCE: Optimize normalization - batch process for faster execution
+            // CRITICAL FIX: Preserve vendor data and sovereign_lineage when loading from cache
+            // This ensures vendor is available when tags are organized, and user-edited lineage is preserved
+            // Use efficient batch processing instead of forEach for better performance
+            const tagCount = cachedTags.length;
+            for (let i = 0; i < tagCount; i++) {
+                const tag = cachedTags[i];
+                // Preserve vendor data (fast check)
+                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
+                    // Preserve vendor in all possible field names for extraction
+                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
+                    if (!tag['Vendor']) tag['Vendor'] = vendor;
+                    if (!tag.vendor) tag.vendor = vendor;
+                }
+                
+                // CRITICAL: Preserve and prioritize sovereign_lineage (user-edited lineage - highest priority)
+                // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage
+                const sovereignRaw = tag.sovereign_lineage;
+                if (sovereignRaw) {
+                    const sovereignStr = String(sovereignRaw).trim();
+                    const sovereignUpper = sovereignStr.toUpperCase();
+                    if (sovereignStr && sovereignUpper !== 'NONE') {
+                        // Set sovereign_lineage as the primary lineage (highest priority)
+                        tag.sovereign_lineage = sovereignUpper;
+                        tag.canonical_lineage = sovereignUpper;
+                        tag.currentLineage = sovereignUpper;
+                        tag.Lineage = sovereignUpper;
+                        tag.lineage = sovereignUpper.toLowerCase();
+                        tag['Lineage*'] = sovereignUpper;
                     }
-                });
-                // Use the same rendering logic as below
-                verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
-                this.state.hydratedFromCache = true;
-                this.state.forceFullAvailableTagRender = true;
-                this.state.simplifiedAvailableTagsActive = false;
-                this.state.tags = [...cachedTags];
-                this.state.originalTags = [...cachedTags];
-
-                if (this.hideActionSplash) {
-                    this.hideActionSplash();
                 }
-                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                    AppLoadingSplash.stopAutoAdvance();
-                    AppLoadingSplash.complete();
+                
+                if (!tag.sovereign_lineage && (tag.canonical_lineage || tag.currentLineage)) {
+                    // No sovereign_lineage in cache - use canonical/current from database
+                    // Will be enriched with sovereign_lineage from database when fresh tags arrive
+                    const dbLineage = String(tag.canonical_lineage || tag.currentLineage).trim().toUpperCase();
+                    tag.canonical_lineage = dbLineage;
+                    tag.currentLineage = dbLineage;
+                    tag.Lineage = dbLineage;
+                    tag.lineage = dbLineage.toLowerCase();
+                    tag['Lineage*'] = dbLineage;
+                    // Clear any stale sovereign_lineage if it exists but is invalid
+                    if (tag.sovereign_lineage && (String(tag.sovereign_lineage).trim() === '' || String(tag.sovereign_lineage).trim().toUpperCase() === 'NONE')) {
+                        delete tag.sovereign_lineage;
+                    }
                 }
+            }
+            // Use the same rendering logic as below
+            verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
+            this.state.hydratedFromCache = true;
+            this.state.forceFullAvailableTagRender = true;
+            this.state.simplifiedAvailableTagsActive = false;
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
 
-                const availableContainer = document.getElementById('availableTags');
-                if (availableContainer) {
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+
+            const availableContainer = document.getElementById('availableTags');
+            if (availableContainer) {
+                this._updateAvailableTags(cachedTags, null);
+                verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+                this.buildFilterOptionsFromTags(cachedTags);
+                this._filtersBuiltThisSession = true; // Mark filters as built
+                setTimeout(() => {
+                    if (typeof this.setupFilterEventListeners === 'function') {
+                        this.setupFilterEventListeners();
+                        console.log('✅ Filter event listeners attached after cache hydration');
+                    }
+                    if (typeof this.setupSearchEventListeners === 'function') {
+                        this.setupSearchEventListeners();
+                        console.log('✅ Search event listeners attached after cache hydration');
+                    }
+                }, 50);
+            } else {
+                const renderCachedTags = () => {
                     this._updateAvailableTags(cachedTags, null);
-                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
                     this.buildFilterOptionsFromTags(cachedTags);
                     this._filtersBuiltThisSession = true; // Mark filters as built
                     setTimeout(() => {
@@ -1493,136 +1566,34 @@ const TagManager = {
                             console.log('✅ Search event listeners attached after cache hydration');
                         }
                     }, 50);
-                } else {
-                    const renderCachedTags = () => {
-                        this._updateAvailableTags(cachedTags, null);
-                        verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
-                        this.buildFilterOptionsFromTags(cachedTags);
-                        this._filtersBuiltThisSession = true; // Mark filters as built
-                        setTimeout(() => {
-                            if (typeof this.setupFilterEventListeners === 'function') {
-                                this.setupFilterEventListeners();
-                                console.log('✅ Filter event listeners attached after cache hydration');
-                            }
-                            if (typeof this.setupSearchEventListeners === 'function') {
-                                this.setupSearchEventListeners();
-                                console.log('✅ Search event listeners attached after cache hydration');
-                            }
-                        }, 50);
-                    };
-                    if (document.readyState === 'loading') {
-                        document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
-                    } else {
-                        renderCachedTags();
-                    }
-                }
-                return true;
-            } else {
-                // No cache - return false so init() or fetchAndUpdateAvailableTags() can fetch from database
-                console.log('📊 No cache found - will fetch from database');
-                return false;
-            }
-        }
-
-        // This path is only for Excel mode (has Excel file) and no recent lineage updates
-        const cachedTags = this.loadAvailableTagsFromCache();
-        if (cachedTags && cachedTags.length) {
-            // CRITICAL FIX: Preserve vendor data when loading from cache
-            // This ensures vendor is available when tags are organized
-            cachedTags.forEach(tag => {
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
-                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
-                    // Preserve vendor in all possible field names for extraction
-                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
-                    if (!tag['Vendor']) tag['Vendor'] = vendor;
-                    if (!tag.vendor) tag.vendor = vendor;
-                }
-            });
-            verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
-            this.state.hydratedFromCache = true;
-            this.state.forceFullAvailableTagRender = true;
-            this.state.simplifiedAvailableTagsActive = false;
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-
-            // CRITICAL FIX: Hide splash IMMEDIATELY before rendering
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-
-            // CRITICAL FIX: Check if DOM is ready before rendering
-            // If DOM is not ready, defer rendering until DOMContentLoaded
-            const availableContainer = document.getElementById('availableTags');
-            if (availableContainer) {
-                // DOM is ready - render immediately
-                this._updateAvailableTags(cachedTags, null);
-                verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
-
-                // REMOVED: Duplicate buildFilterOptionsFromTags call - already called inside _updateAvailableTags
-                // this.buildFilterOptionsFromTags(cachedTags);
-                this._filtersBuiltThisSession = true; // Mark filters as built
-
-                    // Setup filter event listeners so filters work
-                    setTimeout(() => {
-                        if (typeof this.setupFilterEventListeners === 'function') {
-                            this.setupFilterEventListeners();
-                            console.log('✅ Filter event listeners attached after cache hydration');
-                        }
-                        if (typeof this.setupSearchEventListeners === 'function') {
-                            this.setupSearchEventListeners();
-                            console.log('✅ Search event listeners attached after cache hydration');
-                        }
-                    }, 50);
-            } else {
-                // DOM not ready yet - defer rendering until DOM loads
-                console.log('⏳ DOM not ready, deferring render until DOMContentLoaded');
-                const renderCachedTags = () => {
-                    this._updateAvailableTags(cachedTags, null);
-                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
-
-                    // REMOVED: Duplicate buildFilterOptionsFromTags call - already called inside _updateAvailableTags
-                    // this.buildFilterOptionsFromTags(cachedTags);
-                    this._filtersBuiltThisSession = true; // Mark filters as built
-
-                    // Setup filter event listeners
-                    setTimeout(() => {
-                        if (typeof this.setupFilterEventListeners === 'function') {
-                            this.setupFilterEventListeners();
-                            console.log('✅ Filter event listeners attached after cache hydration');
-                        }
-                        if (typeof this.setupSearchEventListeners === 'function') {
-                            this.setupSearchEventListeners();
-                            console.log('✅ Search event listeners attached after cache hydration');
-                        }
-                    }, 50);
                 };
-
                 if (document.readyState === 'loading') {
                     document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
                 } else {
-                    // DOM is already loaded but container not found - try immediately
                     renderCachedTags();
                 }
             }
-
-            // DISABLED: Background lineage refresh was causing slow page loads (18+ seconds)
-            // The database query is too slow and blocks the page, even with timeout
-            // Users reported: "too slow" with tags not loading for 18+ seconds
-            // Lineage updates will happen on next file upload instead
-            // this._refreshLineageFromDatabase(cachedTags).then(() => {
-            //     verboseLog('✅ Background lineage check complete (fast mode)');
-            // }).catch(err => {
-            //     // Silently ignore timeout errors - this is non-critical background refresh
-            //     verboseLog('ℹ️ Background lineage check timed out (non-critical, will retry on next page load)');
-            // });
-
+            
+            // PERFORMANCE: Trigger background refresh if cache is old format (non-blocking)
+            // This will update cache with sovereign_lineage from database without blocking UI
+            if (needsBackgroundRefresh) {
+                console.log('🔄 Triggering background refresh to update cache with sovereign_lineage...');
+                // Don't await - let it run in background without blocking
+                // Use forceReload=true to bypass cache and get fresh data with sovereign_lineage
+                setTimeout(() => {
+                    // Background refresh - fetch fresh data to update cache with sovereign_lineage
+                    this.fetchAndUpdateAvailableTags(true).catch(err => {
+                        console.warn('Background refresh for sovereign_lineage failed (non-critical):', err);
+                    });
+                }, 500); // Small delay to let UI render first, then refresh in background
+            }
+            
             return true;
+        } else {
+            // No cache - return false so init() or fetchAndUpdateAvailableTags() can fetch from backend
+            console.log('📊 No cache found - will fetch from backend');
+            return false;
         }
-        return false;
     },
 
     // Helper method to refresh lineage from database
@@ -1779,7 +1750,7 @@ const TagManager = {
 
                 if (tag) {
                     // Get updated lineage
-                    const lineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED')
+                    const lineage = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED')
                         .toString().trim().toUpperCase();
 
                     // Update data-lineage attribute (CSS will handle color change)
@@ -1843,7 +1814,7 @@ const TagManager = {
                 
                 // CRITICAL FIX: Ensure all lineage fields are present for color generation
                 // The backend expects canonical_lineage, currentLineage, or Lineage fields
-                const lineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                const lineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
                 if (!tag.canonical_lineage) tag.canonical_lineage = lineage;
                 if (!tag.currentLineage) tag.currentLineage = lineage;
                 if (!tag.Lineage) tag.Lineage = lineage;
@@ -3551,7 +3522,7 @@ const TagManager = {
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : 'Unknown Type';
             // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
-            const lineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
+            const lineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
             // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
             let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
@@ -3595,17 +3566,17 @@ const TagManager = {
             }
             
             // Extract price for grouping - try multiple possible price fields
-            const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag['Product Price'] || tag.price || '';
+            const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag['Product Price'] || tag.price || tag['price'] || '';
             // Format price for grouping - use actual price values, not ranges
             let priceGroup = 'No Price';
             if (rawPrice) {
                 const priceStr = rawPrice.toString().trim();
-                if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none') {
+                if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none' && priceStr !== '0' && priceStr !== '$0') {
                     // Try to extract numeric price value
                     const priceMatch = priceStr.match(/[\d.]+/);
                     if (priceMatch) {
                         const priceNum = parseFloat(priceMatch[0]);
-                        if (!isNaN(priceNum)) {
+                        if (!isNaN(priceNum) && priceNum > 0) {
                             // Format price: omit .00 for whole numbers, show 2 decimals for non-whole numbers
                             if (priceNum % 1 === 0) {
                                 priceGroup = `$${Math.round(priceNum)}`;
@@ -3615,6 +3586,21 @@ const TagManager = {
                         }
                     }
                 }
+            }
+            
+            // DEBUG: Log when price extraction fails for first few tags
+            if (priceGroup === 'No Price' && !this._priceDebugLogged) {
+                console.log('🔍 DEBUG: Price extraction failed for tag:', {
+                    productName: tag['Product Name*'] || tag.ProductName,
+                    'Price*': tag['Price*'],
+                    'Price* (Tier Name for Bulk)': tag['Price* (Tier Name for Bulk)'],
+                    'Price': tag.Price,
+                    'Product Price': tag['Product Price'],
+                    'price': tag.price,
+                    'rawPrice': rawPrice,
+                    'allKeys': Object.keys(tag).filter(k => k.toLowerCase().includes('price'))
+                });
+                this._priceDebugLogged = true;
             }
 
             // CRITICAL FIX: Only set to Unknown Vendor if vendor is truly missing after all checks
@@ -3658,8 +3644,7 @@ const TagManager = {
                 }
             }
 
-            // Normalize the tag data (priceGroup is left on the object for analytics,
-            // but we no longer group or categorize by price in the UI)
+            // Normalize the tag data (priceGroup is used for grouping in the UI)
             // CRITICAL: Preserve all lineage fields (database lineage fields must be preserved exactly)
             // CRITICAL FIX: Ensure lineage fields are always set for UI consistency
             // Use database lineage fields first, then fall back to Excel Lineage, then calculated lineage
@@ -6644,17 +6629,16 @@ const TagManager = {
         }
         
         // Set data-lineage attribute for CSS coloring on both row and tagElement
-        // CRITICAL FIX: For JSON matched tags, prioritize the Lineage field from the matched database data
+        // CRITICAL FIX: Use EXACT same lineage priority as docx generation
+        // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
+        // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
         let lineage;
-        // CRITICAL: Use same pipeline as backend - canonical_lineage (from DB) is ALWAYS source of truth
-        // This ensures UI lineages match database and persist correctly after reload
-        // IMPORTANT: If database lineage exists (canonical_lineage or currentLineage), use it exclusively
-        // NEVER use Excel Lineage (tag.Lineage) if database lineage is present
-        // CRITICAL FIX: Always check database lineage FIRST, never use Excel Lineage when DB lineage exists
-        // CRITICAL FIX: ALWAYS check database fields FIRST - database is the source of truth
-        // NEVER use Excel Lineage if database lineage exists
-        if (tag.canonical_lineage || tag.currentLineage) {
-            // Database lineage exists - use it EXCLUSIVELY (this is the source of truth)
+        // CRITICAL: Use EXACT same priority as docx generation - check sovereign_lineage FIRST
+        if (tag.sovereign_lineage) {
+            // Product-level sovereign_lineage (user changes) - highest priority (same as docx generation)
+            lineage = tag.sovereign_lineage;
+        } else if (tag.canonical_lineage || tag.currentLineage) {
+            // Strain-level canonical_lineage or currentLineage - database lineage
             lineage = tag.canonical_lineage || tag.currentLineage;
             // CRITICAL: Log when we're overriding Excel lineage with database lineage
             if (tag.Lineage && tag.Lineage.toUpperCase() !== lineage.toUpperCase()) {
@@ -6909,9 +6893,7 @@ const TagManager = {
         tagName.textContent = cleanedName;
         tagInfo.appendChild(tagName);
         
-
-        
-
+        // Price display removed from individual tag items - kept in dropdown header only
         
         // Add DOH and High CBD/THC images if applicable
         // CRITICAL FIX: Check both DOH field variations for all tags
@@ -7106,15 +7088,23 @@ const TagManager = {
         // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
-        // CRITICAL FIX: Force database lineage if it exists, regardless of what lineage variable says
-        // IMPORTANT: Check tag object DIRECTLY, not the lineage variable, to ensure we get the latest database values
-        const tagDbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+        // CRITICAL FIX: Use EXACT same lineage priority as docx generation for dropdown
+        // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
+        // Check tag object DIRECTLY using same priority as docx generation
+        let tagDbLineage = '';
+        if (tag.sovereign_lineage) {
+            tagDbLineage = tag.sovereign_lineage.toString().toUpperCase().trim();
+        } else if (tag.canonical_lineage || tag.currentLineage) {
+            tagDbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+        }
+        
         if (tagDbLineage) {
             // Database lineage exists - use it exclusively, ignore Excel Lineage completely
             if (tagDbLineage !== normalizedLineage) {
-                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.canonical_lineage=${tag.canonical_lineage} or tag.currentLineage=${tag.currentLineage})`);
+                const source = tag.sovereign_lineage ? 'sovereign_lineage' : (tag.canonical_lineage ? 'canonical_lineage' : 'currentLineage');
+                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.${source})`);
             }
-            normalizedLineage = tagDbLineage;  // Force database lineage
+            normalizedLineage = tagDbLineage;  // Force database lineage (same priority as docx generation)
         } else {
             // No database lineage - log warning for debugging
             if (isForSelectedTags && normalizedLineage && normalizedLineage !== 'MIXED') {
@@ -7193,14 +7183,16 @@ const TagManager = {
         // CRITICAL DEBUG: Log what lineage value was set in dropdown
         if (isForSelectedTags) {
             console.log(`🎯 Set lineage dropdown for SELECTED TAG "${displayName}":`, {
+                'sovereign_lineage': tag.sovereign_lineage || 'NONE',
                 'canonical_lineage': tag.canonical_lineage || 'NONE',
                 'currentLineage': tag.currentLineage || 'NONE',
                 'Excel Lineage': tag.Lineage || 'NONE',
                 'resolved lineage (used)': normalizedLineage,
                 'dropdown value set to': lineageSelect.value
             });
-            if ((tag.canonical_lineage || tag.currentLineage) && tag.Lineage) {
-                const dbLin = ((tag.canonical_lineage || tag.currentLineage) || '').toString().toUpperCase();
+            // Check if database lineage (sovereign/canonical) differs from Excel
+            const dbLin = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase();
+            if (dbLin && tag.Lineage) {
                 const excelLin = (tag.Lineage || '').toString().toUpperCase();
                 if (dbLin !== excelLin) {
                     console.warn(`⚠️ LINEAGE MISMATCH for "${displayName}": database=${dbLin}, excel=${excelLin}, dropdown should show=${dbLin}, actual=${lineageSelect.value}`);
@@ -7682,6 +7674,37 @@ const TagManager = {
 
         // CRITICAL FIX: Record timestamp for pre-generation refresh check
         this._lastLineageUpdateTime = Date.now();
+        
+        // CRITICAL: Track recently updated lineages to prevent refresh from overwriting them
+        if (!this._recentlyUpdatedLineages) {
+            // Try to restore from localStorage on first use
+            try {
+                const stored = localStorage.getItem('_recentlyUpdatedLineages');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    this._recentlyUpdatedLineages = new Map(Object.entries(parsed));
+                    console.log(`✅ Restored ${this._recentlyUpdatedLineages.size} recently updated lineages from localStorage`);
+                } else {
+                    this._recentlyUpdatedLineages = new Map();
+                }
+            } catch (e) {
+                this._recentlyUpdatedLineages = new Map();
+            }
+        }
+        // Store the updated lineage with timestamp - will be preserved for 30 minutes
+        this._recentlyUpdatedLineages.set(tagName, {
+            lineage: newLineage,
+            timestamp: Date.now()
+        });
+
+        // CRITICAL: Persist to localStorage so it survives page reloads
+        try {
+            const obj = Object.fromEntries(this._recentlyUpdatedLineages);
+            localStorage.setItem('_recentlyUpdatedLineages', JSON.stringify(obj));
+            console.log(`💾 Saved recently updated lineages to localStorage (${this._recentlyUpdatedLineages.size} items)`);
+        } catch (e) {
+            console.warn('Failed to save recently updated lineages to localStorage:', e);
+        }
 
         const originalTag = this.state.originalTags.find(t => t['Product Name*'] === tagName);
         if (originalTag) {
@@ -7689,6 +7712,7 @@ const TagManager = {
             originalTag.Lineage = newLineage;
             originalTag.currentLineage = newLineage;
             originalTag.canonical_lineage = newLineage;
+            originalTag.sovereign_lineage = newLineage; // CRITICAL: Set sovereign_lineage for UI display
         }
         const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
         if (currentTag) {
@@ -7696,6 +7720,7 @@ const TagManager = {
             currentTag.Lineage = newLineage;
             currentTag.currentLineage = newLineage;
             currentTag.canonical_lineage = newLineage;
+            currentTag.sovereign_lineage = newLineage; // CRITICAL: Set sovereign_lineage for UI display
 
             // CRITICAL FIX: Update _tagLookupMap immediately for getSelectedTagObjects()
             // This ensures tag objects retrieved for generation have the latest lineage
@@ -7765,20 +7790,34 @@ const TagManager = {
             // CRITICAL FIX: Clear frontend cache after successful lineage update
             // This ensures that on page reload, fresh lineage data is fetched from database
             if (responseData.db_updated > 0 || responseData.excel_updated > 0) {
-                this.clearAvailableTagsCache();
+                // CRITICAL FIX: Update cache with new lineage immediately (don't clear cache)
+                // This preserves the user's change and prevents refresh from pulling old data
+                // Save updated tags to cache immediately so refresh doesn't overwrite
+                if (this.state.tags && this.state.tags.length > 0) {
+                    // CRITICAL: Verify the tag has sovereign_lineage before saving
+                    const updatedTag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                    if (updatedTag) {
+                        console.log(`💾 Saving ${this.state.tags.length} tags to cache with updated lineage for "${tagName}":`, {
+                            sovereign_lineage: updatedTag.sovereign_lineage,
+                            canonical_lineage: updatedTag.canonical_lineage,
+                            Lineage: updatedTag.Lineage
+                        });
+                    }
+                    this.saveAvailableTagsToCache(this.state.tags);
+                }
+                
                 // CRITICAL FIX: Store timestamp in BOTH sessionStorage AND localStorage
                 // sessionStorage for current session, localStorage to persist across reloads
                 const updateTime = Date.now().toString();
                 sessionStorage.setItem('lastLineageUpdateTime', updateTime);
                 localStorage.setItem('lastLineageUpdateTime', updateTime);
-                console.log('🗑️ Cleared frontend cache after lineage update to ensure fresh data on reload');
+                console.log('✅ Saved lineage update timestamp - cache updated with new lineage');
                 
-                // CRITICAL FIX: Save updated tags to cache immediately after clearing
-                // This ensures the updated lineage is cached and persists on page reload
-                if (this.state.tags && this.state.tags.length > 0) {
-                    this.saveAvailableTagsToCache(this.state.tags);
-                    console.log('💾 Saved updated tags with new lineage to cache for persistence');
-                }
+                // CRITICAL FIX: DON'T refresh tags immediately - UI is already updated
+                // The refresh was causing old lineages to be pulled back
+                // Instead, just update cache and let the UI state persist
+                // Background refresh will happen naturally when needed, but won't overwrite sovereign_lineage
+                console.log('⏭️ Skipping immediate refresh - UI already updated, cache saved with new lineage');
             }
 
             // CRITICAL FIX: Use verified lineage from response (may be normalized differently)
@@ -7791,6 +7830,7 @@ const TagManager = {
                 originalTag.Lineage = verifiedLineage;
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
+                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set sovereign_lineage for UI display
                 verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
@@ -7813,11 +7853,14 @@ const TagManager = {
             // This ensures that when the tag list is filtered or re-rendered, it shows the updated lineage
             const originalTagIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
             if (originalTagIndex >= 0) {
-                this.state.originalTags[originalTagIndex].lineage = verifiedLineage;
-                this.state.originalTags[originalTagIndex].Lineage = verifiedLineage;
-                this.state.originalTags[originalTagIndex].currentLineage = verifiedLineage;
-                this.state.originalTags[originalTagIndex].canonical_lineage = verifiedLineage;
-                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
+                const originalTag = this.state.originalTags[originalTagIndex];
+                originalTag.lineage = verifiedLineage;
+                originalTag.Lineage = verifiedLineage;
+                originalTag.currentLineage = verifiedLineage;
+                originalTag.canonical_lineage = verifiedLineage;
+                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set sovereign_lineage to preserve user edit
+                originalTag['Lineage*'] = verifiedLineage;
+                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage} (sovereign_lineage set)`);
             }
 
             // NEW: Instantly update all similar (same vendor + strain) across lists
@@ -7838,13 +7881,9 @@ const TagManager = {
             // OLD CODE REMOVED: The debounced refresh was causing selected tags to be cleared
             // We now rely on direct state/UI updates which are faster and safer
             
-            // Track which tags were recently updated
-            if (!this._recentlyUpdatedLineages) {
-                this._recentlyUpdatedLineages = [];
-            }
-            if (!this._recentlyUpdatedLineages.includes(tagName)) {
-                this._recentlyUpdatedLineages.push(tagName);
-            }
+            // Track which tags were recently updated - this is handled earlier at line 7669-7698
+            // The _recentlyUpdatedLineages is a Map, not an array
+            // This duplicate code can be removed as it's already handled above
             
             // CRITICAL FIX: Mark this lineage update as completed for reload protection
             if (this._lineageUpdatePending) {
@@ -10634,22 +10673,43 @@ const TagManager = {
                 return true;
             }
             
-            // PERFORMANCE OPTIMIZATION: Single-pass normalization to reduce processing overhead
-            // Normalize tags to ensure database lineage is ALWAYS used (single pass instead of multiple)
-            verboseLog(`Normalizing ${tags.length} tags to prioritize database lineage...`);
-            const normalizedTags = tags.map(tag => {
-                // CRITICAL: ALWAYS prioritize database lineage fields over Excel Lineage
+            // PERFORMANCE OPTIMIZATION: Fast normalization - only normalize what's needed
+            // CRITICAL: Preserve sovereign_lineage (user-edited lineage) - it has highest priority
+            verboseLog(`Normalizing ${tags.length} tags (fast mode)...`);
+            // Use for loop instead of map for better performance on large arrays
+            const normalizedTags = [];
+            for (let i = 0; i < tags.length; i++) {
+                const tag = tags[i];
+                // CRITICAL: Check for sovereign_lineage FIRST (highest priority - user edits)
+                // If sovereign_lineage exists, preserve it and use it as the primary lineage
+                const sovereignRaw = tag.sovereign_lineage;
+                if (sovereignRaw) {
+                    const sovereignStr = String(sovereignRaw).trim();
+                    if (sovereignStr && sovereignStr.toUpperCase() !== 'NONE') {
+                        const sovereignLineage = sovereignStr.toUpperCase();
+                        // Preserve sovereign_lineage and set all other fields to match it (fast path)
+                        tag.sovereign_lineage = sovereignLineage;
+                        tag.Lineage = sovereignLineage;
+                        tag.lineage = sovereignLineage.toLowerCase();
+                        tag.currentLineage = sovereignLineage;
+                        tag.canonical_lineage = sovereignLineage;
+                        tag['Lineage*'] = sovereignLineage;
+                        normalizedTags.push(tag);
+                        continue; // Skip further normalization - sovereign takes precedence
+                    }
+                }
+                // No sovereign_lineage - use database lineage (canonical/current) or apply full normalization
                 if (tag.canonical_lineage || tag.currentLineage) {
-                    const dbLineage = (tag.canonical_lineage || tag.currentLineage).toString().trim().toUpperCase();
-                    // Update all lineage fields to match database lineage for consistency
+                    const dbLineage = String(tag.canonical_lineage || tag.currentLineage).trim().toUpperCase();
                     tag.Lineage = dbLineage;
                     tag.lineage = dbLineage.toLowerCase();
                     tag.currentLineage = dbLineage;
                     tag.canonical_lineage = dbLineage;
-                    }
+                    tag['Lineage*'] = dbLineage;
+                }
                 // Apply normalization function if available (for additional processing)
-                return this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag;
-            });
+                normalizedTags.push(this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag);
+            }
             
             tags = normalizedTags;
             verboseLog(`Fetched and normalized ${tags.length} available tags`);
@@ -10716,41 +10776,146 @@ const TagManager = {
                 console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
             }
             
-            // CRITICAL FIX: Preserve vendor data from existing tags when fresh tags arrive
-            // This prevents "Unknown Vendor" from appearing when tags are refreshed
-            if (this.state.tags && this.state.tags.length > 0) {
-                // Create a map of existing tags by product name for vendor lookup
+            // CRITICAL FIX: Preserve vendor data and sovereign_lineage from CACHED tags when fresh tags arrive
+            // This prevents "Unknown Vendor" from appearing and preserves user-edited lineage
+            // Store reference to cached tags before any modifications
+            const originalCachedTags = cacheUsedForDisplay && cachedTags ? [...cachedTags] : null;
+            const tagsToCompareAgainst = originalCachedTags || 
+                                         (this.state.tags && this.state.tags.length > 0 ? this.state.tags : null);
+            if (tagsToCompareAgainst) {
+                // Create maps of cached/existing tags by product name for vendor and sovereign_lineage lookup
                 const existingTagsMap = new Map();
-                this.state.tags.forEach(existingTag => {
+                const existingSovereignLineageMap = new Map();
+                tagsToCompareAgainst.forEach(existingTag => {
                     const productName = existingTag['Product Name*'] || existingTag.ProductName || '';
                     if (productName) {
+                        // Store vendor
                         const vendor = existingTag['Vendor*'] || existingTag['Vendor'] || existingTag.vendor || 
                                      existingTag['Vendor/Supplier*'] || existingTag['Product Vendor'] || '';
                         if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
                             existingTagsMap.set(productName, vendor);
                         }
+                        // Store sovereign_lineage (user-edited lineage - highest priority)
+                        // Only store if it's valid (not empty, not 'NONE')
+                        if (existingTag.sovereign_lineage && 
+                            existingTag.sovereign_lineage.toString().trim() !== '' && 
+                            existingTag.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE') {
+                            existingSovereignLineageMap.set(productName, existingTag.sovereign_lineage.toString().trim().toUpperCase());
+                        }
                     }
                 });
                 
-                // Preserve vendor data in fresh tags from existing tags
-                tags.forEach(tag => {
+                // Preserve vendor data and sovereign_lineage in fresh tags
+                // Use for loop instead of forEach to allow early continue
+                for (let i = 0; i < tags.length; i++) {
+                    const tag = tags[i];
                     const productName = tag['Product Name*'] || tag.ProductName || '';
-                    if (productName && existingTagsMap.has(productName)) {
+                    if (!productName) continue;
+                    
+                    // Preserve vendor
+                    if (existingTagsMap.has(productName)) {
                         const existingVendor = existingTagsMap.get(productName);
                         // Preserve vendor in all possible field names
                         if (!tag['Vendor*']) tag['Vendor*'] = existingVendor;
                         if (!tag['Vendor']) tag['Vendor'] = existingVendor;
                         if (!tag.vendor) tag.vendor = existingVendor;
                     }
-                });
+                    
+                    // CRITICAL: Check for recently updated lineages FIRST (highest priority - just edited)
+                    // This prevents refresh from overwriting lineages that were just updated
+                    const recentlyUpdated = this._recentlyUpdatedLineages && this._recentlyUpdatedLineages.has(productName);
+                    if (recentlyUpdated) {
+                        const updateInfo = this._recentlyUpdatedLineages.get(productName);
+                        const age = Date.now() - updateInfo.timestamp;
+                        // Preserve for 30 minutes after update (increased from 5 minutes)
+                        // This ensures lineage changes persist even across page reloads
+                        if (age < 1800000) {
+                            const recentLineage = updateInfo.lineage.toString().trim().toUpperCase();
+                            tag.sovereign_lineage = recentLineage;
+                            tag.canonical_lineage = recentLineage;
+                            tag.currentLineage = recentLineage;
+                            tag.Lineage = recentLineage;
+                            tag.lineage = recentLineage.toLowerCase();
+                            tag['Lineage*'] = recentLineage;
+                            console.log(`✅ Preserved recently updated lineage for "${productName}": ${recentLineage} (updated ${Math.round(age/1000)}s ago)`);
+                            continue; // Skip to next tag - don't check other sources
+                        } else {
+                            // Too old - remove from tracking
+                            this._recentlyUpdatedLineages.delete(productName);
+                        }
+                    }
+                    
+                    // CRITICAL: Existing cached sovereign_lineage ALWAYS takes precedence over fresh data
+                    // This prevents lineage from flipping when background refresh runs
+                    // User's cached sovereign_lineage (from previous edits) is the source of truth
+                    if (existingSovereignLineageMap.has(productName)) {
+                        // Existing tag has sovereign_lineage - ALWAYS preserve it (user's edits)
+                        const sovereignLineage = existingSovereignLineageMap.get(productName);
+                        tag.sovereign_lineage = sovereignLineage;
+                        // Also set other lineage fields to sovereign for consistency
+                        tag.canonical_lineage = sovereignLineage;
+                        tag.currentLineage = sovereignLineage;
+                        tag.Lineage = sovereignLineage;
+                        tag.lineage = sovereignLineage.toLowerCase();
+                        tag['Lineage*'] = sovereignLineage;
+                        console.log(`✅ Preserved cached sovereign_lineage for "${productName}": ${sovereignLineage} (preventing flip)`);
+                    } else {
+                        // No existing sovereign_lineage - use fresh data from backend
+                        const freshHasSovereign = tag.sovereign_lineage && 
+                                                 tag.sovereign_lineage.toString().trim() !== '' && 
+                                                 tag.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE';
+                        if (freshHasSovereign) {
+                            // Fresh tag has sovereign_lineage from database - use it
+                            const sovereignLineage = tag.sovereign_lineage.toString().trim().toUpperCase();
+                            tag.sovereign_lineage = sovereignLineage;
+                            tag.canonical_lineage = sovereignLineage;
+                            tag.currentLineage = sovereignLineage;
+                            tag.Lineage = sovereignLineage;
+                            tag.lineage = sovereignLineage.toLowerCase();
+                            tag['Lineage*'] = sovereignLineage;
+                            console.log(`✅ Using fresh sovereign_lineage from backend for "${productName}": ${sovereignLineage}`);
+                        }
+                    }
+                }
             }
             
-            // PERFORMANCE FIX: Only update UI if we didn't already show cached tags
-            // If cache was used, we already displayed tags - only update if tags changed significantly
-            // This prevents flickering and maintains instant display from cache
-            if (!cacheUsedForDisplay || tags.length !== (cachedTags?.length || 0)) {
-                // Always update available tags - _updateAvailableTags clears container and re-renders everything
-                // This ensures lineage dropdowns reflect the database values from the normalized tags
+            // PERFORMANCE FIX: Only update UI if we didn't already show cached tags OR if lineage actually changed
+            // CRITICAL: Never update UI if cache was used AND cached tags have sovereign_lineage
+            // This prevents lineage from flipping back and forth
+            let shouldUpdateUI = !cacheUsedForDisplay || tags.length !== (originalCachedTags?.length || 0);
+            
+            // CRITICAL: Check if we should update UI - never update if cached tags have sovereign_lineage
+            if (cacheUsedForDisplay && originalCachedTags && tags.length === originalCachedTags.length) {
+                // Check if any cached tag has sovereign_lineage - if so, don't update UI (preserve user edits)
+                const hasCachedSovereignLineage = originalCachedTags.some(t => 
+                    t.sovereign_lineage && 
+                    t.sovereign_lineage.toString().trim() !== '' && 
+                    t.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE'
+                );
+                
+                if (hasCachedSovereignLineage) {
+                    // Cached tags have sovereign_lineage - don't update UI, preserve user's edits
+                    shouldUpdateUI = false;
+                    console.log('✅ Skipping UI update - cached tags have sovereign_lineage (preserving user edits)');
+                } else {
+                    // No sovereign_lineage in cache - check if fresh tags have new lineage data
+                    let lineageChanged = false;
+                    for (let i = 0; i < tags.length; i++) {
+                        const freshTag = tags[i];
+                        const cachedTag = originalCachedTags[i];
+                        const freshLineage = freshTag.sovereign_lineage || freshTag.canonical_lineage || freshTag.currentLineage || freshTag.Lineage;
+                        const cachedLineage = cachedTag.sovereign_lineage || cachedTag.canonical_lineage || cachedTag.currentLineage || cachedTag.Lineage;
+                        if (freshLineage && cachedLineage && String(freshLineage).trim().toUpperCase() !== String(cachedLineage).trim().toUpperCase()) {
+                            lineageChanged = true;
+                            break;
+                        }
+                    }
+                    shouldUpdateUI = lineageChanged;
+                }
+            }
+            
+            if (shouldUpdateUI) {
+                // Update available tags - _updateAvailableTags clears container and re-renders everything
                 this._updateAvailableTags(tags);
                 
                 // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
@@ -10758,11 +10923,11 @@ const TagManager = {
                     this._waitForTagsToAppear();
                 }
             } else {
-                // Cache was used and tag count matches - just update state silently
+                // Cache was used and no significant changes - just update state silently
                 // This prevents UI flicker while keeping data fresh
                 this.state.tags = [...tags];
                 this.state.originalTags = [...tags];
-                console.log(`✅ Background refresh complete: ${tags.length} tags (UI already showing from cache)`);
+                console.log(`✅ Background refresh complete: ${tags.length} tags (UI unchanged - preserving cached lineage)`);
                 
                 // CRITICAL FIX: Still wait for tags to appear even if cache was used
                 if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
@@ -11090,7 +11255,24 @@ const TagManager = {
             clearTimeout(this._fetchingTimeout);
             this._fetchingTimeout = null;
         }
-        // Clear cache to force fresh load
+        // PERFORMANCE: Show cached data immediately, then refresh in background
+        // This provides instant feedback instead of waiting for full reload
+        const cachedTags = this.hydrateAvailableTagsFromCache();
+        if (cachedTags && cachedTags.length > 0) {
+            console.log(`⚡ INSTANT RELOAD: Showing ${cachedTags.length} cached tags immediately`);
+            this.state.tags = [...cachedTags];
+            this.state.originalTags = [...cachedTags];
+            this._updateAvailableTags(cachedTags, null);
+            // Hide splash immediately since we have cached data
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+        } else {
+            // No cache - show loading indicator
+            this.showActionSplash('Reloading tags...');
+        }
+        
+        // Clear cache and fetch fresh data in background (non-blocking)
         try {
             const cacheKey = this.getAvailableTagsCacheKey();
             if (window.sessionStorage) {
@@ -11099,15 +11281,13 @@ const TagManager = {
         } catch (e) {
             console.warn('Failed to clear cache:', e);
         }
-        // Show loading indicator
-        this.showActionSplash('Reloading tags...');
-        // Force reload
+        
+        // Fetch fresh data in background (don't await - non-blocking)
         try {
             await this.fetchAndUpdateAvailableTags(true); // Pass true to force reload
         } catch (error) {
-            console.error('Force reload failed:', error);
-            this.hideActionSplash();
-            throw error;
+            console.error('Background reload failed:', error);
+            // Don't hide splash or throw - cached data is already shown
         }
     },
     
@@ -11119,21 +11299,39 @@ const TagManager = {
             let lin;
             let fromDatabase = false;
             
-            // EXACT same priority as docx generation (tag_generator.py line 909):
-            // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-            if (tag.sovereign_lineage) {
-                // Product-level sovereign_lineage (user changes) - highest priority
-                lin = tag.sovereign_lineage.toString().trim();
-                fromDatabase = true;
-            } else if (tag.canonical_lineage || tag.currentLineage) {
-                // Strain-level canonical_lineage or currentLineage - database lineage
-                lin = (tag.canonical_lineage || tag.currentLineage || '').toString().trim();
-                fromDatabase = true;
-            } else {
-                // No database lineage - use Excel Lineage only for brand new products
-                lin = (tag.Lineage || tag.lineage || '').toString().trim();
-                // Don't mark as fromDatabase - this is Excel lineage for new products
-            }
+               // EXACT same priority as docx generation (tag_generator.py line 909):
+               // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+               // CRITICAL FIX: Treat 'NONE' as empty/null (same as backend)
+               const cleanLineageValue = (val) => {
+                   if (!val) return null;
+                   const cleaned = String(val).trim().toUpperCase();
+                   if (cleaned === '' || cleaned === 'NONE' || cleaned === 'NULL' || cleaned === 'NAN') {
+                       return null;
+                   }
+                   return cleaned;
+               };
+               
+               const sovereignClean = cleanLineageValue(tag.sovereign_lineage);
+               if (sovereignClean) {
+                   // Product-level sovereign_lineage (user changes) - highest priority
+                   lin = sovereignClean;
+                   fromDatabase = true;
+               } else if (tag.canonical_lineage || tag.currentLineage) {
+                   // Strain-level canonical_lineage or currentLineage - database lineage
+                   const canonicalClean = cleanLineageValue(tag.canonical_lineage || tag.currentLineage);
+                   if (canonicalClean) {
+                       lin = canonicalClean;
+                       fromDatabase = true;
+                   } else {
+                       // No database lineage - use Excel Lineage only for brand new products
+                       lin = cleanLineageValue(tag.Lineage || tag.lineage) || '';
+                       // Don't mark as fromDatabase - this is Excel lineage for new products
+                   }
+               } else {
+                   // No database lineage - use Excel Lineage only for brand new products
+                   lin = cleanLineageValue(tag.Lineage || tag.lineage) || '';
+                   // Don't mark as fromDatabase - this is Excel lineage for new products
+               }
             
             if (lin) {
                 const normalized = lin.toUpperCase();
@@ -16857,13 +17055,16 @@ const TagManager = {
                 console.error('❌ setupFilterEventListeners method not found!');
             }
 
-            // CRITICAL FIX: Force-populate lineage dropdown from filter-options API
-            // This ensures lineages always appear even if updateFilters isn't called with them
-            console.log('🔧 Force-populating lineage dropdown from API...');
-            try {
-                const filterResp = await fetch('/api/filter-options?refresh=true&nocache=1&t=' + Date.now());
-                const filterData = await filterResp.json();
-                const lineages = filterData.lineage || [];
+            // PERFORMANCE: Populate lineage dropdown from cache first (non-blocking), then refresh in background
+            // This ensures lineages appear quickly while tags load
+            console.log('🔧 Populating lineage dropdown (non-blocking)...');
+            // Start this async but don't wait for it - tags loading is more important
+            (async () => {
+                try {
+                    // PERFORMANCE: Use cache first for instant dropdown population, refresh in background
+                    const filterResp = await fetch('/api/filter-options?t=' + Date.now());
+                    const filterData = await filterResp.json();
+                    const lineages = filterData.lineage || [];
 
                 if (lineages.length > 0) {
                     const lineageFilter = document.getElementById('lineageFilter');
@@ -16902,9 +17103,10 @@ const TagManager = {
                 } else {
                     console.warn('⚠️ No lineages returned from API');
                 }
-            } catch (error) {
-                console.error('❌ Error populating lineage dropdown:', error);
-            }
+                } catch (error) {
+                    console.error('❌ Error populating lineage dropdown:', error);
+                }
+            })(); // Non-blocking - don't await
 
             // PERFORMANCE: Show cached data immediately, then refresh in background
             // This provides instant UI while ensuring fresh data

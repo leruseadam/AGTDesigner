@@ -2009,46 +2009,53 @@ class TemplateProcessor:
         
         if product_type in ['pre-roll', 'infused pre-roll']:
             # For pre-roll products, use JointRatio as WeightUnits
+            # Check record first, then cache, then database, then weight
             joint_ratio = (record.get('JointRatio') or 
                           record.get('Joint Ratio') or 
                           '')
             
-            # CRITICAL FIX: If JointRatio is missing from record, try to get it from database directly
-            if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+            # Try cache if missing
+            if not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                product_name = record.get('ProductName') or record.get('Product Name*', '')
+                if product_name and joint_ratio_cache:
+                    joint_ratio = joint_ratio_cache.get(product_name, '')
+            
+            # Try database if still missing
+            if not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 product_name = record.get('ProductName') or record.get('Product Name*', '')
                 if product_name:
                     try:
-                        # Use pre-loaded cache instead of individual query
-                        if joint_ratio_cache and product_name:
-                            joint_ratio = joint_ratio_cache.get(product_name)
-                            if joint_ratio:
-                                self.logger.debug(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
-                            else:
-                                self.logger.debug(f"No JointRatio in cache for '{product_name}'")
-                    except Exception as e:
-                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from cache: {e}")
-                
-                # If still no joint ratio, just use weight
-                if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                    weight_value = record.get('Weight*', '') or label_context.get('Weight*', '')
-                    units_value = record.get('Units', '') or label_context.get('Units', '')
-                    if weight_value and units_value:
-                        joint_ratio = f"{weight_value}{units_value}"
-                    elif weight_value:
-                        joint_ratio = str(weight_value)
-                    self.logger.debug(f"🔧 USING WEIGHT: JointRatio '{joint_ratio}' from weight '{weight_value}{units_value}' for '{product_name}'")
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
+                        if product_db:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute('SELECT "JointRatio" FROM products WHERE "Product Name*" = ?', (product_name,))
+                            result = cursor.fetchone()
+                            if not result or not result[0]:
+                                cursor.execute('SELECT "JointRatio" FROM products WHERE "Product Name*" LIKE ?', (f'%{product_name}%',))
+                                result = cursor.fetchone()
+                            if result and result[0]:
+                                joint_ratio = str(result[0]).strip()
+                    except:
+                        pass
             
-            self.logger.debug(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
-            if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                # Format JointRatio with soft hyphen and nonbreaking space, then prefix with newline for prerolls
-                formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
+            # Use weight if still missing
+            if not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                weight_value = record.get('Weight*', '') or label_context.get('Weight*', '')
+                units_value = record.get('Units', '') or label_context.get('Units', '')
+                if weight_value and units_value:
+                    joint_ratio = f"{weight_value}{units_value}"
+                elif weight_value:
+                    joint_ratio = str(weight_value)
+            
+            # Set WeightUnits
+            if joint_ratio and str(joint_ratio).strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                formatted_joint_ratio = self.format_joint_ratio_pack(str(joint_ratio).strip())
                 label_context['WeightUnits'] = f"\n{formatted_joint_ratio}"
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted JointRatio '{formatted_joint_ratio}' (with newline) for {product_type}")
             else:
-                # Format default with soft hyphen and nonbreaking space, then prefix with newline
                 formatted_default = self.format_joint_ratio_pack("0.5g x 2 Pack")
                 label_context['WeightUnits'] = f"\n{formatted_default}"
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted default '{formatted_default}' (with newline) for {product_type}")
         else:
             # For non-pre-roll products, construct WeightUnits from available fields
             weight_units = (
@@ -3434,34 +3441,55 @@ class TemplateProcessor:
             self.logger.debug("No product name available for QR code generation")
 
         # CRITICAL: Final JointRatio processing for prerolls - must be last to override any other THC/CBD processing
-        product_type = (label_context.get('Product Type*', '').lower() or 
-                       label_context.get('ProductType', '').lower())
+        product_type_raw = (label_context.get('Product Type*', '') or 
+                           label_context.get('ProductType', '') or
+                           record.get('Product Type*', '') or
+                           record.get('ProductType', ''))
+        product_type = str(product_type_raw).lower().strip()
         
-        if product_type in ['pre-roll', 'infused pre-roll']:
+        # Check if this is a preroll product (handle various naming conventions)
+        is_preroll = ('preroll' in product_type or 
+                     'pre-roll' in product_type or 
+                     'pre roll' in product_type)
+        
+        if is_preroll:
             # Use JointRatio for prerolls and infused prerolls
             joint_ratio = (record.get('JointRatio') or
                           record.get('Joint Ratio') or
+                          label_context.get('JointRatio') or
                           record.get('Ratio') or
                           '')
             
-            # CRITICAL FIX: If JointRatio is missing from record, try to get it from cache
-            if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                product_name = record.get('ProductName') or record.get('Product Name*', '')
-                if product_name and joint_ratio_cache:
-                    cached_joint_ratio = joint_ratio_cache.get(product_name)
-                    if cached_joint_ratio and cached_joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                        joint_ratio = cached_joint_ratio
-                        self.logger.debug(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for Ratio_or_THC_CBD for '{product_name}'")
+            # CRITICAL DEBUG: Log what we found
+            product_name = record.get('ProductName') or record.get('Product Name*', '') or label_context.get('ProductName', '')
+            self.logger.info(f"🔍 JOINT RATIO DEBUG: Product '{product_name}' ({product_type})")
+            self.logger.info(f"   - record.get('JointRatio'): '{record.get('JointRatio', 'NOT_FOUND')}'")
+            self.logger.info(f"   - record.get('Joint Ratio'): '{record.get('Joint Ratio', 'NOT_FOUND')}'")
+            self.logger.info(f"   - label_context.get('JointRatio'): '{label_context.get('JointRatio', 'NOT_FOUND')}'")
+            self.logger.info(f"   - record.get('Ratio'): '{record.get('Ratio', 'NOT_FOUND')}'")
+            self.logger.info(f"   - Final joint_ratio value: '{joint_ratio}'")
             
-            if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+            # CRITICAL FIX: If JointRatio is missing from record, try to get it from cache
+            if (not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']) and product_name:
+                self.logger.info(f"   - JointRatio empty, checking cache...")
+                if joint_ratio_cache:
+                    cached_joint_ratio = joint_ratio_cache.get(product_name)
+                    self.logger.info(f"   - Cache result: '{cached_joint_ratio}'")
+                    if cached_joint_ratio and str(cached_joint_ratio).strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                        joint_ratio = cached_joint_ratio
+                        self.logger.info(f"🔧 CACHE HIT: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
+                else:
+                    self.logger.warning(f"⚠️  No joint_ratio_cache available for '{product_name}'")
+            
+            if joint_ratio and str(joint_ratio).strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 # Format JointRatio using the same formatting function as WeightUnits
-                formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
+                formatted_joint_ratio = self.format_joint_ratio_pack(str(joint_ratio).strip())
                 # Wrap JointRatio with markers for proper template processing
                 label_context['Ratio_or_THC_CBD'] = wrap_with_marker(formatted_joint_ratio, 'THC_CBD')
                 label_context['THC_CBD'] = wrap_with_marker(formatted_joint_ratio, 'THC_CBD')
-                self.logger.debug(f"FINAL: Set JointRatio for {product_type} Ratio_or_THC_CBD: '{formatted_joint_ratio}'")
+                self.logger.info(f"✅ JOINT RATIO SET: Product '{product_name}' ({product_type}) - Ratio_or_THC_CBD: '{formatted_joint_ratio}'")
             else:
-                self.logger.debug(f"FINAL: No JointRatio found for {product_type} Ratio_or_THC_CBD")
+                self.logger.warning(f"⚠️  NO JOINT RATIO: Product '{product_name}' ({product_type}) - JointRatio field empty or invalid: '{joint_ratio}'")
 
         # DO NOT unwrap markers here - they are needed for font sizing in the rendered document
         # Markers will be removed AFTER font sizing is applied in the cleanup phase
@@ -5735,33 +5763,23 @@ class TemplateProcessor:
                         if brand_clean_regex:
                             run.text = brand_clean_regex.sub('', original_text).strip()
                     
-                    # Handle alignment based on PRODUCT TYPE, not just lineage content
-                    is_classic_product = product_type and product_type.lower() in CLASSIC_TYPES
-                    
-                    # Debug logging for vape cartridge lineage alignment
-                    if product_type and 'vape' in product_type.lower():
-                        self.logger.debug(f"VAPE CARTRIDGE DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
-                    
-                    # Classic product types should have LEFT alignment for lineage
+                    # Handle alignment based on product type:
+                    # Classic types: LEFT aligned
+                    # Nonclassic types: CENTERED
                     if is_classic_product:
+                        # Classic product types should have LEFT alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         # NO LEFT INDENT - this was causing lineage indentation
                         paragraph.paragraph_format.left_indent = Inches(0)
-                        # Ensure consistent spacing above lineage section for equal margins
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        self.logger.debug(f"Left-aligned lineage for classic product type: '{content[:50]}...' (product_type: {product_type})")
                     else:
-                        # Non-classic product types should have CENTER alignment for ProductBrand (which goes in Lineage field)
+                        # Nonclassic product types should have CENTER alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Ensure consistent spacing above lineage section for equal margins
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        self.logger.debug(f"Centered lineage for nonclassic product type: '{content[:50]}...' (product_type: {product_type})")
                     
-                    # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage
-                    if product_type and 'vape' in product_type.lower():
-                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        paragraph.paragraph_format.left_indent = Inches(0)
-                        self.logger.debug(f"VAPE CARTRIDGE OVERRIDE: Forced LEFT alignment for lineage")
+                    # Ensure consistent spacing above lineage section for equal margins
+                    paragraph.paragraph_format.space_before = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
                     
                     continue
                 # Always center ProductBrand and ProductBrand_Center markers
@@ -6080,13 +6098,19 @@ class TemplateProcessor:
                                     is_classic_raw = is_classic_raw[:-len('PRODUCTBRAND_CENTER_END')]
                                 is_classic = is_classic_raw.lower() == 'true'
                                 
-                                # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
-                                # For classic types, Lineage field contains actual lineage content which should be left-aligned
-                                # Only check product type, not content, to determine alignment
-                                if is_classic:
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                else:
+                                # Lineage should be LEFT aligned, but nonclassic product brands (PRODUCTBRAND_CENTER) should be CENTERED
+                                # Check if content contains PRODUCTBRAND_CENTER markers
+                                has_brand_markers = 'PRODUCTBRAND_CENTER' in actual_lineage or 'PRODUCTBRAND_CENTER' in content
+                                
+                                if has_brand_markers:
+                                    # Nonclassic product brands should be CENTERED
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    self.logger.debug(f"Centered Lineage (ProductBrand) with markers: '{actual_lineage[:50]}...'")
+                                else:
+                                    # Actual lineage content should be LEFT aligned
+                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                    paragraph.paragraph_format.left_indent = Inches(0)
+                                    self.logger.debug(f"Left-aligned lineage content: '{actual_lineage[:50]}...'")
                                 
                                 # Update the content to only show the actual lineage (remove any markers)
                                 if actual_lineage.startswith('LINEAGE_START'):
@@ -6115,26 +6139,21 @@ class TemplateProcessor:
                             if 'vape' in product_type.lower():
                                 self.logger.debug(f"VAPE CARTRIDGE FALLBACK DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
                         
-                        # DEBUG: Log the centering decision for non-classic types
-                        self.logger.info(f"DEBUG: LINEAGE centering decision - product_type='{product_type}', is_classic_product={is_classic_product}, content='{content}'")
+                        # DEBUG: Log the alignment decision
+                        self.logger.info(f"DEBUG: LINEAGE alignment decision - product_type='{product_type}', is_classic_product={is_classic_product}, content='{content[:50]}...'")
                         
-                        # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
-                        # For classic types, Lineage field contains actual lineage content which should be left-aligned
-                        # Only check product type, not content, to determine alignment
+                        # Handle alignment based on product type:
+                        # Classic types: LEFT aligned
+                        # Nonclassic types: CENTERED
                         if is_classic_product:
-                            # For Classic Types, left-justify the lineage text
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
-                        else:
-                            # For non-classic types, center the ProductBrand content in Lineage field
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
-                        
-                        # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
-                        if product_type and 'vape' in product_type.lower():
+                            # Classic product types should have LEFT alignment for lineage
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            self.logger.debug(f"VAPE CARTRIDGE FALLBACK OVERRIDE: Forced LEFT alignment for lineage")
+                            self.logger.debug(f"Left-aligned lineage for classic product type: '{content[:50]}...' (product_type: {product_type})")
+                        else:
+                            # Nonclassic product types should have CENTER alignment for lineage
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            self.logger.debug(f"Centered lineage for nonclassic product type: '{content[:50]}...' (product_type: {product_type})")
                 
                 self.logger.debug(f"Applied template-specific font sizing: {font_size.pt}pt for {marker_name} marker")
 
@@ -7299,9 +7318,23 @@ class TemplateProcessor:
         """
         Ensure brand field is centered for nonclassic types (where brand like "CERES" should be centered).
         This method runs after all other processing to ensure the centering is not overridden.
+        
+        CRITICAL: This should ONLY center brand content for non-classic products.
+        Classic product lineage (SATIVA, INDICA, HYBRID, etc.) should remain LEFT aligned.
         """
         try:
             # Starting _ensure_lineage_centering_for_nonclassic_types
+            
+            # Define classic lineage values that should NEVER be centered in double/vertical templates
+            # These should always be LEFT aligned for classic product types
+            # CRITICAL FIX: DO NOT center anything here - alignment is already set by apply_lineage_colors
+            # apply_lineage_colors sets LEFT for classic lineage (INDICA, SATIVA, HYBRID)
+            # and CENTER for PRODUCTBRAND_CENTER markers (non-classic product brands)
+            # This post-processing was overriding that alignment
+            self.logger.warning("⚠️ SKIPPING brand centering - alignment already set by apply_lineage_colors")
+            return
+            
+            classic_lineage_values = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
             
             # Process all tables and look for actual brand content that should be centered
             for table in doc.tables:
@@ -7314,7 +7347,13 @@ class TemplateProcessor:
                             if not paragraph_text:
                                 continue
                             
-                            # Look for actual brand content that should be centered
+                            # CRITICAL FIX: Skip classic lineage values - these should stay LEFT aligned for classic types
+                            # This prevents centering of SATIVA, INDICA, HYBRID, etc. in double/vertical templates
+                            if paragraph_text.upper() in classic_lineage_values:
+                                self.logger.debug(f"Skipping centering for classic lineage value: '{paragraph_text}'")
+                                continue
+                            
+                            # Look for actual brand content that should be centered (only for non-classic types)
                             # This includes all brand names regardless of case or length
                             is_brand_name = (
                                 paragraph_text and
@@ -7322,8 +7361,6 @@ class TemplateProcessor:
                                 not paragraph_text.endswith('g') and
                                 not paragraph_text.endswith('mg') and
                                 not paragraph_text.isdigit() and
-                                # Not classic lineage values
-                                paragraph_text.upper() not in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"] and
                                 # Not THC/CBD content
                                 not ('THC:' in paragraph_text and 'CBD:' in paragraph_text) and
                                 # Not long product descriptions (those should be left-aligned)
@@ -7339,7 +7376,7 @@ class TemplateProcessor:
                             if is_brand_name:
                                 # Force center alignment for brand names (ProductBrand should be centered for nonclassic types)
                                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                # Centered brand name content
+                                self.logger.debug(f"Centered brand name for nonclassic type: '{paragraph_text}'")
                                 
         except Exception as e:
             self.logger.error(f"Error ensuring brand centering for nonclassic types: {e}")
