@@ -14316,15 +14316,34 @@ const TagManager = {
 
     // Action splash screen for clear/undo operations
     showActionSplash(message) {
-        // CRITICAL FIX: Don't show loading splash if store selection modal is visible
+        // CRITICAL FIX: Don't show loading splash if store selection modal is visible or store not confirmed
         const storeModal = document.getElementById('storeSelectionModal');
-        const isStoreModalVisible = storeModal && (storeModal.classList.contains('show') || storeModal.style.display !== 'none');
+        
+        // Check if store modal is visible using multiple methods
+        let isStoreModalVisible = false;
+        if (storeModal) {
+            // Check Bootstrap modal state
+            if (typeof bootstrap !== 'undefined') {
+                const modalInstance = bootstrap.Modal.getInstance(storeModal);
+                if (modalInstance && modalInstance._isShown) {
+                    isStoreModalVisible = true;
+                }
+            }
+            // Fallback: check DOM classes and styles
+            if (!isStoreModalVisible) {
+                isStoreModalVisible = storeModal.classList.contains('show') || 
+                                     (storeModal.style.display !== 'none' && storeModal.offsetParent !== null);
+            }
+        }
         
         // Also check if store is not confirmed
         const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
         const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
         
-        if (isStoreModalVisible || !storeConfirmed) {
+        // CRITICAL: Also check if we're in the middle of store selection process
+        const isCheckingStore = window.checkingStoreRequired === true;
+        
+        if (isStoreModalVisible || !storeConfirmed || isCheckingStore) {
             verboseLog('Store modal visible or not confirmed - skipping action splash:', message);
             return;
         }
