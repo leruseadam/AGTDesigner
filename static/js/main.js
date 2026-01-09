@@ -10718,11 +10718,11 @@ const TagManager = {
             let response;
             let responseData;
             
-            // ⚡ FAST TIMEOUTS: Backend should respond instantly with fast_load=1
-            // If it takes >5s, something is wrong - show cache or error
-            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries
-            const maxProcessingRetries = isWebClient ? 2 : 2; // Reduce processing retries
-            const fetchTimeout = isWebClient ? 5000 : 5000; // 5s timeout - backend should be instant
+            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (30s)
+            // Desktop/localhost should respond quickly with fast_load=1
+            const maxRetries = isWebClient ? 1 : 2; // Fewer retries for web
+            const maxProcessingRetries = isWebClient ? 1 : 2; // Reduce processing retries
+            const fetchTimeout = isWebClient ? 30000 : 5000; // Web: 30s, Desktop: 5s
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -10730,6 +10730,17 @@ const TagManager = {
             
             console.log(`🔄 Entering retry loop (maxRetries: ${maxRetries}, maxProcessingRetries: ${maxProcessingRetries}, timeout: ${fetchTimeout}ms, web: ${isWebClient})`);
             console.log(`📊 Current state: retryCount=${retryCount}, processingRetryCount=${processingRetryCount}`);
+            
+            // ⚡ CACHE FIRST: Try to load from cache before making network requests
+            if (retryCount === 0 && !forceReload) {
+                console.log('🔄 Attempting cache load before network request...');
+                const cacheLoaded = this.hydrateAvailableTagsFromCache();
+                if (cacheLoaded) {
+                    console.log('✅ Cache loaded successfully - skipping network request');
+                    return true;
+                }
+                console.log('📊 No cache available - proceeding with network request');
+            }
             
             // CRITICAL: Continue retrying as long as EITHER condition is met (not both)
             // This allows 202 retries to continue even after error retries are exhausted
@@ -10772,13 +10783,14 @@ const TagManager = {
                     console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
                     
-                    // PERFORMANCE: Aggressive HTTP caching for instant reloads
+                    // ⚡ AGGRESSIVE CACHING: Web clients use longer cache (30 min), desktop uses shorter (5 min)
+                    const cacheMaxAge = isWebClient ? 1800 : 300; // Web: 30min, Desktop: 5min
                     response = await fetch(optimizedFetchUrl, {
                         signal: controller.signal,
-                        // Always use cache first for fastest loads (force-cache falls back to network)
-                        cache: 'force-cache',
+                        // Default cache strategy - let browser handle it intelligently
+                        cache: 'default',
                         headers: {
-                            'Cache-Control': 'max-age=300' // 5 minute cache
+                            'Cache-Control': `max-age=${cacheMaxAge}`
                         }
                     });
                     clearTimeout(timeoutId);
