@@ -5106,35 +5106,55 @@ class ExcelProcessor:
                 
                 # Special processing for Price filter
                 elif filter_key == "price":
-                    # Format prices consistently: $10 for whole numbers, $10.50 for decimals
-                    # Also include "No Price" for products without prices
-                    formatted_prices = set()
-                    has_no_price = False
-                    for v in values:
-                        if not v or str(v).strip() == '' or str(v).strip().lower() in ['nan', 'none', 'null']:
-                            has_no_price = True
-                            continue
-                        try:
-                            # Extract numeric value from price strings (handles $10, 10.00, $10.50, etc.)
-                            price_str = str(v).strip()
-                            price_match = re.search(r'[\d.]+', price_str)
-                            if price_match:
-                                price_num = float(price_match.group(0))
-                                if price_num >= 0:
-                                    # Format: omit .00 for whole numbers, show 2 decimals for non-whole numbers
-                                    if price_num % 1 == 0:
-                                        formatted_prices.add(f"${int(price_num)}")
-                                    else:
-                                        formatted_prices.add(f"${price_num:.2f}")
-                        except (ValueError, AttributeError):
-                            # If we can't parse it, check if it's already formatted
-                            if '$' in str(v):
-                                formatted_prices.add(str(v).strip())
-                    if has_no_price:
-                        formatted_prices.add('No Price')
-                    values = sorted(list(formatted_prices), key=lambda x: (
-                        0 if x == 'No Price' else float(re.search(r'[\d.]+', x).group(0)) if re.search(r'[\d.]+', x) else 999999
-                    ))
+                    try:
+                        # Format prices consistently: $10 for whole numbers, $10.50 for decimals
+                        # Also include "No Price" for products without prices
+                        formatted_prices = set()
+                        has_no_price = False
+                        for v in values:
+                            try:
+                                if not v or str(v).strip() == '' or str(v).strip().lower() in ['nan', 'none', 'null']:
+                                    has_no_price = True
+                                    continue
+                                # Extract numeric value from price strings (handles $10, 10.00, $10.50, etc.)
+                                price_str = str(v).strip()
+                                price_match = re.search(r'[\d.]+', price_str)
+                                if price_match:
+                                    price_num = float(price_match.group(0))
+                                    if price_num >= 0:
+                                        # Format: omit .00 for whole numbers, show 2 decimals for non-whole numbers
+                                        if price_num % 1 == 0:
+                                            formatted_prices.add(f"${int(price_num)}")
+                                        else:
+                                            formatted_prices.add(f"${price_num:.2f}")
+                            except (ValueError, AttributeError, TypeError) as price_err:
+                                # If we can't parse it, check if it's already formatted
+                                try:
+                                    if '$' in str(v):
+                                        formatted_prices.add(str(v).strip())
+                                except:
+                                    pass  # Skip invalid values
+                        if has_no_price:
+                            formatted_prices.add('No Price')
+                        # Sort prices: "No Price" first, then by numeric value
+                        def price_sort_key(x):
+                            try:
+                                if x == 'No Price':
+                                    return (0, '')
+                                match = re.search(r'[\d.]+', x)
+                                if match:
+                                    return (1, float(match.group(0)))
+                            except (ValueError, AttributeError, TypeError):
+                                pass
+                            return (2, 999999)  # Invalid prices go last
+                        values = sorted(list(formatted_prices), key=price_sort_key)
+                    except Exception as price_filter_err:
+                        # If price filter processing fails, log warning and use raw values
+                        self.logger.warning(f"Price filter processing failed: {price_filter_err}, using raw values")
+                        # Fall back to raw values with basic cleaning
+                        values = [str(v).strip() for v in values if v and str(v).strip() and str(v).strip().lower() not in ['nan', 'none', 'null']]
+                        values = list(set(values))
+                        values.sort()
                 
                 # Remove duplicates and sort
                 if filter_key != "price":  # Price already sorted above
