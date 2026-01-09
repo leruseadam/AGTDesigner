@@ -5213,9 +5213,20 @@ class TemplateProcessor:
                     elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                         product_type = self.label_context['ProductType']
                     
-                    from src.core.constants import CLASSIC_TYPES
+                    from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
                     product_type_normalized = (product_type or '').lower()
                     is_classic_product = product_type_normalized in CLASSIC_TYPES if product_type_normalized else False
+                    
+                    # CRITICAL FIX: Check if lineage content itself is a classic lineage value
+                    # Clean the content to check for classic lineage values
+                    clean_content = content.strip().upper()
+                    # Remove any marker remnants
+                    clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
+                    clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
+                    # Check if the cleaned content is a classic lineage value
+                    is_classic_lineage_value = clean_content in VALID_CLASSIC_LINEAGES or any(
+                        clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
+                    )
                     
                     if (not is_classic_product) and ('PRODUCTBRAND_CENTER' in content):
                         brand_text = re.sub(
@@ -5248,15 +5259,18 @@ class TemplateProcessor:
                         if brand_clean_regex:
                             run.text = brand_clean_regex.sub('', original_text).strip()
                     
-                    # Handle alignment based on PRODUCT TYPE, not just lineage content
-                    is_classic_product = product_type and product_type.lower() in CLASSIC_TYPES
-                    
-                    # Debug logging for vape cartridge lineage alignment
-                    if product_type and 'vape' in product_type.lower():
-                        self.logger.debug(f"VAPE CARTRIDGE DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
-                    
-                    # Classic product types should have LEFT alignment for lineage
-                    if is_classic_product:
+                    # Handle alignment based on PRODUCT TYPE OR classic lineage value
+                    # CRITICAL FIX: If lineage content is a classic lineage value, always left-align
+                    # This ensures lineage values like HYBRID, SATIVA, INDICA are left-aligned
+                    # even if product type detection fails
+                    if is_classic_lineage_value:
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        paragraph.paragraph_format.left_indent = Inches(0)
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
+                        self.logger.debug(f"LINEAGE ALIGNMENT: Forced LEFT alignment for classic lineage value: '{clean_content}'")
+                    elif is_classic_product:
+                        # Classic product types should have LEFT alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         # NO LEFT INDENT - this was causing lineage indentation
                         paragraph.paragraph_format.left_indent = Inches(0)
@@ -5593,13 +5607,29 @@ class TemplateProcessor:
                                     is_classic_raw = is_classic_raw[:-len('PRODUCTBRAND_CENTER_END')]
                                 is_classic = is_classic_raw.lower() == 'true'
                                 
+                                # CRITICAL FIX: Check if lineage content itself is a classic lineage value
+                                from src.core.constants import VALID_CLASSIC_LINEAGES
+                                clean_lineage = actual_lineage.strip().upper()
+                                clean_lineage = re.sub(r'LINEAGE_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
+                                clean_lineage = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
+                                is_classic_lineage_value = clean_lineage in VALID_CLASSIC_LINEAGES or any(
+                                    clean_lineage.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
+                                )
+                                
                                 # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
                                 # For classic types, Lineage field contains actual lineage content which should be left-aligned
-                                # Only check product type, not content, to determine alignment
-                                if is_classic:
+                                # CRITICAL FIX: Also check if lineage content is a classic lineage value
+                                if is_classic or is_classic_lineage_value:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                    paragraph.paragraph_format.left_indent = Inches(0)
+                                    paragraph.paragraph_format.space_before = Pt(2)
+                                    paragraph.paragraph_format.space_after = Pt(1)
+                                    if is_classic_lineage_value:
+                                        self.logger.debug(f"Left-aligned lineage for classic lineage value: '{clean_lineage}'")
                                 else:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                                    paragraph.paragraph_format.space_before = Pt(2)
+                                    paragraph.paragraph_format.space_after = Pt(1)
                                 
                                 # Update the content to only show the actual lineage (remove any markers)
                                 if actual_lineage.startswith('LINEAGE_START'):
@@ -5610,7 +5640,18 @@ class TemplateProcessor:
                     else:
                         # Fallback: check if this is a classic product type by using the context
                         # Import constants to check against CLASSIC_TYPES
-                        from src.core.constants import CLASSIC_TYPES
+                        from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
+                        
+                        # CRITICAL FIX: Check if lineage content itself is a classic lineage value
+                        # Clean the content to check for classic lineage values
+                        clean_content = content.strip().upper()
+                        # Remove any marker remnants
+                        clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
+                        clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
+                        # Check if the cleaned content is a classic lineage value
+                        is_classic_lineage_value = clean_content in VALID_CLASSIC_LINEAGES or any(
+                            clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
+                        )
                         
                         # Get product type from context, not from content
                         is_classic_product = False
@@ -5629,18 +5670,30 @@ class TemplateProcessor:
                                 self.logger.debug(f"VAPE CARTRIDGE FALLBACK DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
                         
                         # DEBUG: Log the centering decision for non-classic types
-                        self.logger.info(f"DEBUG: LINEAGE centering decision - product_type='{product_type}', is_classic_product={is_classic_product}, content='{content}'")
+                        self.logger.info(f"DEBUG: LINEAGE centering decision - product_type='{product_type}', is_classic_product={is_classic_product}, is_classic_lineage_value={is_classic_lineage_value}, content='{content}'")
                         
-                        # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
-                        # For classic types, Lineage field contains actual lineage content which should be left-aligned
-                        # Only check product type, not content, to determine alignment
-                        if is_classic_product:
+                        # CRITICAL FIX: If lineage content is a classic lineage value, always left-align
+                        # This ensures lineage values like HYBRID, SATIVA, INDICA are left-aligned
+                        # even if product type detection fails
+                        if is_classic_lineage_value:
+                            # For Classic Lineage Values, left-justify the lineage text
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            paragraph.paragraph_format.left_indent = Inches(0)
+                            paragraph.paragraph_format.space_before = Pt(2)
+                            paragraph.paragraph_format.space_after = Pt(1)
+                            self.logger.debug(f"Left-justified lineage for classic lineage value: '{clean_content}' (content: '{content}')")
+                        elif is_classic_product:
                             # For Classic Types, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            paragraph.paragraph_format.left_indent = Inches(0)
+                            paragraph.paragraph_format.space_before = Pt(2)
+                            paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
                         else:
                             # For non-classic types, center the ProductBrand content in Lineage field
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            paragraph.paragraph_format.space_before = Pt(2)
+                            paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
                         
                         # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
