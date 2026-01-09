@@ -305,7 +305,7 @@
                     console.warn('⚠️ /api/available-tags timeout after 30 seconds, falling back...');
                 }, 30000);
                 
-                const quickResponse = await fetch('/api/available-tags?fast_load=1', {
+                const quickResponse = await fetch('/api/available-tags?fast_load=1&prefer_db=1', {
                     signal: controller.signal
                 });
                 if (timeoutId) {

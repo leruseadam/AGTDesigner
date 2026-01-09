@@ -1654,7 +1654,7 @@ const TagManager = {
             const fastLoad = 0;
             verboseLog('🔄 Background refresh: forcing database lineage enrichment (fast_load=0)');
             
-            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}`, {
+            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}&prefer_db=1`, {
                 signal: AbortSignal.timeout(15000) // 15 second timeout (increased from 5s to reduce timeout errors)
             });
             if (lineageResponse.ok) {
@@ -10758,8 +10758,8 @@ const TagManager = {
                     // CRITICAL: Force nocache if lineage was recently updated (even for web clients) to get fresh lineage
                     const useCache = retryCount === 0 && !forceDbLineage && !forceReload && !hasRecentLineageUpdate;
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Skip prefer_db for web clients (web endpoint handles lineage updates via timestamp check)
-                    const preferDbParam = (isWebClient || !forceDbLineage) ? '' : '&prefer_db=1';
+                    // CRITICAL: Always use prefer_db=1 to force database lineage query
+                    const preferDbParam = '&prefer_db=1';
                     
                     // Use web endpoint for web clients, regular endpoint for localhost/desktop
                     const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
@@ -15774,7 +15774,7 @@ const TagManager = {
                     // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
                     let tagsResponse;
                     try {
-                        tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
+                        tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1&prefer_db=1`, {
                             signal: tagsController.signal
                         });
                     } catch (fetchError) {
