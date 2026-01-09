@@ -2209,6 +2209,7 @@ const TagManager = {
             // DEBUG: Log brand filter specifically
             if (filterType === 'brand') {
                 console.log(`🔍 Updating brand filter with ${fieldValues.length} values:`, fieldValues.slice(0, 10));
+                console.log(`🔍 Brand filter element exists:`, !!filterElement);
             }
             
             const values = new Set();
@@ -2219,8 +2220,12 @@ const TagManager = {
             });
             
             // DEBUG: Log if brand filter ends up empty
-            if (filterType === 'brand' && values.size === 0) {
-                console.warn('⚠️ Brand filter has no values after processing! Field values:', fieldValues);
+            if (filterType === 'brand') {
+                if (values.size === 0) {
+                    console.warn('⚠️ Brand filter has no values after processing! Field values:', fieldValues);
+                } else {
+                    console.log(`✅ Brand filter will have ${values.size} options after processing`);
+                }
             }
             
             // Sort values alphabetically for consistent ordering
@@ -2283,6 +2288,16 @@ const TagManager = {
             // Clear and append in one operation
             filterElement.innerHTML = '';
             filterElement.appendChild(fragment);
+            
+            // DEBUG: Verify brand filter was populated
+            if (filterType === 'brand') {
+                const optionCount = filterElement.options.length;
+                console.log(`✅ Brand filter dropdown now has ${optionCount} options (including "All")`);
+                if (optionCount <= 1) {
+                    console.error('❌ Brand filter dropdown is empty or only has "All" option!');
+                    console.error('   Expected values:', sortedValues.slice(0, 20));
+                }
+            }
             
             // Handle value restoration based on preserveExistingValues parameter
             if (preserveExistingValues) {
@@ -2576,6 +2591,17 @@ const TagManager = {
                 }
             }
             
+            // CRITICAL: Always log filter options (not verboseLog) so we can see what's being built
+            console.log('⚡⚡⚡ Built filter options:', {
+                vendor: filterOptionsArrays.vendor.length,
+                brand: filterOptionsArrays.brand.length,
+                productType: filterOptionsArrays.productType.length,
+                lineage: filterOptionsArrays.lineage.length,
+                weight: filterOptionsArrays.weight.length,
+                price: filterOptionsArrays.price?.length || 0,
+                doh: filterOptionsArrays.doh.length,
+                highCbd: filterOptionsArrays.highCbd.length
+            });
             verboseLog('⚡⚡⚡ Built filter options:', {
                 vendor: filterOptionsArrays.vendor.length,
                 brand: filterOptionsArrays.brand.length,
@@ -2585,8 +2611,10 @@ const TagManager = {
             });
 
             // Update filters immediately
+            console.log('⚡⚡⚡ Calling updateFilters with built options...');
             verboseLog('⚡⚡⚡ Calling updateFilters with built options...');
             this.updateFilters(filterOptionsArrays, true);
+            console.log('⚡⚡⚡ updateFilters completed');
             verboseLog('⚡⚡⚡ updateFilters completed');
 
             // CRITICAL FIX: Reset flag after completion

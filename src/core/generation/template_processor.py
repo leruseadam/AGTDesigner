@@ -6810,6 +6810,11 @@ class TemplateProcessor:
                             if not paragraph_text:
                                 continue
                             
+                            # CRITICAL FIX: Don't override LEFT-aligned paragraphs (classic lineage should stay left-aligned)
+                            # If paragraph is already left-aligned, skip it - this preserves classic type lineage alignment
+                            if paragraph.alignment == WD_ALIGN_PARAGRAPH.LEFT:
+                                continue
+                            
                             # Look for actual brand content that should be centered
                             # This includes all brand names regardless of case or length
                             is_brand_name = (
@@ -6819,7 +6824,7 @@ class TemplateProcessor:
                                 not paragraph_text.endswith('mg') and
                                 not paragraph_text.isdigit() and
                                 # Not classic lineage values
-                                paragraph_text.upper() not in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"] and
+                                paragraph_text.upper() not in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARA", "PARAPHERNALIA"] and
                                 # Not THC/CBD content
                                 not ('THC:' in paragraph_text and 'CBD:' in paragraph_text) and
                                 # Not long product descriptions (those should be left-aligned)
@@ -6833,7 +6838,7 @@ class TemplateProcessor:
                             )
                             
                             if is_brand_name:
-                                # Force center alignment for brand names
+                                # Force center alignment for brand names (only if not already left-aligned)
                                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 # Centered brand name content
                                 

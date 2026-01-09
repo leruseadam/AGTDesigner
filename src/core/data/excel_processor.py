@@ -5007,6 +5007,7 @@ class ExcelProcessor:
                 "productType": [],
                 "lineage": [],
                 "weight": [],
+                "price": [],
                 "strain": [],
                 "doh": [],
                 "highCbd": []

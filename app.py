@@ -13779,6 +13779,7 @@ def get_web_filter_options():
                         'productType': [],
                         'lineage': [],
                         'weight': [],
+                        'price': [],
                         'strain': [],
                         'doh': [],
                         'highCbd': []
@@ -14120,6 +14121,7 @@ def get_filter_options():
                         'productType': sorted(list(product_types)),
                         'lineage': sorted(list(lineages)),
                         'weight': sorted(list(weights)),
+                        'price': [],  # Price filter options
                         'strain': sorted(list(strains)),
                         'doh': sorted(list(doh_values)),
                         'highCbd': []  # Will be calculated separately if needed
@@ -14154,6 +14156,7 @@ def get_filter_options():
                             'productType': [],
                             'lineage': [],
                             'weight': [],
+                            'price': [],
                             'strain': [],
                             'doh': [],
                             'highCbd': [],
