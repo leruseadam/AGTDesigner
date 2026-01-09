@@ -1100,66 +1100,9 @@ class JSONMatcher:
         try:
             logging.info("📊 Building sheet cache from ProductDatabase...")
             
-            # Try to get store name from session/context
-            store_name = None
-            try:
-                from flask import session
-                store_name = session.get('current_store')
-            except:
-                pass
-            
-            # If no store selected, try to find a database with actual data
-            if not store_name:
-                import os
-                import glob
-                import sqlite3
-                
-                # Check both uploads and databases directories
-                search_dirs = [
-                    os.path.join(os.getcwd(), 'uploads'),
-                    os.path.join(os.getcwd(), 'databases')
-                ]
-                
-                best_db = None
-                best_count = 0
-                
-                for db_dir in search_dirs:
-                    if not os.path.exists(db_dir):
-                        continue
-                        
-                    # Match both product_database_*.db and *_products.db patterns
-                    db_files = (glob.glob(os.path.join(db_dir, 'product_database_*.db')) + 
-                               glob.glob(os.path.join(db_dir, '*_products.db')))
-                    
-                    # Find the database with the most products
-                    for db_file in db_files:
-                        try:
-                            conn = sqlite3.connect(db_file)
-                            cursor = conn.cursor()
-                            cursor.execute("SELECT COUNT(*) FROM products")
-                            count = cursor.fetchone()[0]
-                            conn.close()
-                            
-                            if count > best_count:
-                                best_count = count
-                                best_db = db_file
-                                # Extract store name from filename
-                                filename = os.path.basename(db_file)
-                                if filename.startswith('product_database_'):
-                                    store_name = filename.replace('product_database_', '').replace('.db', '')
-                                else:
-                                    store_name = filename.replace('_products.db', '')
-                                logging.info(f"📊 Found database with {count} products: {store_name}")
-                        except Exception as e:
-                            logging.debug(f"📊 Error checking database {db_file}: {e}")
-                            continue
-                
-                if store_name:
-                    logging.info(f"📊 Selected database with most products: {store_name} ({best_count} products)")
-                else:
-                    # Fall back to generic database if no other database found
-                    store_name = 'generic'
-                    logging.info("📊 Using generic database as fallback")
+            # CRITICAL FIX: Use _determine_store_name() to ensure consistency with _get_product_database()
+            # This ensures both methods use the same store selection logic
+            store_name = self._determine_store_name()
             
             # Cache the store selection so subsequent lookups reuse it
             if self._cached_store_name and self._cached_store_name != store_name:
