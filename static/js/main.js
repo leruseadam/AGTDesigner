@@ -1274,13 +1274,15 @@ const TagManager = {
                 return null;
             }
             
-            // PERFORMANCE: Check cache version but don't block - use old cache for instant display
-            // Will refresh in background to get sovereign_lineage
+            // ⚡ AUTO CACHE INVALIDATION: Check version for automatic invalidation
+            const CURRENT_VERSION = 3;
             const cacheVersion = payload.cacheVersion || 1;
-            if (cacheVersion < 2) {
-                console.log(`ℹ️ Old cache format detected (version ${cacheVersion}) - using for instant display, will refresh in background for sovereign_lineage`);
-                // Mark for background refresh but still return cache for instant display
-                payload._needsBackgroundRefresh = true;
+            
+            // Invalidate if cache version is outdated
+            if (cacheVersion < CURRENT_VERSION) {
+                console.log(`🔄 Cache outdated (v${cacheVersion} < v${CURRENT_VERSION}) - auto-invalidating`);
+                storage.removeItem(cacheKey);
+                return null;
             }
             
             const age = Date.now() - payload.timestamp;
@@ -1308,6 +1310,9 @@ const TagManager = {
             if (!storage) {
                 return;
             }
+            
+            // ⚡ AUTO CACHE VERSIONING: Increment on data structure changes
+            const CACHE_VERSION = 3; // Increment when tag structure changes
 
             // CRITICAL FIX: Clear old cache entries FIRST to make space
             // Also clear cache from different platform (Chrome sync can share cache between Mac/Windows)
@@ -1375,7 +1380,7 @@ const TagManager = {
                 tags: optimizedTags,
                 _optimized: true, // Flag to indicate this is optimized cache
                 platform: currentPlatform, // Store platform to detect cross-platform cache conflicts
-                cacheVersion: 2 // Version 2: includes sovereign_lineage support
+                cacheVersion: CACHE_VERSION // Auto-incremented cache version
             };
 
             const payloadStr = JSON.stringify(payload);
@@ -3884,19 +3889,25 @@ const TagManager = {
             // Format price for grouping - use actual price values, not ranges
             let priceGroup = 'No Price';
             if (rawPrice) {
-                const priceStr = rawPrice.toString().trim();
+                const priceStr = String(rawPrice).trim();
                 // CRITICAL FIX: More lenient validation - allow any price string that contains a number
-                if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none') {
+                // Also handle empty strings, null, undefined, and various "empty" representations
+                if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr !== 'null' && priceStr !== 'undefined' && 
+                    priceStr.toLowerCase() !== 'none' && priceStr.toLowerCase() !== 'n/a' && priceStr !== '$0' && priceStr !== '$0.00') {
                     // Try to extract numeric price value (handles $10, 10.00, $10.50, etc.)
+                    // Improved regex to handle more formats: $10, 10, 10.00, $10.50, 10.5, etc.
                     const priceMatch = priceStr.match(/[\d.]+/);
                     if (priceMatch) {
                         const priceNum = parseFloat(priceMatch[0]);
                         // CRITICAL FIX: Accept 0 prices (some products are legitimately free/comp)
+                        // But only if explicitly set to 0, not if missing
                         if (!isNaN(priceNum) && priceNum >= 0) {
                             // Format price: omit .00 for whole numbers, show 2 decimals for non-whole numbers
+                            // This matches user preference: $25 instead of $25.00, $25.50 instead of $25.5
                             if (priceNum % 1 === 0) {
                                 priceGroup = `$${Math.round(priceNum)}`;
                             } else {
+                                // Ensure exactly 2 decimal places (no trailing zeros removal)
                                 priceGroup = `$${priceNum.toFixed(2)}`;
                             }
                         }
@@ -15669,6 +15680,10 @@ const TagManager = {
             
             verboseLog(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
             
+            // ⚡ AUTO CACHE CLEARING: Clear cache after file upload (data has changed)
+            console.log('🔄 File uploaded - auto-clearing cache for fresh data');
+            this.clearAvailableTagsCache();
+            
             // Show success toast
             if (typeof showToast === 'function') {
                 showToast('success', `File uploaded successfully! ${uploadData.rows || 0} rows processed.`);
@@ -16097,6 +16112,9 @@ const TagManager = {
             
             if (response.ok && data.status === 'ready') {
                 verboseLog('Fallback upload successful');
+                // ⚡ AUTO CACHE CLEARING: Clear cache after file upload (data has changed)
+                console.log('🔄 Fallback upload completed - auto-clearing cache');
+                this.clearAvailableTagsCache();
                 this.updateUploadUI(file.name, 'File uploaded successfully', 'success');
                 // Refresh the page to load the new file
                 safeReload(500); // Small delay to ensure UI updates
