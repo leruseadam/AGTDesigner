@@ -8105,18 +8105,17 @@
                 }
               }
 
-              // CRITICAL: Debounced search to prevent rapid-fire when changing multiple filters
+              // CRITICAL FIX: Apply filters to main tag list, not database editor search
               clearTimeout(filterDebounceTimer);
               filterDebounceTimer = setTimeout(() => {
-                const productSearchInput = document.getElementById('productSearch');
-                if (productSearchInput && window.searchProducts && window.selectedVendor) {
-                  // Re-run search with current search term and new filters
-                  console.log(`🔍 Triggering search after ${filterId} change`);
-                  window.searchProducts(productSearchInput.value || '');
+                // Apply filters to the main tag list using TagManager
+                if (window.TagManager && typeof window.TagManager.applyFilters === 'function') {
+                  console.log(`🔍 Applying filters after ${filterId} change`);
+                  window.TagManager.applyFilters(true); // immediate = true for responsive filtering
                 } else {
-                  console.log(`⚠️ Search not triggered - vendor: ${window.selectedVendor}, searchProducts: ${typeof window.searchProducts}`);
+                  console.warn(`⚠️ TagManager.applyFilters not available - filters may not work`);
                 }
-              }, 300); // Wait 300ms after last filter change before searching
+              }, 300); // Wait 300ms after last filter change before applying
             });
 
             console.log(`✅ ${filterId} event listener attached`);

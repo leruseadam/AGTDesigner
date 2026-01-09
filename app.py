@@ -13791,31 +13791,33 @@ def get_web_filter_options():
         # Use optimized method for web clients
         options = excel_processor.get_dynamic_filter_options(current_filters)
         
-        # CRITICAL FIX: Enrich lineage options from database to match enriched tags
-        # The DataFrame's "Lineage" column may be stale, but tags are enriched with database lineage
+        # PERFORMANCE FIX: Query database directly for unique lineage values instead of fetching all tags
+        # This is much faster than get_available_tags() + _align_tags_with_db_lineage()
         try:
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and options.get('lineage'):
-                # Get enriched tags to extract correct lineage values
-                enriched_tags = excel_processor.get_available_tags(current_filters)
-                if enriched_tags:
-                    # Align tags with database lineage
-                    enriched_tags = _align_tags_with_db_lineage(enriched_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    # Extract unique lineage values from enriched tags
-                    enriched_lineages = set()
-                    for tag in enriched_tags:
-                        lineage = (tag.get('sovereign_lineage') or tag.get('canonical_lineage') or 
-                                  tag.get('currentLineage') or tag.get('Lineage') or '')
-                        if isinstance(lineage, str):
-                            lineage = lineage.strip().upper()
-                        else:
-                            lineage = str(lineage).strip().upper() if lineage else ''
-                        if lineage and lineage not in ['', 'NONE', 'NULL', 'NAN']:
-                            enriched_lineages.add(lineage)
-                    if enriched_lineages:
-                        # Replace DataFrame lineage with enriched lineage
-                        options['lineage'] = sorted(list(enriched_lineages))
-                        logging.info(f"✅ Enriched lineage filter options: {len(options['lineage'])} lineages from database")
+                product_db = get_product_database(store_name)
+                if product_db:
+                    try:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        # Query unique lineage values directly using COALESCE logic (same as _get_filter_options_from_database)
+                        cursor.execute('''
+                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                            FROM products p
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
+                        ''')
+                        db_lineages = [str(row[0]).strip().upper() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
+                        if db_lineages:
+                            # Replace DataFrame lineage with database lineage
+                            options['lineage'] = sorted(list(set(db_lineages)))
+                            logging.info(f"✅ Enriched lineage filter options: {len(options['lineage'])} lineages from database (fast query)")
+                    except Exception as db_query_err:
+                        logging.warning(f"Could not query database for lineage options: {db_query_err}")
         except Exception as enrich_err:
             logging.warning(f"Could not enrich lineage filter options: {enrich_err}")
         
@@ -14276,31 +14278,33 @@ def get_filter_options():
                 'error': f'Error generating filter options: {str(filter_error)}'
             }), 200
         
-        # CRITICAL FIX: Enrich lineage options from database to match enriched tags
-        # The DataFrame's "Lineage" column may be stale, but tags are enriched with database lineage
+        # PERFORMANCE FIX: Query database directly for unique lineage values instead of fetching all tags
+        # This is much faster than get_available_tags() + _align_tags_with_db_lineage()
         try:
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and options.get('lineage'):
-                # Get enriched tags to extract correct lineage values
-                enriched_tags = excel_processor.get_available_tags(current_filters)
-                if enriched_tags:
-                    # Align tags with database lineage
-                    enriched_tags = _align_tags_with_db_lineage(enriched_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    # Extract unique lineage values from enriched tags
-                    enriched_lineages = set()
-                    for tag in enriched_tags:
-                        lineage = (tag.get('sovereign_lineage') or tag.get('canonical_lineage') or 
-                                  tag.get('currentLineage') or tag.get('Lineage') or '')
-                        if isinstance(lineage, str):
-                            lineage = lineage.strip().upper()
-                        else:
-                            lineage = str(lineage).strip().upper() if lineage else ''
-                        if lineage and lineage not in ['', 'NONE', 'NULL', 'NAN']:
-                            enriched_lineages.add(lineage)
-                    if enriched_lineages:
-                        # Replace DataFrame lineage with enriched lineage
-                        options['lineage'] = sorted(list(enriched_lineages))
-                        logging.info(f"✅ Enriched lineage filter options: {len(options['lineage'])} lineages from database")
+                product_db = get_product_database(store_name)
+                if product_db:
+                    try:
+                        conn = product_db._get_connection()
+                        cursor = conn.cursor()
+                        # Query unique lineage values directly using COALESCE logic (same as _get_filter_options_from_database)
+                        cursor.execute('''
+                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                            FROM products p
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
+                        ''')
+                        db_lineages = [str(row[0]).strip().upper() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
+                        if db_lineages:
+                            # Replace DataFrame lineage with database lineage
+                            options['lineage'] = sorted(list(set(db_lineages)))
+                            logging.info(f"✅ Enriched lineage filter options: {len(options['lineage'])} lineages from database (fast query)")
+                    except Exception as db_query_err:
+                        logging.warning(f"Could not query database for lineage options: {db_query_err}")
         except Exception as enrich_err:
             logging.warning(f"Could not enrich lineage filter options: {enrich_err}")
             
