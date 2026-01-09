@@ -10530,15 +10530,16 @@ const TagManager = {
         // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
         // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
         if (storeConfirmed && !hasExistingTags && !hasCache) {
-            // Initial load - show full loading UI
-            this.showActionSplash('Loading tags...');
+            // Initial load - show full loading UI with better message
+            this.showActionSplash('Loading tags from server...');
             if (availableTagsContainer) {
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-4">
                         <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
                             <span class="visually-hidden">Loading...</span>
                         </div>
-                        <p class="mt-2 text-white">Loading tags...</p>
+                        <p class="mt-2 text-white">Loading tags from server...</p>
+                        <p class="mt-1 text-white-50 small">This may take up to 30 seconds for large datasets</p>
                     </div>
                 `;
             }
@@ -10709,11 +10710,11 @@ const TagManager = {
             let responseData;
             
             // PERFORMANCE: Balanced timeouts for reliable loading
-            // CRITICAL FIX: Increased timeout from 5s to 15s to prevent premature aborts
-            // This allows server enough time to respond, especially for large datasets
+            // CRITICAL FIX: Increased timeout to 30s for web to handle slow backend responses
+            // This allows server enough time to respond, especially for large datasets or slow connections
             const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for network resilience
             const maxProcessingRetries = isWebClient ? 3 : 3; // Allow processing retries
-            const fetchTimeout = isWebClient ? 15000 : 20000; // 15s web, 20s desktop (was 5s/8s - too aggressive)
+            const fetchTimeout = isWebClient ? 30000 : 20000; // 30s web (was 15s - still timing out), 20s desktop
             
             let retryCount = 0;
             let processingRetryCount = 0;
