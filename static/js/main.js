@@ -17226,9 +17226,9 @@ const TagManager = {
             this.state.initialized = true;
         }
     },
-        
-        // CRITICAL FIX: Global function to clear cache and force reload (for price issues)
-        clearCacheAndReload() {
+    
+    // CRITICAL FIX: Global function to clear cache and force reload (for price issues)
+    clearCacheAndReload() {
             console.log('🗑️ Clearing all caches and forcing reload...');
             this.clearAvailableTagsCache();
             
@@ -17253,7 +17253,6 @@ const TagManager = {
                 console.error('❌ Failed to reload tags after cache clear:', error);
             });
         }
-    }
 };
 
 // CRITICAL FIX: Expose global function for cache clearing
