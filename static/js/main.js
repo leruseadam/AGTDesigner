@@ -2450,9 +2450,18 @@ const TagManager = {
             const excludedTypesLower = excludedTypes.map(t => t.toLowerCase());
             
             tags.forEach(tag => {
-                // Vendor
-                const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag['Vendor/Supplier'] || '';
-                if (vendor && vendor.trim()) filterOptions.vendor.add(vendor.trim());
+                // Vendor - check ALL possible vendor field names
+                const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || 
+                              tag['Vendor/Supplier'] || tag['Vendor*'] || tag['Product Vendor'] || 
+                              tag['ProductVendor'] || '';
+                if (vendor && vendor.trim()) {
+                    const vendorTrimmed = vendor.trim();
+                    // Skip "Unknown" vendors
+                    if (vendorTrimmed.toLowerCase() !== 'unknown' && 
+                        vendorTrimmed.toLowerCase() !== 'unknown vendor') {
+                        filterOptions.vendor.add(vendorTrimmed);
+                    }
+                }
                 
                 // Brand - CRITICAL FIX: Check all possible brand field names consistently
                 const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || tag['brand'] || '';
@@ -10586,19 +10595,13 @@ const TagManager = {
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
-                // PERFORMANCE: Longer timeout to allow cache to load first
-                // Only hide if we don't have cache (cache should load instantly)
-                const safetyTimeoutMs = isWebClient ? 8000 : 12000; // 8s for web, 12s for desktop
+                // PERFORMANCE: Much shorter timeout for faster failure recovery
+                const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
                 safetyTimeout = setTimeout(() => {
-                    // Only hide if we haven't loaded from cache yet
-                    if (!cacheUsedForDisplay) {
-                        console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms) - no cache available`);
-                        // Just hide the splash, don't show error message
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                    } else {
-                        console.log(`✅ Safety timeout: Cache already loaded, keeping UI visible`);
+                    console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
+                    // Just hide the splash, don't show error message
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
                     }
                     // Don't show error message - let the app continue working
                 }, safetyTimeoutMs);
@@ -10715,11 +10718,11 @@ const TagManager = {
             let response;
             let responseData;
             
-            // PERFORMANCE: Optimized timeouts - use cache aggressively for fast loads
-            // Reduced timeout to fail faster and use cache, then refresh in background
-            const maxRetries = isWebClient ? 1 : 2; // Reduced retries for web - fail fast to cache
-            const maxProcessingRetries = isWebClient ? 2 : 3; // Reduced processing retries
-            const fetchTimeout = isWebClient ? 10000 : 15000; // 10s web (fail fast to cache), 15s desktop
+            // ⚡ FAST TIMEOUTS: Backend should respond instantly with fast_load=1
+            // If it takes >5s, something is wrong - show cache or error
+            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries
+            const maxProcessingRetries = isWebClient ? 2 : 2; // Reduce processing retries
+            const fetchTimeout = isWebClient ? 5000 : 5000; // 5s timeout - backend should be instant
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -11036,32 +11039,27 @@ const TagManager = {
                 return true;
             }
             
-            // PERFORMANCE OPTIMIZATION: Fast normalization - only normalize what's needed
-            // CRITICAL: Preserve sovereign_lineage (user-edited lineage) - it has highest priority
-            verboseLog(`Normalizing ${tags.length} tags (fast mode)...`);
-            // Use for loop instead of map for better performance on large arrays
+            // ⚡ FAST NORMALIZATION: Process all tags in one go (removed progressive rendering)
+            verboseLog(`⚡ Fast normalizing ${tags.length} tags...`);
+            
             const normalizedTags = [];
-            for (let i = 0; i < tags.length; i++) {
-                const tag = tags[i];
-                // CRITICAL: Check for sovereign_lineage FIRST (highest priority - user edits)
-                // If sovereign_lineage exists, preserve it and use it as the primary lineage
+            
+            // Fast normalize function
+            const fastNormalize = (tag) => {
                 const sovereignRaw = tag.sovereign_lineage;
                 if (sovereignRaw) {
                     const sovereignStr = String(sovereignRaw).trim();
                     if (sovereignStr && sovereignStr.toUpperCase() !== 'NONE') {
                         const sovereignLineage = sovereignStr.toUpperCase();
-                        // Preserve sovereign_lineage and set all other fields to match it (fast path)
                         tag.sovereign_lineage = sovereignLineage;
                         tag.Lineage = sovereignLineage;
                         tag.lineage = sovereignLineage.toLowerCase();
                         tag.currentLineage = sovereignLineage;
                         tag.canonical_lineage = sovereignLineage;
                         tag['Lineage*'] = sovereignLineage;
-                        normalizedTags.push(tag);
-                        continue; // Skip further normalization - sovereign takes precedence
+                        return tag;
                     }
                 }
-                // No sovereign_lineage - use database lineage (canonical/current) or apply full normalization
                 if (tag.canonical_lineage || tag.currentLineage) {
                     const dbLineage = String(tag.canonical_lineage || tag.currentLineage).trim().toUpperCase();
                     tag.Lineage = dbLineage;
@@ -11070,12 +11068,16 @@ const TagManager = {
                     tag.canonical_lineage = dbLineage;
                     tag['Lineage*'] = dbLineage;
                 }
-                // Apply normalization function if available (for additional processing)
-                normalizedTags.push(this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag);
+                return this._normalizeLineageFields ? this._normalizeLineageFields(tag) : tag;
+            };
+            
+            // Process all tags at once
+            for (let i = 0; i < tags.length; i++) {
+                normalizedTags.push(fastNormalize(tags[i]));
             }
             
             tags = normalizedTags;
-            verboseLog(`Fetched and normalized ${tags.length} available tags`);
+            verboseLog(`⚡ Normalized ${tags.length} tags`);
 
             // PERFORMANCE: Reduced debug logging - only log summary, not every tag
             if (verboseLog.enabled) {

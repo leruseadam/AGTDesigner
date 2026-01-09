@@ -10452,7 +10452,7 @@ def get_available_tags():
                 try:
                     if file_exists and session_file_path:
                         from src.core.data.excel_processor import ExcelProcessor
-                        logging.info(f"🆕 Creating NEW processor instance for ULTRA-FAST path: {session_file_path}")
+                        logging.info(f"⚡ ULTRA-FAST: Creating processor for {session_file_path}")
                         excel_processor = ExcelProcessor(store_name=store_name)
 
                         # PERFORMANCE: Use fast loading methods when fast_load is enabled
@@ -10502,30 +10502,76 @@ def get_available_tags():
                     load_elapsed = (time.time() - start_time) * 1000
                     logging.info(f"⚡ ULTRA-FAST: Excel loaded in {load_elapsed:.1f}ms - Serving Excel-only tags for fast_load request (no DB lineage alignment).")
 
-                    # CRITICAL PERFORMANCE FIX: Skip enrichment for maximum speed
-                    # Set flag BEFORE calling get_available_tags to prevent database queries
+                    # ⚡ ULTRA-FAST: Skip enrichment but do lightweight lineage alignment
                     excel_processor._skip_enrichment = True
-                    logging.info("⚡ PERFORMANCE: Set _skip_enrichment=True to skip database queries")
+                    
+                    tags_start = time.time()
+                    excel_tags = excel_processor.get_available_tags(filters=None)
+                    tags_elapsed = (time.time() - tags_start) * 1000
+                    logging.info(f"⚡ Got {len(excel_tags) if excel_tags else 0} Excel tags in {tags_elapsed:.0f}ms")
+                    
+                    excel_processor._skip_enrichment = False
 
-                    # PERFORMANCE LOGGING: Track exactly how long get_available_tags takes
-                    tags_start_time = time.time()
-                    try:
-                        excel_tags = excel_processor.get_available_tags(filters=None)
-                        tags_elapsed = (time.time() - tags_start_time) * 1000
-                        logging.info(f"⏱️ TIMING: get_available_tags() took {tags_elapsed:.1f}ms for {len(excel_tags) if excel_tags else 0} tags")
-                    except Exception as get_tags_err:
-                        tags_elapsed = (time.time() - tags_start_time) * 1000
-                        logging.error(f"Error getting tags from processor (after {tags_elapsed:.1f}ms): {get_tags_err}")
-                        excel_tags = []
-                    finally:
-                        # Always reset enrichment flag
-                        excel_processor._skip_enrichment = False
-                        logging.info("⚡ PERFORMANCE: Reset _skip_enrichment=False")
-
-                    # CRITICAL PERFORMANCE FIX: Skip database enrichment when fast_load=1
-                    # Database queries can take minutes with thousands of products - skip for speed
+                    # ⚡ FAST BATCH LINEAGE ALIGNMENT: Quick DB query for lineage only
+                    # This gives users correct lineage while staying fast (<200ms)
+                    if excel_tags and store_name:
+                        try:
+                            product_db = get_product_database(store_name)
+                            if product_db:
+                                lineage_start = time.time()
+                                product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
+                                
+                                if product_names:
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
+                                    excel_lower_map = {name.lower().strip(): name for name in product_names}
+                                    
+                                    # Batch query in chunks for performance
+                                    chunk_size = 400
+                                    lineage_map = {}
+                                    for chunk_start in range(0, len(product_names), chunk_size):
+                                        chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                        chunk_lower = [name.lower() for name in chunk]
+                                        placeholders = ','.join(['?' for _ in chunk_lower])
+                                        cursor.execute(f'''
+                                            SELECT p."Product Name*",
+                                                   COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
+                                                   p.sovereign_lineage as product_sovereign
+                                            FROM products p
+                                            LEFT JOIN strains s ON p.strain_id = s.id
+                                            WHERE LOWER(p."Product Name*") IN ({placeholders})
+                                        ''', chunk_lower)
+                                        
+                                        for row in cursor.fetchall():
+                                            db_name, effective_lineage, product_sovereign = row
+                                            if effective_lineage:
+                                                clean_lineage = str(effective_lineage).strip().upper()
+                                                clean_sovereign = str(product_sovereign).strip().upper() if product_sovereign and str(product_sovereign).strip().upper() not in ['', 'NONE', 'NULL'] else None
+                                                lineage_map[db_name] = {'lineage': clean_lineage, 'sovereign': clean_sovereign}
+                                                excel_key = db_name.lower().strip()
+                                                if excel_key in excel_lower_map:
+                                                    lineage_map[excel_lower_map[excel_key]] = {'lineage': clean_lineage, 'sovereign': clean_sovereign}
+                                    
+                                    # Apply lineage to tags
+                                    for tag in excel_tags:
+                                        product_name = tag.get('Product Name*')
+                                        if product_name and product_name in lineage_map:
+                                            lineage_data = lineage_map[product_name]
+                                            tag['currentLineage'] = lineage_data['lineage']
+                                            tag['canonical_lineage'] = lineage_data['lineage']
+                                            tag['Lineage'] = lineage_data['lineage']
+                                            tag['Lineage*'] = lineage_data['lineage']
+                                            tag['lineage'] = lineage_data['lineage'].lower()
+                                            if lineage_data['sovereign']:
+                                                tag['sovereign_lineage'] = lineage_data['sovereign']
+                                    
+                                    lineage_elapsed = (time.time() - lineage_start) * 1000
+                                    logging.info(f"⚡ Aligned {len(lineage_map)} tags with DB lineage in {lineage_elapsed:.0f}ms")
+                        except Exception as lineage_err:
+                            logging.warning(f"Fast lineage alignment failed (non-critical): {lineage_err}")
+                    
                     if not fast_load:
-                        # Enrich with database lineage ONLY when not using fast_load
+                        # Only do full enrichment when NOT using fast_load
                         # This ensures UI shows current lineage from database, not stale Excel lineage
                         try:
                             product_db = get_product_database(store_name)
@@ -13526,16 +13572,15 @@ def get_web_available_tags():
         try:
             excel_tags = excel_processor.get_available_tags()
             
-            # PERFORMANCE FIX: Always do database alignment but optimize it for speed
-            # Database lineage is required for accurate display, but we'll optimize the queries
+            # CRITICAL FIX: Use EXACT same lineage priority as docx generation
+            # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage" (Excel)
+            # Only use Excel lineage if product is brand new (not in database)
             store_name = get_current_store_name(allow_fallback=False)
-            should_align_with_db = store_name  # Always align if we have a store
-            
-            if should_align_with_db:
+            if store_name:
                 try:
                     product_db = get_product_database(store_name)
                     if product_db:
-                        logging.info("🔄 WEB: Aligning tags with database lineage (optimized single batch query)")
+                        logging.info("🔄 WEB: Aligning tags with database using docx generation lineage priority")
                         
                         # Collect product names for batch lookup
                         product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
@@ -13544,27 +13589,27 @@ def get_web_available_tags():
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
                             
-                            # PERFORMANCE FIX: Use single batch query instead of chunked queries
-                            # This reduces database round trips from multiple chunks to just one query
-                            # SQLite can handle large IN clauses efficiently
-                            placeholders = ','.join(['?' for _ in product_names])
-                            
-                            # Use EXACT same query as docx generation - but also return individual fields to preserve priority
-                            # Single query for all products - much faster than chunked queries
-                            cursor.execute(f'''
-                                SELECT p."Product Name*", 
-                                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                                       p.sovereign_lineage as product_sovereign,
-                                       s.sovereign_lineage as strain_sovereign,
-                                       s.canonical_lineage as strain_canonical
-                                FROM products p
-                                LEFT JOIN strains s ON p.strain_id = s.id
-                                WHERE p."Product Name*" IN ({placeholders})
-                                ORDER BY p.id DESC
-                            ''', product_names)
-                            
-                            # Process all results at once
-                            for row in cursor.fetchall():
+                            # Use EXACT same query as docx generation (tag_generator.py line 909)
+                            # Match by "Product Name*" exactly like docx generation does
+                            chunk_size = 400
+                            for start in range(0, len(product_names), chunk_size):
+                                chunk = product_names[start:start + chunk_size]
+                                placeholders = ','.join(['?' for _ in chunk])
+                                
+                                # EXACT same query as docx generation - but also return individual fields to preserve priority
+                                cursor.execute(f'''
+                                    SELECT p."Product Name*", 
+                                           COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                                           p.sovereign_lineage as product_sovereign,
+                                           s.sovereign_lineage as strain_sovereign,
+                                           s.canonical_lineage as strain_canonical
+                                    FROM products p
+                                    LEFT JOIN strains s ON p.strain_id = s.id
+                                    WHERE p."Product Name*" IN ({placeholders})
+                                    ORDER BY p.id DESC
+                                ''', chunk)
+                                
+                                for row in cursor.fetchall():
                                     db_name = row[0]
                                     db_lineage = row[1]
                                     product_sovereign = row[2]

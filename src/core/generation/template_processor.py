@@ -2083,7 +2083,7 @@ class TemplateProcessor:
         label_context['Product Type*'] = product_type.title()  # Store as title case for consistency
         
         if product_type in ['pre-roll', 'infused pre-roll']:
-            # For pre-roll products, use JointRatio as WeightUnits
+            # For pre-roll products, use JointRatio as the weight
             joint_ratio = (record.get('JointRatio') or 
                           record.get('Joint Ratio') or 
                           '')
@@ -2097,23 +2097,33 @@ class TemplateProcessor:
                         if joint_ratio_cache and product_name:
                             joint_ratio = joint_ratio_cache.get(product_name)
                             if joint_ratio:
-                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
+                                self.logger.info(f"✅ Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
                             else:
                                 self.logger.debug(f"No JointRatio in cache for '{product_name}'")
                     except Exception as e:
-                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from cache: {e}")
+                        self.logger.warning(f"⚠️ Could not retrieve JointRatio from cache: {e}")
             
-            self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
+            self.logger.info(f"📦 PRE-ROLL: Product '{record.get('ProductName', 'N/A')}', JointRatio: '{joint_ratio}'")
+            
+            # Use JointRatio or default for all weight fields
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                # Format JointRatio with soft hyphen and nonbreaking space, then prefix with newline for prerolls
                 formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
-                label_context['WeightUnits'] = f"\n{formatted_joint_ratio}"
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted JointRatio '{formatted_joint_ratio}' (with newline) for {product_type}")
+                # Set JointRatio for ALL weight-related fields
+                label_context['Weight*'] = formatted_joint_ratio
+                label_context['WeightUnits'] = formatted_joint_ratio
+                label_context['CombinedWeight'] = formatted_joint_ratio
+                label_context['weightWithUnits'] = formatted_joint_ratio
+                label_context['JointRatio'] = formatted_joint_ratio
+                self.logger.info(f"✅ Using JointRatio as weight: '{formatted_joint_ratio}' for {product_type}")
             else:
-                # Format default with soft hyphen and nonbreaking space, then prefix with newline
                 formatted_default = self.format_joint_ratio_pack("0.5g x 2 Pack")
-                label_context['WeightUnits'] = f"\n{formatted_default}"
-                self.logger.debug(f"PRE-ROLL WeightUnits: Using formatted default '{formatted_default}' (with newline) for {product_type}")
+                # Set default for ALL weight-related fields
+                label_context['Weight*'] = formatted_default
+                label_context['WeightUnits'] = formatted_default
+                label_context['CombinedWeight'] = formatted_default
+                label_context['weightWithUnits'] = formatted_default
+                label_context['JointRatio'] = formatted_default
+                self.logger.warning(f"⚠️ Using default JointRatio as weight: '{formatted_default}' for {product_type}")
         else:
             # For non-pre-roll products, construct WeightUnits from available fields
             weight_units = (
