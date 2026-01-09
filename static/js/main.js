@@ -2056,7 +2056,9 @@ const TagManager = {
 
         tags.forEach(tag => {
             if (tag.Vendor) vendors.add(tag.Vendor);
-            if (tag.ProductBrand || tag['Product Brand']) brands.add(tag.ProductBrand || tag['Product Brand']);
+            // CRITICAL FIX: Check all possible brand field names consistently
+            const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
+            if (brand && brand.trim()) brands.add(brand.trim());
             // Product Type - exclude deactivated and sample types
             const pt = tag.ProductType || tag['Product Type*'];
             if (pt && pt.trim()) {
@@ -2378,8 +2380,8 @@ const TagManager = {
                 const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag['Vendor/Supplier'] || '';
                 if (vendor && vendor.trim()) filterOptions.vendor.add(vendor.trim());
                 
-                // Brand
-                const brand = tag['Product Brand'] || tag.ProductBrand || tag.Brand || '';
+                // Brand - CRITICAL FIX: Check all possible brand field names consistently
+                const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
                 if (brand && brand.trim()) filterOptions.brand.add(brand.trim());
                 
                 // Product Type - exclude deactivated and sample types
@@ -2570,8 +2572,9 @@ const TagManager = {
                 }
                 
                 // Check brand filter - only apply if not empty and not "All"
+                // CRITICAL FIX: Check all possible brand field names consistently
                 if (currentFilters.brand && currentFilters.brand.trim() !== '' && currentFilters.brand.toLowerCase() !== 'all') {
-                    const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+                    const tagBrand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toString().trim();
                     if (tagBrand.toLowerCase() !== currentFilters.brand.toLowerCase()) {
                         return false;
                     }
@@ -2691,7 +2694,8 @@ const TagManager = {
                 if (vendor) availableOptions.vendor.add(vendor);
                 
                 // Always add brand options (show all brands)
-                const brand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+                // CRITICAL FIX: Check all possible brand field names consistently
+                const brand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toString().trim();
                 if (brand) availableOptions.brand.add(brand);
                 
                 // Always add product type options (show all types)
@@ -2791,7 +2795,8 @@ const TagManager = {
                 if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) return false;
             }
             if (currentFilters.brand && currentFilters.brand.trim() !== '' && currentFilters.brand.toLowerCase() !== 'all') {
-                const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+                // CRITICAL FIX: Check all possible brand field names consistently
+                const tagBrand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toString().trim();
                 if (tagBrand.toLowerCase() !== currentFilters.brand.toLowerCase()) return false;
             }
             if (currentFilters.productType && currentFilters.productType.trim() !== '' && currentFilters.productType.toLowerCase() !== 'all') {
@@ -3013,8 +3018,23 @@ const TagManager = {
             }
             
             // Check brand filter - only apply if not empty and not "All"
+            // CRITICAL FIX: Check all possible brand field names consistently
             if (brandFilter && brandFilter.trim() !== '' && brandFilter.toLowerCase() !== 'all') {
-                const tagBrand = (tag['Product Brand'] || tag.productBrand || '').toString().trim();
+                const tagBrand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toString().trim();
+                
+                // DEBUG: Log first matching attempt for troubleshooting
+                if (window._brandFilterDebug === undefined) {
+                    console.log('🔍 BRAND FILTER DEBUG:', {
+                        brandFilter: brandFilter,
+                        tagBrand: tagBrand,
+                        tag_Product_Brand: tag['Product Brand'],
+                        tag_ProductBrand: tag.ProductBrand,
+                        tag_productBrand: tag.productBrand,
+                        allTagKeys: Object.keys(tag).filter(k => k.toLowerCase().includes('brand'))
+                    });
+                    window._brandFilterDebug = true;
+                }
+                
                 if (tagBrand.toLowerCase() !== brandFilter.toLowerCase()) {
                     return false;
                 }
@@ -3341,8 +3361,9 @@ const TagManager = {
     },
 
     extractBrand(tag) {
+        // CRITICAL FIX: Check all possible brand field names consistently
         // Try to get brand from Product Brand field first
-        let brand = tag.productBrand || tag.brand || '';
+        let brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
         
         // If no brand found, try to extract from product name
         if (!brand) {
@@ -3510,7 +3531,8 @@ const TagManager = {
                 
                 this._vendorDebugLogged = true;
             }
-            let brand = tag.productBrand || tag['Product Brand'] || tag['ProductBrand'] || this.extractBrand(tag) || '';
+            // CRITICAL FIX: Check all possible brand field names consistently
+            let brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || tag['ProductBrand'] || this.extractBrand(tag) || '';
             const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
             const normalizedProductType = normalizeProductType(rawProductType.trim());
             const normalizedLower = normalizedProductType.toLowerCase();
@@ -6729,7 +6751,7 @@ const TagManager = {
         let displayLineage = lineage; // Start with database lineage (already converted if classic type)
         const nameStr = (tag['Product Name*'] || tag.ProductName || tag.productName || displayName || '').toString().toLowerCase();
         const descStr = (tag.Description || tag.description || '').toString().toLowerCase();
-        const brandStr = (tag['Product Brand'] || tag.productBrand || tag.brand || '').toString().toLowerCase();
+        const brandStr = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.brand || '').toString().toLowerCase();
         const ratioStr = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().toLowerCase();
         const lineageStr = (lineage || '').toString().toLowerCase();
         const lowerProductType = (productTypeCheck || '').toString().toLowerCase();
@@ -10285,8 +10307,8 @@ const TagManager = {
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
-                // PERFORMANCE: Shorter timeout for web clients (faster failure recovery)
-                const safetyTimeoutMs = isWebClient ? 20000 : 60000; // 20s for web, 60s for desktop
+                // PERFORMANCE: Much shorter timeout for faster failure recovery
+                const safetyTimeoutMs = isWebClient ? 8000 : 15000; // 8s for web, 15s for desktop
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
                     // Just hide the splash, don't show error message
@@ -10340,12 +10362,12 @@ const TagManager = {
             });
             
             // Rate limiting: prevent rapid successive calls (unless force reload)
-            // Increased to 1000ms to prevent restarts from multiple rapid calls
+            // Reduced to 200ms for faster consecutive operations
             if (!forceReload) {
                 const now = Date.now();
-                if (this._lastFetchTime && (now - this._lastFetchTime) < 1000) {
+                if (this._lastFetchTime && (now - this._lastFetchTime) < 200) {
                     const timeSinceLastFetch = now - this._lastFetchTime;
-                    console.warn(`⏸️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 1000ms)`);
+                    console.warn(`⏸️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 200ms)`);
                     verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
                     // Hide splash if we're skipping
                     if (this.hideActionSplash) {
@@ -10408,10 +10430,10 @@ const TagManager = {
             let response;
             let responseData;
             
-            // PERFORMANCE: Web clients need faster timeouts and fewer retries
-            const maxRetries = isWebClient ? 2 : 3; // Fewer retries for web
-            const maxProcessingRetries = isWebClient ? 5 : 15; // Much fewer processing retries for web (10 seconds vs 30)
-            const fetchTimeout = isWebClient ? 30000 : 30000; // Temporarily increased to 30s for web to handle slow backend (TODO: optimize backend)
+            // PERFORMANCE: Faster timeouts for quicker response
+            const maxRetries = isWebClient ? 2 : 2; // Reduced retries for faster failure
+            const maxProcessingRetries = isWebClient ? 3 : 5; // Reduced processing retries for speed
+            const fetchTimeout = isWebClient ? 10000 : 15000; // Much faster timeout (10s web, 15s desktop)
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -10461,12 +10483,14 @@ const TagManager = {
                     console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
                     
-                    // PERFORMANCE: Browser will now cache responses for 5 minutes (via HTTP headers)
-                    // This provides faster reloads without needing to modify fetch logic
+                    // PERFORMANCE: Aggressive HTTP caching for instant reloads
                     response = await fetch(optimizedFetchUrl, {
                         signal: controller.signal,
-                        // Add cache mode to leverage HTTP cache headers
-                        cache: useCache ? 'default' : 'no-cache'
+                        // Always use cache first for fastest loads (force-cache falls back to network)
+                        cache: 'force-cache',
+                        headers: {
+                            'Cache-Control': 'max-age=300' // 5 minute cache
+                        }
                     });
                     clearTimeout(timeoutId);
                     
@@ -10499,12 +10523,8 @@ const TagManager = {
                             throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
                         }
                         
-// PERFORMANCE: For web clients, add progressive delay between retries to avoid overwhelming server
-            // For desktop, retry immediately
-            if (isWebClient && processingRetryCount > 0) {
-                const delay = Math.min(500 * processingRetryCount, 3000); // Progressive delay up to 3s
-                await new Promise(resolve => setTimeout(resolve, delay));
-                        }
+                        // PERFORMANCE: Skip progressive delay - retry immediately for speed
+                        // Removed delay to speed up tag loading
                         
                         verboseLog(`⏳ File still processing (202), retrying... (${processingRetryCount}/${maxProcessingRetries})`);
                         continue; // Retry without incrementing error retry count
