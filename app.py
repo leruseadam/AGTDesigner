@@ -14178,6 +14178,7 @@ def get_filter_options():
                         'productType': [],
                         'lineage': [],
                         'weight': [],
+                        'price': [],
                         'strain': [],
                         'doh': [],
                         'highCbd': [],
