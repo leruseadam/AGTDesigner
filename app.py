@@ -10579,9 +10579,10 @@ def get_available_tags():
                                         chunk = product_names[chunk_start:chunk_start + chunk_size]
                                         chunk_lower = [name.lower() for name in chunk]
                                         placeholders = ','.join(['?' for _ in chunk_lower])
+                                        # Match DOCX query: prioritize products.Lineage, fallback to strain canonical/sovereign
                                         cursor.execute(f'''
                                             SELECT p."Product Name*",
-                                                   COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
+                                                   COALESCE(p."Lineage", s.canonical_lineage, s.sovereign_lineage) as effective_lineage,
                                                    p.sovereign_lineage as product_sovereign
                                             FROM products p
                                             LEFT JOIN strains s ON p.strain_id = s.id
