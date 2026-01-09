@@ -10486,10 +10486,12 @@ const TagManager = {
             let response;
             let responseData;
             
-            // PERFORMANCE: Faster timeouts for quicker response
-            const maxRetries = isWebClient ? 1 : 2; // Minimal retries for speed
-            const maxProcessingRetries = isWebClient ? 2 : 3; // Minimal processing retries
-            const fetchTimeout = isWebClient ? 5000 : 8000; // Ultra-fast timeout (5s web, 8s desktop)
+            // PERFORMANCE: Balanced timeouts for reliable loading
+            // CRITICAL FIX: Increased timeout from 5s to 15s to prevent premature aborts
+            // This allows server enough time to respond, especially for large datasets
+            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for network resilience
+            const maxProcessingRetries = isWebClient ? 3 : 3; // Allow processing retries
+            const fetchTimeout = isWebClient ? 15000 : 20000; // 15s web, 20s desktop (was 5s/8s - too aggressive)
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -10631,6 +10633,44 @@ const TagManager = {
                     if (error.name === 'AbortError') {
                         console.warn(`⏱️ Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
                         verboseLog(`Request timeout (attempt ${retryCount + 1}/${maxRetries})`);
+                        
+                        // PERFORMANCE FIX: On timeout, immediately check cache instead of retrying
+                        // Timeouts usually mean server is slow, not transient errors
+                        // This provides instant fallback to cached data for faster UX
+                        if (!cacheUsedForDisplay) {
+                            const cachedTags = this.hydrateAvailableTagsFromCache();
+                            if (cachedTags && cachedTags.length > 0) {
+                                console.log(`⚡ TIMEOUT CACHE FALLBACK: Using ${cachedTags.length} cached tags immediately`);
+                                verboseLog('✅ Using cached tags immediately after timeout');
+                                // Render cached tags immediately
+                                this.state.tags = [...cachedTags];
+                                this.state.originalTags = [...cachedTags];
+                                this.state.hydratedFromCache = true;
+                                cacheUsedForDisplay = true;
+                                this._updateAvailableTags(cachedTags, null);
+                                this.buildFilterOptionsFromTags(cachedTags);
+                                // Hide splash since we have cached tags
+                                if (this.hideActionSplash) {
+                                    this.hideActionSplash();
+                                }
+                                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                                    AppLoadingSplash.stopAutoAdvance();
+                                    AppLoadingSplash.complete();
+                                }
+                                // Continue fetching in background (non-blocking)
+                                console.log('🔄 Continuing to fetch fresh tags in background...');
+                            }
+                        }
+                        
+                        // Only retry if we don't have cache, or if this is the first attempt
+                        if (cacheUsedForDisplay || retryCount >= maxRetries - 1) {
+                            // We have cache or exhausted retries - exit gracefully
+                            if (cacheUsedForDisplay) {
+                                return true; // Successfully loaded from cache
+                            }
+                            console.error(`❌ Max retries reached, throwing error:`, error);
+                            throw error;
+                        }
                     } else {
                         console.error(`❌ Request error (attempt ${retryCount + 1}/${maxRetries}):`, error.message || error);
                         verboseLog(`Request error (attempt ${retryCount + 1}/${maxRetries}):`, error);

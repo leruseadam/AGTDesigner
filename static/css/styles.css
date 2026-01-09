@@ -8188,6 +8188,15 @@ body.modal-open #mainContent.store-selection-disabled,
   width: 100% !important;
   min-width: 0 !important;
   max-width: 100% !important;
+  /* Force left alignment for selected text */
+  text-align: left !important;
+  text-align-last: left !important;
+  -webkit-text-align-last: left !important;
+  -moz-text-align-last: left !important;
+}
+.filter-row .filter-select option {
+  /* Force left alignment for dropdown options */
+  text-align: left !important;
 }
 @media (max-width: 1400px) {
   .filter-row .filter-group {

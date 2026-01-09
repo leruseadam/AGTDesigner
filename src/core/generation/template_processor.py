@@ -1000,6 +1000,25 @@ class TemplateProcessor:
                                     new_text
                                 )
                         
+                        # CRITICAL FIX: Add QR placeholder after DOH
+                        if '{{Label1.QR}}' not in cell_text and 'QR' not in cell_text:
+                            text_elements = list(tc.iter(qn('w:t')))
+                            doh_end_index = -1
+                            for i, t in enumerate(text_elements):
+                                if t.text and 'DOH' in t.text:
+                                    for j in range(i, len(text_elements)):
+                                        if text_elements[j].text and '}}' in text_elements[j].text:
+                                            doh_end_index = j
+                                            break
+                            if doh_end_index >= 0:
+                                new_text = OxmlElement('w:t')
+                                new_text.text = f'\n{{{{Label{cnt}.QR}}}}'
+                                doh_end_element = text_elements[doh_end_index]
+                                doh_end_element.getparent().insert(
+                                    doh_end_element.getparent().index(doh_end_element) + 1,
+                                    new_text
+                                )
+                        
                         # CRITICAL FIX: Add DescAndWeight after QR for product description + weight
                         if '{{Label1.DescAndWeight}}' not in cell_text and 'DescAndWeight' not in cell_text:
                             text_elements = list(tc.iter(qn('w:t')))

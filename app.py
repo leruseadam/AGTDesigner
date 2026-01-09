@@ -13791,6 +13791,34 @@ def get_web_filter_options():
         # Use optimized method for web clients
         options = excel_processor.get_dynamic_filter_options(current_filters)
         
+        # CRITICAL FIX: Enrich lineage options from database to match enriched tags
+        # The DataFrame's "Lineage" column may be stale, but tags are enriched with database lineage
+        try:
+            store_name = get_current_store_name(allow_fallback=False)
+            if store_name and options.get('lineage'):
+                # Get enriched tags to extract correct lineage values
+                enriched_tags = excel_processor.get_available_tags(current_filters)
+                if enriched_tags:
+                    # Align tags with database lineage
+                    enriched_tags = _align_tags_with_db_lineage(enriched_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                    # Extract unique lineage values from enriched tags
+                    enriched_lineages = set()
+                    for tag in enriched_tags:
+                        lineage = (tag.get('sovereign_lineage') or tag.get('canonical_lineage') or 
+                                  tag.get('currentLineage') or tag.get('Lineage') or '')
+                        if isinstance(lineage, str):
+                            lineage = lineage.strip().upper()
+                        else:
+                            lineage = str(lineage).strip().upper() if lineage else ''
+                        if lineage and lineage not in ['', 'NONE', 'NULL', 'NAN']:
+                            enriched_lineages.add(lineage)
+                    if enriched_lineages:
+                        # Replace DataFrame lineage with enriched lineage
+                        options['lineage'] = sorted(list(enriched_lineages))
+                        logging.info(f"✅ Enriched lineage filter options: {len(options['lineage'])} lineages from database")
+        except Exception as enrich_err:
+            logging.warning(f"Could not enrich lineage filter options: {enrich_err}")
+        
         import math
         def clean_list(lst):
             return ['' if (v is None or (isinstance(v, float) and math.isnan(v))) else v for v in lst]
@@ -14247,6 +14275,34 @@ def get_filter_options():
                 'highCbd': [],
                 'error': f'Error generating filter options: {str(filter_error)}'
             }), 200
+        
+        # CRITICAL FIX: Enrich lineage options from database to match enriched tags
+        # The DataFrame's "Lineage" column may be stale, but tags are enriched with database lineage
+        try:
+            store_name = get_current_store_name(allow_fallback=False)
+            if store_name and options.get('lineage'):
+                # Get enriched tags to extract correct lineage values
+                enriched_tags = excel_processor.get_available_tags(current_filters)
+                if enriched_tags:
+                    # Align tags with database lineage
+                    enriched_tags = _align_tags_with_db_lineage(enriched_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                    # Extract unique lineage values from enriched tags
+                    enriched_lineages = set()
+                    for tag in enriched_tags:
+                        lineage = (tag.get('sovereign_lineage') or tag.get('canonical_lineage') or 
+                                  tag.get('currentLineage') or tag.get('Lineage') or '')
+                        if isinstance(lineage, str):
+                            lineage = lineage.strip().upper()
+                        else:
+                            lineage = str(lineage).strip().upper() if lineage else ''
+                        if lineage and lineage not in ['', 'NONE', 'NULL', 'NAN']:
+                            enriched_lineages.add(lineage)
+                    if enriched_lineages:
+                        # Replace DataFrame lineage with enriched lineage
+                        options['lineage'] = sorted(list(enriched_lineages))
+                        logging.info(f"✅ Enriched lineage filter options: {len(options['lineage'])} lineages from database")
+        except Exception as enrich_err:
+            logging.warning(f"Could not enrich lineage filter options: {enrich_err}")
             
         import math
         def clean_list(lst):
