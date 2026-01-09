@@ -5836,6 +5836,12 @@
                       </select>
                     </div>
                     <div class="filter-group">
+                      <label for="priceFilter" class="filter-label">PRICE</label>
+                      <select id="priceFilter" class="form-select filter-select" aria-label="Filter by price" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; text-align: left !important; text-align-last: left !important;">
+                        <!-- Options populated dynamically by JavaScript -->
+                      </select>
+                    </div>
+                    <div class="filter-group">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
                       <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
@@ -8073,6 +8079,7 @@
           'productTypeFilter',
           'lineageFilter',
           'weightFilter',
+          'priceFilter',
           'dohFilter',
           'highCbdFilter'
           // Note: vendorFilter is handled separately because it's in a different context

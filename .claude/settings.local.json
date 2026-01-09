@@ -41,7 +41,9 @@
       "Bash(!hasCache\" to \"!hasExistingTags\"\n\nResult:\n- Refresh now always loads ALL available tags from server ✅\n- No more showing only previously selected tags ✅\n- Tag list accurately reflects current Excel file ✅\n- Cache is skipped entirely to prevent stale data ✅\n\nThis completes the cache removal started in previous commits, ensuring\nfresh data is always fetched from the server on every page load.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(for db in uploads/product_database*.db)",
       "Bash(do echo \"Adding index to $db...\")",
-      "Bash(python app.py:*)"
+      "Bash(python app.py:*)",
+      "Bash(cd /Users/adamcordova/Desktop/labelMaker_\\\\ QR\\\\ copy\\\\ final:*)",
+      "Bash(git log --all --oneline --grep=\"price\" -i)"
     ],
     "deny": [],
     "ask": []

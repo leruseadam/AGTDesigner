@@ -1006,8 +1006,9 @@ const AppLoadingSplash = {
 const TagManager = {
     CACHE_TTL_MS: 60 * 60 * 1000, // 60 minutes - increased for better persistence across page refreshes
     // CRITICAL FIX: Lower threshold for Windows (PC is slower, so use simplified rendering sooner)
+    // PERFORMANCE FIX: Even more aggressive threshold for Windows to ensure fast loading
     get SIMPLIFIED_RENDER_THRESHOLD() {
-        return isWindows ? 500 : 900; // Lower threshold on Windows for faster loading
+        return isWindows ? 300 : 900; // Much lower threshold on Windows (300 vs 500) for faster loading
     },
     state: {
         selectedTags: new Set(),
@@ -2187,6 +2188,7 @@ const TagManager = {
             productType: 'productTypeFilter', // Backend now returns 'productType'
             lineage: 'lineageFilter',
             weight: 'weightFilter',
+            price: 'priceFilter',
             doh: 'dohFilter',
             highCbd: 'highCbdFilter'
             // Removed strain since there's no strainFilter dropdown in the HTML
@@ -2203,12 +2205,23 @@ const TagManager = {
             
             // Get values for this filter type
             const fieldValues = filters[filterType] || [];
+            
+            // DEBUG: Log brand filter specifically
+            if (filterType === 'brand') {
+                console.log(`🔍 Updating brand filter with ${fieldValues.length} values:`, fieldValues.slice(0, 10));
+            }
+            
             const values = new Set();
             fieldValues.forEach(value => {
                 if (value && value.trim() !== '') {
                     values.add(value.trim());
                 }
             });
+            
+            // DEBUG: Log if brand filter ends up empty
+            if (filterType === 'brand' && values.size === 0) {
+                console.warn('⚠️ Brand filter has no values after processing! Field values:', fieldValues);
+            }
             
             // Sort values alphabetically for consistent ordering
             const sortedValues = Array.from(values).sort((a, b) => {
@@ -2344,6 +2357,7 @@ const TagManager = {
                 productType: document.getElementById('productTypeFilter')?.value || '',
                 lineage: document.getElementById('lineageFilter')?.value || '',
                 weight: document.getElementById('weightFilter')?.value || '',
+                price: document.getElementById('priceFilter')?.value || '',
                 doh: document.getElementById('dohFilter')?.value || '',
                 highCbd: document.getElementById('highCbdFilter')?.value || ''
             };
@@ -2406,6 +2420,7 @@ const TagManager = {
                 productType: new Set(),
                 lineage: new Set(),
                 weight: new Set(),
+                price: new Set(),
                 doh: new Set(),
                 highCbd: new Set()
             };
@@ -2425,8 +2440,24 @@ const TagManager = {
                 if (vendor && vendor.trim()) filterOptions.vendor.add(vendor.trim());
                 
                 // Brand - CRITICAL FIX: Check all possible brand field names consistently
-                const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
-                if (brand && brand.trim()) filterOptions.brand.add(brand.trim());
+                const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || tag['brand'] || '';
+                
+                // DEBUG: Log first few brands to diagnose empty filter issue
+                if (filterOptions.brand.size < 5 && brand && brand.trim()) {
+                    console.log(`🔍 Found brand "${brand}" in tag:`, {
+                        'Product Brand': tag['Product Brand'],
+                        'ProductBrand': tag.ProductBrand,
+                        'productBrand': tag.productBrand,
+                        'Brand': tag.Brand,
+                        'brand': tag.brand,
+                        'brand (lowercase)': tag['brand'],
+                        allKeys: Object.keys(tag).filter(k => k.toLowerCase().includes('brand'))
+                    });
+                }
+                
+                if (brand && brand.trim() && brand.trim().toLowerCase() !== 'unknown' && brand.trim().toLowerCase() !== 'n/a') {
+                    filterOptions.brand.add(brand.trim());
+                }
                 
                 // Product Type - exclude deactivated and sample types
                 const productType = tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '';
@@ -2451,6 +2482,28 @@ const TagManager = {
                 // Weight
                 const weight = tag['Weight*'] || tag.Weight || tag.weight || '';
                 if (weight && weight.toString().trim()) filterOptions.weight.add(weight.toString().trim());
+                
+                // Price - extract and format price for filtering
+                const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag.price || tag['Product Price'] || tag['ProductPrice'] || tag['Unit Price'] || tag['UnitPrice'] || tag['Retail Price'] || tag['RetailPrice'] || '';
+                if (rawPrice) {
+                    const priceStr = rawPrice.toString().trim();
+                    if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none') {
+                        // Try to extract numeric price value (handles $10, 10.00, $10.50, etc.)
+                        const priceMatch = priceStr.match(/[\d.]+/);
+                        if (priceMatch) {
+                            const priceNum = parseFloat(priceMatch[0]);
+                            if (!isNaN(priceNum) && priceNum >= 0) {
+                                // Format price: omit .00 for whole numbers, show 2 decimals for non-whole numbers
+                                const formattedPrice = priceNum % 1 === 0 ? `$${Math.round(priceNum)}` : `$${priceNum.toFixed(2)}`;
+                                filterOptions.price.add(formattedPrice);
+                            }
+                        }
+                    }
+                }
+                // Also add "No Price" option if price is missing
+                if (!rawPrice || rawPrice.toString().trim() === '' || rawPrice.toString().trim().toLowerCase() === 'none' || rawPrice.toString().trim() === 'nan') {
+                    filterOptions.price.add('No Price');
+                }
                 
                 // DOH
                 const doh = tag.DOH || tag['DOH Compliant (Yes/No)'] || '';
@@ -2481,6 +2534,47 @@ const TagManager = {
                        !ptLower.includes('trade sample') && 
                        !excludedTypesLower.includes(ptLower);
             });
+            
+            // Special sorting for price: "No Price" first, then by numeric value
+            if (filterOptionsArrays.price && filterOptionsArrays.price.length > 0) {
+                filterOptionsArrays.price.sort((a, b) => {
+                    if (a === 'No Price') return -1;
+                    if (b === 'No Price') return 1;
+                    // Extract numeric value from price strings (e.g., "$10" -> 10, "$15.50" -> 15.50)
+                    const priceA = parseFloat(a.replace(/[^0-9.]/g, '')) || 0;
+                    const priceB = parseFloat(b.replace(/[^0-9.]/g, '')) || 0;
+                    return priceA - priceB;
+                });
+            }
+            
+            console.log('⚡⚡⚡ Built filter options:', {
+                vendor: filterOptionsArrays.vendor.length,
+                brand: filterOptionsArrays.brand.length,
+                productType: filterOptionsArrays.productType.length,
+                lineage: filterOptionsArrays.lineage.length,
+                weight: filterOptionsArrays.weight.length,
+                price: filterOptionsArrays.price?.length || 0,
+                doh: filterOptionsArrays.doh.length,
+                highCbd: filterOptionsArrays.highCbd.length
+            });
+            
+            // DEBUG: Log first few brands to verify they're being extracted
+            if (filterOptionsArrays.brand.length > 0) {
+                console.log('🔍 First 10 brands found:', filterOptionsArrays.brand.slice(0, 10));
+            } else {
+                console.warn('⚠️ No brands found in tags! Checking sample tag structure...');
+                if (tags.length > 0) {
+                    const sampleTag = tags[0];
+                    console.log('Sample tag keys:', Object.keys(sampleTag));
+                    console.log('Sample tag brand fields:', {
+                        'Product Brand': sampleTag['Product Brand'],
+                        'ProductBrand': sampleTag.ProductBrand,
+                        'productBrand': sampleTag.productBrand,
+                        'Brand': sampleTag.Brand,
+                        'brand': sampleTag.brand
+                    });
+                }
+            }
             
             verboseLog('⚡⚡⚡ Built filter options:', {
                 vendor: filterOptionsArrays.vendor.length,
@@ -2963,13 +3057,14 @@ const TagManager = {
         const productTypeFilter = document.getElementById('productTypeFilter')?.value || '';
         const lineageFilter = document.getElementById('lineageFilter')?.value || '';
         const weightFilter = document.getElementById('weightFilter')?.value || '';
+        const priceFilter = document.getElementById('priceFilter')?.value || '';
         const dohFilter = document.getElementById('dohFilter')?.value || '';
         const highCbdFilter = document.getElementById('highCbdFilter')?.value || '';
         
-        verboseLog('🔍 Current filter values:', { vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter });
+        verboseLog('🔍 Current filter values:', { vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter });
         
         // Check if all filters are "All" - show everything (fast path)
-        const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, dohFilter, highCbdFilter]
+        const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter]
             .every(filter => !filter || filter.trim() === '' || filter.toLowerCase() === 'all');
         
         verboseLog('🔍 All filters empty?', allFiltersAll);
@@ -3007,6 +3102,7 @@ const TagManager = {
             productTypeFilter || '',
             lineageFilter || '',
             weightFilter || '',
+            priceFilter || '',
             dohFilter || '',
             highCbdFilter || ''
         ].join('|');
@@ -3144,6 +3240,35 @@ const TagManager = {
                 ].some(weight => weight === filterWeight);
                 
                 if (!weightMatches) {
+                    return false;
+                }
+            }
+            
+            // Check price filter - only apply if not empty and not "All"
+            if (priceFilter && priceFilter.trim() !== '' && priceFilter.toLowerCase() !== 'all') {
+                // Extract price from tag
+                const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag.price || 
+                                tag['Product Price'] || tag['ProductPrice'] || tag['Unit Price'] || tag['UnitPrice'] || 
+                                tag['Retail Price'] || tag['RetailPrice'] || '';
+                
+                let tagPriceFormatted = 'No Price';
+                if (rawPrice) {
+                    const priceStr = rawPrice.toString().trim();
+                    if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none') {
+                        // Try to extract numeric price value (handles $10, 10.00, $10.50, etc.)
+                        const priceMatch = priceStr.match(/[\d.]+/);
+                        if (priceMatch) {
+                            const priceNum = parseFloat(priceMatch[0]);
+                            if (!isNaN(priceNum) && priceNum >= 0) {
+                                // Format price: omit .00 for whole numbers, show 2 decimals for non-whole numbers
+                                tagPriceFormatted = priceNum % 1 === 0 ? `$${Math.round(priceNum)}` : `$${priceNum.toFixed(2)}`;
+                            }
+                        }
+                    }
+                }
+                
+                // Compare formatted price with filter
+                if (tagPriceFormatted !== priceFilter) {
                     return false;
                 }
             }
@@ -3296,6 +3421,7 @@ const TagManager = {
             }
             
             const searchTerm = searchInput.value.toLowerCase().trim();
+            console.log(`🔍 Search triggered for ${listId}: "${searchTerm}"`);
             verboseLog(`🔍 Search triggered for ${listId}: "${searchTerm}"`);
 
             // Choose which tags to filter
@@ -3305,14 +3431,40 @@ const TagManager = {
                 const filtered = (this.state.activeFilteredTags && this.state.activeFilteredTags.length > 0)
                     ? this.state.activeFilteredTags
                     : (this.state.filterCache && this.state.filterCache.result ? this.state.filterCache.result : null);
-                tags = filtered || this.state.originalTags || [];
+                tags = filtered || this.state.originalTags || this.state.tags || [];
+                
+                // CRITICAL FIX: If no tags found, try to get them from DOM as fallback
+                if (tags.length === 0) {
+                    const availableTagsContainer = document.getElementById('availableTags');
+                    if (availableTagsContainer) {
+                        const tagElements = availableTagsContainer.querySelectorAll('.tag-item, .tag-entry');
+                        if (tagElements.length > 0) {
+                            console.warn('⚠️ No tags in state, but found tags in DOM. Search may be limited.');
+                        }
+                    }
+                }
             } else if (listId === 'selectedTags') {
-                tags = Array.from(this.state.selectedTags).map(name =>
-                    (this.state.originalTags && Array.isArray(this.state.originalTags))
-                        ? this.state.originalTags.find(t => t['Product Name*'] === name)
-                        : null
-                ).filter(Boolean);
+                // PERFORMANCE FIX: Use tag lookup map for O(1) lookups instead of O(n) array.find()
+                const selectedTagNames = Array.from(this.state.selectedTags || []);
+                tags = selectedTagNames.map(name => {
+                    // Try Map lookup first (fastest - O(1))
+                    let tag = this._tagLookupMap?.get(name);
+                    
+                    // If not in Map, fallback to originalTags
+                    if (!tag && this.state.originalTags && Array.isArray(this.state.originalTags)) {
+                        tag = this.state.originalTags.find(t => t['Product Name*'] === name);
+                    }
+                    
+                    // Last resort: current tags (filtered view)
+                    if (!tag && this.state.tags && Array.isArray(this.state.tags)) {
+                        tag = this.state.tags.find(t => t['Product Name*'] === name);
+                    }
+                    
+                    return tag;
+                }).filter(Boolean);
             }
+            
+            console.log(`🔍 Found ${tags.length} tags to search through for ${listId}`);
 
             if (!searchTerm) {
                 // Restore full list
@@ -3330,10 +3482,21 @@ const TagManager = {
                 return true;
             }
 
-            // Filter tags: only match product name
+            // PERFORMANCE FIX: Use more efficient filtering and search multiple fields
+            // Search product name, brand, vendor, and product type for better results
             const filteredTags = tags.filter(tag => {
-                const tagName = tag['Product Name*'] || '';
-                return tagName.toLowerCase().includes(searchTerm);
+                const tagName = (tag['Product Name*'] || '').toLowerCase();
+                const brand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toLowerCase();
+                const vendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag['Vendor/Supplier'] || '').toLowerCase();
+                const productType = (tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '').toLowerCase();
+                const strain = (tag['Product Strain'] || tag.ProductStrain || tag.strain || '').toLowerCase();
+                
+                // Search across multiple fields for better matching
+                return tagName.includes(searchTerm) ||
+                       brand.includes(searchTerm) ||
+                       vendor.includes(searchTerm) ||
+                       productType.includes(searchTerm) ||
+                       strain.includes(searchTerm);
             });
 
             verboseLog(`🔍 Found ${filteredTags.length} matching tags out of ${tags.length} total`);
@@ -3341,21 +3504,24 @@ const TagManager = {
             // Update the list with only matching tags
             if (listId === 'availableTags') {
                 this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
-                // Scroll to top of available tags list after search
-                requestAnimationFrame(() => {
+                // PERFORMANCE FIX: Use setTimeout(0) on Windows for faster scrolling
+                const nextFrame = isWindows ? (fn) => setTimeout(fn, 0) : requestAnimationFrame;
+                nextFrame(() => {
                     const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
                         availableTagsContainer.scrollTop = 0;
                     }
                 });
-                // Ensure groups are expanded while searching
+                // Ensure groups are expanded while searching (faster timeout on Windows)
+                const expandDelay = isWindows ? 50 : 120;
                 setTimeout(() => {
                     this.expandAllTagGroups();
-                }, 120);
+                }, expandDelay);
             } else if (listId === 'selectedTags') {
                 this.updateSelectedTags(filteredTags);
-                // Scroll to top of selected tags list after search
-                requestAnimationFrame(() => {
+                // PERFORMANCE FIX: Use setTimeout(0) on Windows for faster scrolling
+                const nextFrame = isWindows ? (fn) => setTimeout(fn, 0) : requestAnimationFrame;
+                nextFrame(() => {
                     const selectedTagsContainer = document.getElementById('selectedTags');
                     if (selectedTagsContainer) {
                         selectedTagsContainer.scrollTop = 0;
@@ -3380,21 +3546,47 @@ const TagManager = {
                 return;
             }
 
+            // PERFORMANCE FIX: Batch DOM operations for better performance on Windows
             // Find all collapsed content elements (vendor-content, brand-content, product-type-content, weight-content, price-content)
             const collapsedElements = availableTagsContainer.querySelectorAll('.vendor-content.collapsed, .brand-content.collapsed, .product-type-content.collapsed, .weight-content.collapsed, .price-content.collapsed');
             
-            // Expand all collapsed groups
-            collapsedElements.forEach(element => {
-                element.classList.remove('collapsed');
-            });
+            // PERFORMANCE FIX: Use batch DOM manipulation for Windows
+            if (isWindows && collapsedElements.length > 50) {
+                // For large numbers of elements on Windows, batch the operations
+                const batchSize = 100;
+                let index = 0;
+                const processBatch = () => {
+                    const end = Math.min(index + batchSize, collapsedElements.length);
+                    for (let i = index; i < end; i++) {
+                        collapsedElements[i].classList.remove('collapsed');
+                    }
+                    index = end;
+                    if (index < collapsedElements.length) {
+                        setTimeout(processBatch, 0);
+                    } else {
+                        // Update collapse icons after all groups are expanded
+                        const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
+                        collapseIcons.forEach(icon => {
+                            icon.textContent = '▼';
+                        });
+                        verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
+                    }
+                };
+                processBatch();
+            } else {
+                // For smaller numbers or Mac, do it synchronously
+                collapsedElements.forEach(element => {
+                    element.classList.remove('collapsed');
+                });
 
-            // Update all collapse icons to show expanded state (▼)
-            const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
-            collapseIcons.forEach(icon => {
-                icon.textContent = '▼';
-            });
+                // Update all collapse icons to show expanded state (▼)
+                const collapseIcons = availableTagsContainer.querySelectorAll('.collapse-icon');
+                collapseIcons.forEach(icon => {
+                    icon.textContent = '▼';
+                });
 
-            verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
+                verboseLog(`✅ Expanded all tag groups (${collapsedElements.length} groups expanded)`);
+            }
         } catch (error) {
             console.error('❌ Error expanding tag groups:', error);
         }
@@ -5445,8 +5637,8 @@ const TagManager = {
             verboseLog('About to organize tags, tags length:', tags.length);
             
             // CRITICAL FIX: For large datasets, organize asynchronously to prevent UI freeze
-            // CRITICAL FIX: Lower threshold for Windows (PC is slower, so use simplified rendering sooner)
-            const LARGE_DATASET_THRESHOLD = isWindows ? 300 : 500; // Lower threshold on Windows
+            // PERFORMANCE FIX: Much lower threshold for Windows to trigger async organization sooner
+            const LARGE_DATASET_THRESHOLD = isWindows ? 200 : 500; // Much lower threshold on Windows (200 vs 300)
             if (tags.length > LARGE_DATASET_THRESHOLD) {
                 verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
 
@@ -6235,7 +6427,8 @@ const TagManager = {
         }
 
         // CRITICAL FIX: Larger chunk sizes for Windows (fewer DOM operations = faster)
-        const chunkSize = isWindows ? 400 : 200; // 2x larger chunks on Windows
+        // PERFORMANCE FIX: Even larger chunks for Windows to minimize DOM operations
+        const chunkSize = isWindows ? 600 : 200; // 3x larger chunks on Windows (was 400, now 600)
         let index = 0;
 
         availableTagsContainer.innerHTML = '';
@@ -7544,8 +7737,9 @@ const TagManager = {
         if (!tags || tags.length === 0) return;
         
         // CRITICAL FIX: Larger batch sizes for Windows (fewer DOM operations = faster)
+        // PERFORMANCE FIX: Even larger batches for Windows to reduce DOM operations significantly
         // Windows benefits from larger batches due to different DOM performance characteristics
-        const BATCH_SIZE = isWindows ? 250 : 100; // 2.5x larger batches on Windows
+        const BATCH_SIZE = isWindows ? 500 : 100; // 5x larger batches on Windows (was 250, now 500)
         let index = 0;
         
         const renderBatch = () => {
@@ -12217,13 +12411,14 @@ const TagManager = {
         }
         
         // Set each filter dropdown to saved value or 'All' (or '')
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
         const filterMap = {
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
             'lineageFilter': 'lineage',
             'weightFilter': 'weight',
+            'priceFilter': 'price',
             'dohFilter': 'doh',
             'highCbdFilter': 'highCbd'
         };
@@ -12367,13 +12562,14 @@ const TagManager = {
         }
         
         // Set each filter dropdown to saved value or 'All' (or '')
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
         const filterMap = {
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
             'lineageFilter': 'lineage',
             'weightFilter': 'weight',
+            'priceFilter': 'price',
             'dohFilter': 'doh',
             'highCbdFilter': 'highCbd'
         };
@@ -14365,7 +14561,7 @@ const TagManager = {
             this.resetSearchInputs();
             
             // INSTANTANEOUS: Clear all filter dropdowns
-            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
                 if (filterElement) {
@@ -16190,7 +16386,7 @@ const TagManager = {
     },
 
     setupFilterEventListeners() {
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
         
         verboseLog('Setting up Mac-like fast filter event listeners...');
         
@@ -16225,6 +16421,7 @@ const TagManager = {
                 'productType': 'productType',
                 'lineage': 'lineage',
                 'weight': 'weight',
+                'price': 'price',
                 'doh': 'doh',
                 'highCbd': 'highCbd'
             };
@@ -16400,25 +16597,38 @@ const TagManager = {
         
         // CRITICAL FIX: Create debounced functions as instance properties so we can properly remove them
         // Only create them once, reuse if they already exist
+        // FIX: Read search value directly from input instead of relying on event object
         if (!this._debouncedAvailableSearch) {
-            this._debouncedAvailableSearch = (event) => {
+            this._debouncedAvailableSearch = () => {
                 if (this._searchDebounceTimers.available) {
                     clearTimeout(this._searchDebounceTimers.available);
                 }
+                // PERFORMANCE FIX: Faster debounce on Windows for more responsive search
+                const debounceDelay = isWindows ? 150 : 300; // 150ms on Windows, 300ms on Mac
                 this._searchDebounceTimers.available = setTimeout(() => {
-                    this.handleAvailableTagsSearch(event);
-                }, 300); // 300ms debounce delay
+                    // Read value directly from input element to ensure we get current value
+                    const searchInput = document.getElementById('availableTagsSearch');
+                    if (searchInput) {
+                        this.handleSearch('availableTags', 'availableTagsSearch');
+                    }
+                }, debounceDelay);
             };
         }
         
         if (!this._debouncedSelectedSearch) {
-            this._debouncedSelectedSearch = (event) => {
+            this._debouncedSelectedSearch = () => {
                 if (this._searchDebounceTimers.selected) {
                     clearTimeout(this._searchDebounceTimers.selected);
                 }
+                // PERFORMANCE FIX: Faster debounce on Windows for more responsive search
+                const debounceDelay = isWindows ? 150 : 300; // 150ms on Windows, 300ms on Mac
                 this._searchDebounceTimers.selected = setTimeout(() => {
-                    this.handleSelectedTagsSearch(event);
-                }, 300); // 300ms debounce delay
+                    // Read value directly from input element to ensure we get current value
+                    const searchInput = document.getElementById('selectedTagsSearch');
+                    if (searchInput) {
+                        this.handleSearch('selectedTags', 'selectedTagsSearch');
+                    }
+                }, debounceDelay);
             };
         }
         
@@ -16439,7 +16649,10 @@ const TagManager = {
             // Store bound function and add new listener
             this._boundAvailableSearch = this._debouncedAvailableSearch;
             availableTagsSearch.addEventListener('input', this._debouncedAvailableSearch);
+            // CRITICAL FIX: Also add keyup listener as fallback to ensure search works
+            availableTagsSearch.addEventListener('keyup', this._debouncedAvailableSearch);
             foundCount++;
+            console.log('✅ Added search event listeners to availableTagsSearch');
             verboseLog('✅ Added debounced event listener to availableTagsSearch');
         } else {
             console.warn('⚠️ Available tags search element not found');
@@ -16460,7 +16673,10 @@ const TagManager = {
             // Store bound function and add new listener
             this._boundSelectedSearch = this._debouncedSelectedSearch;
             selectedTagsSearch.addEventListener('input', this._debouncedSelectedSearch);
+            // CRITICAL FIX: Also add keyup listener as fallback to ensure search works
+            selectedTagsSearch.addEventListener('keyup', this._debouncedSelectedSearch);
             foundCount++;
+            console.log('✅ Added search event listeners to selectedTagsSearch');
             verboseLog('✅ Added debounced event listener to selectedTagsSearch');
         } else {
             console.warn('⚠️ Selected tags search element not found');

@@ -13763,6 +13763,7 @@ def get_web_filter_options():
                             'productType': [],
                             'lineage': [],
                             'weight': [],
+                            'price': [],
                             'strain': [],
                             'doh': [],
                             'highCbd': []

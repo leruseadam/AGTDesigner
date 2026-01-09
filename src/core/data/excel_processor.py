@@ -5022,6 +5022,7 @@ class ExcelProcessor:
             "productType": "Product Type*",
             "lineage": "Lineage",
             "weight": "CombinedWeight",  # Reverted back to "CombinedWeight" as requested
+            "price": "Price*",  # Price filter
             "strain": "Product Strain",
             "doh": "DOH",
             "highCbd": "Product Type*"  # Will be processed specially for high CBD detection
@@ -5103,9 +5104,42 @@ class ExcelProcessor:
                     has_high_cbd = any(v.strip().lower().startswith('high cbd') for v in values)
                     values = ["High CBD Products", "Non-High CBD Products"] if has_high_cbd else ["Non-High CBD Products"]
                 
+                # Special processing for Price filter
+                elif filter_key == "price":
+                    # Format prices consistently: $10 for whole numbers, $10.50 for decimals
+                    # Also include "No Price" for products without prices
+                    formatted_prices = set()
+                    has_no_price = False
+                    for v in values:
+                        if not v or str(v).strip() == '' or str(v).strip().lower() in ['nan', 'none', 'null']:
+                            has_no_price = True
+                            continue
+                        try:
+                            # Extract numeric value from price strings (handles $10, 10.00, $10.50, etc.)
+                            price_str = str(v).strip()
+                            price_match = re.search(r'[\d.]+', price_str)
+                            if price_match:
+                                price_num = float(price_match.group(0))
+                                if price_num >= 0:
+                                    # Format: omit .00 for whole numbers, show 2 decimals for non-whole numbers
+                                    if price_num % 1 == 0:
+                                        formatted_prices.add(f"${int(price_num)}")
+                                    else:
+                                        formatted_prices.add(f"${price_num:.2f}")
+                        except (ValueError, AttributeError):
+                            # If we can't parse it, check if it's already formatted
+                            if '$' in str(v):
+                                formatted_prices.add(str(v).strip())
+                    if has_no_price:
+                        formatted_prices.add('No Price')
+                    values = sorted(list(formatted_prices), key=lambda x: (
+                        0 if x == 'No Price' else float(re.search(r'[\d.]+', x).group(0)) if re.search(r'[\d.]+', x) else 999999
+                    ))
+                
                 # Remove duplicates and sort
-                values = list(set(values))
-                values.sort()
+                if filter_key != "price":  # Price already sorted above
+                    values = list(set(values))
+                    values.sort()
                 options[filter_key] = clean_list(values)
             else:
                 options[filter_key] = []
