@@ -902,11 +902,14 @@ def process_chunk(args):
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     placeholders = ','.join(['?'] * len(product_names))
+                    # CRITICAL: Use same lineage query as UI for consistency
                     batch_lineage_query = f'''
-                        SELECT "Product Name*", "Lineage"
-                        FROM products
-                        WHERE "Product Name*" IN ({placeholders})
-                        ORDER BY id DESC
+                        SELECT p."Product Name*",
+                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage
+                        FROM products p
+                        LEFT JOIN strains s ON p.strain_id = s.id
+                        WHERE p."Product Name*" IN ({placeholders})
+                        ORDER BY p.id DESC
                     '''
                     cur.execute(batch_lineage_query, product_names)
                     for row_result in cur.fetchall():
