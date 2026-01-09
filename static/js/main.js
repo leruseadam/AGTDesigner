@@ -13303,33 +13303,8 @@ const TagManager = {
             this.state.persistentSelectedTags = checkedFromUI;
         }
 
-        // CRITICAL FIX: Wait for any pending lineage updates to complete before generating
-        // This ensures lineage changes made right before clicking generate are saved
-        if (this._lineageUpdateTimeout || this._lineageUpdateProcessing) {
-            console.log('⏳ Waiting for pending lineage updates to complete before generating...');
-            const generateBtn = document.getElementById('generateBtn');
-            if (generateBtn) {
-                generateBtn.disabled = true;
-                generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving lineage...';
-            }
-
-            // Wait for debounce timeout to trigger processing
-            if (this._lineageUpdateTimeout) {
-                await new Promise(resolve => setTimeout(resolve, 600)); // Wait for 500ms debounce + 100ms buffer
-            }
-
-            // Wait for processing to complete (max 10 seconds)
-            const maxWait = 10000;
-            const startWait = Date.now();
-            while (this._lineageUpdateProcessing && (Date.now() - startWait) < maxWait) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-
-            console.log('✅ Lineage updates complete, proceeding with generation');
-            if (generateBtn) {
-                generateBtn.innerHTML = 'Generate Tags';
-            }
-        }
+        // PERFORMANCE: Removed lineage update wait - lineage is sent with tags in request
+        // This eliminates unnecessary delays before generation
 
         console.time('debouncedGenerate');
         const generateBtn = document.getElementById('generateBtn');
@@ -13472,7 +13447,7 @@ const TagManager = {
             this.isGenerating = false; // Release generation lock
             console.timeEnd('debouncedGenerate');
         }
-    }, 2000), // 2-second debounce delay
+    }, 300), // 300ms debounce for faster response
 
     updateTagColor(tag, color) {
         // Find the tag element by product name since that's how they're identified

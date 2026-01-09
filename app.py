@@ -7461,13 +7461,7 @@ def generate_labels():
         file_path = data.get('file_path') or session.get('file_path')  # Use session file_path if not provided
         filters = data.get('filters', None)
 
-        logging.info(f"🎯 Generation request received:")
-        logging.info(f"   - template_type: {template_type}")
-        logging.info(f"   - scale_factor: {scale_factor}")
-        logging.info(f"   - selected_tags_from_request count: {len(selected_tags_from_request) if selected_tags_from_request else 0}")
-        if selected_tags_from_request:
-            logging.info(f"   - Sample tags: {selected_tags_from_request[:3]}")
-        logging.debug(f"Selected tags from request: {selected_tags_from_request}")
+        logging.info(f"🎯 Generation: {len(selected_tags_from_request) if selected_tags_from_request else 0} tags, template={template_type}, scale={scale_factor}")
         
         # CRITICAL PERFORMANCE FIX: Set bypass flag BEFORE get_excel_processor to skip file loading
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
@@ -7490,14 +7484,16 @@ def generate_labels():
         # TRACE: Check store after getting excel_processor
         logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
-        # CRITICAL PERFORMANCE FIX: If tags provided, set them directly
+        # CRITICAL PERFORMANCE FIX: If tags provided, set them directly (skip ALL file loading)
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
-            logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly without file I/O")
+            logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly - SKIPPING ALL FILE I/O")
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
-            excel_processor._last_loaded_file = file_path
+            excel_processor._last_loaded_file = file_path or 'direct_from_request'
+            excel_processor._skip_enrichment = True  # Skip database enrichment for speed
             logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time)")
             needs_file_load = False
+            skip_default_file_load = True  # Skip ALL further file loading operations
         else:
             logging.info("📂 No tags in request - using normal file loading")
             # TRACE: Check store before file loading
@@ -9834,10 +9830,9 @@ def get_available_tags():
         has_excel_data = file_exists and session_file_path
         logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)})")
 
-        # ENABLED: Automatically load default file for the selected store
-        # CRITICAL: Only load default file if user has actually selected a store
-        # This ensures the store modal appears for first-time users
-        if not has_excel_data and store_name:
+        # DISABLED: Do not automatically load default file - require explicit upload
+        # User must upload an Excel file to see tags
+        if False and not has_excel_data and store_name:
             try:
                 from src.core.data.excel_processor import get_default_upload_file
                 default_file = get_default_upload_file(store_name)
@@ -9854,9 +9849,9 @@ def get_available_tags():
             except Exception as default_err:
                 logging.warning(f"Default file fallback failed: {default_err}")
 
-        # FALLBACK: If no file but request-scoped processor already loaded, use it FIRST
-        # This handles cases where file was uploaded but path check fails
-        if not has_excel_data and getattr(g, 'excel_processor', None):
+        # DISABLED: Do not use in-memory processor fallback - require explicit file
+        # User must have a valid file path to load tags
+        if False and not has_excel_data and getattr(g, 'excel_processor', None):
             try:
                 proc = g.excel_processor
                 if proc.df is not None and not proc.df.empty:
@@ -9923,8 +9918,20 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        # PERFORMANCE: Allow caching again (keyed by file + timestamp) to avoid recomputing tags on every request.
-        # CRITICAL: Always check cache first, even during fast_load, to avoid reloading Excel file
+        # CRITICAL: Tags ONLY come from Excel files - never from database alone
+        # If no Excel file, return empty tags with message to upload Excel file
+        # CHECK THIS FIRST before attempting to load from cache
+        if not has_excel_data:
+            logging.info("📦 No Excel file - returning empty tags (tags only come from Excel files)")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'no-excel-file',
+                'message': 'No Excel file uploaded. Please upload an Excel file to see products in CURRENT INVENTORY.'
+            }), 200
+
+        # PERFORMANCE: Allow caching (keyed by file + timestamp) to avoid recomputing tags on every request.
+        # CRITICAL: Only check cache AFTER verifying Excel file exists
         cached_tags = None if prefer_db or nocache else cache.get(cache_key)
         
         # Respect nocache fully: only use file cache when nocache is not requested
@@ -9953,17 +9960,6 @@ def get_available_tags():
                 'source': 'cache-fast-load',
                 'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
             })
-
-        # CRITICAL: Tags ONLY come from Excel files - never from database alone
-        # If no Excel file, return empty tags with message to upload Excel file
-        if not has_excel_data:
-            logging.info("📦 No Excel file - returning empty tags (tags only come from Excel files)")
-            return jsonify({
-                'tags': [],
-                'total_count': 0,
-                'source': 'no-excel-file',
-                'message': 'No Excel file uploaded. Please upload an Excel file to see products in CURRENT INVENTORY.'
-            }), 200
 
         # CRITICAL: Validate that the session file matches the selected store
         # This prevents wrong store data from being loaded
@@ -13476,7 +13472,35 @@ def get_web_available_tags():
                 logging.warning(f"WEB: Failed to clear cache: {clear_err}")
             nocache = True  # Force fresh load to get updated lineage
         
-        # Check cache first (unless nocache is set or recent lineage update)
+        # CRITICAL: Get Excel processor first to validate file exists before checking cache
+        excel_processor = get_session_excel_processor()
+        if excel_processor is None:
+            excel_processor = get_excel_processor()
+        
+        # DISABLED: Do not automatically load default file - require explicit upload
+        if False and excel_processor and (excel_processor.df is None or excel_processor.df.empty):
+            store_name = get_current_store_name(allow_fallback=False)
+            if store_name:
+                try:
+                    from src.core.data.excel_processor import get_default_upload_file
+                    default_file = get_default_upload_file(store_name)
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"WEB: Loading default file: {default_file}")
+                        excel_processor.load_file(default_file)
+                except Exception as load_err:
+                    logging.warning(f"WEB: Error loading default file: {load_err}")
+        
+        # CRITICAL: Check if Excel file exists BEFORE serving cache
+        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
+            logging.info("WEB: No Excel data available - user must upload file")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'web-no-excel',
+                'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
+            })
+        
+        # Check cache only after verifying Excel file exists (unless nocache is set or recent lineage update)
         if not nocache and not has_recent_lineage_update:
             cached_tags = cache.get(cache_key)
             if cached_tags:
@@ -13500,32 +13524,7 @@ def get_web_available_tags():
         # This skips all database queries for maximum speed
         logging.info("🔄 WEB: Building tags with fast Excel-only path (no database queries)...")
         
-        # Get Excel processor
-        excel_processor = get_session_excel_processor()
-        if excel_processor is None:
-            excel_processor = get_excel_processor()
-        
-        # Try to load default file if processor is empty
-        if excel_processor and (excel_processor.df is None or excel_processor.df.empty):
-            store_name = get_current_store_name(allow_fallback=False)
-            if store_name:
-                try:
-                    from src.core.data.excel_processor import get_default_upload_file
-                    default_file = get_default_upload_file(store_name)
-                    if default_file and os.path.exists(default_file):
-                        logging.info(f"WEB: Loading default file: {default_file}")
-                        excel_processor.load_file(default_file)
-                except Exception as load_err:
-                    logging.warning(f"WEB: Error loading default file: {load_err}")
-        
-        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-            logging.info("WEB: No Excel data available")
-            return jsonify({
-                'tags': [],
-                'total_count': 0,
-                'source': 'web-no-excel'
-            })
-        
+        # Excel processor already loaded and validated above - just use it
         # Get tags from Excel
         try:
             excel_tags = excel_processor.get_available_tags()
@@ -18886,11 +18885,13 @@ def get_available_tags_lite():
             except Exception as e:
                 logging.error(f"Excel processor error in lite mode: {e}")
         
-        # Ultimate fallback - return empty but valid response
+        # No Excel file - return empty with message to upload
+        logging.info("Lite: No Excel data available - user must upload file")
         return jsonify({
             'tags': [],
             'total_count': 0,
-            'source': 'empty-fallback'
+            'source': 'no-excel-file',
+            'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
         })
         
     except Exception as e:
