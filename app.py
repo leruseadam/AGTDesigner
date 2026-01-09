@@ -7285,57 +7285,103 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         return tags
 
 def _calculate_joint_ratio_for_record(db_record):
-    """Get joint ratio for pre-roll products from database record. If missing, query database, then use weight directly."""
+    """Get joint ratio for pre-roll products from database record, parsing from name if needed."""
+    import re
+    
     product_type = db_record.get('Product Type*', '')
+    product_name = db_record.get('Product Name*', '') or db_record.get('ProductName', '')
     
     # Only process for pre-roll products
     if not product_type or 'pre-roll' not in str(product_type).lower():
         return db_record.get('JointRatio', '') or db_record.get('Joint Ratio', '')
     
+    logging.info(f"🔧 Calculating JointRatio for preroll: '{product_name}'")
+    
     # First, check if JointRatio already exists - use it if present
     joint_ratio = db_record.get('JointRatio', '') or db_record.get('Joint Ratio', '')
     if joint_ratio and str(joint_ratio).strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+        logging.info(f"✅ JointRatio exists: '{joint_ratio}' for '{product_name}'")
         return str(joint_ratio).strip()
     
     # If JointRatio is missing, try to get it from database with flexible matching
-    product_name = db_record.get('Product Name*', '') or db_record.get('ProductName', '')
     if product_name:
         try:
             from src.core.data.product_database import get_product_database
-            product_db = get_product_database()
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
             if product_db:
                 conn = product_db._get_connection()
                 cursor = conn.cursor()
                 # Try exact match first
-                cursor.execute('SELECT "JointRatio" FROM products WHERE "Product Name*" = ?', (product_name,))
+                cursor.execute('SELECT "JointRatio" FROM products WHERE "Product Name*" = ? AND "JointRatio" IS NOT NULL AND "JointRatio" != ""', (product_name,))
                 result = cursor.fetchone()
-                if not result or not result[0]:
-                    # Try LIKE match for partial name (e.g., "Sundaze" matches "Sundaze by 2727")
-                    cursor.execute('SELECT "JointRatio" FROM products WHERE "Product Name*" LIKE ?', (f'%{product_name}%',))
+                if not result:
+                    # Try LIKE match for partial name
+                    cursor.execute('SELECT "JointRatio" FROM products WHERE "Product Name*" LIKE ? AND "JointRatio" IS NOT NULL AND "JointRatio" != "" LIMIT 1', (f'%{product_name}%',))
                     result = cursor.fetchone()
                 if result and result[0] and str(result[0]).strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                     joint_ratio = str(result[0]).strip()
-                    logging.info(f"🔧 Retrieved JointRatio '{joint_ratio}' from database for '{product_name}'")
+                    logging.info(f"✅ Retrieved JointRatio from DB: '{joint_ratio}' for '{product_name}'")
                     return joint_ratio
+                else:
+                    logging.warning(f"⚠️ No JointRatio found in DB for '{product_name}'")
         except Exception as e:
-            logging.warning(f"🔧 Failed to retrieve JointRatio from database for '{product_name}': {e}")
+            logging.warning(f"⚠️ Failed to retrieve JointRatio from database for '{product_name}': {e}")
     
-    # If JointRatio is still missing, just use weight directly (no calculation)
+    # Try to parse pack info from product name (e.g., "0.5g x 2 Pack", "1g x 5", "5pk")
+    if product_name:
+        # Pattern 1: "0.5g x 2 Pack" or "1g x 5"
+        match = re.search(r'(\d+\.?\d*)\s*g?\s*x\s*(\d+)(?:\s*pack)?', product_name, re.IGNORECASE)
+        if match:
+            joint_weight = match.group(1)
+            pack_count = match.group(2)
+            joint_ratio = f"{joint_weight}g x {pack_count}"
+            logging.info(f"✅ Parsed JointRatio from name: '{joint_ratio}' for '{product_name}'")
+            return joint_ratio
+        
+        # Pattern 2: "5pk" or "2 pack"
+        match = re.search(r'(\d+)\s*(?:pk|pack)', product_name, re.IGNORECASE)
+        if match:
+            pack_count = match.group(1)
+            # Get weight and divide by pack count
+            weight = db_record.get('Weight*', '')
+            if weight:
+                try:
+                    total_weight = float(weight)
+                    joint_weight = total_weight / float(pack_count)
+                    # Format nicely
+                    if joint_weight == int(joint_weight):
+                        joint_ratio = f"{int(joint_weight)}g x {pack_count}"
+                    else:
+                        joint_ratio = f"{joint_weight:.1f}g x {pack_count}"
+                    logging.info(f"✅ Calculated JointRatio from pack count: '{joint_ratio}' for '{product_name}'")
+                    return joint_ratio
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+    
+    # If JointRatio is still missing, construct from weight (fallback)
     weight = db_record.get('Weight*', '')
-    units = db_record.get('Units', '')
+    units = db_record.get('Weight Unit* (grams/gm or ounces/oz)', '') or 'g'
     
-    if weight and units and str(units) != 'None' and str(units) != '':
+    # Normalize units
+    if 'gram' in str(units).lower() or 'gm' in str(units).lower() or str(units).strip() == 'g':
+        units = 'g'
+    elif 'oz' in str(units).lower() or 'ounce' in str(units).lower():
+        units = 'oz'
+    
+    if weight:
         try:
             weight_float = float(weight)
             if weight_float == int(weight_float):
-                return f'{int(weight_float)}{units}'
+                joint_ratio = f"{int(weight_float)}{units}"
             else:
-                return f'{weight}{units}'
+                joint_ratio = f"{weight_float}{units}"
+            logging.info(f"⚠️ Using weight as JointRatio fallback: '{joint_ratio}' for '{product_name}'")
+            return joint_ratio
         except (ValueError, TypeError):
-            return f'{weight}{units}' if weight else ''
-    elif weight:
-        return str(weight)
+            pass
     
+    logging.warning(f"❌ No JointRatio available for '{product_name}' - returning empty")
     return ''
 
 def _replace_json_tags_with_database_data(selected_tags, product_db):
