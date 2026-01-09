@@ -5135,13 +5135,10 @@ class ExcelProcessor:
                                         formatted_prices.add(str(v).strip())
                                 except:
                                     pass  # Skip invalid values
-                        if has_no_price:
-                            formatted_prices.add('No Price')
-                        # Sort prices: "No Price" first, then by numeric value
+                        # REMOVED: Don't add "No Price" - all products should have valid prices
+                        # Sort prices by numeric value
                         def price_sort_key(x):
                             try:
-                                if x == 'No Price':
-                                    return (0, '')
                                 match = re.search(r'[\d.]+', x)
                                 if match:
                                     return (1, float(match.group(0)))

@@ -2536,10 +2536,7 @@ const TagManager = {
                         }
                     }
                 }
-                // Also add "No Price" option if price is missing
-                if (!rawPrice || rawPrice.toString().trim() === '' || rawPrice.toString().trim().toLowerCase() === 'none' || rawPrice.toString().trim() === 'nan') {
-                    filterOptions.price.add('No Price');
-                }
+                // REMOVED: Don't add "No Price" option - all products should have prices from Excel cache
                 
                 // DOH
                 const doh = tag.DOH || tag['DOH Compliant (Yes/No)'] || '';
