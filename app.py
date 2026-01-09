@@ -13526,24 +13526,16 @@ def get_web_available_tags():
         try:
             excel_tags = excel_processor.get_available_tags()
             
-            # PERFORMANCE FIX: Skip database alignment for web endpoint when fast_load=1
-            # Database queries are slow and cause timeouts - Excel lineage is sufficient for initial load
-            # Users can refresh if they need database lineage (which will use cache)
-            # CRITICAL: Only align if lineage was recently updated (user expects fresh data)
+            # PERFORMANCE FIX: Always do database alignment but optimize it for speed
+            # Database lineage is required for accurate display, but we'll optimize the queries
             store_name = get_current_store_name(allow_fallback=False)
-            should_align_lineage = has_recent_lineage_update  # Only align if lineage was recently updated
-            
-            # Only do database alignment if:
-            # 1. Recent lineage update (user just changed lineage, need fresh data)
-            # 2. Not using fast_load (but web always uses fast_load, so this is effectively disabled)
-            # 3. User explicitly requests it via prefer_db=1 (but web skips this)
-            should_align_with_db = has_recent_lineage_update and store_name
+            should_align_with_db = store_name  # Always align if we have a store
             
             if should_align_with_db:
                 try:
                     product_db = get_product_database(store_name)
                     if product_db:
-                        logging.info("🔄 WEB: Aligning tags with database (recent lineage update detected)")
+                        logging.info("🔄 WEB: Aligning tags with database lineage (optimized single batch query)")
                         
                         # Collect product names for batch lookup
                         product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
@@ -13552,28 +13544,27 @@ def get_web_available_tags():
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
                             
-                            # Use EXACT same query as docx generation (tag_generator.py line 909)
-                            # Match by "Product Name*" exactly like docx generation does
-                            # PERFORMANCE: Use larger chunk size for fewer queries
-                            chunk_size = 500  # Increased from 400 for fewer round trips
-                            for start in range(0, len(product_names), chunk_size):
-                                chunk = product_names[start:start + chunk_size]
-                                placeholders = ','.join(['?' for _ in chunk])
-                                
-                                # EXACT same query as docx generation - but also return individual fields to preserve priority
-                                cursor.execute(f'''
-                                    SELECT p."Product Name*", 
-                                           COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                                           p.sovereign_lineage as product_sovereign,
-                                           s.sovereign_lineage as strain_sovereign,
-                                           s.canonical_lineage as strain_canonical
-                                    FROM products p
-                                    LEFT JOIN strains s ON p.strain_id = s.id
-                                    WHERE p."Product Name*" IN ({placeholders})
-                                    ORDER BY p.id DESC
-                                ''', chunk)
-                                
-                                for row in cursor.fetchall():
+                            # PERFORMANCE FIX: Use single batch query instead of chunked queries
+                            # This reduces database round trips from multiple chunks to just one query
+                            # SQLite can handle large IN clauses efficiently
+                            placeholders = ','.join(['?' for _ in product_names])
+                            
+                            # Use EXACT same query as docx generation - but also return individual fields to preserve priority
+                            # Single query for all products - much faster than chunked queries
+                            cursor.execute(f'''
+                                SELECT p."Product Name*", 
+                                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                                       p.sovereign_lineage as product_sovereign,
+                                       s.sovereign_lineage as strain_sovereign,
+                                       s.canonical_lineage as strain_canonical
+                                FROM products p
+                                LEFT JOIN strains s ON p.strain_id = s.id
+                                WHERE p."Product Name*" IN ({placeholders})
+                                ORDER BY p.id DESC
+                            ''', product_names)
+                            
+                            # Process all results at once
+                            for row in cursor.fetchall():
                                     db_name = row[0]
                                     db_lineage = row[1]
                                     product_sovereign = row[2]
@@ -13661,10 +13652,6 @@ def get_web_available_tags():
                                     logging.warning(f"⚠️ WEB: Sample lineage_map keys: {list(lineage_map.keys())[:3] if lineage_map else 'empty'}")
                 except Exception as align_err:
                     logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
-            else:
-                # PERFORMANCE FIX: Skip database alignment for fast loads - Excel lineage is sufficient
-                # Database alignment is slow and causes timeouts - only do it when lineage was recently updated
-                logging.info(f"⚡ WEB: Skipping database alignment for fast load (Excel lineage only)")
             
             # Normalize all tags (both database and Excel lineage)
             simple_tags = []
