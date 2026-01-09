@@ -13958,6 +13958,7 @@ def _get_filter_options_from_database(store_name=None):
             'productType': sorted(list(product_types)),
             'lineage': sorted(list(lineages)),
             'weight': sorted(list(weights)),
+            'price': [],  # Price filter - would need to extract from products if needed
             'strain': sorted(list(strains)),
             'doh': sorted(list(doh_values)),
             'highCbd': []  # Will be set below
