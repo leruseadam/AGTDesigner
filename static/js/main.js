@@ -1005,6 +1005,10 @@ const AppLoadingSplash = {
 // This allows other scripts to check for TagManager even before it's fully initialized
 const TagManager = {
     CACHE_TTL_MS: 60 * 60 * 1000, // 60 minutes - increased for better persistence across page refreshes
+    // CRITICAL FIX: Lower threshold for Windows (PC is slower, so use simplified rendering sooner)
+    get SIMPLIFIED_RENDER_THRESHOLD() {
+        return isWindows ? 500 : 900; // Lower threshold on Windows for faster loading
+    },
     state: {
         selectedTags: new Set(),
         isClearing: false, // Flag to prevent multiple simultaneous clear operations
@@ -1045,7 +1049,6 @@ const TagManager = {
         // Redo stack for snapshot-based redo
         redoSnapshotStack: []
     },
-    SIMPLIFIED_RENDER_THRESHOLD: 900,
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
 
@@ -1414,10 +1417,41 @@ const TagManager = {
 
     clearAvailableTagsCache() {
         try {
-            if (window.sessionStorage) {
-                sessionStorage.removeItem(this.getAvailableTagsCacheKey());
-                verboseLog('Cleared available-tags cache');
+            // CRITICAL FIX: Clear cache from both localStorage and sessionStorage
+            const cacheKey = this.getAvailableTagsCacheKey();
+            const normalizedKey = this.getNormalizedCacheKey();
+            
+            if (window.localStorage) {
+                localStorage.removeItem(cacheKey);
+                if (normalizedKey && normalizedKey !== cacheKey) {
+                    localStorage.removeItem(normalizedKey);
+                }
+                // Clear all cache keys that match the pattern
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                    const key = localStorage.key(i);
+                    if (key && (key.includes('available-tags-cache') || key.includes('tags-cache'))) {
+                        localStorage.removeItem(key);
+                    }
+                }
+                verboseLog('Cleared available-tags cache from localStorage');
             }
+            
+            if (window.sessionStorage) {
+                sessionStorage.removeItem(cacheKey);
+                if (normalizedKey && normalizedKey !== cacheKey) {
+                    sessionStorage.removeItem(normalizedKey);
+                }
+                // Clear all cache keys that match the pattern
+                for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                    const key = sessionStorage.key(i);
+                    if (key && (key.includes('available-tags-cache') || key.includes('tags-cache'))) {
+                        sessionStorage.removeItem(key);
+                    }
+                }
+                verboseLog('Cleared available-tags cache from sessionStorage');
+            }
+            
+            console.log('✅ Cache cleared successfully - prices will reload on next fetch');
         } catch (error) {
             console.warn('Failed to clear available-tags cache:', error);
         }
@@ -1487,6 +1521,16 @@ const TagManager = {
                     if (!tag['Vendor*']) tag['Vendor*'] = vendor;
                     if (!tag['Vendor']) tag['Vendor'] = vendor;
                     if (!tag.vendor) tag.vendor = vendor;
+                }
+                
+                // CRITICAL FIX: Preserve price data when loading from cache
+                // Check all possible price field variations to ensure prices are available
+                const price = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag.price || tag['Product Price'] || tag['ProductPrice'] || tag['Unit Price'] || tag['UnitPrice'] || tag['Retail Price'] || tag['RetailPrice'] || '';
+                if (price && price.trim() !== '' && price.trim().toLowerCase() !== 'none' && price.trim().toLowerCase() !== 'nan') {
+                    // Preserve price in all possible field names for extraction
+                    if (!tag['Price*']) tag['Price*'] = price;
+                    if (!tag.Price) tag.Price = price;
+                    if (!tag.price) tag.price = price;
                 }
                 
                 // CRITICAL: Preserve and prioritize sovereign_lineage (user-edited lineage - highest priority)
@@ -3022,17 +3066,21 @@ const TagManager = {
             if (brandFilter && brandFilter.trim() !== '' && brandFilter.toLowerCase() !== 'all') {
                 const tagBrand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toString().trim();
                 
-                // DEBUG: Log first matching attempt for troubleshooting
-                if (window._brandFilterDebug === undefined) {
-                    console.log('🔍 BRAND FILTER DEBUG:', {
+                // DEBUG: Always log brand filtering to diagnose issues
+                if (window._brandFilterDebugCount === undefined) {
+                    window._brandFilterDebugCount = 0;
+                }
+                if (window._brandFilterDebugCount < 5) {
+                    console.log('🔍 BRAND FILTER ACTIVE:', {
                         brandFilter: brandFilter,
                         tagBrand: tagBrand,
+                        match: tagBrand.toLowerCase() === brandFilter.toLowerCase(),
                         tag_Product_Brand: tag['Product Brand'],
                         tag_ProductBrand: tag.ProductBrand,
                         tag_productBrand: tag.productBrand,
                         allTagKeys: Object.keys(tag).filter(k => k.toLowerCase().includes('brand'))
                     });
-                    window._brandFilterDebug = true;
+                    window._brandFilterDebugCount++;
                 }
                 
                 if (tagBrand.toLowerCase() !== brandFilter.toLowerCase()) {
@@ -3911,12 +3959,9 @@ const TagManager = {
             verboseLog('Store not confirmed - skipping loading splash (store modal should show)');
         }
         
-        // PERFORMANCE: Use setTimeout(0) instead of requestAnimationFrame for faster initial render
-        // requestAnimationFrame can add unnecessary delay
-        setTimeout(() => {
-            this._updateAvailableTags(originalTags, filteredTags);
-        }, 0);
-    }, 150), // Reduced debounce from 300ms to 150ms for faster response
+        // PERFORMANCE: Call immediately - no setTimeout delay for instant rendering
+        this._updateAvailableTags(originalTags, filteredTags);
+    }, 50), // Ultra-fast debounce (50ms) for near-instant response
 
     // Helpers to preserve scroll position of the available list across re-renders
     // USER PREFERENCE: Scroll CURRENT INVENTORY to top when filter is applied
@@ -5400,7 +5445,8 @@ const TagManager = {
             verboseLog('About to organize tags, tags length:', tags.length);
             
             // CRITICAL FIX: For large datasets, organize asynchronously to prevent UI freeze
-            const LARGE_DATASET_THRESHOLD = 500;
+            // CRITICAL FIX: Lower threshold for Windows (PC is slower, so use simplified rendering sooner)
+            const LARGE_DATASET_THRESHOLD = isWindows ? 300 : 500; // Lower threshold on Windows
             if (tags.length > LARGE_DATASET_THRESHOLD) {
                 verboseLog(`⚡ Large dataset (${tags.length} tags) - organizing asynchronously to prevent freeze`);
 
@@ -6188,7 +6234,8 @@ const TagManager = {
             return;
         }
 
-        const chunkSize = 200;
+        // CRITICAL FIX: Larger chunk sizes for Windows (fewer DOM operations = faster)
+        const chunkSize = isWindows ? 400 : 200; // 2x larger chunks on Windows
         let index = 0;
 
         availableTagsContainer.innerHTML = '';
@@ -6250,9 +6297,15 @@ const TagManager = {
             listWrapper.appendChild(fragment);
 
             if (index < tags.length) {
-                requestAnimationFrame(renderChunk);
+                // CRITICAL FIX: Windows uses setTimeout(0) for faster rendering
+                if (isWindows) {
+                    setTimeout(renderChunk, 0);
+                } else {
+                    requestAnimationFrame(renderChunk);
+                }
             } else {
-                requestAnimationFrame(() => {
+                const nextFrame = isWindows ? (fn) => setTimeout(fn, 0) : requestAnimationFrame;
+                nextFrame(() => {
                     this._restoreAvailableScrollPosition(savedScroll);
                     this.updateSelectAllCheckboxes();
                     this._waitForTagsToAppear();
@@ -7486,21 +7539,20 @@ const TagManager = {
     },
     
     // PERFORMANCE FIX: Render tags in batches to prevent UI freeze
+    // CRITICAL FIX: PC-specific optimizations for faster rendering
     _renderTagsInBatches(tags, container) {
         if (!tags || tags.length === 0) return;
         
-        // PERFORMANCE: Increase batch size for faster rendering (100 tags per batch)
-        // Use larger batches for better performance on modern browsers
-        const BATCH_SIZE = 100;
+        // CRITICAL FIX: Larger batch sizes for Windows (fewer DOM operations = faster)
+        // Windows benefits from larger batches due to different DOM performance characteristics
+        const BATCH_SIZE = isWindows ? 250 : 100; // 2.5x larger batches on Windows
         let index = 0;
         
         const renderBatch = () => {
             const endIndex = Math.min(index + BATCH_SIZE, tags.length);
             const fragment = document.createDocumentFragment();
             
-            // PERFORMANCE: Build HTML string first, then set innerHTML once per batch
-            // This is faster than multiple appendChild calls for large batches
-            const batchHtml = [];
+            // PERFORMANCE: Build fragment efficiently
             for (let i = index; i < endIndex; i++) {
                 const tagElement = this.createTagElement(tags[i], false);
                 if (tagElement) {
@@ -7513,9 +7565,13 @@ const TagManager = {
             
             // Continue rendering if there are more tags
             if (index < tags.length) {
-                // CRITICAL FIX: Use requestAnimationFrame for smoother rendering without flickering
-                // This ensures rendering happens at the optimal time for the browser
-                requestAnimationFrame(renderBatch);
+                // CRITICAL FIX: Windows uses setTimeout(0) for faster rendering
+                // requestAnimationFrame can add unnecessary delay on Windows
+                if (isWindows) {
+                    setTimeout(renderBatch, 0); // Immediate next batch on Windows
+                } else {
+                    requestAnimationFrame(renderBatch); // Smooth rendering on Mac
+                }
             }
         };
         
@@ -10308,7 +10364,7 @@ const TagManager = {
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
                 // PERFORMANCE: Much shorter timeout for faster failure recovery
-                const safetyTimeoutMs = isWebClient ? 8000 : 15000; // 8s for web, 15s for desktop
+                const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
                     // Just hide the splash, don't show error message
@@ -10362,10 +10418,10 @@ const TagManager = {
             });
             
             // Rate limiting: prevent rapid successive calls (unless force reload)
-            // Reduced to 200ms for faster consecutive operations
+            // Reduced to 50ms for much faster consecutive operations
             if (!forceReload) {
                 const now = Date.now();
-                if (this._lastFetchTime && (now - this._lastFetchTime) < 200) {
+                if (this._lastFetchTime && (now - this._lastFetchTime) < 50) {
                     const timeSinceLastFetch = now - this._lastFetchTime;
                     console.warn(`⏸️ Rate limiting: skipping fetch (${timeSinceLastFetch}ms since last fetch, need 200ms)`);
                     verboseLog('Rate limiting: skipping fetch (too soon after last fetch)');
@@ -10431,9 +10487,9 @@ const TagManager = {
             let responseData;
             
             // PERFORMANCE: Faster timeouts for quicker response
-            const maxRetries = isWebClient ? 2 : 2; // Reduced retries for faster failure
-            const maxProcessingRetries = isWebClient ? 3 : 5; // Reduced processing retries for speed
-            const fetchTimeout = isWebClient ? 10000 : 15000; // Much faster timeout (10s web, 15s desktop)
+            const maxRetries = isWebClient ? 1 : 2; // Minimal retries for speed
+            const maxProcessingRetries = isWebClient ? 2 : 3; // Minimal processing retries
+            const fetchTimeout = isWebClient ? 5000 : 8000; // Ultra-fast timeout (5s web, 8s desktop)
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -16236,16 +16292,18 @@ const TagManager = {
                 // Single, fast event handler with throttling for better performance
                 filterElement._filterChangeHandler = (event) => {
                     try {
+                        console.log(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
                         verboseLog(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
                         const filterType = self.getFilterTypeFromId(filterId);
                         const value = event.target.value;
+                        console.log(`🔥 Filter type: ${filterType}, value: ${value}`);
                         
                         // Clear existing throttle timer for this filter
                         if (self._filterThrottleTimers[filterId]) {
                             clearTimeout(self._filterThrottleTimers[filterId]);
                         }
                         
-                        // Throttle filter updates (150ms delay for smoother performance)
+                        // Throttle filter updates (25ms delay for ultra-fast response)
                         self._filterThrottleTimers[filterId] = setTimeout(() => {
                             // Special handling for vendor filter
                             if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
@@ -16259,7 +16317,7 @@ const TagManager = {
                                 verboseLog(`🔥 Calling immediateFilterUpdate for ${filterType}: ${value}`);
                                 immediateFilterUpdate(filterType, value);
                             });
-                        }, 150); // 150ms throttle delay
+                        }, 25); // Ultra-fast 25ms throttle delay for instant filter response
                     } catch (error) {
                         console.error(`Error in filter change handler for ${filterId}:`, error);
                     }
@@ -17145,6 +17203,68 @@ const TagManager = {
                 
                 // CRITICAL FIX: Clear splash timeout since we completed successfully
                 clearTimeout(splashTimeout);
+            }
+        },
+        
+        // CRITICAL FIX: Global function to clear cache and force reload (for price issues)
+        clearCacheAndReload() {
+            console.log('🗑️ Clearing all caches and forcing reload...');
+            this.clearAvailableTagsCache();
+            
+            // Also clear any filter cache
+            try {
+                if (window.localStorage) {
+                    localStorage.removeItem('agt_filters');
+                }
+                if (window.sessionStorage) {
+                    sessionStorage.removeItem('agt_filters');
+                }
+            } catch (e) {
+                console.warn('Failed to clear filter cache:', e);
+            }
+            
+            // Force reload tags
+            console.log('🔄 Reloading tags after cache clear...');
+            this.state.hydratedFromCache = false;
+            this.fetchAndUpdateAvailableTags().then(() => {
+                console.log('✅ Tags reloaded successfully after cache clear');
+            }).catch(error => {
+                console.error('❌ Failed to reload tags after cache clear:', error);
+            });
+        }
+    }
+};
+
+// CRITICAL FIX: Expose global function for cache clearing
+window.clearTagCache = function() {
+        if (window.TagManager && typeof window.TagManager.clearCacheAndReload === 'function') {
+            window.TagManager.clearCacheAndReload();
+        } else {
+            console.warn('TagManager not available - clearing cache manually');
+            try {
+                if (window.localStorage) {
+                    for (let i = localStorage.length - 1; i >= 0; i--) {
+                        const key = localStorage.key(i);
+                        if (key && (key.includes('cache') || key.includes('tags'))) {
+                            localStorage.removeItem(key);
+                        }
+                    }
+                }
+                if (window.sessionStorage) {
+                    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                        const key = sessionStorage.key(i);
+                        if (key && (key.includes('cache') || key.includes('tags'))) {
+                            sessionStorage.removeItem(key);
+                        }
+                    }
+                }
+                console.log('✅ Cache cleared manually - please refresh the page');
+                window.location.reload();
+            } catch (e) {
+                console.error('Failed to clear cache:', e);
+            }
+        }
+    };
                 
                 // CRITICAL FIX: Ensure splash completes even if fetchAndUpdateAvailableTags didn't do it
                 if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
@@ -17181,6 +17301,33 @@ const TagManager = {
             this.state.initialized = true;
             return false;
         }
+    },
+    
+    // CRITICAL FIX: Global function to clear cache and force reload (for price issues)
+    clearCacheAndReload() {
+        console.log('🗑️ Clearing all caches and forcing reload...');
+        this.clearAvailableTagsCache();
+        
+        // Also clear any filter cache
+        try {
+            if (window.localStorage) {
+                localStorage.removeItem('agt_filters');
+            }
+            if (window.sessionStorage) {
+                sessionStorage.removeItem('agt_filters');
+            }
+        } catch (e) {
+            console.warn('Failed to clear filter cache:', e);
+        }
+        
+        // Force reload tags
+        console.log('🔄 Reloading tags after cache clear...');
+        this.state.hydratedFromCache = false;
+        this.fetchAndUpdateAvailableTags().then(() => {
+            console.log('✅ Tags reloaded successfully after cache clear');
+        }).catch(error => {
+            console.error('❌ Failed to reload tags after cache clear:', error);
+        });
     }
 };
 
