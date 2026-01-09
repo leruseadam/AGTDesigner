@@ -13526,15 +13526,24 @@ def get_web_available_tags():
         try:
             excel_tags = excel_processor.get_available_tags()
             
-            # CRITICAL FIX: Use EXACT same lineage priority as docx generation
-            # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage" (Excel)
-            # Only use Excel lineage if product is brand new (not in database)
+            # PERFORMANCE FIX: Skip database alignment for web endpoint when fast_load=1
+            # Database queries are slow and cause timeouts - Excel lineage is sufficient for initial load
+            # Users can refresh if they need database lineage (which will use cache)
+            # CRITICAL: Only align if lineage was recently updated (user expects fresh data)
             store_name = get_current_store_name(allow_fallback=False)
-            if store_name:
+            should_align_lineage = has_recent_lineage_update  # Only align if lineage was recently updated
+            
+            # Only do database alignment if:
+            # 1. Recent lineage update (user just changed lineage, need fresh data)
+            # 2. Not using fast_load (but web always uses fast_load, so this is effectively disabled)
+            # 3. User explicitly requests it via prefer_db=1 (but web skips this)
+            should_align_with_db = has_recent_lineage_update and store_name
+            
+            if should_align_with_db:
                 try:
                     product_db = get_product_database(store_name)
                     if product_db:
-                        logging.info("🔄 WEB: Aligning tags with database using docx generation lineage priority")
+                        logging.info("🔄 WEB: Aligning tags with database (recent lineage update detected)")
                         
                         # Collect product names for batch lookup
                         product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
@@ -13545,7 +13554,8 @@ def get_web_available_tags():
                             
                             # Use EXACT same query as docx generation (tag_generator.py line 909)
                             # Match by "Product Name*" exactly like docx generation does
-                            chunk_size = 400
+                            # PERFORMANCE: Use larger chunk size for fewer queries
+                            chunk_size = 500  # Increased from 400 for fewer round trips
                             for start in range(0, len(product_names), chunk_size):
                                 chunk = product_names[start:start + chunk_size]
                                 placeholders = ','.join(['?' for _ in chunk])
@@ -13651,6 +13661,10 @@ def get_web_available_tags():
                                     logging.warning(f"⚠️ WEB: Sample lineage_map keys: {list(lineage_map.keys())[:3] if lineage_map else 'empty'}")
                 except Exception as align_err:
                     logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
+            else:
+                # PERFORMANCE FIX: Skip database alignment for fast loads - Excel lineage is sufficient
+                # Database alignment is slow and causes timeouts - only do it when lineage was recently updated
+                logging.info(f"⚡ WEB: Skipping database alignment for fast load (Excel lineage only)")
             
             # Normalize all tags (both database and Excel lineage)
             simple_tags = []

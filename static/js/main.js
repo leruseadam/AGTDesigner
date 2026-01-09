@@ -10586,13 +10586,19 @@ const TagManager = {
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
-                // PERFORMANCE: Much shorter timeout for faster failure recovery
-                const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
+                // PERFORMANCE: Longer timeout to allow cache to load first
+                // Only hide if we don't have cache (cache should load instantly)
+                const safetyTimeoutMs = isWebClient ? 8000 : 12000; // 8s for web, 12s for desktop
                 safetyTimeout = setTimeout(() => {
-                    console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
-                    // Just hide the splash, don't show error message
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
+                    // Only hide if we haven't loaded from cache yet
+                    if (!cacheUsedForDisplay) {
+                        console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms) - no cache available`);
+                        // Just hide the splash, don't show error message
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                    } else {
+                        console.log(`✅ Safety timeout: Cache already loaded, keeping UI visible`);
                     }
                     // Don't show error message - let the app continue working
                 }, safetyTimeoutMs);
@@ -10709,12 +10715,11 @@ const TagManager = {
             let response;
             let responseData;
             
-            // PERFORMANCE: Balanced timeouts for reliable loading
-            // CRITICAL FIX: Increased timeout to 30s for web to handle slow backend responses
-            // This allows server enough time to respond, especially for large datasets or slow connections
-            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for network resilience
-            const maxProcessingRetries = isWebClient ? 3 : 3; // Allow processing retries
-            const fetchTimeout = isWebClient ? 30000 : 20000; // 30s web (was 15s - still timing out), 20s desktop
+            // PERFORMANCE: Optimized timeouts - use cache aggressively for fast loads
+            // Reduced timeout to fail faster and use cache, then refresh in background
+            const maxRetries = isWebClient ? 1 : 2; // Reduced retries for web - fail fast to cache
+            const maxProcessingRetries = isWebClient ? 2 : 3; // Reduced processing retries
+            const fetchTimeout = isWebClient ? 10000 : 15000; // 10s web (fail fast to cache), 15s desktop
             
             let retryCount = 0;
             let processingRetryCount = 0;
