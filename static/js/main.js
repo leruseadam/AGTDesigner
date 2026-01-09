@@ -17203,8 +17203,29 @@ const TagManager = {
                 
                 // CRITICAL FIX: Clear splash timeout since we completed successfully
                 clearTimeout(splashTimeout);
+            } catch (error) {
+                console.error('❌ Error in TagManager.init():', error);
+                // Clear splash timeout even on error
+                clearTimeout(splashTimeout);
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                // Mark as initialized anyway to prevent infinite retry loops
+                this.state.initialized = true;
             }
-        },
+        } catch (outerError) {
+            console.error('❌ Outer error in TagManager.init():', outerError);
+            // Clear splash timeout even on error
+            clearTimeout(splashTimeout);
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            // Mark as initialized anyway to prevent infinite retry loops
+            this.state.initialized = true;
+        }
+    },
         
         // CRITICAL FIX: Global function to clear cache and force reload (for price issues)
         clearCacheAndReload() {
