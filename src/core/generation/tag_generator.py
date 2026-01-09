@@ -1455,6 +1455,15 @@ def generate_multiple_label_tables(records, template_path):
         if final_doc.paragraphs:
             p = final_doc.paragraphs[0]
             p._element.getparent().remove(p._element)
+        
+        # ⚡ PERFORMANCE: Pre-load template once instead of per-record
+        template_doc = None
+        try:
+            template_doc = DocxTemplate(template_path)
+        except Exception as template_err:
+            logger.error(f"Failed to load template: {template_err}")
+            raise
+        
         # Group by lineage and chunk within each group
         for lineage, group in groupby(records_sorted, key=get_lineage):
             group_list = list(group)
@@ -1485,7 +1494,9 @@ def generate_multiple_label_tables(records, template_path):
                     if idx < len(chunk):
                         record = chunk[idx]
                         try:
-                            doc = DocxTemplate(template_path)
+                            # ⚡ PERFORMANCE: Reuse template, create fresh copy for rendering
+                            from copy import deepcopy
+                            doc = deepcopy(template_doc)
                             context = build_context(record, doc)
                             doc.render(context)
                             tmp_stream = BytesIO()

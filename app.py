@@ -7358,6 +7358,16 @@ def _calculate_joint_ratio_for_record(db_record):
                     return joint_ratio
                 except (ValueError, TypeError, ZeroDivisionError):
                     pass
+        
+        # Pattern 3: Extract weight from name and use it directly (e.g., "Pre-Roll - 5g" or "Pre-Roll 1g")
+        # This handles cases where the product name has weight but no explicit pack count
+        weight_match = re.search(r'[-\s](\d+\.?\d*)\s*g(?:\s|$)', product_name, re.IGNORECASE)
+        if weight_match and not re.search(r'x\s*\d+', product_name):  # Only if no pack format found
+            weight_str = weight_match.group(1)
+            # Assume it's a single pre-roll at this weight
+            joint_ratio = f"{weight_str}g x 1"
+            logging.info(f"✅ Extracted JointRatio from weight in name: '{joint_ratio}' for '{product_name}'")
+            return joint_ratio
     
     # If JointRatio is still missing, construct from weight (fallback)
     weight = db_record.get('Weight*', '')
@@ -8070,16 +8080,18 @@ def generate_labels():
                                 except Exception as batch_err:
                                     logging.warning(f"Batch lineage query failed: {batch_err}")
                                 
-                                # CRITICAL FIX: Build JointRatio cache from Excel data
-                                # Database doesn't have JointRatio, but Excel processor extracted it from product names
+                                # CRITICAL FIX: Build JointRatio and Price caches from Excel data
+                                # Database doesn't have JointRatio or may have missing prices, but Excel processor has them
                                 joint_ratio_cache_from_excel = {}
+                                price_cache_from_excel = {}
                                 try:
                                     if hasattr(g.excel_processor, 'df') and g.excel_processor.df is not None and not g.excel_processor.df.empty:
                                         excel_df = g.excel_processor.df
-                                        if 'JointRatio' in excel_df.columns:
-                                            product_name_col = 'Product Name*' if 'Product Name*' in excel_df.columns else 'ProductName'
-                                            if product_name_col in excel_df.columns:
-                                                # Build map: product name -> JointRatio
+                                        product_name_col = 'Product Name*' if 'Product Name*' in excel_df.columns else 'ProductName'
+                                        
+                                        if product_name_col in excel_df.columns:
+                                            # Build map: product name -> JointRatio
+                                            if 'JointRatio' in excel_df.columns:
                                                 for _, row in excel_df.iterrows():
                                                     p_name = row.get(product_name_col)
                                                     joint_ratio = row.get('JointRatio')
@@ -8088,12 +8100,27 @@ def generate_labels():
                                                 logging.info(f"✅ JOINT RATIO CACHE: Extracted {len(joint_ratio_cache_from_excel)} JointRatio values from Excel")
                                                 if joint_ratio_cache_from_excel:
                                                     logging.info(f"   Sample JointRatio entries: {list(joint_ratio_cache_from_excel.items())[:3]}")
+                                            
+                                            # Build map: product name -> Price
+                                            price_cols = ['Price', 'Price*', 'Price* (Tier Name for Bulk)']
+                                            price_col = next((col for col in price_cols if col in excel_df.columns), None)
+                                            if price_col:
+                                                for _, row in excel_df.iterrows():
+                                                    p_name = row.get(product_name_col)
+                                                    price = row.get(price_col)
+                                                    if p_name and price and str(price).strip() not in ['', 'nan', 'None', 'null', '0', '0.0', '0.00']:
+                                                        price_cache_from_excel[str(p_name).strip()] = str(price).strip()
+                                                logging.info(f"✅ PRICE CACHE: Extracted {len(price_cache_from_excel)} Price values from Excel")
+                                                if price_cache_from_excel:
+                                                    logging.info(f"   Sample Price entries: {list(price_cache_from_excel.items())[:3]}")
+                                            else:
+                                                logging.warning("⚠️ No Price column found in Excel data")
                                         else:
-                                            logging.warning("⚠️  No JointRatio column found in Excel data")
+                                            logging.warning("⚠️ No product name column found in Excel data")
                                     else:
-                                        logging.warning("⚠️  No Excel data available for JointRatio cache")
-                                except Exception as joint_cache_err:
-                                    logging.error(f"❌ Error building JointRatio cache from Excel: {joint_cache_err}")
+                                        logging.warning("⚠️ No Excel data available for caches")
+                                except Exception as cache_err:
+                                    logging.error(f"❌ Error building Excel caches: {cache_err}")
                                 
                                 # Convert database records to the format expected by TemplateProcessor
                                 records = []
@@ -8149,8 +8176,13 @@ def generate_labels():
                                         is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
                                         docx_lineage = 'HYBRID' if is_classic else 'MIXED'
                                     
-                                    # Extract price (no logging for performance)
-                                    extracted_price = _extract_price_from_database_product(processed_record)
+                                    # Extract price from Excel cache first, then database
+                                    if product_name_for_record in price_cache_from_excel:
+                                        extracted_price = price_cache_from_excel[product_name_for_record]
+                                        logging.info(f"💰 Using price from Excel cache: '{product_name_debug}' -> '{extracted_price}'")
+                                    else:
+                                        extracted_price = _extract_price_from_database_product(processed_record)
+                                    
                                     formatted_price = _format_price_value(extracted_price)
                                     
                                     # CRITICAL FIX: Ensure Price is always set - use fallback if empty
@@ -8162,7 +8194,10 @@ def generate_labels():
                                             processed_record.get('Med Price', '') or
                                             ''
                                         )
-                                        formatted_price = price_fallback if price_fallback else '$0.00'
+                                        if price_fallback:
+                                            formatted_price = _format_price_value(price_fallback)
+                                        else:
+                                            formatted_price = ''  # Leave empty instead of $0.00
                                     
                                     # CRITICAL FIX: Ensure DescAndWeight is always set - use fallback if empty
                                     desc_and_weight = processed_record.get('DescAndWeight', '')
@@ -8171,24 +8206,28 @@ def generate_labels():
                                         combined_weight_fallback = processed_record.get('CombinedWeight', '1g')
                                         desc_and_weight = f"{product_name_fallback} - {combined_weight_fallback}" if product_name_fallback else combined_weight_fallback
                                     
-                                    # CRITICAL DEBUG: Log what's in processed_record for JointRatio
+                                    # CRITICAL FIX: Extract JointRatio from product name if it contains the pattern
                                     product_name_debug = processed_record.get('Product Name*', '')
                                     product_type_debug = processed_record.get('Product Type*', '')
-                                    joint_ratio_debug = processed_record.get('JointRatio', 'NOT_FOUND')
+                                    joint_ratio_value = processed_record.get('JointRatio', '') or processed_record.get('Joint Ratio', '')
                                     
-                                    # CRITICAL FIX: Merge JointRatio from Excel cache if not in database
+                                    # First, check Excel cache
                                     if product_name_for_record in joint_ratio_cache_from_excel:
-                                        excel_joint_ratio = joint_ratio_cache_from_excel[product_name_for_record]
-                                        if 'preroll' in product_type_debug.lower() or 'pre-roll' in product_type_debug.lower():
-                                            logging.info(f"🔧 INJECTING JointRatio from Excel: '{product_name_debug}' -> '{excel_joint_ratio}'")
-                                        # Inject into processed_record so it gets picked up by the record construction
-                                        processed_record['JointRatio'] = excel_joint_ratio
-                                        joint_ratio_debug = excel_joint_ratio
+                                        joint_ratio_value = joint_ratio_cache_from_excel[product_name_for_record]
+                                        logging.info(f"🔧 Using JointRatio from Excel cache: '{product_name_debug}' -> '{joint_ratio_value}'")
                                     
-                                    if 'preroll' in product_type_debug.lower() or 'pre-roll' in product_type_debug.lower():
-                                        logging.info(f"🔍 RECORD CONSTRUCTION DEBUG: '{product_name_debug}' ({product_type_debug})")
-                                        logging.info(f"   - processed_record.get('JointRatio'): '{joint_ratio_debug}'")
-                                        logging.info(f"   - processed_record.get('Joint Ratio'): '{processed_record.get('Joint Ratio', 'NOT_FOUND')}'")
+                                    # If still empty and it's a pre-roll, extract from product name directly
+                                    if not joint_ratio_value and product_name_debug and 'pre-roll' in product_type_debug.lower():
+                                        import re
+                                        # Extract "1g x 5 Pack" or "1g x 5" pattern from product name
+                                        match = re.search(r'(\d*\.?\d+g)\s*x\s*(\d+)(?:\s*Pack)?', product_name_debug, re.IGNORECASE)
+                                        if match:
+                                            joint_ratio_value = f"{match.group(1)} x {match.group(2)} Pack"
+                                            logging.info(f"✅ Extracted JointRatio from product name: '{product_name_debug}' -> '{joint_ratio_value}'")
+                                    
+                                    # Store in processed_record for use below
+                                    if joint_ratio_value:
+                                        processed_record['JointRatio'] = joint_ratio_value
                                     
                                     # Map database fields to template fields (using correct field names from database)
                                     record = {
