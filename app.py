@@ -7496,8 +7496,6 @@ def generate_labels():
             skip_default_file_load = True  # Skip ALL further file loading operations
         else:
             logging.info("📂 No tags in request - using normal file loading")
-            # TRACE: Check store before file loading
-            logging.info(f"🔍 TRACE: Store before file loading = {get_current_store_name()}")
             needs_file_load = True
         
         # PERFORMANCE FIX: Check if processor already has the file loaded before reloading
@@ -8730,10 +8728,9 @@ def generate_labels():
             store_name = get_current_store_name()
             product_db = get_product_database(store_name)
             if product_db and records:
-                # PERFORMANCE: Check if records already have database lineage (from batch query)
-                # If most records already have lineage set, skip the expensive query
+                # PERFORMANCE: Skip expensive query if 95%+ records already have lineage
                 records_with_lineage = sum(1 for r in records if r.get('Lineage') and r.get('Lineage') not in ['', 'MIXED', 'HYBRID'])
-                if records_with_lineage >= len(records) * 0.8:  # 80%+ already have lineage
+                if records_with_lineage >= len(records) * 0.95:  # 95%+ already have lineage
                     logging.info(f"⚡ PERFORMANCE: Skipping force overwrite - {records_with_lineage}/{len(records)} records already have lineage")
                 else:
                     logging.info(f"🔄 FORCING DB LINEAGE: Overwriting lineage for {len(records)} records from database...")
