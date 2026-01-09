@@ -1278,11 +1278,18 @@ const TagManager = {
             const CURRENT_VERSION = 3;
             const cacheVersion = payload.cacheVersion || 1;
             
-            // Invalidate if cache version is outdated
-            if (cacheVersion < CURRENT_VERSION) {
-                console.log(`🔄 Cache outdated (v${cacheVersion} < v${CURRENT_VERSION}) - auto-invalidating`);
+            // PERFORMANCE: Only invalidate if version is 2+ steps behind (not just 1)
+            // This prevents unnecessary cache clears during gradual rollouts
+            if (cacheVersion < CURRENT_VERSION - 1) {
+                console.log(`🔄 Cache very outdated (v${cacheVersion} << v${CURRENT_VERSION}) - auto-invalidating`);
                 storage.removeItem(cacheKey);
                 return null;
+            }
+            
+            // For cache that's only 1 version behind, use it but mark for background refresh
+            if (cacheVersion < CURRENT_VERSION) {
+                console.log(`ℹ️ Cache slightly outdated (v${cacheVersion} vs v${CURRENT_VERSION}) - using but will refresh in background`);
+                payload._needsRefresh = true;
             }
             
             const age = Date.now() - payload.timestamp;
