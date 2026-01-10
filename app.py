@@ -7195,17 +7195,24 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 strain_sovereign_raw = row[3]
                 strain_canonical_raw = row[4]
 
-                def _clean_lineage(val):
+                def _clean_lineage(val, field_name=''):
                     if val is None:
                         return None
                     txt = str(val).strip().upper()
+                    # CRITICAL: Don't clean sovereign_lineage values - preserve them as-is for UI display
+                    # Only clean if it's explicitly 'NONE' without spaces
                     if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
                         return None
+                    # For sovereign_lineage, preserve the original value (even if it has spaces like 'NON E')
+                    # The frontend will handle validation
+                    if 'sovereign' in field_name.lower() and txt:
+                        # Return original uppercase value for sovereign_lineage - don't normalize further
+                        return str(val).strip().upper()
                     return txt
 
                 db_lineage = _clean_lineage(db_lineage_raw)
-                product_sovereign = _clean_lineage(product_sovereign_raw)
-                strain_sovereign = _clean_lineage(strain_sovereign_raw)
+                product_sovereign = _clean_lineage(product_sovereign_raw, 'product_sovereign')
+                strain_sovereign = _clean_lineage(strain_sovereign_raw, 'strain_sovereign')
                 strain_canonical = _clean_lineage(strain_canonical_raw)
 
                 if db_name and db_lineage:
@@ -7250,12 +7257,15 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 effective_lineage = db_lineage  # Default to COALESCEd result
 
                 # CRITICAL FIX: ONLY set sovereign_lineage when present; do not emit 'NONE' or None
+                # ALWAYS prioritize product_sovereign over strain_sovereign (product-level edits override strain-level)
                 if lineage_info['product_sovereign']:
                     tag['sovereign_lineage'] = lineage_info['product_sovereign']
                     effective_lineage = lineage_info['product_sovereign']
+                    logging.debug(f"✅ Set sovereign_lineage from product for '{name}': {lineage_info['product_sovereign']}")
                 elif lineage_info['strain_sovereign']:
                     tag['sovereign_lineage'] = lineage_info['strain_sovereign']
                     effective_lineage = lineage_info['strain_sovereign']
+                    logging.debug(f"✅ Set sovereign_lineage from strain for '{name}': {lineage_info['strain_sovereign']}")
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
                 # Always set canonical_lineage and currentLineage for UI compatibility
