@@ -7551,15 +7551,20 @@ def generate_labels():
         # TRACE: Check store after getting excel_processor
         logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
-        # CRITICAL FIX: Store original file path before potentially replacing DataFrame
+        # CRITICAL FIX: Store original file path and DataFrame before potentially replacing it
+        # This allows instant restoration after generation (from memory, no disk I/O)
         original_file_path = None
         original_df = None
-        if excel_processor.df is not None and not excel_processor.df.empty:
-            original_file_path = excel_processor._last_loaded_file
-            original_df = excel_processor.df.copy()  # Store copy for restoration
+        needs_restoration = False  # Track if we need to restore after generation
         
         # CRITICAL PERFORMANCE FIX: If tags provided, set them directly (skip ALL file loading)
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
+            # Store original data BEFORE replacing for instant restoration later
+            if excel_processor.df is not None and not excel_processor.df.empty:
+                original_file_path = excel_processor._last_loaded_file
+                original_df = excel_processor.df.copy()  # Store copy for instant restoration
+                needs_restoration = True
+            
             logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly - SKIPPING ALL FILE I/O")
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
@@ -9283,18 +9288,19 @@ def generate_labels():
     finally:
         # CRITICAL FIX: Restore original Excel DataFrame INSTANTLY after generation to prevent filtering by vendor
         # This ensures that after tag generation, users see all tags from all vendors, not just the last generated vendor
-        # PERFORMANCE: Always restore from in-memory DataFrame copy (instant) instead of reloading from disk
+        # PERFORMANCE: Always restore from in-memory DataFrame copy (instant, no disk I/O)
         try:
-            if 'original_df' in locals() and original_df is not None and not original_df.empty:
-                if 'excel_processor' in locals() and excel_processor:
-                    try:
-                        # INSTANT RESTORE: Restore DataFrame directly from memory (no disk I/O)
-                        excel_processor.df = original_df.copy()  # Use fresh copy to avoid any references
-                        if 'original_file_path' in locals() and original_file_path:
-                            excel_processor._last_loaded_file = original_file_path
-                        logging.debug(f"⚡ INSTANT: Restored original DataFrame ({len(excel_processor.df)} rows)")
-                    except Exception as restore_error:
-                        logging.warning(f"Could not restore original DataFrame: {restore_error}")
+            if 'needs_restoration' in locals() and needs_restoration:
+                if 'original_df' in locals() and original_df is not None and not original_df.empty:
+                    if 'excel_processor' in locals() and excel_processor:
+                        try:
+                            # INSTANT RESTORE: Restore DataFrame directly from memory (no disk I/O)
+                            excel_processor.df = original_df.copy()  # Use fresh copy to avoid any references
+                            if 'original_file_path' in locals() and original_file_path:
+                                excel_processor._last_loaded_file = original_file_path
+                            logging.debug(f"⚡ INSTANT: Restored original DataFrame ({len(excel_processor.df)} rows)")
+                        except Exception as restore_error:
+                            logging.warning(f"Could not restore original DataFrame: {restore_error}")
         except Exception as restore_err:
             logging.warning(f"Error during Excel DataFrame restoration: {restore_err}")
         
@@ -21047,4 +21053,3262 @@ def serve_lineage_editor_test():
 @app.route('/debug_lineage_editor_comprehensive.html')
 def serve_lineage_editor_debug():
     """Serve the comprehensive lineage editor debug page."""
-    return send_fro
+    return send_from_directory('.', 'debug_lineage_editor_comprehensive.html')
+
+@app.route('/debug_lineage_editor_issue.html')
+def serve_lineage_editor_issue():
+    """Serve the lineage editor issue diagnostic page."""
+    return send_from_directory('.', 'debug_lineage_editor_issue.html')
+
+@app.route('/test_lineage_editor_styling.html')
+def serve_lineage_editor_styling_test():
+    """Serve the lineage editor styling test page."""
+    return send_from_directory('.', 'test_lineage_editor_styling.html')
+
+@app.route('/test_enhanced_lineage_editor.html')
+def serve_enhanced_lineage_editor_test():
+    """Serve the enhanced lineage editor test page."""
+    return send_from_directory('.', 'test_enhanced_lineage_editor.html')
+@app.route('/test_lineage_editor_direct')
+def test_lineage_editor_direct():
+    """Test the lineage editor directly."""
+    return '''
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Direct Lineage Editor Test</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body { background: #1a1a2e; color: white; padding: 2rem; }
+            .test-btn { margin: 1rem; padding: 1rem 2rem; }
+        </style>
+    </head>
+    <body>
+        <h1>Direct Lineage Editor Test</h1>
+        <button class="btn btn-primary test-btn" onclick="openLineageEditor()">Open Lineage Editor</button>
+        <script>
+            // Simulate the main app environment
+            window.showDatabaseModal = function(title, content) {
+                const modalHtml = `
+                    <div class="modal fade" id="databaseModal" tabindex="-1">
+                        <div class="modal-dialog ${title.includes('Lineage Editor') ? 'modal-xl' : 'modal-lg'}">
+                            <div class="modal-content glass-card">
+                                <div class="modal-header border-0 bg-transparent">
+                                    <h5 class="modal-title text-white">${title}</h5>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">${content}</div>
+                                <div class="modal-footer border-0 bg-transparent">
+                                    <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+                const modal = new bootstrap.Modal(document.getElementById('databaseModal'));
+                modal.show();
+            };
+            
+            window.openLineageEditor = function() {
+                showDatabaseModal('Enhanced Strain Lineage Editor', '<div class="text-white">This is the lineage editor with modal-xl sizing!</div>');
+            };
+        </script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    </body>
+    </html>
+    '''
+
+@app.route('/test_upload.html')
+def serve_test_upload():
+    """Serve the file upload test page."""
+    return send_from_directory('.', 'test_upload.html')
+
+@app.route('/test_default_file_loading.html')
+def serve_default_file_loading_test():
+    """Serve the default file loading test page."""
+    return send_from_directory('.', 'test_default_file_loading.html')
+
+@app.route('/test_undo_functionality.html')
+def serve_undo_functionality_test():
+    """Serve the undo functionality test page."""
+    return send_from_directory('.', 'test_undo_functionality.html')
+
+@app.route('/test_undo_selections.html')
+def serve_undo_selections_test():
+    """Serve the undo selections test page."""
+    return send_from_directory('.', 'test_undo_selections.html')
+
+@app.route('/upload-optimized', methods=['POST'])
+def upload_file_optimized():
+    """Highly optimized file upload with streaming and minimal processing"""
+    try:
+        # Quick validation
+        if not check_disk_space()[0]:
+            return jsonify({'error': 'Insufficient disk space'}), 507
+        
+        if not check_rate_limit(request.remote_addr):
+            return jsonify({'error': 'Rate limit exceeded'}), 429
+        
+        # Rate limiting for uploads (more restrictive)
+        client_ip = request.remote_addr
+        if not check_rate_limit(client_ip):
+            return jsonify({'error': 'Rate limit exceeded. Please wait before uploading another file.'}), 429
+        
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        logging.info("=== ULTRA-FAST UPLOAD REQUEST START ===")
+        start_time = time.time()
+        
+        # Log request details
+        logging.info(f"Request method: {request.method}")
+        logging.info(f"Request headers: {dict(request.headers)}")
+        logging.info(f"Request files: {list(request.files.keys()) if request.files else 'None'}")
+        
+        if 'file' not in request.files:
+            logging.error("No file uploaded - 'file' not in request.files")
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        logging.info(f"File received: {file.filename}, Content-Type: {file.content_type}")
+        
+        if file.filename == '':
+            logging.error("No file selected - filename is empty")
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.lower().endswith('.xlsx'):
+            logging.error(f"Invalid file type: {file.filename}")
+            return jsonify({'error': 'Only .xlsx files are allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
+        
+        # Sanitize filename to prevent path traversal (security fix)
+        sanitized_filename = sanitize_filename(file.filename)
+        if not sanitized_filename:
+            logging.error(f"Invalid filename after sanitization: {file.filename}")
+            return jsonify({'error': 'Invalid filename'}), 400
+        
+        # Check file size
+        file.seek(0, 2)  # Seek to end
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        logging.info(f"File size: {file_size} bytes ({file_size / (1024*1024):.2f} MB)")
+        
+        if file_size > app.config['MAX_CONTENT_LENGTH']:
+            logging.error(f"File too large: {file_size} bytes (max: {app.config['MAX_CONTENT_LENGTH']})")
+            return jsonify({'error': f'File too large. Maximum size is {app.config["MAX_CONTENT_LENGTH"] / (1024*1024):.1f} MB'}), 400
+        
+        # Ensure upload folder exists
+        upload_folder = app.config['UPLOAD_FOLDER']
+        os.makedirs(upload_folder, exist_ok=True)
+        logging.info(f"Upload folder: {upload_folder}")
+        
+        # Use sanitized filename (security fix)
+        temp_path = os.path.join(upload_folder, sanitized_filename)
+        logging.info(f"Saving file to: {temp_path}")
+        
+        save_start = time.time()
+        try:
+            file.save(temp_path)
+            save_time = time.time() - save_start
+            logging.info(f"File saved successfully to {temp_path} in {save_time:.2f}s")
+        except Exception as save_error:
+            logging.error(f"Error saving file: {save_error}")
+            return jsonify({'error': f'Failed to save file: {str(save_error)}'}), 500
+        
+        # Clear any existing status for this filename and mark as processing
+        logging.info(f"[ULTRA-FAST] Setting processing status for: {file.filename}")
+        update_processing_status(file.filename, 'processing')
+        logging.info(f"[ULTRA-FAST] Processing status set. Current statuses: {dict(processing_status)}")
+        
+        # ULTRA-FAST UPLOAD OPTIMIZATION - Minimal cache clearing
+        logging.info(f"[ULTRA-FAST] Performing ultra-fast upload optimization for: {sanitized_filename}")
+        
+        # Only clear the most critical caches (preserve everything else)
+        try:
+            # Clear only the most essential file-related caches
+            critical_cache_keys = [
+                'full_excel_cache_key', 'json_matched_cache_key', 'file_path'
+            ]
+            cleared_count = 0
+            for key in critical_cache_keys:
+                if cache.has(key):
+                    cache.delete(key)
+                    cleared_count += 1
+            logging.info(f"[ULTRA-FAST] Cleared {cleared_count} critical cache entries")
+        except Exception as cache_error:
+            logging.warning(f"[ULTRA-FAST] Error clearing critical caches: {cache_error}")
+        
+        # Preserve ALL user session data for instant UI response
+        # Only clear the absolute minimum required for new file
+        if 'file_path' in session:
+            del session['file_path']
+            logging.info(f"[ULTRA-FAST] Cleared session key: file_path")
+        
+        # Clear global Excel processor to force complete replacement
+        logging.info(f"[ULTRA-FAST] Resetting Excel processor before loading new file: {sanitized_filename}")
+        reset_excel_processor()
+        
+        # Clear any existing g context for this request
+        if hasattr(g, 'excel_processor'):
+            delattr(g, 'excel_processor')
+            logging.info("[ULTRA-FAST] Cleared g.excel_processor context")
+        
+        # Start background thread with error handling
+        try:
+            logging.info(f"[ULTRA-FAST] Starting background processing thread for {file.filename}")
+            thread = threading.Thread(target=process_excel_background, args=(file.filename, temp_path))
+            thread.daemon = True  # Make thread daemon so it doesn't block app shutdown
+            thread.start()
+            logging.info(f"[ULTRA-FAST] Background processing thread started successfully for {file.filename}")
+            
+            # Log current processing status
+            logging.info(f"[ULTRA-FAST] Current processing status after thread start: {dict(processing_status)}")
+        except Exception as thread_error:
+            logging.error(f"[ULTRA-FAST] Failed to start background thread: {thread_error}")
+            update_processing_status(file.filename, f'error: Failed to start processing')
+            return jsonify({'error': 'Failed to start file processing'}), 500
+        
+        upload_time = time.time() - start_time
+        logging.info(f"=== ULTRA-FAST UPLOAD REQUEST COMPLETE === Time: {upload_time:.2f}s")
+        
+        # Store uploaded file path in session
+        session['file_path'] = temp_path
+        
+        # Clear selected tags in session to ensure fresh start
+        session['selected_tags'] = []
+        
+        # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
+        upload_response_time = time.time() - start_time
+        logging.info(f"[ULTRA-FAST] Ultra-fast upload completed in {upload_response_time:.3f}s")
+        
+        return jsonify({
+            'message': 'File uploaded, processing in background', 
+            'filename': sanitized_filename,
+            'upload_time': f"{upload_response_time:.3f}s",
+            'processing_status': 'background',
+            'performance': 'ultra_fast'
+        })
+    except Exception as e:
+        logging.error(f"=== ULTRA-FAST UPLOAD REQUEST FAILED ===")
+        logging.error(f"Upload error: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Don't expose internal errors to client (security fix)
+        if app.config.get('DEBUG', False):
+            return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+        else:
+            return jsonify({'error': 'Upload failed. Please try again.'}), 500
+
+@app.route('/upload-fast', methods=['POST'])
+def upload_file_fast():
+    """Ultra-fast file upload with background processing for PythonAnywhere"""
+    try:
+        start_time = time.time()
+        logging.info("=== UPLOAD-FAST REQUEST START ===")
+        
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
+            logging.error("Upload attempted without store selection")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
+        # Check if file is present
+        if 'file' not in request.files:
+            logging.error("No file provided in request")
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            logging.error("No file selected")
+            return jsonify({'error': 'No file selected'}), 400
+        
+        logging.info(f"Processing file: {file.filename}")
+        
+        # Validate file type
+        if not file.filename.lower().endswith(('.xlsx', '.xls')):
+            return jsonify({'error': 'Only Excel files allowed'}), 400
+        
+        # Validate filename contains store name and matches selected store
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        
+        if not is_valid:
+            logging.error(f"Filename validation failed: {warning_msg}")
+            return jsonify({
+                'error': warning_msg,
+                'filename': file.filename,
+                'selected_store': selected_store,
+                'detected_store': detected_store
+            }), 400
+        
+        # Create uploads directory if it doesn't exist
+        uploads_dir = Path('uploads')
+        uploads_dir.mkdir(exist_ok=True)
+        logging.info(f"Uploads directory: {uploads_dir.absolute()}")
+        
+        # Generate unique filename
+        timestamp = int(time.time())
+        safe_filename = secure_filename(file.filename)
+        filename = f"{timestamp}_{safe_filename}"
+        file_path = uploads_dir / filename
+        
+        logging.info(f"Saving file to: {file_path}")
+        
+        # Save file
+        file.save(str(file_path))
+        
+        # Store file path in session
+        session['file_path'] = str(file_path)
+        session['selected_tags'] = []
+        
+        # Clear cached initial data so fresh upload is visible immediately
+        try:
+            cache_key = get_session_cache_key('initial_data')
+            cache.delete(cache_key)
+            logging.info(f"Cleared initial data cache for session after upload: {cache_key}")
+        except Exception as cache_error:
+            logging.warning(f"Could not clear initial data cache after upload: {cache_error}")
+        
+        # CRITICAL FIX: Use background processing with database storage
+        # This ensures products are stored in the database
+        try:
+            logging.info(f"Starting background processing with database storage for {file.filename}")
+            
+            # Use the background processing function that includes database storage
+            ultra_fast_background_processing(file.filename, str(file_path))
+            logging.info(f"Background processing with database storage completed for {file.filename}")
+            
+        except Exception as bg_error:
+            logging.error(f"Failed background processing: {bg_error}")
+            logging.error(f"Background error traceback: {traceback.format_exc()}")
+            # Don't fail the upload - just log the error
+            logging.warning("Continuing without processing - file uploaded but not processed")
+        
+        upload_time = time.time() - start_time
+        logging.info(f"File saved and processed successfully: {filename} in {upload_time:.3f}s")
+        
+        # Return success response with synchronous processing status
+        return jsonify({
+            'message': 'File uploaded and processed successfully',
+            'filename': filename,
+            'status': 'success',
+            'upload_time': f"{upload_time:.3f}s",
+            'processing_status': 'completed'
+        })
+        
+    except Exception as e:
+        logging.error(f"=== UPLOAD-FAST ERROR ===")
+        logging.error(f"Upload-fast error: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'Upload failed. Please try again.'}), 500
+
+
+@app.route('/test-upload-fast', methods=['GET'])
+def test_upload_fast():
+    """Test endpoint to verify upload-fast is working"""
+    return jsonify({
+        'message': 'Upload-fast endpoint is working',
+        'status': 'success',
+        'timestamp': time.time()
+    })
+
+@app.route('/test-sync-processing', methods=['GET'])
+def test_sync_processing():
+    """Test endpoint to verify synchronous processing is deployed"""
+    return jsonify({
+        'message': 'Synchronous processing is deployed', 
+        'status': 'ok',
+        'version': 'sync-v1',
+        'function_exists': hasattr(globals(), 'process_excel_sync')
+    })
+
+@app.route('/test-database-fix', methods=['GET'])
+def test_database_fix():
+    """Test endpoint to verify database fix is deployed"""
+    try:
+        from src.core.data.product_database import ProductDatabase
+        product_db = ProductDatabase()
+        
+        # Test if clear_all_data method exists
+        has_clear_method = hasattr(product_db, 'clear_all_data')
+        
+        return jsonify({
+            'message': 'Database fix test', 
+            'status': 'ok',
+            'version': 'database-fix-v1',
+            'has_clear_all_data': has_clear_method,
+            'database_path': product_db.db_path,
+            'database_exists': os.path.exists(product_db.db_path)
+        })
+    except Exception as e:
+        return jsonify({
+            'message': 'Database fix test failed', 
+            'status': 'error',
+            'error': str(e)
+        })
+
+@app.route('/test-direct-excel', methods=['GET'])
+def test_direct_excel():
+    """Test endpoint to directly load and return Excel data"""
+    try:
+        import glob
+        import os
+        import pandas as pd
+        
+        # Find the most recent Excel file
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        if not os.path.exists(uploads_dir):
+            return jsonify({'error': 'Uploads directory not found'})
+        
+        xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+        if not xlsx_files:
+            return jsonify({'error': 'No Excel files found'})
+        
+        # Get the most recent file
+        xlsx_files.sort(key=os.path.getmtime, reverse=True)
+        latest_file = xlsx_files[0]
+        
+        # Load the file
+        df = pd.read_excel(latest_file)
+        
+        # Convert to records
+        records = df.to_dict('records')
+        
+        # Clean the data
+        import math
+        def clean_dict(d):
+            if not isinstance(d, dict):
+                return {}
+            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+        
+        cleaned_records = [clean_dict(record) for record in records if isinstance(record, dict)]
+        
+        return jsonify({
+            'message': 'Direct Excel loading test',
+            'file': latest_file,
+            'shape': df.shape,
+            'columns': list(df.columns),
+            'record_count': len(cleaned_records),
+            'sample_record': cleaned_records[0] if cleaned_records else None
+        })
+    except Exception as e:
+        return jsonify({
+            'message': 'Direct Excel loading failed',
+            'error': str(e)
+        })
+
+@app.route('/test-available-tags-debug', methods=['GET'])
+def test_available_tags_debug():
+    """Test endpoint to debug available tags logic step by step"""
+    try:
+        import glob
+        import os
+        import pandas as pd
+        
+        debug_info = {
+            'message': 'Available tags debug test',
+            'steps': []
+        }
+        
+        # Step 1: Check uploads directory
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        debug_info['steps'].append(f'Uploads dir exists: {os.path.exists(uploads_dir)}')
+        debug_info['uploads_dir'] = uploads_dir
+        
+        if not os.path.exists(uploads_dir):
+            return jsonify(debug_info)
+        
+        # Step 2: Find Excel files
+        xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+        debug_info['steps'].append(f'Found {len(xlsx_files)} Excel files')
+        debug_info['xlsx_files'] = xlsx_files
+        
+        if not xlsx_files:
+            return jsonify(debug_info)
+        
+        # Step 3: Get most recent file
+        xlsx_files.sort(key=os.path.getmtime, reverse=True)
+        latest_file = xlsx_files[0]
+        debug_info['steps'].append(f'Latest file: {latest_file}')
+        debug_info['latest_file'] = latest_file
+        
+        # Step 4: Load the file
+        df = pd.read_excel(latest_file)
+        debug_info['steps'].append(f'Loaded file shape: {df.shape}')
+        debug_info['shape'] = df.shape
+        debug_info['columns'] = list(df.columns)
+        
+        # Step 5: Convert to records
+        records = df.to_dict('records')
+        debug_info['steps'].append(f'Converted to {len(records)} records')
+        debug_info['record_count'] = len(records)
+        
+        # Step 6: Clean the data
+        import math
+        def clean_dict(d):
+            if not isinstance(d, dict):
+                return {}
+            return {k: ('' if (v is None or (isinstance(v, float) and math.isnan(v))) else v) for k, v in d.items()}
+        
+        cleaned_records = [clean_dict(record) for record in records if isinstance(record, dict)]
+        debug_info['steps'].append(f'Cleaned to {len(cleaned_records)} records')
+        debug_info['cleaned_count'] = len(cleaned_records)
+        
+        # Step 7: Return sample
+        if cleaned_records:
+            debug_info['sample_record'] = cleaned_records[0]
+            debug_info['steps'].append('Sample record created')
+        else:
+            debug_info['steps'].append('No cleaned records')
+        
+        return jsonify(debug_info)
+    except Exception as e:
+        return jsonify({
+            'message': 'Available tags debug failed',
+            'error': str(e),
+            'steps': debug_info.get('steps', [])
+        })
+@app.route('/api/upload-database-file', methods=['POST'])
+def upload_database_file():
+    """Upload a database file directly to replace the existing database"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.lower().endswith('.db'):
+            return jsonify({'error': 'Only .db files are allowed'}), 400
+        
+        # Check file size
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        if file_size > 500 * 1024 * 1024:  # 500MB limit
+            return jsonify({'error': 'File too large. Maximum size is 500 MB'}), 400
+        
+        # Save the database file directly in uploads directory
+        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        file.save(db_file_path)
+        
+        # Verify the database file
+        try:
+            import sqlite3
+            conn = create_db_connection(db_file_path)
+            cursor = conn.cursor()
+            
+            # Check tables
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            # Check products count
+            cursor.execute('SELECT COUNT(*) FROM products')
+            products_count = cursor.fetchone()[0]
+            
+            # Check strains count
+            cursor.execute('SELECT COUNT(*) FROM strains')
+            strains_count = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            logging.info(f"Database file uploaded successfully: {products_count} products, {strains_count} strains")
+            
+            return jsonify({
+                'success': True,
+                'message': 'Database file uploaded successfully',
+                'filename': file.filename,
+                'size': file_size,
+                'products': products_count,
+                'strains': strains_count,
+                'tables': tables
+            })
+            
+        except Exception as db_error:
+            logging.error(f"Error verifying database file: {db_error}")
+            return jsonify({'error': f'Invalid database file: {str(db_error)}'}), 400
+        
+    except Exception as e:
+        logging.error(f"Error uploading database file: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+@app.route('/api/setup-database', methods=['POST'])
+def setup_database_endpoint():
+    """Set up the product database with sample data"""
+    try:
+        import sqlite3
+        from datetime import datetime
+        
+        # Database file path - save directly in uploads directory
+        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        
+        # Create a new database with sample data
+        conn = create_db_connection(db_file_path)
+        cursor = conn.cursor()
+        
+        # Create strains table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS strains (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                strain_name TEXT UNIQUE NOT NULL,
+                normalized_name TEXT NOT NULL,
+                canonical_lineage TEXT,
+                first_seen_date TEXT NOT NULL,
+                last_seen_date TEXT NOT NULL,
+                total_occurrences INTEGER DEFAULT 1,
+                lineage_confidence REAL DEFAULT 0.0,
+                sovereign_lineage TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+        
+        # Create products table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS products (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_name TEXT NOT NULL,
+                normalized_name TEXT NOT NULL,
+                strain_id INTEGER,
+                product_type TEXT NOT NULL,
+                vendor TEXT,
+                brand TEXT,
+                description TEXT,
+                weight TEXT,
+                units TEXT,
+                price TEXT,
+                lineage TEXT,
+                first_seen_date TEXT NOT NULL,
+                last_seen_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                product_strain TEXT,
+                quantity TEXT,
+                doh_compliant TEXT,
+                concentrate_type TEXT,
+                ratio TEXT,
+                joint_ratio TEXT,
+                thc_test_result TEXT,
+                cbd_test_result TEXT,
+                test_result_unit TEXT,
+                state TEXT,
+                is_sample TEXT,
+                is_mj_product TEXT,
+                discountable TEXT,
+                room TEXT,
+                batch_number TEXT,
+                lot_number TEXT,
+                barcode TEXT,
+                cost TEXT,
+                medical_only TEXT,
+                med_price TEXT,
+                expiration_date TEXT,
+                is_archived TEXT,
+                thc_per_serving TEXT,
+                allergens TEXT,
+                solvent TEXT,
+                accepted_date TEXT,
+                internal_product_identifier TEXT,
+                product_tags TEXT,
+                image_url TEXT,
+                ingredients TEXT,
+                combined_weight TEXT,
+                ratio_or_thc_cbd TEXT,
+                description_complexity TEXT,
+                total_thc TEXT,
+                thca TEXT,
+                cbda TEXT,
+                cbn TEXT,
+                FOREIGN KEY (strain_id) REFERENCES strains (id)
+            )
+        ''')
+        
+        # Insert sample strains
+        sample_strains = [
+            ('Blue Dream', 'blue dream', 'HYBRID', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 1, 0.9, 'HYBRID', '2025-01-01T00:00:00', '2025-01-01T00:00:00'),
+            ('OG Kush', 'og kush', 'INDICA', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 1, 0.9, 'INDICA', '2025-01-01T00:00:00', '2025-01-01T00:00:00'),
+            ('Sour Diesel', 'sour diesel', 'SATIVA', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 1, 0.9, 'SATIVA', '2025-01-01T00:00:00', '2025-01-01T00:00:00'),
+            ('Gelato', 'gelato', 'HYBRID', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 1, 0.9, 'HYBRID', '2025-01-01T00:00:00', '2025-01-01T00:00:00'),
+            ('Granddaddy Purple', 'granddaddy purple', 'INDICA', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 1, 0.9, 'INDICA', '2025-01-01T00:00:00', '2025-01-01T00:00:00')
+        ]
+        
+        cursor.executemany('''
+            INSERT OR IGNORE INTO strains 
+            (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, 
+             total_occurrences, lineage_confidence, sovereign_lineage, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', sample_strains)
+        
+        # Insert sample products
+        sample_products = [
+            ('Blue Dream Flower', 'blue dream flower', 1, 'flower', 'ABC Dispensary', 'Green Valley', 
+             'A balanced hybrid with sweet berry aroma', '3.5', 'g', '45.00', 'HYBRID', 
+             '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00',
+             'Blue Dream', '100', 'Yes', 'flower', '1:1', '1:1', '18.5', '0.5', '%', 'CA', 'No', 'Yes', 
+             'Yes', 'Room A', 'BATCH-001', 'LOT-001', '123456789', '30.00', 'No', '40.00', '2025-12-31', 
+             'No', '18.5', 'None', 'None', '2025-01-01', 'BD-001', 'premium,hybrid', '', 'Cannabis'),
+            ('OG Kush Concentrate', 'og kush concentrate', 2, 'concentrate', 'XYZ Cannabis', 'Purple Labs',
+             'A potent indica concentrate', '1', 'g', '60.00', 'INDICA', '2025-01-01T00:00:00', 
+             '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 'OG Kush', '50', 'Yes', 
+             'wax', '1:1', '1:1', '80.0', '2.0', '%', 'CA', 'No', 'Yes', 'Yes', 'Room B', 'BATCH-002', 
+             'LOT-002', '123456790', '45.00', 'No', '55.00', '2025-12-31', 'No', '80.0', 'None', 'CO2', 
+             '2025-01-01', 'OGK-001', 'indica,concentrate', '', 'Cannabis'),
+            ('Sour Diesel Pre-Roll', 'sour diesel pre-roll', 3, 'pre-roll', 'Local Dispensary', 'Fire Brand',
+             'A energizing sativa pre-roll', '1', 'g', '12.00', 'SATIVA', '2025-01-01T00:00:00', 
+             '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 'Sour Diesel', '25', 'Yes', 
+             'pre-roll', '1:1', '1:1', '22.0', '0.3', '%', 'CA', 'No', 'Yes', 'Yes', 'Room C', 'BATCH-003', 
+             'LOT-003', '123456791', '8.00', 'No', '10.00', '2025-12-31', 'No', '22.0', 'None', 'None', 
+             '2025-01-01', 'SD-001', 'sativa,pre-roll', '', 'Cannabis'),
+            ('Gelato Edible', 'gelato edible', 4, 'edible', 'Edibles Plus', 'Sweet Treats',
+             'A delicious hybrid edible', '10', 'mg', '25.00', 'HYBRID', '2025-01-01T00:00:00', 
+             '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 'Gelato', '20', 'Yes', 
+             'gummy', '1:1', '1:1', '10.0', '10.0', 'mg', 'CA', 'No', 'Yes', 'Yes', 'Room D', 'BATCH-004', 
+             'LOT-004', '123456792', '15.00', 'No', '20.00', '2025-12-31', 'No', '10.0', 'None', 'None', 
+             '2025-01-01', 'GEL-001', 'edible,hybrid', '', 'Cannabis'),
+            ('Granddaddy Purple Vape', 'granddaddy purple vape', 5, 'vape cartridge', 'Vape Shop', 'Vape Pro',
+             'A relaxing indica vape cartridge', '0.5', 'g', '35.00', 'INDICA', '2025-01-01T00:00:00', 
+             '2025-01-01T00:00:00', '2025-01-01T00:00:00', '2025-01-01T00:00:00', 'Granddaddy Purple', '15', 'Yes', 
+             'vape', '1:1', '1:1', '85.0', '5.0', '%', 'CA', 'No', 'Yes', 'Yes', 'Room E', 'BATCH-005', 
+             'LOT-005', '123456793', '25.00', 'No', '30.00', '2025-12-31', 'No', '85.0', 'None', 'None', 
+             '2025-01-01', 'GDP-001', 'indica,vape', '', 'Cannabis')
+        ]
+        
+        cursor.executemany('''
+            INSERT OR IGNORE INTO products 
+            (product_name, normalized_name, strain_id, product_type, vendor, brand, description, weight, units, 
+             price, lineage, first_seen_date, last_seen_date, created_at, updated_at, product_strain, quantity, 
+             doh_compliant, concentrate_type, ratio, joint_ratio, thc_test_result, cbd_test_result, test_result_unit, 
+             state, is_sample, is_mj_product, discountable, room, batch_number, lot_number, barcode, cost, 
+             medical_only, med_price, expiration_date, is_archived, thc_per_serving, allergens, solvent, 
+             accepted_date, internal_product_identifier, product_tags, image_url, ingredients)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', sample_products)
+        
+        conn.commit()
+        conn.close()
+        
+        # Verify the database
+        conn = create_db_connection(db_file_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) FROM products')
+        products_count = cursor.fetchone()[0]
+        
+        cursor.execute('SELECT COUNT(*) FROM strains')
+        strains_count = cursor.fetchone()[0]
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Database setup completed successfully',
+            'products': products_count,
+            'strains': strains_count,
+            'file_size': os.path.getsize(db_file_path)
+        })
+        
+    except Exception as e:
+        logging.error(f"Error setting up database: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cleanup-duplicate-products', methods=['POST'])
+def cleanup_duplicate_products_endpoint():
+    """Clean up duplicate products in the database"""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not hasattr(product_db, 'cleanup_duplicate_products'):
+            return jsonify({
+                'success': False,
+                'error': 'Cleanup function not available'
+            }), 500
+        
+        result = product_db.cleanup_duplicate_products()
+        
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        logging.error(f"Error in duplicate cleanup endpoint: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/diagnose-uploads', methods=['GET'])
+def diagnose_uploads():
+    """Diagnostic endpoint to check upload directory and files"""
+    try:
+        import os
+        import glob
+        
+        # Check current working directory
+        cwd = os.getcwd()
+        
+        # Check uploads directory
+        uploads_dir = os.path.join(cwd, 'uploads')
+        uploads_exists = os.path.exists(uploads_dir)
+        
+        # List files in uploads directory
+        files = []
+        if uploads_exists:
+            xlsx_files = glob.glob(os.path.join(uploads_dir, '*.xlsx'))
+            for file_path in xlsx_files:
+                file_stat = os.stat(file_path)
+                files.append({
+                    'name': os.path.basename(file_path),
+                    'size': file_stat.st_size,
+                    'modified': file_stat.st_mtime,
+                    'path': file_path
+                })
+            # Sort by modification time, newest first
+            files.sort(key=lambda x: x['modified'], reverse=True)
+        
+        # Check global processor
+        global _excel_processor
+        processor_status = {
+            'exists': _excel_processor is not None,
+            'has_df': _excel_processor.df is not None if _excel_processor else False,
+            'df_shape': _excel_processor.df.shape if _excel_processor and _excel_processor.df is not None else None,
+            'last_file': getattr(_excel_processor, '_last_loaded_file', None) if _excel_processor else None
+        }
+        
+        return jsonify({
+            'cwd': cwd,
+            'uploads_dir': uploads_dir,
+            'uploads_exists': uploads_exists,
+            'files': files,
+            'processor_status': processor_status,
+            'total_files': len(files)
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/check-processing', methods=['GET'])
+def check_processing():
+    """Check if background processing completed and show sample data"""
+    try:
+        if not hasattr(g, 'excel_processor') or g.excel_processor is None:
+            return jsonify({'error': 'No Excel processor available'}), 400
+        
+        if g.excel_processor.df is None:
+            return jsonify({'error': 'No Excel data loaded'}), 400
+        
+        # Check the problem products
+        problem_products = ['Cheesecake', 'Birthday Cake', 'Banana OG', 'Cherry Pie']
+        problem_data = []
+        
+        for product in problem_products:
+            matching_rows = g.excel_processor.df[g.excel_processor.df['ProductName'].str.contains(product, case=False, na=False)]
+            if not matching_rows.empty:
+                for idx, row in matching_rows.iterrows():
+                    problem_data.append({
+                        'product_name': row['ProductName'],
+                        'product_type': row.get('Product Type*', 'MISSING'),
+                        'lineage': row.get('Lineage', 'MISSING'),
+                        'index': idx
+                    })
+        
+        return jsonify({
+            'total_rows': len(g.excel_processor.df),
+            'columns': list(g.excel_processor.df.columns),
+            'problem_products': problem_data,
+            'all_product_types': g.excel_processor.df['Product Type*'].unique().tolist() if 'Product Type*' in g.excel_processor.df.columns else []
+        })
+        
+    except Exception as e:
+        logging.error(f"Check processing error: {str(e)}")
+        return jsonify({'error': f'Check failed: {str(e)}'}), 500
+
+@app.route('/process-uploaded-file', methods=['POST'])
+def process_uploaded_file():
+    """Process the uploaded file after upload"""
+    try:
+        file_path = session.get('file_path')
+        if not file_path or not os.path.exists(file_path):
+            return jsonify({'error': 'No uploaded file found'}), 400
+        
+        logging.info(f"Processing uploaded file: {file_path}")
+        
+        # Create and load Excel processor
+        processor = ExcelProcessor(file_path)
+        success = processor.load_file(file_path)
+        
+        if not success:
+            return jsonify({'error': 'Failed to process Excel file'}), 500
+        
+        # Store in global context
+        g.excel_processor = processor
+        
+        # Log processing details
+        if processor.df is not None:
+            logging.info(f"Processed {len(processor.df)} rows")
+            logging.info(f"Columns: {list(processor.df.columns)}")
+            
+            if 'Product Type*' in processor.df.columns:
+                product_types = processor.df['Product Type*'].unique()
+                logging.info(f"Product Types: {product_types.tolist()}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'File processed successfully',
+            'rows': len(processor.df) if processor.df is not None else 0,
+            'columns': list(processor.df.columns) if processor.df is not None else []
+        })
+        
+    except Exception as e:
+        logging.error(f"Process uploaded file error: {str(e)}")
+        return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+
+
+
+@app.route('/test-upload.html')
+def test_upload_page():
+    """Test page for file upload"""
+    return send_from_directory('.', 'test_upload.html')
+
+@app.route('/api/database-add-missing-columns', methods=['POST'])
+def add_missing_database_columns():
+    """Add missing columns to existing database tables."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        product_db.add_missing_columns()
+        return jsonify({'success': True, 'message': 'Missing columns added successfully'})
+    except Exception as e:
+        logging.error(f"Error adding missing columns: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/product-db/status', methods=['GET'])
+def get_product_db_status():
+    """Get Product Database status and priority information."""
+    try:
+        json_matcher = get_session_json_matcher()
+        if json_matcher:
+            status_info = json_matcher.get_product_database_priority_info()
+            return jsonify(status_info)
+        else:
+            return jsonify({
+                'enabled': False,
+                'strain_count': 0,
+                'product_count': 0,
+                'priority': 'UNKNOWN - No JSON matcher available',
+                'message': 'JSON matcher not initialized'
+            })
+    except Exception as e:
+        logging.error(f"Error getting Product Database status: {e}")
+        return jsonify({
+            'enabled': False,
+            'strain_count': 0,
+            'product_count': 0,
+            'priority': 'ERROR - Failed to check status',
+            'message': f'Error: {str(e)}'
+        }), 500
+@app.route('/api/json-match/diagnose', methods=['POST'])
+def diagnose_json_matching():
+    """Diagnose JSON matching issues and show Product Database priority status."""
+    try:
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+            
+        json_matcher = get_session_json_matcher()
+        excel_processor = get_session_excel_processor()
+        
+        if not json_matcher:
+            return jsonify({'error': 'JSON matcher not available'}), 500
+        
+        # Get Product Database status
+        db_status = json_matcher.get_product_database_priority_info()
+        
+        # Check if Product Database is enabled
+        db_enabled = json_matcher.is_product_database_enabled()
+        
+        # Analyze the URL to determine what type of data we're dealing with
+        url_analysis = {
+            'url': url,
+            'is_http': url.lower().startswith('http'),
+            'is_data_url': url.lower().startswith('data:'),
+            'url_type': 'HTTP' if url.lower().startswith('http') else 'Data URL' if url.lower().startswith('data:') else 'Unknown'
+        }
+        
+        # CRITICAL FIX: Enhanced diagnostic information
+        excel_status = {
+            'exists': excel_processor is not None,
+            'has_df': excel_processor.df is not None if excel_processor else False,
+            'df_empty': excel_processor.df.empty if excel_processor and excel_processor.df is not None else True,
+            'df_shape': excel_processor.df.shape if excel_processor and excel_processor.df is not None else None,
+            'last_loaded_file': getattr(excel_processor, '_last_loaded_file', None) if excel_processor else None
+        }
+        
+        json_matcher_status = {
+            'exists': json_matcher is not None,
+            'sheet_cache_built': json_matcher._sheet_cache is not None if json_matcher else False,
+            'sheet_cache_size': len(json_matcher._sheet_cache) if json_matcher and json_matcher._sheet_cache else 0,
+            'cache_status': json_matcher.get_sheet_cache_status() if json_matcher else 'No matcher'
+        }
+        
+        # Try to fetch and analyze JSON data
+        json_analysis = {}
+        try:
+            import requests
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'application/json'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            
+            # Analyze JSON structure
+            if isinstance(payload, list):
+                items = payload
+                json_analysis = {
+                    'type': 'list',
+                    'item_count': len(items),
+                    'sample_item': items[0] if items else None
+                }
+            elif isinstance(payload, dict):
+                items = payload.get("inventory_transfer_items", [])
+                json_analysis = {
+                    'type': 'dict',
+                    'has_inventory_items': 'inventory_transfer_items' in payload,
+                    'item_count': len(items),
+                    'global_vendor': payload.get("from_license_name", ""),
+                    'sample_item': items[0] if items else None,
+                    'root_keys': list(payload.keys())
+                }
+            else:
+                json_analysis = {
+                    'type': str(type(payload)),
+                    'error': 'Unexpected payload type'
+                }
+                
+            # CRITICAL FIX: Test the actual matching process
+            if json_matcher and items:
+                try:
+                    logging.info("DIAGNOSTIC: Testing JSON matching process...")
+                    matched_products = json_matcher.fetch_and_match(url)
+                    json_analysis['matching_test'] = {
+                        'success': True,
+                        'matched_count': len(matched_products) if matched_products else 0,
+                        'sample_matches': [p.get('Product Name*', 'Unknown') for p in (matched_products[:3] if matched_products else [])]
+                    }
+                    logging.info(f"DIAGNOSTIC: Matching test completed - {len(matched_products) if matched_products else 0} matches")
+                except Exception as match_test_error:
+                    json_analysis['matching_test'] = {
+                        'success': False,
+                        'error': str(match_test_error)
+                    }
+                    logging.error(f"DIAGNOSTIC: Matching test failed - {match_test_error}")
+                
+        except Exception as fetch_error:
+            json_analysis['fetch_error'] = str(fetch_error)
+        
+        # Provide diagnosis and recommendations
+        diagnosis = {
+            'timestamp': datetime.now().isoformat(),
+            'url_analysis': url_analysis,
+            'excel_processor_status': excel_status,
+            'json_matcher_status': json_matcher_status,
+            'json_analysis': json_analysis,
+            'product_database_status': db_status,
+            'recommendations': []
+        }
+        
+        # CRITICAL FIX: Enhanced recommendations based on actual status
+        if not excel_status['exists'] or excel_status['df_empty']:
+            diagnosis['recommendations'].append({
+                'priority': 'HIGH',
+                'action': 'Load Excel data or upload file - JSON matching needs product data for enhancement',
+                'benefit': 'Enable Excel-based matching for better product information'
+            })
+        
+        if not json_matcher_status['sheet_cache_built']:
+            diagnosis['recommendations'].append({
+                'priority': 'HIGH',
+                'action': 'Rebuild sheet cache - JSON matcher cache is not initialized',
+                'benefit': 'Enable proper product matching against Excel data'
+            })
+        
+        if db_enabled:
+            diagnosis['recommendations'].append({
+                'priority': 'HIGH',
+                'action': 'Product Database lookups will be prioritized over JSON exact matching',
+                'benefit': 'More accurate product information, consistent data, better lineage detection'
+            })
+            diagnosis['recommendations'].append({
+                'priority': 'MEDIUM',
+                'action': 'JSON data will be used as fallback when Product Database lookups fail',
+                'benefit': 'Ensures all products are processed even if not in database'
+            })
+        else:
+            diagnosis['recommendations'].append({
+                'priority': 'HIGH',
+                'action': 'Fix Product Database connection - JSON exact matching will be used',
+                'benefit': 'Enable Product Database priority for better data quality'
+            })
+            diagnosis['recommendations'].append({
+                'priority': 'MEDIUM',
+                'action': 'Check database file permissions and SQLite installation',
+                'benefit': 'Resolve Product Database availability issues'
+            })
+        
+        # Add specific recommendations based on URL type
+        if url_analysis['is_http']:
+            diagnosis['recommendations'].append({
+                'priority': 'LOW',
+                'action': 'Ensure URL is accessible and returns valid JSON',
+                'benefit': 'Prevent connection and parsing errors'
+            })
+        
+        return jsonify(diagnosis)
+        
+    except Exception as e:
+        logging.error(f"Error diagnosing JSON matching: {e}")
+        return jsonify({'error': f'Diagnosis failed: {str(e)}'}), 500
+
+@app.route('/api/json-match/mixed', methods=['POST'])
+def json_match_mixed():
+    """Enhanced JSON matching endpoint that explicitly mixes JSON and Excel data for optimal results."""
+    try:
+        # Clear the available tags cache to force refresh after JSON matching
+        cache_key = get_session_cache_key('available_tags')
+        cache.delete(cache_key)
+        logging.info(f"Cleared available tags cache before mixed JSON/Excel matching")
+        
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        if not (url.lower().startswith('http') or url.lower().startswith('data:')):
+            return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
+            
+        excel_processor = get_session_excel_processor()
+        json_matcher = get_session_json_matcher()
+        
+        # Check if we have Excel data
+        has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
+        
+        if not has_excel_data:
+            return jsonify({'error': 'Excel data is required for mixed JSON/Excel matching. Please load an Excel file first.'}), 400
+        
+        logging.info("Starting mixed JSON/Excel matching with enhanced data merging")
+        
+        # Perform JSON matching
+        try:
+            matched_products = json_matcher.fetch_and_match(url)
+            logging.info(f"JSON matching returned {len(matched_products) if matched_products else 0} products")
+            
+            if not matched_products:
+                logging.info("No products matched - likely due to strict vendor isolation or no matching products in database")
+                return jsonify({
+                    'success': True,
+                    'matched_count': 0,
+                    'matched_names': [],
+                    'available_tags': [],
+                    'selected_tags': [],
+                    'json_matched_tags': [],
+                    'message': 'No products matched. This may be due to strict vendor isolation - only products from the same vendor are matched.'
+                }), 200
+                
+        except Exception as match_error:
+            logging.error(f"JSON matching failed: {match_error}")
+            if "timeout" in str(match_error).lower():
+                return jsonify({'error': 'JSON matching timed out. The dataset may be too large or the URL may be slow to respond.'}), 408
+            elif "connection" in str(match_error).lower():
+                return jsonify({'error': 'Failed to connect to the JSON URL. Please check the URL and try again.'}), 503
+            else:
+                return jsonify({'error': f'JSON matching failed: {str(match_error)}'}), 500
+        
+        # Enhanced mixing: Combine JSON and Excel data optimally
+        mixed_products = []
+        excel_products = excel_processor.get_available_tags()
+        
+        if excel_products:
+            # Create a mapping of product names to Excel data
+            excel_product_map = {}
+            for excel_product in excel_products:
+                if isinstance(excel_product, dict):
+                    excel_name = excel_product.get('Product Name*', '').lower()
+                    if excel_name:
+                        excel_product_map[excel_name] = excel_product
+            
+            # Process each JSON product and enhance with Excel data
+            for json_product in matched_products:
+                if isinstance(json_product, dict):
+                    json_name = json_product.get('Product Name*', json_product.get('ProductName', '')).lower()
+                    
+                    if json_name and json_name in excel_product_map:
+                        # Found exact match - enhance JSON with Excel data
+                        excel_product = excel_product_map[json_name]
+                        enhanced_product = _enhance_json_with_excel_data(json_product, excel_product)
+                        enhanced_product['Source'] = 'Mixed (JSON + Excel)'
+                        mixed_products.append(enhanced_product)
+                        logging.info(f"Mixed product: {json_name}")
+                    else:
+                        # No Excel match - keep as JSON product but mark as such
+                        json_product['Source'] = 'JSON Only'
+                        mixed_products.append(json_product)
+                        logging.info(f"JSON-only product: {json_name}")
+        
+        # Store mixed products in cache and session
+        cache_key = get_session_cache_key('available_tags')
+        cache.set(cache_key, mixed_products, timeout=3600)
+        
+        # Set selected tags to all mixed products
+        selected_names = []
+        for product in mixed_products:
+            if isinstance(product, dict):
+                product_name = product.get('Product Name*', product.get('ProductName', ''))
+                if product_name:
+                    selected_names.append(product_name)
+        
+        session['selected_tags'] = selected_names
+        excel_processor.selected_tags = selected_names
+        session.modified = True
+        
+        logging.info(f"Mixed JSON/Excel matching completed: {len(mixed_products)} products")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully mixed {len(mixed_products)} JSON and Excel products',
+            'available_tags': len(mixed_products),
+            'selected_tags': len(selected_names),
+            'mixed_count': len([p for p in mixed_products if p.get('Source') == 'Mixed (JSON + Excel)']),
+            'json_only_count': len([p for p in mixed_products if p.get('Source') == 'JSON Only'])
+        })
+        
+    except Exception as e:
+        logging.error(f"Mixed JSON/Excel matching failed: {e}")
+        return jsonify({'error': f'Mixed matching failed: {str(e)}'}), 500
+
+@app.route('/api/json-match/clear-cache', methods=['POST'])
+def clear_json_match_cache():
+    """Clear JSON matching cache to resolve stale data issues."""
+    try:
+        # Clear all JSON matching related caches
+        cache_keys_to_clear = [
+            'available_tags',
+            'selected_tags', 
+            'json_matched_tags',
+            'full_excel_tags'
+        ]
+        
+        cleared_count = 0
+        for base_key in cache_keys_to_clear:
+            try:
+                # Clear session-specific cache keys
+                cache_key = get_session_cache_key(base_key)
+                if cache.has(cache_key):
+                    cache.delete(cache_key)
+                    cleared_count += 1
+                    logging.info(f"Cleared cache key: {cache_key}")
+                
+                # Also clear any direct cache keys
+                if cache.has(base_key):
+                    cache.delete(base_key)
+                    cleared_count += 1
+                    logging.info(f"Cleared direct cache key: {base_key}")
+                    
+            except Exception as key_error:
+                logging.warning(f"Error clearing cache key {base_key}: {key_error}")
+        
+        # Clear session cache keys
+        session_keys_to_clear = [
+            'json_matched_cache_key',
+            'full_excel_cache_key',
+            'current_filter_mode'
+        ]
+        
+        for key in session_keys_to_clear:
+            if key in session:
+                del session[key]
+                logging.info(f"Cleared session key: {key}")
+        
+        # Clear Excel processor caches if available
+        excel_processor = get_session_excel_processor()
+        if excel_processor:
+            if hasattr(excel_processor, '_file_cache'):
+                excel_processor._file_cache.clear()
+                logging.info("Cleared Excel processor file cache")
+            
+            if hasattr(excel_processor, '_dropdown_cache'):
+                excel_processor._dropdown_cache.clear()
+                logging.info("Cleared Excel processor dropdown cache")
+            
+            if hasattr(excel_processor, '_available_tags_cache'):
+                excel_processor._available_tags_cache.clear()
+                logging.info("Cleared Excel processor available tags cache")
+        
+        # Clear JSON matcher caches if available
+        json_matcher = get_session_json_matcher()
+        if json_matcher:
+            if hasattr(json_matcher, '_sheet_cache'):
+                json_matcher._sheet_cache = None
+                logging.info("Cleared JSON matcher sheet cache")
+            
+            if hasattr(json_matcher, '_indexed_cache'):
+                json_matcher._indexed_cache = None
+                logging.info("Cleared JSON matcher indexed cache")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {cleared_count} cache entries and session data',
+            'cleared_cache_count': cleared_count,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error clearing JSON match cache: {e}")
+        return jsonify({'error': f'Failed to clear cache: {str(e)}'}), 500
+
+@app.route('/api/debug/font-config')
+def debug_font_config():
+    """Debug endpoint to check font configuration."""
+    try:
+        from src.core.generation.unified_font_sizing import FONT_SIZING_CONFIG
+        return jsonify({
+            "status": "success",
+            "mini_config": FONT_SIZING_CONFIG.get('standard', {}).get('mini', {}),
+            "is_pythonanywhere": IS_PYTHONANYWHERE
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/api/performance/status')
+def performance_status():
+    """Get current performance status and statistics."""
+    try:
+        # Try to import performance optimizations
+        try:
+            from performance_optimizations import get_memory_usage, _memory_cache, _cache_timestamps  # type: ignore[import]
+        except ImportError:
+            # Fallback if performance_optimizations is not available
+            def get_memory_usage():
+                try:
+                    import psutil
+                    process = psutil.Process()
+                    return process.memory_info().rss / 1024 / 1024
+                except:
+                    # If psutil not available, use basic resource module
+                    try:
+                        import resource
+                        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Convert KB to MB
+                    except:
+                        return 0
+            _memory_cache = {}
+            _cache_timestamps = {}
+        
+        memory_mb = get_memory_usage()
+        cache_size = len(_memory_cache)
+        
+        return jsonify({
+            "status": "enabled",
+            "memory_usage_mb": round(memory_mb, 2),
+            "cache_entries": cache_size,
+            "is_production": IS_PRODUCTION,
+            "performance_module_loaded": PERFORMANCE_ENABLED,
+            "chunk_size_limit": CHUNK_SIZE_LIMIT,
+            "max_processing_time": MAX_PROCESSING_TIME_PER_CHUNK
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+@app.route('/api/performance/clear-cache', methods=['POST'])
+def clear_performance_cache():
+    """Clear performance cache."""
+    try:
+        if PERFORMANCE_ENABLED:
+            clear_cache()
+            return jsonify({"status": "success", "message": "Cache cleared"})
+        else:
+            return jsonify({"status": "disabled", "message": "Performance optimizations not available"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+# Database Import/Export API endpoints for migration
+@app.route('/api/backup-database', methods=['GET'])
+def backup_database():
+    """Backup the current database by downloading it."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db or not os.path.exists(product_db.db_path):
+            return jsonify({'error': 'Database not found'}), 404
+        
+        # Create backup filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        store_suffix = f'_{store_name}' if store_name else ''
+        backup_filename = f'product_database_backup{store_suffix}_{timestamp}.db'
+        
+        # Read the database file
+        with open(product_db.db_path, 'rb') as f:
+            database_data = f.read()
+        
+        # Create response with database file
+        response = make_response(database_data)
+        response.headers['Content-Type'] = 'application/x-sqlite3'
+        response.headers['Content-Disposition'] = f'attachment; filename="{backup_filename}"'
+        response.headers['Content-Length'] = len(database_data)
+        
+        logging.info(f"Database backup created: {backup_filename} ({len(database_data)} bytes)")
+        return response
+        
+    except Exception as e:
+        logging.error(f"Error backing up database: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/restore-database', methods=['POST'])
+def restore_database():
+    """Restore database from an uploaded backup file."""
+    try:
+        if 'database_file' not in request.files:
+            return jsonify({'error': 'No database file provided'}), 400
+        
+        file = request.files['database_file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Validate file extension
+        if not file.filename.lower().endswith(('.db', '.sqlite', '.sqlite3')):
+            return jsonify({'error': 'Invalid file type. Please upload a .db, .sqlite, or .sqlite3 file'}), 400
+        
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        if not product_db:
+            return jsonify({'error': 'Could not get product database'}), 500
+        
+        # Validate the uploaded database file
+        try:
+            import sqlite3
+            import tempfile
+            
+            # Save uploaded file to temp location
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as temp_file:
+                file.save(temp_file.name)
+                temp_path = temp_file.name
+            
+            # Validate it's a valid SQLite database
+            test_conn = create_db_connection(temp_path)
+            test_cursor = test_conn.cursor()
+            
+            # Check if it has required tables
+            test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('products', 'strains')")
+            tables = [row[0] for row in test_cursor.fetchall()]
+            test_conn.close()
+            
+            if 'products' not in tables or 'strains' not in tables:
+                os.unlink(temp_path)
+                return jsonify({'error': 'Invalid database file. Missing required tables (products, strains)'}), 400
+            
+            # Create backup of current database before restore
+            backup_path = f"{product_db.db_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            if os.path.exists(product_db.db_path):
+                import shutil
+                shutil.copy2(product_db.db_path, backup_path)
+                logging.info(f"Created backup of current database: {backup_path}")
+            
+            # Close any existing connections
+            if hasattr(product_db, '_connection') and product_db._connection:
+                try:
+                    product_db._connection.close()
+                except:
+                    pass
+            
+            # Replace current database with uploaded one
+            import shutil
+            shutil.copy2(temp_path, product_db.db_path)
+            
+            # Clean up temp file
+            os.unlink(temp_path)
+            
+            # Reset database initialization flag to force re-initialization
+            product_db._initialized = False
+            
+            # Verify the restored database
+            restored_conn = create_db_connection(product_db.db_path)
+            restored_cursor = restored_conn.cursor()
+            restored_cursor.execute("SELECT COUNT(*) FROM products")
+            product_count = restored_cursor.fetchone()[0]
+            restored_cursor.execute("SELECT COUNT(*) FROM strains")
+            strain_count = restored_cursor.fetchone()[0]
+            restored_conn.close()
+            
+            logging.info(f"Database restored successfully: {product_count} products, {strain_count} strains")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Database restored successfully',
+                'products': product_count,
+                'strains': strain_count,
+                'backup_created': backup_path if os.path.exists(backup_path) else None
+            })
+            
+        except sqlite3.Error as db_error:
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+            logging.error(f"Database validation error: {db_error}")
+            return jsonify({'error': f'Invalid database file: {str(db_error)}'}), 400
+        except Exception as restore_error:
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise restore_error
+        
+    except Exception as e:
+        logging.error(f"Error restoring database: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/clear-database', methods=['POST'])
+def clear_database():
+    """Clear the database for migration."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        # Clear products and strains tables
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM products")
+        cursor.execute("DELETE FROM strains")
+        cursor.execute("DELETE FROM _migration_log")
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info("Database cleared for migration")
+        return jsonify({"status": "success", "message": "Database cleared"})
+        
+    except Exception as e:
+        logging.error(f"Error clearing database: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/import-strains', methods=['POST'])
+def import_strains():
+    """Import strains from migration data."""
+    try:
+        data = request.get_json()
+        strains = data.get('strains', [])
+        
+        if not strains:
+            return jsonify({"error": "No strains provided"}), 400
+        
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        imported_count = 0
+        for strain in strains:
+            try:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO strains 
+                    (strain_name, normalized_name, canonical_lineage, total_occurrences, 
+                     first_seen_date, last_seen_date, lineage_confidence, sovereign_lineage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    strain.get('strain_name'),
+                    strain.get('normalized_name'),
+                    strain.get('canonical_lineage'),
+                    strain.get('total_occurrences', 0),
+                    strain.get('first_seen_date'),
+                    strain.get('last_seen_date'),
+                    strain.get('lineage_confidence'),
+                    strain.get('sovereign_lineage')
+                ))
+                imported_count += 1
+            except Exception as e:
+                logging.warning(f"Error importing strain {strain.get('strain_name')}: {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info(f"Imported {imported_count} strains")
+        return jsonify({"status": "success", "imported": imported_count})
+        
+    except Exception as e:
+        logging.error(f"Error importing strains: {e}")
+        return jsonify({"error": str(e)}), 500
+@app.route('/api/import-products', methods=['POST'])
+def import_products():
+    """Import products from migration data."""
+    try:
+        data = request.get_json()
+        products = data.get('products', [])
+        
+        if not products:
+            return jsonify({"error": "No products provided"}), 400
+        
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        imported_count = 0
+        for product in products:
+            try:
+                # Get strain_id if strain_name exists
+                strain_id = None
+                if product.get('strain_name'):
+                    cursor.execute("SELECT id FROM strains WHERE strain_name = ?", (product['strain_name'],))
+                    result = cursor.fetchone()
+                    if result:
+                        strain_id = result[0]
+                
+                # Insert product with all available columns
+                columns = []
+                values = []
+                
+                # Map product data to database columns
+                column_mapping = {
+                    'Product Name*': product.get('Product Name*'),
+                    'Product Type*': product.get('Product Type*'),
+                    'Vendor/Supplier*': product.get('Vendor/Supplier*'),
+                    'Product Brand': product.get('Product Brand'),
+                    'Lineage': product.get('Lineage'),
+                    'Description': product.get('Description'),
+                    'Weight*': product.get('Weight*'),
+                    'Units': product.get('Units'),
+                    'Price': product.get('Price'),
+                    'Product Strain': product.get('Product Strain'),
+                    'Quantity*': product.get('Quantity*'),
+                    'DOH': product.get('DOH'),
+                    'Concentrate Type': product.get('Concentrate Type'),
+                    'Ratio': product.get('Ratio'),
+                    'JointRatio': product.get('JointRatio'),
+                    'THC test result': product.get('THC test result'),
+                    'CBD test result': product.get('CBD test result'),
+                    'Test result unit (% or mg)': product.get('Test result unit (% or mg)'),
+                    'State': product.get('State'),
+                    'Is Sample? (yes/no)': product.get('Is Sample? (yes/no)'),
+                    'Is MJ product?(yes/no)': product.get('Is MJ product?(yes/no)'),
+                    'Discountable? (yes/no)': product.get('Discountable? (yes/no)'),
+                    'Room*': product.get('Room*'),
+                    'Batch Number': product.get('Batch Number'),
+                    'Lot Number': product.get('Lot Number'),
+                    'Barcode*': product.get('Barcode*'),
+                    'Medical Only (Yes/No)': product.get('Medical Only (Yes/No)'),
+                    'Med Price': product.get('Med Price'),
+                    'Expiration Date(YYYY-MM-DD)': product.get('Expiration Date(YYYY-MM-DD)'),
+                    'Is Archived? (yes/no)': product.get('Is Archived? (yes/no)'),
+                    'THC Per Serving': product.get('THC Per Serving'),
+                    'Allergens': product.get('Allergens'),
+                    'Solvent': product.get('Solvent'),
+                    'Accepted Date': product.get('Accepted Date'),
+                    'Internal Product Identifier': product.get('Internal Product Identifier'),
+                    'Product Tags (comma separated)': product.get('Product Tags (comma separated)'),
+                    'Image URL': product.get('Image URL'),
+                    'Ingredients': product.get('Ingredients'),
+                    'CombinedWeight': product.get('CombinedWeight'),
+                    'Ratio_or_THC_CBD': product.get('Ratio_or_THC_CBD'),
+                    'Description_Complexity': product.get('Description_Complexity'),
+                    'Total THC': product.get('Total THC'),
+                    'THCA': product.get('THCA'),
+                    'CBDA': product.get('CBDA'),
+                    'CBN': product.get('CBN')
+                }
+                
+                # Add non-null columns
+                for col, val in column_mapping.items():
+                    if val is not None:
+                        columns.append(f'"{col}"')
+                        values.append(val)
+                
+                # Add strain_id and metadata
+                columns.extend(['strain_id', 'total_occurrences', 'first_seen_date', 'last_seen_date'])
+                values.extend([
+                    strain_id,
+                    product.get('total_occurrences', 1),
+                    product.get('first_seen_date'),
+                    product.get('last_seen_date')
+                ])
+                
+                if columns:
+                    placeholders = ', '.join(['?' for _ in values])
+                    column_names = ', '.join(columns)
+                    
+                    cursor.execute(f"""
+                        INSERT OR REPLACE INTO products ({column_names})
+                        VALUES ({placeholders})
+                    """, values)
+                    
+                    imported_count += 1
+                    
+            except Exception as e:
+                logging.warning(f"Error importing product {product.get('Product Name*', 'Unknown')}: {e}")
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info(f"Imported {imported_count} products")
+        return jsonify({"status": "success", "imported": imported_count})
+        
+    except Exception as e:
+        logging.error(f"Error importing products: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/upload-database-chunk', methods=['POST'])
+def upload_database_chunk():
+    """Upload a database chunk for reconstruction."""
+    try:
+        data = request.get_json()
+        chunk_data = data.get('chunk_data')
+        chunk_num = data.get('chunk_num', 0)
+        total_chunks = data.get('total_chunks', 1)
+        is_last = data.get('is_last', False)
+        
+        if not chunk_data:
+            return jsonify({"error": "No chunk data provided"}), 400
+        
+        # Decode base64 data
+        import base64
+        import gzip
+        import tempfile
+        import os
+        
+        decoded_data = base64.b64decode(chunk_data)
+        
+        # Create temporary file for this chunk
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f'_chunk_{chunk_num}')
+        temp_file.write(decoded_data)
+        temp_file.close()
+        
+        # If this is the first chunk, start a new database file
+        if chunk_num == 0:
+            # Clear existing database
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM products")
+            cursor.execute("DELETE FROM strains")
+            cursor.execute("DELETE FROM _migration_log")
+            conn.commit()
+            conn.close()
+            
+            # Start new compressed database file
+            with open('database_reconstruction.gz', 'wb') as f:
+                f.write(decoded_data)
+        else:
+            # Append to existing compressed database file
+            with open('database_reconstruction.gz', 'ab') as f:
+                f.write(decoded_data)
+        
+        # If this is the last chunk, decompress and replace the database
+        if is_last:
+            print(f"Reconstructing database from {total_chunks} chunks...")
+            
+            # Decompress the reconstructed database
+            with gzip.open('database_reconstruction.gz', 'rb') as f_in:
+                with open('uploads/product_database_new.db', 'wb') as f_out:
+                    f_out.write(f_in.read())
+            
+            # Replace the existing database
+            import shutil
+            if os.path.exists('uploads/product_database.db'):
+                shutil.move('uploads/product_database.db', 'uploads/product_database_backup.db')
+            
+            shutil.move('uploads/product_database_new.db', 'uploads/product_database.db')
+            
+            # Cleanup
+            os.remove('database_reconstruction.gz')
+            os.remove(temp_file.name)
+            
+            # Reinitialize the database
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
+            product_db.init_database()
+            
+            logging.info(f"Database successfully reconstructed from {total_chunks} chunks")
+            return jsonify({"status": "success", "message": "Database reconstructed successfully"})
+        
+        # Cleanup temporary file
+        os.remove(temp_file.name)
+        
+        return jsonify({"status": "success", "message": f"Chunk {chunk_num + 1} received"})
+        
+    except Exception as e:
+        logging.error(f"Error processing database chunk: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# Missing function definitions
+def enforce_fixed_cell_dimensions():
+    """Placeholder for enforce_fixed_cell_dimensions function."""
+    pass
+
+# NOTE: apply_lineage_colors is imported from src.core.generation.docx_formatting where needed
+# Do NOT override it with a placeholder here
+
+@app.route('/api/backfill-missing-values', methods=['POST'])
+def backfill_missing_values():
+    """Backfill missing crucial values in existing database products."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        # Run the backfill process
+        result = product_db.backfill_missing_crucial_values()
+        
+        if result is None:
+            return jsonify({'success': False, 'message': 'Failed to backfill missing values'})
+        
+        total_updated = sum(result.values())
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully backfilled missing crucial values for {total_updated} total fields',
+            'details': result
+        })
+        
+    except Exception as e:
+        logger.error(f"Error backfilling missing values: {e}")
+        return jsonify({'success': False, 'message': f'Error backfilling missing values: {str(e)}'})
+
+# ============================================================================
+# ENHANCED JSON MATCHING ENDPOINTS
+# ============================================================================
+
+@app.route('/api/json-match/enhanced', methods=['POST'])
+def enhanced_json_match():
+    """Enhanced JSON matching endpoint with performance and accuracy improvements."""
+    try:
+        logging.info("Enhanced JSON match endpoint called")
+        
+        start_time = time.perf_counter()
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        strategy = data.get('strategy', 'hybrid')  # hybrid, fuzzy, semantic, ml_enhanced
+        debug_mode = data.get('debug', True)  # Enable debug mode for more matches
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+        if not (url.lower().startswith('http') or url.lower().startswith('data:')):
+            return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
+            
+        logging.info(f"Processing URL with strategy '{strategy}': {url[:50]}...")
+        
+        # Get enhanced JSON matcher
+        json_matcher = get_session_json_matcher()
+        if json_matcher is None:
+            return jsonify({'error': 'Failed to initialize enhanced JSON matcher'}), 500
+        
+        # Check if we have enhanced capabilities
+        has_enhanced = hasattr(json_matcher, 'match_products')
+        
+        if has_enhanced:
+            # Use enhanced matching
+            logging.info("Using enhanced JSON matching capabilities")
+            
+            # Fetch JSON data
+            import requests
+            response = requests.get(url, timeout=30)
+            json_data = response.json()
+            
+            if isinstance(json_data, list):
+                products = json_data
+                document_vendor = None  # No document-level vendor for array format
+            elif isinstance(json_data, dict):
+                products = json_data.get("inventory_transfer_items", [])
+                # Extract document-level vendor for Cultivera JSON format
+                document_vendor = json_data.get("from_license_name", "")
+            else:
+                products = []
+                document_vendor = None
+            
+            logging.info(f"Fetched {len(products)} products from JSON")
+            
+            # VENDOR ASSIGNMENT: Add document-level vendor to each product for vendor-restricted matching
+            if document_vendor and products:
+                for product in products:
+                    if not product.get('vendor'):  # Only assign if vendor not already present
+                        product['vendor'] = document_vendor
+                logging.info(f"🏢 Assigned document vendor '{document_vendor}' to {len(products)} products")
+            
+            # Convert strategy string to enum
+            from src.core.data.enhanced_json_matcher import MatchStrategy
+            strategy_enum = getattr(MatchStrategy, strategy.upper(), MatchStrategy.HYBRID)
+            
+            # Perform enhanced matching
+            matches = json_matcher.match_products(products, strategy=strategy_enum)
+            
+            # FALLBACK: If enhanced matching returns too few results, try original matcher
+            if len(matches) < 10:
+                logging.info(f"Enhanced matching returned only {len(matches)} matches, trying original matcher as fallback")
+                try:
+                    original_matches = json_matcher.fetch_and_match(url)
+                    if original_matches and len(original_matches) > len(matches):
+                        logging.info(f"Original matcher found {len(original_matches)} matches, using original results")
+                        
+                        # Convert original matches to enhanced format
+                        enhanced_matches = []
+                        for i, match_data in enumerate(original_matches):
+                            from src.core.data.enhanced_json_matcher import MatchResult, MatchStrategy
+                            enhanced_match = MatchResult(
+                                score=0.8 - (i * 0.01),  # Decreasing scores
+                                match_data=match_data,
+                                strategy_used=MatchStrategy.FUZZY,
+                                confidence=0.7,
+                                processing_time=0.001,
+                                match_factors={'fallback_match': True}
+                            )
+                            enhanced_matches.append(enhanced_match)
+                        matches = enhanced_matches
+                        logging.info(f"Using {len(matches)} matches from original matcher fallback")
+                except Exception as fallback_error:
+                    logging.warning(f"Fallback to original matcher failed: {fallback_error}")
+                    pass
+            
+            # Convert matches to response format
+            matched_products = []
+            match_details = []
+            
+            for match in matches[:50]:  # Limit to top 50 matches
+                matched_products.append(match.match_data)
+                match_details.append({
+                    'score': match.score,
+                    'confidence': match.confidence,
+                    'strategy': match.strategy_used.value,
+                    'processing_time': match.processing_time,
+                    'factors': match.match_factors if hasattr(match, 'match_factors') else {}
+                })
+            
+            # Sort matched products alphabetically by product name
+            if matched_products:
+                def get_sort_key(product):
+                    if isinstance(product, dict):
+                        name = (product.get('Product Name*', '') or 
+                               product.get('ProductName', '') or 
+                               product.get('Description', '') or 
+                               product.get('product_name', ''))
+                        return str(name).lower().strip()
+                    return ''
+                
+                # Create a list of tuples (product, detail) for synchronized sorting
+                combined = list(zip(matched_products, match_details))
+                combined.sort(key=lambda x: get_sort_key(x[0]))
+                matched_products, match_details = zip(*combined) if combined else ([], [])
+                matched_products = list(matched_products)
+                match_details = list(match_details)
+                logging.info(f"✅ Sorted {len(matched_products)} enhanced matched products alphabetically")
+            
+            processing_time = time.perf_counter() - start_time
+            
+            # Get performance report if available
+            performance_report = None
+            if hasattr(json_matcher, 'get_performance_report'):
+                try:
+                    performance_report = json_matcher.get_performance_report()
+                except:
+                    pass
+            
+            response_data = {
+                'success': True,
+                'enhanced': True,
+                'strategy_used': strategy,
+                'matched_count': len(matched_products),
+                'total_processing_time': processing_time,
+                'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products],
+                'available_tags': matched_products,
+                'match_details': match_details,
+                'performance_report': performance_report
+            }
+            
+            # Update session variables
+            if hasattr(get_session_excel_processor(), 'selected_tags'):
+                get_session_excel_processor().selected_tags = matched_products
+                
+            # Update timestamp for cache management
+            session['json_match_timestamp'] = time.time()
+            
+            logging.info(f"Enhanced JSON matching completed: {len(matched_products)} matches in {processing_time:.3f}s")
+            
+        else:
+            # Fallback to original matching
+            logging.info("Enhanced matcher not available, using original JSON matching")
+            matched_products = json_matcher.fetch_and_match(url)
+            
+            # Sort matched products alphabetically by product name
+            if matched_products:
+                def get_sort_key(product):
+                    if isinstance(product, dict):
+                        name = (product.get('Product Name*', '') or 
+                               product.get('ProductName', '') or 
+                               product.get('Description', '') or 
+                               product.get('product_name', ''))
+                        return str(name).lower().strip()
+                    return ''
+                matched_products.sort(key=get_sort_key)
+                logging.info(f"✅ Sorted {len(matched_products)} matched products alphabetically (fallback)")
+            
+            response_data = {
+                'success': True,
+                'enhanced': False,
+                'matched_count': len(matched_products) if matched_products else 0,
+                'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in (matched_products or [])],
+                'available_tags': matched_products or []
+            }
+        
+        # Clear available tags cache
+        cache_key = get_session_cache_key('available_tags')
+        cache.delete(cache_key)
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logging.error(f"Error in enhanced JSON matching: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Enhanced JSON matching failed: {str(e)}'}), 500
+@app.route('/api/json-match/ai-enhanced', methods=['POST'])
+def ai_enhanced_json_match():
+    """AI-enhanced JSON matching with machine learning."""
+    try:
+        logging.info("AI-enhanced JSON match endpoint called")
+        
+        start_time = time.perf_counter()
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+            
+        # Get enhanced AI matcher
+        ai_matcher = get_enhanced_ai_matcher()
+        if ai_matcher is None:
+            return jsonify({'error': 'Enhanced AI matcher not available'}), 500
+            
+        # Get excel processor for database products
+        excel_processor = get_session_excel_processor()
+        if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No database products available for matching'}), 500
+            
+        # Fetch JSON data
+        import requests
+        response = requests.get(url, timeout=30)
+        json_data = response.json()
+        
+        if isinstance(json_data, list):
+            json_products = json_data
+        elif isinstance(json_data, dict):
+            json_products = json_data.get("inventory_transfer_items", [])
+        else:
+            json_products = []
+        
+        # Convert database to list of dicts
+        db_products = excel_processor.df.to_dict('records')
+        
+        logging.info(f"AI matching {len(json_products)} JSON products against {len(db_products)} database products")
+        
+        # Perform AI-enhanced matching
+        matches = ai_matcher.match_products(json_products, db_products, strategy="ml_enhanced")
+        
+        # Sort by score and confidence
+        matches.sort(key=lambda x: (x.score, x.confidence), reverse=True)
+        
+        # Prepare response
+        matched_products = []
+        match_analytics = []
+        
+        for match in matches[:50]:  # Top 50
+            matched_products.append(match.match_data)
+            
+            match_info = {
+                'score': match.score,
+                'confidence': match.confidence,
+                'explanation': match.explanation,
+                'processing_time': match.processing_time,
+                'model_versions': match.model_versions
+            }
+            
+            # Add feature details if available
+            if hasattr(match, 'features'):
+                match_info['features'] = {
+                    'text_similarity': match.features.text_similarity,
+                    'semantic_similarity': match.features.semantic_similarity,
+                    'weight_similarity': match.features.weight_similarity,
+                    'vendor_similarity': match.features.vendor_similarity,
+                    'brand_similarity': match.features.brand_similarity
+                }
+            
+            match_analytics.append(match_info)
+        
+        processing_time = time.perf_counter() - start_time
+        
+        # Get performance report
+        performance_report = ai_matcher.get_performance_report()
+        
+        response_data = {
+            'success': True,
+            'ai_enhanced': True,
+            'matched_count': len(matched_products),
+            'total_processing_time': processing_time,
+            'matched_names': [p.get('Product Name*', p.get('ProductName', '')) for p in matched_products],
+            'available_tags': matched_products,
+            'match_analytics': match_analytics,
+            'performance_report': performance_report,
+            'ai_stats': {
+                'models_trained': performance_report.get('is_trained', False),
+                'match_history_size': performance_report.get('match_history_size', 0)
+            }
+        }
+        
+        # Update session
+        if hasattr(excel_processor, 'selected_tags'):
+            excel_processor.selected_tags = matched_products
+        session['json_match_timestamp'] = time.time()
+        
+        logging.info(f"AI-enhanced JSON matching completed: {len(matched_products)} matches in {processing_time:.3f}s")
+        
+        return jsonify(response_data)
+        
+    except Exception as e:
+        logging.error(f"Error in AI-enhanced JSON matching: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'AI-enhanced JSON matching failed: {str(e)}'}), 500
+
+@app.route('/api/json-match/performance', methods=['GET'])
+def get_matching_performance():
+    """Get performance analytics for JSON matching."""
+    try:
+        performance_data = {
+            'enhanced_matcher': None,
+            'ai_matcher': None,
+            'system_stats': {}
+        }
+        
+        # Get enhanced matcher performance
+        json_matcher = get_session_json_matcher()
+        if json_matcher and hasattr(json_matcher, 'get_performance_report'):
+            try:
+                performance_data['enhanced_matcher'] = json_matcher.get_performance_report()
+            except Exception as e:
+                logging.warning(f"Error getting enhanced matcher performance: {e}")
+        
+        # Get AI matcher performance
+        ai_matcher = get_enhanced_ai_matcher()
+        if ai_matcher and hasattr(ai_matcher, 'get_performance_report'):
+            try:
+                performance_data['ai_matcher'] = ai_matcher.get_performance_report()
+            except Exception as e:
+                logging.warning(f"Error getting AI matcher performance: {e}")
+        
+        # System stats
+        import psutil
+        performance_data['system_stats'] = {
+            'cpu_percent': psutil.cpu_percent(),
+            'memory_percent': psutil.virtual_memory().percent,
+            'disk_usage': psutil.disk_usage('/').percent
+        }
+        
+        return jsonify({
+            'success': True,
+            'performance_data': performance_data,
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting performance data: {str(e)}")
+        return jsonify({'error': f'Failed to get performance data: {str(e)}'}), 500
+
+@app.route('/api/json-match/train', methods=['POST'])
+def train_ai_matcher():
+    """Train AI matcher with feedback data."""
+    try:
+        data = request.get_json()
+        training_data = data.get('training_data', [])
+        
+        if not training_data:
+            return jsonify({'error': 'Training data is required'}), 400
+        
+        ai_matcher = get_enhanced_ai_matcher()
+        if ai_matcher is None:
+            return jsonify({'error': 'Enhanced AI matcher not available'}), 500
+        
+        # Convert training data format
+        formatted_training_data = []
+        for item in training_data:
+            if len(item) == 3:
+                json_product, db_product, score = item
+                formatted_training_data.append((json_product, db_product, float(score)))
+        
+        if not formatted_training_data:
+            return jsonify({'error': 'Invalid training data format'}), 400
+        
+        # Train the models
+        ai_matcher.train_from_feedback(formatted_training_data)
+        
+        return jsonify({
+            'success': True,
+            'message': f'AI matcher trained on {len(formatted_training_data)} examples',
+            'training_count': len(formatted_training_data)
+        })
+        
+    except Exception as e:
+        logging.error(f"Error training AI matcher: {str(e)}")
+        return jsonify({'error': f'Failed to train AI matcher: {str(e)}'}), 500
+
+@app.route('/api/json-match/cache/warm', methods=['POST'])
+def warm_matching_cache():
+    """Warm up caches for better performance."""
+    try:
+        json_matcher = get_session_json_matcher()
+        if json_matcher and hasattr(json_matcher, 'warm_cache'):
+            json_matcher.warm_cache()
+            return jsonify({
+                'success': True,
+                'message': 'Matching caches warmed up successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Cache warming not supported by current matcher'
+            })
+            
+    except Exception as e:
+        logging.error(f"Error warming cache: {str(e)}")
+        return jsonify({'error': f'Failed to warm cache: {str(e)}'}), 500
+
+@app.route('/api/json-match/cache/clear-enhanced', methods=['POST'])
+def clear_enhanced_matching_cache():
+    """Clear enhanced matching caches."""
+    try:
+        cleared_count = 0
+        
+        # Clear enhanced matcher cache
+        json_matcher = get_session_json_matcher()
+        if json_matcher and hasattr(json_matcher, 'clear_cache'):
+            json_matcher.clear_cache()
+            cleared_count += 1
+            
+        # Clear AI matcher caches
+        ai_matcher = get_enhanced_ai_matcher()
+        if ai_matcher:
+            # Reset match history if needed
+            if hasattr(ai_matcher, 'match_history'):
+                ai_matcher.match_history.clear()
+                cleared_count += 1
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {cleared_count} enhanced caches',
+            'cleared_count': cleared_count
+        })
+        
+    except Exception as e:
+        logging.error(f"Error clearing enhanced cache: {str(e)}")
+        return jsonify({'error': f'Failed to clear enhanced cache: {str(e)}'}), 500
+
+@app.route('/api/json-match/debug', methods=['POST'])
+def debug_json_matching():
+    """Debug JSON matching to see what's happening with match counts."""
+    try:
+        logging.info("Debug JSON matching endpoint called")
+        
+        data = request.get_json()
+        url = data.get('url', '').strip()
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+            
+        # Fetch JSON data
+        import requests
+        response = requests.get(url, timeout=30)
+        json_data = response.json()
+        
+        if isinstance(json_data, list):
+            products = json_data
+        elif isinstance(json_data, dict):
+            products = json_data.get("inventory_transfer_items", [])
+        else:
+            products = []
+        
+        # Get database products
+        excel_processor = get_session_excel_processor()
+        if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
+            return jsonify({'error': 'No database products available'}), 500
+            
+        db_products = excel_processor.df.to_dict('records')
+        
+        # Debug info
+        debug_info = {
+            'json_products_count': len(products),
+            'database_products_count': len(db_products),
+            'sample_json_products': [],
+            'sample_db_products': [],
+            'matching_details': []
+        }
+        
+        # Show sample JSON products
+        for i, product in enumerate(products[:3]):
+            debug_info['sample_json_products'].append({
+                'index': i,
+                'name': product.get('inventory_name', 'NO_NAME'),
+                'type': product.get('inventory_type', 'NO_TYPE'),
+                'vendor': product.get('vendor_name', 'NO_VENDOR')
+            })
+        
+        # Show sample DB products
+        for i, product in enumerate(db_products[:3]):
+            debug_info['sample_db_products'].append({
+                'index': i,
+                'name': product.get('Product Name*', 'NO_NAME'),
+                'type': product.get('Product Type', 'NO_TYPE'),
+                'vendor': product.get('Vendor/Supplier*', 'NO_VENDOR')
+            })
+        
+        # Try different matching approaches and see results
+        json_matcher = get_session_json_matcher()
+        
+        if hasattr(json_matcher, 'match_products'):
+            # Enhanced matching - try different strategies
+            from src.core.data.enhanced_json_matcher import MatchStrategy
+            
+            strategies = ['FUZZY', 'SEMANTIC', 'HYBRID']
+            
+            for strategy_name in strategies:
+                try:
+                    strategy_enum = getattr(MatchStrategy, strategy_name)
+                    matches = json_matcher.match_products(products[:5], strategy=strategy_enum)  # Test first 5
+                    
+                    debug_info['matching_details'].append({
+                        'strategy': strategy_name,
+                        'matches_found': len(matches),
+                        'top_scores': [match.score for match in matches[:5]],
+                        'sample_matches': [
+                            {
+                                'score': match.score,
+                                'confidence': match.confidence,
+                                'product_name': match.match_data.get('Product Name*', 'NO_NAME')
+                            }
+                            for match in matches[:3]
+                        ]
+                    })
+                except Exception as e:
+                    debug_info['matching_details'].append({
+                        'strategy': strategy_name,
+                        'error': str(e)
+                    })
+        
+        # Also try original matching for comparison
+        try:
+            original_matches = json_matcher.fetch_and_match(url)
+            debug_info['original_matcher'] = {
+                'matches_found': len(original_matches) if original_matches else 0,
+                'sample_matches': [
+                    match.get('Product Name*', 'NO_NAME')
+                    for match in (original_matches or [])[:5]
+                ]
+            }
+        except Exception as e:
+            debug_info['original_matcher'] = {'error': str(e)}
+        
+        return jsonify({
+            'success': True,
+            'debug_info': debug_info
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in debug JSON matching: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Debug JSON matching failed: {str(e)}'}), 500
+
+@app.route('/api/fix-descriptions', methods=['POST'])
+def fix_descriptions():
+    """Fix Description fields in database to follow Excel processor rules."""
+    try:
+        logging.info("=== FIX DESCRIPTIONS REQUEST START ===")
+        
+        # Get the product database instance
+                    # Store context removed - using single database
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        if not product_db:
+            return jsonify({'error': 'Product database not available'}), 500
+        
+        # Call the update_all_descriptions method
+        result = product_db.update_all_descriptions()
+        
+        if result['success']:
+            logging.info(f"Successfully fixed {result['updated_count']} product descriptions")
+            return jsonify({
+                'success': True,
+                'message': f"Successfully updated {result['updated_count']} product descriptions",
+                'updated_count': result['updated_count']
+            })
+        else:
+            logging.error(f"Failed to fix descriptions: {result.get('error', 'Unknown error')}")
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Unknown error')
+            }), 500
+        
+    except Exception as e:
+        logging.error(f"Error in fix descriptions: {str(e)}")
+        return jsonify({'error': f'Failed to fix descriptions: {str(e)}'}), 500
+@app.route('/api/backfill-units', methods=['POST'])
+def backfill_units():
+    """Backfill Units data in database from Excel files."""
+    try:
+        logging.info("=== BACKFILL UNITS REQUEST START ===")
+        
+        # Import the backfill functions
+        import pandas as pd
+        from pathlib import Path
+        
+        def normalize_product_name(name):
+            """Normalize product name for matching."""
+            if not name:
+                return ""
+            return str(name).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+
+        def normalize_units(unit_value):
+            """Normalize and standardize unit values."""
+            if not unit_value or str(unit_value).strip().lower() in ['nan', 'none', 'null', '']:
+                return 'each'
+            
+            unit = str(unit_value).strip().lower()
+            unit_mappings = {
+                'grams': 'g', 'gram': 'g', 'gm': 'g',
+                'ounces': 'oz', 'ounce': 'oz',
+                'milligrams': 'mg', 'milligram': 'mg',
+                'milliliters': 'ml', 'milliliter': 'ml',
+                'each': 'each', 'pack': 'pack', 'piece': 'each', 'unit': 'each'
+            }
+            return unit_mappings.get(unit, unit)
+
+        def extract_units_from_excel(excel_file_path):
+            """Extract product name to units mapping from Excel file."""
+            try:
+                df = pd.read_excel(excel_file_path, engine='openpyxl')
+                
+                # Find columns
+                product_name_col = None
+                units_col = None
+                weight_col = None
+                
+                for col in df.columns:
+                    if col in ['Product Name*', 'ProductName', 'Product Name']:
+                        product_name_col = col
+                    elif col in ['Weight Unit* (grams/gm or ounces/oz)', 'Units', 'Unit']:
+                        units_col = col
+                    elif col in ['Weight*', 'Weight']:
+                        weight_col = col
+                
+                if not product_name_col or not units_col:
+                    return {}
+                
+                # Create mapping
+                units_mapping = {}
+                for _, row in df.iterrows():
+                    product_name = row.get(product_name_col)
+                    units = row.get(units_col)
+                    weight = row.get(weight_col) if weight_col else None
+                    
+                    if product_name and str(product_name).strip():
+                        normalized_name = normalize_product_name(product_name)
+                        normalized_units = normalize_units(units)
+                        
+                        # For zero weight products, use 'each'
+                        if weight_col and (not weight or str(weight).strip() in ['0', '0.0', 'nan', 'None']):
+                            if normalized_units in ['g', 'grams', 'oz', 'ounces', 'mg', 'ml']:
+                                normalized_units = 'each'
+                        
+                        if normalized_name and normalized_units:
+                            units_mapping[normalized_name] = normalized_units
+                
+                return units_mapping
+            except Exception as e:
+                logging.error(f"Error reading Excel file {excel_file_path}: {e}")
+                return {}
+        
+        # Get database path - using main database
+        db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        
+        if not os.path.exists(db_path):
+            return jsonify({'error': 'Database not found'}), 400
+        
+        # Excel files to process
+        uploads_dir = Path(current_dir) / 'uploads'
+        excel_files = [
+            'A Greener Today - Bothell_inventory_08-29-2025  8_38 PM.xlsx',
+            'A Greener Today - Bothell_inventory_09-19-2025  4_52 PM.xlsx',
+            '1757643649_A_Greener_Today_-_Bothell_inventory_09-11-2025_4_36_PM.xlsx'
+        ]
+        
+        # Collect units mapping
+        combined_units_mapping = {}
+        files_processed = 0
+        
+        for excel_file in excel_files:
+            excel_path = uploads_dir / excel_file
+            if excel_path.exists():
+                units_mapping = extract_units_from_excel(excel_path)
+                combined_units_mapping.update(units_mapping)
+                files_processed += 1
+                logging.info(f"Processed {excel_file}: {len(units_mapping)} mappings")
+        
+        if not combined_units_mapping:
+            return jsonify({'error': 'No units data found in Excel files'}), 400
+        
+        # Update database
+        import sqlite3
+        conn = create_db_connection(db_path, timeout=30)
+        cursor = conn.cursor()
+        
+        # Get products needing updates
+        cursor.execute('''
+            SELECT id, "Product Name*", normalized_name, Units
+            FROM products 
+            WHERE Units = 'each' OR Units = '' OR Units IS NULL
+        ''')
+        
+        products_to_update = cursor.fetchall()
+        updated_count = 0
+        
+        for product_id, product_name, normalized_name, current_units in products_to_update:
+            new_units = None
+            
+            if normalized_name and normalized_name in combined_units_mapping:
+                new_units = combined_units_mapping[normalized_name]
+            else:
+                alt_normalized = normalize_product_name(product_name)
+                if alt_normalized in combined_units_mapping:
+                    new_units = combined_units_mapping[alt_normalized]
+            
+            if new_units and new_units != current_units:
+                cursor.execute('''
+                    UPDATE products 
+                    SET Units = ?, updated_at = ?
+                    WHERE id = ?
+                ''', (new_units, datetime.now().isoformat(), product_id))
+                updated_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info(f"Backfilled {updated_count} products with proper units")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Successfully backfilled {updated_count} products with proper units from {files_processed} Excel files',
+            'updated_count': updated_count,
+            'files_processed': files_processed,
+            'total_mappings': len(combined_units_mapping)
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in backfill units: {str(e)}")
+        return jsonify({'error': f'Failed to backfill units: {str(e)}'}), 500
+
+@app.route('/api/identify-bad-descriptions', methods=['GET'])
+def identify_bad_descriptions():
+    """Identify all description values that don't meet Product Name transformation criteria."""
+    try:
+                    # Store context removed - using single database
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        # Get the list of bad descriptions
+        result = product_db.identify_bad_descriptions()
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'bad_descriptions': result['bad_descriptions'],
+                'total_products': result['total_products'],
+                'bad_count': result['bad_count']
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Unknown error occurred')
+            }), 500
+            
+    except Exception as e:
+        logging.error(f"Error identifying bad descriptions: {str(e)}")
+        return jsonify({'error': f'Failed to identify bad descriptions: {str(e)}'}), 500
+
+@app.route('/api/fix-description-format', methods=['POST'])
+def fix_description_format():
+    """Fix Description field format to extract just product name from 'Product Name by Vendor - Weight' format."""
+    try:
+                    # Store context removed - using single database
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        # Run the original fix
+        result = product_db.fix_description_format()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Fixed {result["fixed"]} product descriptions',
+            'fixed': result['fixed'],
+            'total_checked': result['total_checked']
+        })
+            
+    except Exception as e:
+        logging.error(f"Error fixing description format: {str(e)}")
+        return jsonify({'error': f'Failed to fix description format: {str(e)}'}), 500
+
+# Register optimized upload routes
+# create_optimized_upload_routes(app)  # Disabled - module not found
+
+# Register fast upload routes (optional)
+if FAST_UPLOAD_AVAILABLE and create_fast_upload_routes:
+    try:
+        create_fast_upload_routes(app)
+        logging.info("Fast upload routes registered successfully")
+    except Exception as e:
+        logging.warning(f"Failed to register fast upload routes: {e}")
+
+# Register fast DOCX generation routes (optional)
+if FAST_DOCX_AVAILABLE and create_fast_docx_routes:
+    try:
+        create_fast_docx_routes(app)
+        logging.info("Fast DOCX routes registered successfully")
+    except Exception as e:
+        logging.warning(f"Failed to register fast DOCX routes: {e}")
+
+# Performance monitoring routes - DISABLED to prevent CPU issues
+@app.route('/api/performance/stats')
+def performance_stats():
+    """Get performance statistics - DISABLED."""
+    import time
+    return jsonify({
+        'message': 'Performance monitoring disabled to prevent high CPU usage',
+        'status': 'disabled',
+        'timestamp': time.time()
+    })
+
+@app.route('/api/performance/cache/stats')
+def cache_stats_route():
+    """Get cache statistics - DISABLED."""
+    import time
+    return jsonify({
+        'message': 'Cache monitoring disabled to prevent high CPU usage',
+        'status': 'disabled',
+        'timestamp': time.time()
+    })
+
+@app.route('/api/performance/cache/clear', methods=['POST'])
+def clear_cache_route():
+    """Clear all caches - SIMPLIFIED."""
+    try:
+        # Clear Flask cache only (safe operation)
+        if hasattr(cache, 'clear'):
+            cache.clear()
+        
+        # Basic garbage collection
+        import gc
+        gc.collect()
+        
+        return jsonify({'message': 'Basic cache cleared successfully'})
+    except Exception as e:
+        logging.error(f"Failed to clear caches: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/preroll-items/<group_id>')
+def display_preroll_items(group_id):
+    """Display preroll items for a specific product group - mobile-friendly page.
+    
+    Query parameters:
+        vendor: Optional vendor name to filter products by vendor
+    """
+    try:
+        # Get vendor from query parameter for vendor-specific filtering
+        vendor_filter = request.args.get('vendor', '').strip()
+        if vendor_filter:
+            from urllib.parse import unquote
+            vendor_filter = unquote(vendor_filter)  # Decode URL-encoded vendor name
+            logging.info(f"PREROLL ROUTE: Accessing preroll-items for group_id: {group_id} with vendor filter: '{vendor_filter}'")
+        else:
+            logging.info(f"PREROLL ROUTE: Accessing preroll-items for group_id: {group_id} (no vendor filter)")
+        
+        # CRITICAL FIX: If vendor is provided, try to get vendor-specific cache first
+        # Format: group_key = "group_id|vendor"
+        preroll_items = None
+        if vendor_filter:
+            group_key = f"{group_id}|{vendor_filter}"
+            # Try session-independent key first (most recent items for this vendor+group)
+            preroll_items = cache.get(f"preroll_group_latest_{group_key}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            
+            # If not found, try current session
+            if not preroll_items:
+                current_session_id = session.get('session_id', 'default')
+                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
+        
+        # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
+        if not preroll_items:
+            # Try session-independent key first (most recent items for this group)
+            preroll_items = cache.get(f"preroll_group_latest_{group_id}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for 'preroll_group_latest_{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            
+            # If not found, try current session
+            if not preroll_items:
+                current_session_id = session.get('session_id', 'default')
+                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_id}")
+            
+            # If still not found, try default fallback
+            if not preroll_items:
+                preroll_items = cache.get(f"preroll_group_default_{group_id}")
+        
+        # Get group display name from group_id or items
+        group_display_name = "Preroll Items"
+        if group_id:
+            # Try session-independent group info first
+            group_info = cache.get(f"preroll_group_info_latest_{group_id}")
+            
+            # If not found, try current session
+            if not group_info:
+                current_session_id = session.get('session_id', 'default')
+                group_info = cache.get(f"preroll_group_info_{current_session_id}_{group_id}")
+            
+            if group_info and isinstance(group_info, dict):
+                group_display_name = group_info.get('display_name', 'Preroll Items')
+            else:
+                # Infer from group_id
+                group_display_name_map = {
+                    'blunts': 'Assorted Blunts',
+                    '5packs': 'Assorted 1g x 5 Packs',
+                    'infused-preroll-1g': 'Infused Pre-Roll - 1g',
+                    'preroll-1g': 'Pre-Roll - 1g',
+                    'other': 'Assorted Pre-Rolls'
+                }
+                group_display_name = group_display_name_map.get(group_id, 'Preroll Items')
+        
+        # CRITICAL FIX: Filter items by vendor if vendor parameter is provided
+        # This ensures QR codes show only the specific vendor's products
+        if vendor_filter and preroll_items:
+            original_count = len(preroll_items)
+            # Filter items to only include those from the specified vendor
+            filtered_items = []
+            vendor_filter_lower = vendor_filter.lower().strip()
+            
+            for item in preroll_items:
+                item_vendor = str(item.get('vendor', '')).strip()
+                item_vendor_lower = item_vendor.lower().strip()
+                
+                # Case-insensitive vendor matching with normalization
+                # Handle common variations: apostrophes, spaces, special characters
+                def normalize_vendor(v):
+                    """Normalize vendor name for comparison."""
+                    v = v.lower().strip()
+                    # Remove common punctuation variations
+                    v = v.replace("'", "").replace("'", "").replace("`", "")
+                    v = v.replace("  ", " ")  # Multiple spaces to single space
+                    return v
+                
+                vendor_normalized = normalize_vendor(vendor_filter)
+                item_vendor_normalized = normalize_vendor(item_vendor)
+                
+                # Exact match (case-insensitive) or normalized match
+                if (item_vendor_lower == vendor_filter_lower or 
+                    item_vendor_normalized == vendor_normalized):
+                    filtered_items.append(item)
+            
+            preroll_items = filtered_items
+            logging.info(f"PREROLL ROUTE: Filtered {original_count} items to {len(preroll_items)} items for vendor '{vendor_filter}'")
+            
+            # Update group display name to include vendor
+            if preroll_items:
+                group_display_name = f"{group_display_name} - {vendor_filter}"
+
+        # CRITICAL FIX: If cache lookup failed, try database fallback
+        if not preroll_items:
+            logging.info("PREROLL ROUTE: Cache lookup failed, trying database fallback...")
+            try:
+                from src.core.generation.preroll_tag_generator import _get_preroll_group_from_database
+
+                # Try group_key first (with vendor), then group_id only
+                if vendor_filter:
+                    group_key = f"{group_id}|{vendor_filter}"
+                    preroll_items, group_info = _get_preroll_group_from_database(group_key=group_key)
+                    logging.info(f"PREROLL ROUTE: Database lookup for group_key '{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+
+                # If vendor-specific lookup failed or no vendor, try group_id only
+                if not preroll_items:
+                    preroll_items, group_info = _get_preroll_group_from_database(group_id=group_id)
+                    logging.info(f"PREROLL ROUTE: Database lookup for group_id '{group_id}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+
+                if preroll_items and group_info:
+                    logging.info(f"✅ PREROLL ROUTE: Successfully retrieved {len(preroll_items)} items from database for group '{group_id}'")
+                    # Update group display name from database
+                    if isinstance(group_info, dict):
+                        group_display_name = group_info.get('display_name', group_display_name)
+                        if vendor_filter:
+                            group_display_name = f"{group_display_name} - {vendor_filter}"
+
+                    # Restore to cache for future lookups
+                    if vendor_filter:
+                        group_key = f"{group_id}|{vendor_filter}"
+                        cache.set(f"preroll_group_latest_{group_key}", preroll_items, timeout=86400)
+                        if group_info:
+                            cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
+                    cache.set(f"preroll_group_latest_{group_id}", preroll_items, timeout=86400)
+                    if group_info:
+                        cache.set(f"preroll_group_info_latest_{group_id}", group_info, timeout=86400)
+
+                    logging.info(f"✅ PREROLL ROUTE: Restored preroll group data to cache from database")
+            except Exception as db_error:
+                logging.error(f"❌ PREROLL ROUTE: Database fallback failed: {db_error}")
+
+        if not preroll_items:
+            # Return error page if items not found
+            return f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>{group_display_name} Not Found</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{ 
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 20px;
+                        padding: 40px;
+                        max-width: 500px;
+                        width: 100%;
+                        text-align: center;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                    }}
+                    h1 {{ color: #333; margin-bottom: 20px; font-size: 24px; }}
+                    p {{ color: #666; line-height: 1.6; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Items Not Found</h1>
+                    <p>The {group_display_name.lower()} list has expired or could not be found. Please scan a fresh QR code.</p>
+                </div>
+            </body>
+            </html>
+            """, 404
+        
+        # Generate mobile-friendly HTML with lineage color coding
+        items_html = ""
+        for idx, item in enumerate(preroll_items, 1):
+            product_name = item.get('product_name', 'Unknown Product')
+            description = item.get('description', '')
+            price = item.get('price', 'N/A')
+            weight = item.get('weight', '')
+            vendor = item.get('vendor', '')
+            strain = item.get('strain', '')
+            lineage = item.get('lineage', '').upper()
+            doh = item.get('doh', '').upper()
+
+            # Determine lineage badge color and emoji
+            lineage_class = ''
+            lineage_emoji = ''
+            if 'SATIVA' in lineage:
+                lineage_class = 'lineage-sativa'
+                lineage_emoji = '⚡'
+            elif 'INDICA' in lineage:
+                lineage_class = 'lineage-indica'
+                lineage_emoji = '🌙'
+            elif 'HYBRID' in lineage:
+                lineage_class = 'lineage-hybrid'
+                lineage_emoji = '🌿'
+            elif 'CBD' in lineage:
+                lineage_class = 'lineage-cbd'
+                lineage_emoji = '💚'
+            else:
+                lineage_class = 'lineage-mixed'
+                lineage_emoji = '🌈'
+
+            # Determine DOH badge styling
+            doh_badge = ''
+            if doh and doh in ['DOH', 'YES', 'THC', 'CBD']:
+                doh_badge = f'<span class="detail doh-badge"><img src="/static/img/DOH.png" alt="DOH" style="height: 16px; width: auto; vertical-align: middle; margin-right: 4px;"> DOH</span>'
+
+            items_html += f"""
+            <div class="item-card">
+                <div class="item-number">{idx}</div>
+                <div class="item-content">
+                    <div class="product-header">
+                        <h3 class="product-name">{product_name}</h3>
+                        {f'<span class="lineage-badge {lineage_class}">{lineage_emoji} {lineage}</span>' if lineage else ''}
+                    </div>
+                    {f'<p class="description">{description}</p>' if description else ''}
+                    <div class="item-details">
+                        {f'<span class="detail price-tag">💰 {price}</span>' if price and price != 'N/A' else ''}
+                        {f'<span class="detail">⚖️ {weight}</span>' if weight else ''}
+                        {f'<span class="detail">🏪 {vendor}</span>' if vendor else ''}
+                        {f'<span class="detail">🌱 {strain}</span>' if strain else ''}
+                        {doh_badge}
+                    </div>
+                </div>
+            </div>
+            """
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{group_display_name}</title>
+            <style>
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 20px;
+                    padding-bottom: 40px;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                }}
+                .header {{
+                    background: white;
+                    border-radius: 20px;
+                    padding: 30px;
+                    margin-bottom: 20px;
+                    text-align: center;
+                    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+                }}
+                .header h1 {{
+                    color: #333;
+                    font-size: 28px;
+                    margin-bottom: 10px;
+                }}
+                .header p {{
+                    color: #666;
+                    font-size: 16px;
+                }}
+                .items-list {{
+                    display: flex;
+                    flex-direction: column;
+                    gap: 15px;
+                }}
+                .item-card {{
+                    background: white;
+                    border-radius: 15px;
+                    padding: 20px;
+                    display: flex;
+                    gap: 15px;
+                    box-shadow: 0 3px 15px rgba(0,0,0,0.1);
+                    transition: transform 0.2s, box-shadow 0.2s;
+                    border-left: 4px solid #667eea;
+                }}
+                .item-card:active {{
+                    transform: scale(0.98);
+                }}
+                .item-number {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                    font-size: 18px;
+                    flex-shrink: 0;
+                }}
+                .item-content {{
+                    flex: 1;
+                }}
+                .product-header {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: flex-start;
+                    gap: 10px;
+                    margin-bottom: 8px;
+                    flex-wrap: wrap;
+                }}
+                .product-name {{
+                    color: #333;
+                    font-size: 18px;
+                    font-weight: 600;
+                    flex: 1;
+                    min-width: 200px;
+                }}
+                .lineage-badge {{
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    white-space: nowrap;
+                }}
+                .lineage-sativa {{
+                    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+                    color: #333;
+                    box-shadow: 0 2px 8px rgba(255, 215, 0, 0.3);
+                }}
+                .lineage-indica {{
+                    background: linear-gradient(135deg, #9370DB 0%, #6A5ACD 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(147, 112, 219, 0.3);
+                }}
+                .lineage-hybrid {{
+                    background: linear-gradient(135deg, #32CD32 0%, #228B22 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(50, 205, 50, 0.3);
+                }}
+                .lineage-cbd {{
+                    background: linear-gradient(135deg, #4ECDC4 0%, #44A08D 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(78, 205, 196, 0.3);
+                }}
+                .lineage-mixed {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+                }}
+                .description {{
+                    color: #666;
+                    font-size: 14px;
+                    margin-bottom: 10px;
+                    line-height: 1.4;
+                }}
+                .item-details {{
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 12px;
+                }}
+                .detail {{
+                    color: #555;
+                    font-size: 14px;
+                    line-height: 1.5;
+                    padding: 4px 10px;
+                    background: #f5f5f5;
+                    border-radius: 8px;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                }}
+                .price-tag {{
+                    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+                    color: #333;
+                    font-weight: 600;
+                    box-shadow: 0 2px 6px rgba(255, 215, 0, 0.2);
+                }}
+                .doh-badge {{
+                    background: linear-gradient(135deg, #00d4aa 0%, #00b894 100%);
+                    color: white;
+                    font-weight: 600;
+                    box-shadow: 0 2px 6px rgba(0, 212, 170, 0.3);
+                }}
+                @media (max-width: 480px) {{
+                    .header h1 {{ font-size: 24px; }}
+                    .product-name {{ font-size: 16px; min-width: 150px; }}
+                    .item-card {{ padding: 15px; }}
+                    .lineage-badge {{ font-size: 11px; padding: 3px 8px; }}
+                    .product-header {{ flex-direction: column; align-items: flex-start; }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>{group_display_name}</h1>
+                    <p>{len(preroll_items)} option{'s' if len(preroll_items) != 1 else ''} available</p>
+                </div>
+                <div class="items-list">
+                    {items_html}
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return html
+        
+    except Exception as e:
+        logging.error(f"Error displaying preroll items: {e}")
+        return f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Error</title>
+            <style>
+                body {{ font-family: system-ui; padding: 40px; text-align: center; }}
+                h1 {{ color: #d32f2f; }}
+            </style>
+        </head>
+        <body>
+            <h1>Error</h1>
+            <p>An error occurred while loading preroll items.</p>
+        </body>
+        </html>
+        """, 500
+
+@app.route('/api/performance/optimize', methods=['POST'])
+def optimize_performance():
+    """Trigger performance optimizations - SIMPLIFIED."""
+    try:
+        # Clear Flask cache only (safe operation)
+        if hasattr(cache, 'clear'):
+            cache.clear()
+        
+        # Basic garbage collection
+        import gc
+        gc.collect()
+        
+        return jsonify({'message': 'Basic optimization completed'})
+    except Exception as e:
+        logging.error(f"Failed to optimize performance: {e}")
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    # SIMPLE STARTUP: Allow easy process termination
+    import sys
+    import os
+    import signal
+    
+    # CRITICAL FIX: Windows-compatible signal handlers
+    import platform
+    is_windows = platform.system() == 'Windows'
+    import tempfile
+    
+    # Get cross-platform temp directory
+    temp_dir = tempfile.gettempdir()
+    lock_file = os.path.join(temp_dir, 'labelmaker_app.lock')
+    
+    # Set up signal handlers for clean shutdown
+    def signal_handler(signum, frame):
+        print(f"\n🛑 Received signal {signum} - shutting down gracefully...")
+        # Clean up lock file if it exists
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass
+        sys.exit(0)
+    
+    # Register signal handlers for clean shutdown (Windows-compatible)
+    try:
+        signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C (works on Windows)
+        signal.signal(signal.SIGTERM, signal_handler)  # kill command (Unix)
+        if not is_windows:
+            signal.signal(signal.SIGHUP, signal_handler)   # hangup (Unix only)
+    except (ValueError, AttributeError) as e:
+        logging.warning(f"Some signal handlers unavailable on this platform: {e}")
+    
+    # CRITICAL FIX: Cross-platform lock file check (lock_file already defined above)
+    if os.path.exists(lock_file):
+        try:
+            with open(lock_file, 'r') as f:
+                pid = int(f.read().strip())
+            # Check if the process is still running (Windows-compatible)
+            try:
+                if is_windows:
+                    # Windows: use tasklist to check if process exists
+                    import subprocess
+                    result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
+                                          capture_output=True, text=True, timeout=2)
+                    if str(pid) in result.stdout:
+                        print(f"⚠️  App already running with PID {pid}")
+                        print(f"💡 To force start, delete lock file: {lock_file}")
+                        sys.exit(0)
+                    else:
+                        # Process doesn't exist, remove stale lock file
+                        os.remove(lock_file)
+                else:
+                    # Unix: use os.kill
+                    os.kill(pid, 0)  # This will raise an exception if process doesn't exist
+                    print(f"⚠️  App already running with PID {pid}")
+                    print(f"💡 To force start, run: rm -f {lock_file} && python app.py")
+                    sys.exit(0)
+            except (OSError, ProcessLookupError, subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+                # Process doesn't exist or tasklist failed, remove stale lock file
+                try:
+                    os.remove(lock_file)
+                except FileNotFoundError:
+                    pass
+        except (ValueError, FileNotFoundError):
+            # Invalid lock file, remove it
+            try:
+                os.remove(lock_file)
+            except FileNotFoundError:
+                pass
+    
+    # Create lock file with current PID
+    try:
+        with open(lock_file, 'w') as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass  # Continue even if we can't create lock file
+    
+    # Use the LabelMakerApp class for proper startup
+    print("Starting Label Maker application...")
+    print(f"🆔 Process ID: {os.getpid()}")
+    # CRITICAL FIX: os.getppid() not available on Windows
+    try:
+        if not is_windows:
+            print(f"🆔 Parent Process ID: {os.getppid()}")
+    except (AttributeError, OSError):
+        pass  # Not available on this platform
+    print("🛑 Press Ctrl+C to stop the app")
+    
+    try:
+        # Create and run the application
+        label_maker_app = LabelMakerApp()
+        label_maker_app.run()
+    except KeyboardInterrupt:
+        print("\n🛑 Shutdown requested by user")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+    finally:
+        # Clean up lock file on exit
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass 
+@app.route('/test-json-match')
+def test_json_match_page():
+    """Test page for JSON matching functionality."""
+    return render_template('test_json_match.html')
