@@ -116,13 +116,12 @@ function createTagRow(tag) {
   // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
   // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
   // sovereign_lineage can be from current session edits OR preexisting saved values
-  // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
+  // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
   let rawLineage = '';
   if (tag.sovereign_lineage) {
-    const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
-    const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
-    // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
-    if (sovereignRaw && sovereignUpper !== 'NONE') {
+    const sovereignRaw = String(tag.sovereign_lineage).trim();
+    // Use if not empty - trust backend validation
+    if (sovereignRaw) {
       rawLineage = tag.sovereign_lineage;
     }
   }
@@ -298,13 +297,12 @@ class TagsTable {
   // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
   // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
   // sovereign_lineage can be from current session edits OR preexisting saved values
-  // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
+  // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
   let rawLineage = '';
   if (tag.sovereign_lineage) {
-    const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
-    const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
-    // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
-    if (sovereignRaw && sovereignUpper !== 'NONE') {
+    const sovereignRaw = String(tag.sovereign_lineage).trim();
+    // Use if not empty - trust backend validation
+    if (sovereignRaw) {
       rawLineage = tag.sovereign_lineage;
     }
   }

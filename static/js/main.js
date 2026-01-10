@@ -6972,12 +6972,11 @@ const TagManager = {
         // If no manual edit, use currentLineage (matches DOCX COALESCE result)
         let lineage;
         // Priority 1: sovereign_lineage (manual user edits OR preexisting from database - highest priority)
-        // Use ANY sovereign_lineage value that exists (backend validates it)
+        // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
         if (tag.sovereign_lineage) {
-            const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
-            const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
-            // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
-            if (sovereignRaw && sovereignUpper !== 'NONE') {
+            const sovereignRaw = String(tag.sovereign_lineage).trim();
+            // Use if not empty - trust backend validation
+            if (sovereignRaw) {
                 lineage = tag.sovereign_lineage;
             }
         }
@@ -7426,16 +7425,12 @@ const TagManager = {
         // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
         let tagDbLineage = '';
         // Priority 1: sovereign_lineage (manual edits OR preexisting from database - highest priority)
-        // Use ANY sovereign_lineage value that exists (backend validates it)
+        // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
         if (tag.sovereign_lineage) {
-            const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
-            const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
-            // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
-            if (sovereignRaw && sovereignUpper !== 'NONE') {
+            const sovereignRaw = String(tag.sovereign_lineage).trim();
+            // Use if not empty - trust backend validation
+            if (sovereignRaw) {
                 tagDbLineage = sovereignRaw.toUpperCase().trim();
-            } else if (isForSelectedTags) {
-                // Debug: Log why sovereign_lineage was rejected
-                console.log(`⚠️ Rejected sovereign_lineage for "${displayName}": "${tag.sovereign_lineage}" (normalized: "${sovereignUpper}") - treating as NONE, using currentLineage instead`);
             }
         }
         // Priority 2: currentLineage (matches DOCX COALESCE result)
