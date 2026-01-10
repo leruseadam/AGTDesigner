@@ -3120,7 +3120,24 @@ const TagManager = {
         // USER PREFERENCE: Scroll to top when filter is applied (don't preserve position)
         // Fast path: show all if no filters (Mac-like speed)
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
-        const brandFilter = document.getElementById('brandFilter')?.value || '';
+        // CRITICAL FIX: Ensure brand filter value is always read correctly, with fallback to state
+        const brandFilterElement = document.getElementById('brandFilter');
+        let brandFilter = brandFilterElement?.value || '';
+        // Fallback: If element exists but value is empty, check state
+        if (!brandFilter && brandFilterElement && this.state.filters?.brand) {
+            brandFilter = this.state.filters.brand;
+            // Sync the dropdown to match state
+            if (brandFilter !== 'All' && brandFilter !== '') {
+                brandFilterElement.value = brandFilter;
+            }
+        }
+        // Additional fallback: If still empty, check if dropdown has a selected option
+        if (!brandFilter && brandFilterElement) {
+            const selectedOption = brandFilterElement.options[brandFilterElement.selectedIndex];
+            if (selectedOption && selectedOption.value && selectedOption.value !== 'All') {
+                brandFilter = selectedOption.value;
+            }
+        }
         const productTypeFilter = document.getElementById('productTypeFilter')?.value || '';
         const lineageFilter = document.getElementById('lineageFilter')?.value || '';
         const weightFilter = document.getElementById('weightFilter')?.value || '';
@@ -16695,6 +16712,17 @@ const TagManager = {
                 // Only use change event for Mac-like behavior
                 filterElement.addEventListener('change', filterElement._filterChangeHandler);
                 
+                // CRITICAL FIX: Also add input event for brand filter to catch programmatic changes
+                if (filterId === 'brandFilter') {
+                    filterElement._filterInputHandler = (event) => {
+                        // Re-trigger change handler if value changed programmatically
+                        if (event.target.value !== self.state.filters?.brand) {
+                            filterElement._filterChangeHandler(event);
+                        }
+                    };
+                    filterElement.addEventListener('input', filterElement._filterInputHandler);
+                }
+                
                 verboseLog(`✅ Fast event listener attached to ${filterId}`);
             } else {
                 missingFilters.push(filterId);
@@ -16712,6 +16740,46 @@ const TagManager = {
             console.warn(`⚠️ Some filter elements missing: ${missingFilters.join(', ')}. Found ${foundCount}/${filterIds.length} filters.`);
         } else {
             verboseLog(`✅ All ${foundCount} filter event listeners attached successfully`);
+        }
+        
+        // CRITICAL FIX: Periodic check to ensure brand filter listener stays attached
+        // This prevents the brand filter from "stopping working" if the listener gets detached
+        if (!self._brandFilterHealthCheck) {
+            self._brandFilterHealthCheck = setInterval(() => {
+                const brandFilterElement = document.getElementById('brandFilter');
+                if (brandFilterElement && !brandFilterElement._filterChangeHandler) {
+                    console.warn('⚠️ Brand filter listener missing - reattaching...');
+                    // Re-attach just the brand filter listener
+                    const brandFilterId = 'brandFilter';
+                    const filterType = self.getFilterTypeFromId(brandFilterId);
+                    
+                    brandFilterElement._filterChangeHandler = (event) => {
+                        try {
+                            console.log(`🔥 BRAND FILTER CHANGED: "${event.target.value}"`);
+                            const value = event.target.value;
+                            
+                            if (self._filterThrottleTimers && self._filterThrottleTimers[brandFilterId]) {
+                                clearTimeout(self._filterThrottleTimers[brandFilterId]);
+                            }
+                            
+                            if (!self._filterThrottleTimers) {
+                                self._filterThrottleTimers = {};
+                            }
+                            
+                            self._filterThrottleTimers[brandFilterId] = setTimeout(() => {
+                                requestAnimationFrame(() => {
+                                    immediateFilterUpdate(filterType, value);
+                                });
+                            }, 25);
+                        } catch (error) {
+                            console.error('Error in brand filter change handler:', error);
+                        }
+                    };
+                    
+                    brandFilterElement.addEventListener('change', brandFilterElement._filterChangeHandler);
+                    console.log('✅ Brand filter listener reattached');
+                }
+            }, 2000); // Check every 2 seconds
         }
     },
 
