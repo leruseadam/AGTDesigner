@@ -10073,25 +10073,35 @@ def get_available_tags():
                 'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
             })
         
-        # CRITICAL: Also return cached tags even when fast_load=0, but re-align if lineage updated
+        # CRITICAL: Also return cached tags even when fast_load=0, but re-align if lineage updated OR first request of session
         # This handles the case where UI sends fast_load=0 to ensure fresh lineage
         if cached_tags and not fast_load:
             logging.info(f"⚡ CACHE HIT (slow mode): Checking if re-alignment needed for {len(cached_tags)} tags")
+            
+            # Check if this is first request of session (no tags_aligned_this_session flag)
+            first_request = not session.get('tags_aligned_this_session', False)
+            
+            # Check if lineage was recently updated
             lineage_update_ts = session.get('lineage_update_timestamp')
-            needs_realignment = False
+            needs_realignment = first_request  # Always align on first request
             if lineage_update_ts:
                 try:
                     # Within 10 minutes of lineage update, re-align cached tags
-                    needs_realignment = (time.time() - float(lineage_update_ts)) < 600
+                    if (time.time() - float(lineage_update_ts)) < 600:
+                        needs_realignment = True
                 except Exception:
-                    needs_realignment = False
+                    pass
             
             if needs_realignment:
-                logging.info(f"🔄 SLOW MODE: Recent lineage update detected - re-aligning cached tags with database")
+                reason = "first request of session" if first_request else "recent lineage update"
+                logging.info(f"🔄 SLOW MODE: Re-aligning cached tags with database ({reason})")
                 try:
                     store_name_align = get_current_store_name(allow_fallback=False) or store_name
                     if store_name_align:
                         cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                        # Mark that we've aligned tags in this session
+                        session['tags_aligned_this_session'] = True
+                        session.modified = True
                         # Clear the timestamp after alignment so we don't keep re-aligning
                         if 'lineage_update_timestamp' in session:
                             del session['lineage_update_timestamp']
