@@ -2994,7 +2994,8 @@ const TagManager = {
         // Apply filters to get weight options
         const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
             if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
-                const tagVendor = (tag.Vendor || tag.vendor || '').toString().trim();
+                // CRITICAL FIX: Check all possible vendor field names consistently
+                const tagVendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
                 if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) return false;
             }
             if (currentFilters.brand && currentFilters.brand.trim() !== '' && currentFilters.brand.toLowerCase() !== 'all') {
