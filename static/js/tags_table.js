@@ -119,9 +119,10 @@ function createTagRow(tag) {
   // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
   let rawLineage = '';
   if (tag.sovereign_lineage) {
-    const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty and not explicitly 'NONE' (backend validates all other values)
-    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+    const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
+    const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
+    // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
+    if (sovereignRaw && sovereignUpper !== 'NONE') {
       rawLineage = tag.sovereign_lineage;
     }
   }
@@ -300,9 +301,10 @@ class TagsTable {
   // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
   let rawLineage = '';
   if (tag.sovereign_lineage) {
-    const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty and not explicitly 'NONE' (backend validates all other values)
-    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+    const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
+    const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
+    // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
+    if (sovereignRaw && sovereignUpper !== 'NONE') {
       rawLineage = tag.sovereign_lineage;
     }
   }

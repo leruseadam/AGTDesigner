@@ -6974,9 +6974,10 @@ const TagManager = {
         // Priority 1: sovereign_lineage (manual user edits OR preexisting from database - highest priority)
         // Use ANY sovereign_lineage value that exists (backend validates it)
         if (tag.sovereign_lineage) {
-            const sovereignRaw = String(tag.sovereign_lineage).trim();
-            // Use if not empty and not explicitly 'NONE'
-            if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+            const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
+            const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
+            // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
+            if (sovereignRaw && sovereignUpper !== 'NONE') {
                 lineage = tag.sovereign_lineage;
             }
         }
@@ -7427,10 +7428,14 @@ const TagManager = {
         // Priority 1: sovereign_lineage (manual edits OR preexisting from database - highest priority)
         // Use ANY sovereign_lineage value that exists (backend validates it)
         if (tag.sovereign_lineage) {
-            const sovereignRaw = String(tag.sovereign_lineage).trim();
-            // Use if not empty and not explicitly 'NONE'
-            if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
-                tagDbLineage = tag.sovereign_lineage.toString().toUpperCase().trim();
+            const sovereignRaw = String(tag.sovereign_lineage).trim().replace(/\s+/g, ' '); // Normalize spaces
+            const sovereignUpper = sovereignRaw.toUpperCase().replace(/\s+/g, ''); // Remove all spaces for comparison
+            // Use if not empty and not 'NONE' (handle variations like 'NON E', 'N ONE', etc.)
+            if (sovereignRaw && sovereignUpper !== 'NONE') {
+                tagDbLineage = sovereignRaw.toUpperCase().trim();
+            } else if (isForSelectedTags) {
+                // Debug: Log why sovereign_lineage was rejected
+                console.log(`⚠️ Rejected sovereign_lineage for "${displayName}": "${tag.sovereign_lineage}" (normalized: "${sovereignUpper}") - treating as NONE, using currentLineage instead`);
             }
         }
         // Priority 2: currentLineage (matches DOCX COALESCE result)
