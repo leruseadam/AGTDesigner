@@ -2157,6 +2157,9 @@ const TagManager = {
             productType: filters.productType?.length || 0,
             lineage: filters.lineage?.length || 0,
             weight: filters.weight?.length || 0,
+            price: filters.price?.length || 0,
+            doh: filters.doh?.length || 0,
+            highCbd: filters.highCbd?.length || 0,
             preserveExistingValues
         };
         console.log('🔧🔧🔧 updateFilters called with:', filterCounts);
@@ -2243,6 +2246,15 @@ const TagManager = {
                         return aIndex - bIndex;
                     }
                 }
+                // Special handling for price: "No Price" first, then by numeric value
+                if (filterType === 'price') {
+                    if (a === 'No Price') return -1;
+                    if (b === 'No Price') return 1;
+                    // Extract numeric value from price strings (e.g., "$10" -> 10, "$15.50" -> 15.50)
+                    const priceA = parseFloat(a.replace(/[^0-9.]/g, '')) || 0;
+                    const priceB = parseFloat(b.replace(/[^0-9.]/g, '')) || 0;
+                    return priceA - priceB;
+                }
                 // Special handling for High CBD filter - High CBD Products should come first
                 if (filterType === 'highCbd') {
                     if (a === 'High CBD Products') return -1;
@@ -2258,6 +2270,14 @@ const TagManager = {
             // Special debug for weight filter
             if (filterType === 'weight') {
                 verboseLog('Weight filter values (first 10):', sortedValues.slice(0, 10));
+            }
+            
+            // Special debug for price filter
+            if (filterType === 'price') {
+                console.log(`🔍 Price filter: ${sortedValues.length} options, first 10:`, sortedValues.slice(0, 10));
+                if (sortedValues.length === 0) {
+                    console.warn('⚠️ Price filter is empty! Field values were:', fieldValues);
+                }
             }
             
             // Store current value
@@ -12043,6 +12063,7 @@ const TagManager = {
                             productType: [],
                             lineage: [],
                             weight: [],
+                            price: [],
                             strain: [],
                             doh: [],
                             highCbd: []
@@ -12060,12 +12081,13 @@ const TagManager = {
                 // Continue to update filters with empty arrays (will be populated from database when available)
             }
             
-            // CRITICAL FIX: Check if filters are empty and retry if needed
+            // CRITICAL FIX: Check if filters are empty and retry if needed (include price in check)
             const hasData = (filterOptions.vendor && filterOptions.vendor.length > 0) ||
                            (filterOptions.brand && filterOptions.brand.length > 0) ||
                            (filterOptions.productType && filterOptions.productType.length > 0) ||
                            (filterOptions.lineage && filterOptions.lineage.length > 0) ||
-                           (filterOptions.weight && filterOptions.weight.length > 0);
+                           (filterOptions.weight && filterOptions.weight.length > 0) ||
+                           (filterOptions.price && filterOptions.price.length > 0);
             
             if (!hasData && retryCount < maxRetries) {
                 verboseLog(`⚠️ Filters are empty (attempt ${retryCount + 1}/${maxRetries}), retrying in ${retryDelay}ms...`);
@@ -12088,7 +12110,7 @@ const TagManager = {
             if (!hasData && retryCount >= maxRetries) {
                 console.warn('⚠️ Filters remain empty after all retries - data may not be loaded yet. Filters will refresh when data becomes available.');
             } else if (hasData) {
-                verboseLog(`✅ Filters loaded successfully: vendor=${filterOptions.vendor?.length || 0}, brand=${filterOptions.brand?.length || 0}, productType=${filterOptions.productType?.length || 0}`);
+                verboseLog(`✅ Filters loaded successfully: vendor=${filterOptions.vendor?.length || 0}, brand=${filterOptions.brand?.length || 0}, productType=${filterOptions.productType?.length || 0}, price=${filterOptions.price?.length || 0}`);
             }
         } catch (error) {
             console.error('Error fetching filter options:', error);
@@ -12109,6 +12131,7 @@ const TagManager = {
                         productType: [],
                         lineage: [],
                         weight: [],
+                        price: [],
                         strain: [],
                         doh: [],
                         highCbd: []
