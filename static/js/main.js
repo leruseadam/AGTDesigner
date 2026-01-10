@@ -2102,7 +2102,9 @@ const TagManager = {
         ];
 
         tags.forEach(tag => {
-            if (tag.Vendor) vendors.add(tag.Vendor);
+            // CRITICAL FIX: Check all possible vendor field names consistently
+            const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '';
+            if (vendor && vendor.trim()) vendors.add(vendor.trim());
             // CRITICAL FIX: Check all possible brand field names consistently
             const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
             if (brand && brand.trim()) brands.add(brand.trim());
