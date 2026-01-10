@@ -7551,6 +7551,13 @@ def generate_labels():
         # TRACE: Check store after getting excel_processor
         logging.info(f"🔍 TRACE: Store after get_excel_processor = {get_current_store_name()}")
         
+        # CRITICAL FIX: Store original file path before potentially replacing DataFrame
+        original_file_path = None
+        original_df = None
+        if excel_processor.df is not None and not excel_processor.df.empty:
+            original_file_path = excel_processor._last_loaded_file
+            original_df = excel_processor.df.copy()  # Store copy for restoration
+        
         # CRITICAL PERFORMANCE FIX: If tags provided, set them directly (skip ALL file loading)
         if selected_tags_from_request and len(selected_tags_from_request) > 0:
             logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly - SKIPPING ALL FILE I/O")
@@ -9274,6 +9281,36 @@ def generate_labels():
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
     
     finally:
+        # CRITICAL FIX: Restore original Excel DataFrame after generation to prevent filtering by vendor
+        # This ensures that after tag generation, users see all tags from all vendors, not just the last generated vendor
+        try:
+            if 'original_file_path' in locals() and original_file_path and original_file_path != 'direct_from_request':
+                if 'excel_processor' in locals() and excel_processor:
+                    try:
+                        # Restore original file if it exists and is valid
+                        if os.path.exists(original_file_path):
+                            logging.info(f"🔄 Restoring original Excel file after generation: {original_file_path}")
+                            excel_processor.load_file(original_file_path)
+                            logging.info(f"✅ Restored original Excel file with {len(excel_processor.df) if excel_processor.df is not None else 0} rows")
+                        elif original_df is not None and not original_df.empty:
+                            # Fallback: restore DataFrame directly if file doesn't exist
+                            logging.info(f"🔄 Restoring original DataFrame after generation ({len(original_df)} rows)")
+                            excel_processor.df = original_df
+                            excel_processor._last_loaded_file = original_file_path
+                            logging.info(f"✅ Restored original DataFrame with {len(excel_processor.df)} rows")
+                    except Exception as restore_error:
+                        logging.warning(f"Could not restore original Excel file after generation: {restore_error}")
+                        # Last resort: try to restore DataFrame if we have it
+                        if original_df is not None and not original_df.empty and 'excel_processor' in locals():
+                            try:
+                                excel_processor.df = original_df
+                                excel_processor._last_loaded_file = original_file_path
+                                logging.info(f"✅ Restored original DataFrame as fallback ({len(original_df)} rows)")
+                            except Exception as df_restore_error:
+                                logging.warning(f"Could not restore original DataFrame: {df_restore_error}")
+        except Exception as restore_err:
+            logging.warning(f"Error during Excel file restoration: {restore_err}")
+        
         # Clean up request fingerprint to allow future requests
         # Always try to clean up, even if an exception occurred early
         try:
@@ -9487,8 +9524,12 @@ def clear_available_tags_cache(reason=None):
         
         # Clear file-specific caches using both possible session keys
         session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
+        upload_timestamp = session.get('upload_timestamp', '')
         if session_file_path:
             _clear_key(get_session_cache_key(f'available_tags_{session_file_path}'))
+            # CRITICAL FIX: Also clear cache with upload_timestamp (used in line 10000)
+            if upload_timestamp:
+                _clear_key(get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}'))
         
         # Also clear file-based cache on disk for current store
         try:
