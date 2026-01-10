@@ -17572,16 +17572,21 @@ const TagManager = {
             console.log('📊 Loading tags (showing cache immediately, refreshing in background)...');
             try {
                 // Try to show cached data first for instant display
-                const cachedTags = this.hydrateAvailableTagsFromCache();
-                if (cachedTags && cachedTags.length > 0) {
-                    console.log(`⚡ Showing ${cachedTags.length} cached tags immediately`);
-                    this.state.tags = [...cachedTags];
-                    this.state.originalTags = [...cachedTags];
-                    this._updateAvailableTags(cachedTags, null);
-                }
-                
-                // Then fetch fresh data in background
-                const loaded = await this.fetchAndUpdateAvailableTags();
+                // hydrateAvailableTagsFromCache() returns true if cache was found and hydrated, false otherwise
+                const cacheHydrated = this.hydrateAvailableTagsFromCache();
+                if (cacheHydrated) {
+                    console.log(`⚡ Cache hydrated successfully - tags loaded from cache`);
+                    // Cache was hydrated, tags are already loaded and displayed
+                    // Still refresh in background to ensure data is fresh, but don't block UI
+                    setTimeout(() => {
+                        this.fetchAndUpdateAvailableTags(false).catch(err => {
+                            console.warn('Background refresh after cache hydration failed (non-critical):', err);
+                        });
+                    }, 1000); // Small delay to let UI render first
+                } else {
+                    // No cache found - fetch from server
+                    console.log('📊 No cache found - fetching tags from server...');
+                    const loaded = await this.fetchAndUpdateAvailableTags();
                 if (loaded) {
                     console.log('✅ Tags loaded from database in init()');
                 } else {
