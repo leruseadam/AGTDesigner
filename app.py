@@ -13715,9 +13715,9 @@ def get_web_available_tags():
                 response = compress_response(response)
                 return response
         
-        # WEB OPTIMIZATION: Use the same fast Excel-only path as regular endpoint
-        # This skips all database queries for maximum speed
-        logging.info("🔄 WEB: Building tags with fast Excel-only path (no database queries)...")
+        # WEB OPTIMIZATION: Use fast Excel path but always align with database lineage
+        # Database alignment ensures lineage is always available from the database
+        logging.info("🔄 WEB: Building tags with Excel data, aligning with database lineage...")
         
         # Excel processor already loaded and validated above - just use it
         # Get tags from Excel
