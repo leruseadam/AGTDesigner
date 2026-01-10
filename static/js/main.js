@@ -2526,7 +2526,10 @@ const TagManager = {
                         }
                     }
                 }
-                // REMOVED: Don't add "No Price" option - all products should have prices from Excel cache
+                // Add "No Price" if product has no valid price
+                if (!rawPrice || rawPrice.toString().trim() === '' || rawPrice.toString().trim().toLowerCase() === 'nan' || rawPrice.toString().trim().toLowerCase() === 'none') {
+                    filterOptions.price.add('No Price');
+                }
                 
                 // DOH
                 const doh = tag.DOH || tag['DOH Compliant (Yes/No)'] || '';
