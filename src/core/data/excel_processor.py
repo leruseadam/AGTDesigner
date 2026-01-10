@@ -3503,6 +3503,7 @@ class ExcelProcessor:
                 'Units': safe_get_value(row.get('Units', '')),  # Add Units field for label generation
                 'WeightWithUnits': safe_get_value(weight_with_units),
                 'WeightUnits': safe_get_value(weight_with_units),  # Add WeightUnits for frontend compatibility
+                'JointRatio': safe_get_value(row.get('JointRatio', '')),  # Add JointRatio for pre-roll products
                 'Quantity*': safe_get_value(quantity),
                 'Quantity Received*': safe_get_value(quantity),
                 'quantity': safe_get_value(quantity),
@@ -3544,6 +3545,13 @@ class ExcelProcessor:
 
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
+
+            # CRITICAL: For pre-rolls, use JointRatio as WeightUnits display value
+            if product_type in ['pre-roll', 'infused pre-roll']:
+                joint_ratio = tag.get('JointRatio', '')
+                if joint_ratio and str(joint_ratio).strip():
+                    tag['WeightUnits'] = str(joint_ratio).strip()
+                    logger.debug(f"Set WeightUnits to JointRatio '{joint_ratio}' for pre-roll: {product_name}")
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
