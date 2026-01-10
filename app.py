@@ -10144,12 +10144,17 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
-                # CRITICAL: SKIP ALL DATABASE OPERATIONS - ONLY USE EXCEL TAGS
-                # User requested: "STOP LOADING DATABASE TAGS. ONLY LOAD EXCEL"
-                # Skip database enrichment entirely - use Excel data as-is
-                logging.info(f"⚡ EXCEL-ONLY MODE: Skipping all database enrichment - using {len(simple_tags)} Excel tags as-is")
-                if False:  # Disabled - never run database enrichment
-                    # Enrich with database lineage ONLY (don't add database products)
+                # CRITICAL: Strip Excel Lineage field - UI uses database lineage only
+                for tag in simple_tags:
+                    # Remove all Excel lineage fields
+                    tag.pop('Lineage', None)
+                    tag.pop('lineage', None)
+                    tag.pop('Lineage*', None)
+                logging.info(f"🗑️ STRIPPED Excel Lineage field from {len(simple_tags)} tags - database lineage only")
+
+                # CRITICAL: Enrich with database lineage after stripping Excel lineage
+                # This populates currentLineage, canonical_lineage from database
+                # Enrich with database lineage ONLY (don't add database products)
                     try:
                         product_db = get_product_database(store_name)
                         if product_db and simple_tags:
