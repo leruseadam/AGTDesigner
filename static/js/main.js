@@ -2511,6 +2511,7 @@ const TagManager = {
                 
                 // Price - extract and format price for filtering
                 const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag.price || tag['Product Price'] || tag['ProductPrice'] || tag['Unit Price'] || tag['UnitPrice'] || tag['Retail Price'] || tag['RetailPrice'] || '';
+                let hasValidPrice = false;
                 if (rawPrice) {
                     const priceStr = rawPrice.toString().trim();
                     if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none') {
@@ -2522,12 +2523,13 @@ const TagManager = {
                                 // Format price: omit .00 for whole numbers, show 2 decimals for non-whole numbers
                                 const formattedPrice = priceNum % 1 === 0 ? `$${Math.round(priceNum)}` : `$${priceNum.toFixed(2)}`;
                                 filterOptions.price.add(formattedPrice);
+                                hasValidPrice = true;
                             }
                         }
                     }
                 }
-                // Add "No Price" if product has no valid price
-                if (!rawPrice || rawPrice.toString().trim() === '' || rawPrice.toString().trim().toLowerCase() === 'nan' || rawPrice.toString().trim().toLowerCase() === 'none') {
+                // Add "No Price" only if product has no valid price
+                if (!hasValidPrice) {
                     filterOptions.price.add('No Price');
                 }
                 
