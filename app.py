@@ -13724,131 +13724,19 @@ def get_web_available_tags():
         try:
             excel_tags = excel_processor.get_available_tags()
             
-            # CRITICAL FIX: Use EXACT same lineage priority as docx generation
-            # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage" (Excel)
-            # Only use Excel lineage if product is brand new (not in database)
+            # CRITICAL FIX: Always align tags with database lineage to ensure lineage is available
+            # Use the robust _align_tags_with_db_lineage helper function used throughout the codebase
             store_name = get_current_store_name(allow_fallback=False)
-            if store_name:
+            if store_name and excel_tags:
                 try:
-                    product_db = get_product_database(store_name)
-                    if product_db:
-                        logging.info("🔄 WEB: Aligning tags with database using docx generation lineage priority")
-                        
-                        # Collect product names for batch lookup
-                        product_names = [tag.get('Product Name*') for tag in excel_tags if tag.get('Product Name*')]
-                        if product_names:
-                            lineage_map = {}
-                            conn = product_db._get_connection()
-                            cursor = conn.cursor()
-                            
-                            # Use EXACT same query as docx generation (tag_generator.py line 909)
-                            # Match by "Product Name*" exactly like docx generation does
-                            chunk_size = 400
-                            for start in range(0, len(product_names), chunk_size):
-                                chunk = product_names[start:start + chunk_size]
-                                placeholders = ','.join(['?' for _ in chunk])
-                                
-                                # EXACT same query as docx generation - but also return individual fields to preserve priority
-                                cursor.execute(f'''
-                                    SELECT p."Product Name*", 
-                                           COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                                           p.sovereign_lineage as product_sovereign,
-                                           s.sovereign_lineage as strain_sovereign,
-                                           s.canonical_lineage as strain_canonical
-                                    FROM products p
-                                    LEFT JOIN strains s ON p.strain_id = s.id
-                                    WHERE p."Product Name*" IN ({placeholders})
-                                    ORDER BY p.id DESC
-                                ''', chunk)
-                                
-                                for row in cursor.fetchall():
-                                    db_name = row[0]
-                                    db_lineage = row[1]
-                                    product_sovereign = row[2]
-                                    strain_sovereign = row[3]
-                                    strain_canonical = row[4]
-                                    
-                                    # CRITICAL FIX: Treat 'NONE' as empty/null (same as docx generation)
-                                    def clean_lineage_value(val):
-                                        if not val:
-                                            return None
-                                        cleaned = str(val).strip().upper()
-                                        if cleaned in ['', 'NONE', 'NULL', 'NAN', 'NONE', '0']:
-                                            return None
-                                        return cleaned
-                                    
-                                    # Clean all lineage values
-                                    product_sovereign_clean = clean_lineage_value(product_sovereign)
-                                    strain_sovereign_clean = clean_lineage_value(strain_sovereign)
-                                    strain_canonical_clean = clean_lineage_value(strain_canonical)
-                                    db_lineage_clean = clean_lineage_value(db_lineage)
-                                    
-                                    if db_name and db_lineage_clean:
-                                        # Store lineage with source info for proper field assignment
-                                        lineage_info = {
-                                            'lineage': db_lineage_clean,
-                                            'has_sovereign': bool(product_sovereign_clean or strain_sovereign_clean),
-                                            'product_sovereign': product_sovereign_clean,
-                                            'strain_sovereign': strain_sovereign_clean,
-                                            'strain_canonical': strain_canonical_clean
-                                        }
-                                        # Map by original name (exact match like docx generation)
-                                        lineage_map[db_name] = lineage_info
-                                        # Also map by normalized name for lookup
-                                        normalized = product_db._normalize_product_name(db_name)
-                                        lineage_map[normalized] = lineage_info
-                                        lineage_map[db_name.lower().strip()] = lineage_info
-                            
-                            # Apply database lineage to tags (same priority as docx generation)
-                            for tag in excel_tags:
-                                name = tag.get('Product Name*')
-                                if not name:
-                                    continue
-                                
-                                # Try exact match first (like docx generation), then normalized
-                                lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
-                                
-                                if lineage_info:
-                                    # Product exists in database - use database lineage (same as docx generation)
-                                    lineage_clean = lineage_info['lineage']
-                                    # Set fields according to priority (same as docx generation)
-                                    # CRITICAL: Only set sovereign_lineage if it's not None/NONE
-                                    if lineage_info['product_sovereign']:
-                                        tag['sovereign_lineage'] = lineage_info['product_sovereign']
-                                    elif lineage_info['strain_sovereign']:
-                                        tag['sovereign_lineage'] = lineage_info['strain_sovereign']
-                                    # If no sovereign, don't set it (don't set to 'NONE')
-                                    # Always set canonical_lineage and currentLineage for UI compatibility
-                                    if lineage_info['strain_canonical']:
-                                        tag['canonical_lineage'] = lineage_info['strain_canonical']
-                                    else:
-                                        tag['canonical_lineage'] = lineage_clean
-                                    tag['currentLineage'] = lineage_clean
-                                    tag['Lineage'] = lineage_clean
-                                    tag['Lineage*'] = lineage_clean
-                                    tag['lineage'] = lineage_clean.lower()
-                                else:
-                                    # Brand new product not in database - use Excel lineage as fallback
-                                    excel_lineage = tag.get('Lineage')
-                                    if excel_lineage and str(excel_lineage).strip():
-                                        lineage_clean = str(excel_lineage).strip().upper()
-                                        tag['Lineage'] = lineage_clean
-                                        tag['Lineage*'] = lineage_clean
-                                        tag['lineage'] = lineage_clean.lower()
-                                        # Don't set canonical_lineage/currentLineage for Excel-only lineage
-                                        # This marks it as Excel lineage, not database lineage
-                            
-                            matched_count = len([t for t in excel_tags if t.get('canonical_lineage')])
-                            excel_fallback_count = len([t for t in excel_tags if not t.get('canonical_lineage')])
-                            logging.info(f"✅ WEB: Applied database lineage to {matched_count} tags, Excel fallback for {excel_fallback_count} new products")
-                            if matched_count == 0 and len(product_names) > 0:
-                                logging.warning(f"⚠️ WEB: No products matched in database! Query returned {len(lineage_map)} results for {len(product_names)} product names")
-                                # Log sample product names for debugging
-                                if len(product_names) > 0:
-                                    logging.warning(f"⚠️ WEB: Sample product names: {product_names[:3]}")
-                                    logging.warning(f"⚠️ WEB: Sample lineage_map keys: {list(lineage_map.keys())[:3] if lineage_map else 'empty'}")
+                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
+                    excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                    matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
+                    logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
                 except Exception as align_err:
                     logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
+                    import traceback
+                    logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
             # Normalize all tags (both database and Excel lineage)
             simple_tags = []
