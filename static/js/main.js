@@ -1482,27 +1482,10 @@ const TagManager = {
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
         
-        // CRITICAL: After lineage updates, clear cache to force fresh fetch from database
-        // This ensures updated sovereign_lineage from database is loaded
+        // CRITICAL: After lineage updates, still use cache for instant loading but refresh in background
+        // This ensures instant UI while fresh sovereign_lineage is fetched from database
         const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
         const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
-
-        if (hasRecentLineageUpdate) {
-            const timeSinceUpdate = Date.now() - parseInt(lastLineageUpdateTime, 10);
-            console.log(`🔄 Recent lineage update detected (${Math.round(timeSinceUpdate/1000)}s ago) - clearing cache to force fresh database fetch`);
-            // Clear the cache so fresh data with updated sovereign_lineage is fetched
-            const cacheKey = this.getAvailableTagsCacheKey();
-            try {
-                const hadLocalStorage = !!localStorage.getItem(cacheKey);
-                const hadSessionStorage = !!sessionStorage.getItem(cacheKey);
-                localStorage.removeItem(cacheKey);
-                sessionStorage.removeItem(cacheKey);
-                console.log(`✅ Cleared frontend cache (localStorage: ${hadLocalStorage}, sessionStorage: ${hadSessionStorage}) - will fetch fresh lineage from database`);
-            } catch (e) {
-                console.warn('Could not clear cache:', e);
-            }
-            return false; // Skip cache, force fresh fetch
-        }
 
         // PERFORMANCE: Always check cache first (works for both Excel and database mode)
         // This allows tags to load instantly on page refresh instead of waiting for API call
@@ -1510,6 +1493,12 @@ const TagManager = {
         const cachedTags = this.loadAvailableTagsFromCache();
         
         if (cachedTags && cachedTags.length > 0) {
+            // INSTANT LOADING FIX: Even if there was a recent lineage update, use cache for instant display
+            // This ensures tags load instantly while fresh lineage data is fetched in background
+            if (hasRecentLineageUpdate) {
+                const timeSinceUpdate = Date.now() - parseInt(lastLineageUpdateTime, 10);
+                console.log(`⚡ Recent lineage update detected (${Math.round(timeSinceUpdate/1000)}s ago) - using cache for instant load, will refresh in background`);
+            }
             // Cache found - use it for instant load (works for both Excel and database mode)
             console.log(`✅ Found ${cachedTags.length} cached tags - using for instant load`);
             
@@ -1634,10 +1623,11 @@ const TagManager = {
                 }
             }
             
-            // PERFORMANCE: Trigger background refresh if cache is old format (non-blocking)
+            // PERFORMANCE: Trigger background refresh if cache is old format OR if lineage was recently updated (non-blocking)
             // This will update cache with sovereign_lineage from database without blocking UI
-            if (needsBackgroundRefresh) {
-                console.log('🔄 Triggering background refresh to update cache with sovereign_lineage...');
+            if (needsBackgroundRefresh || hasRecentLineageUpdate) {
+                const refreshReason = needsBackgroundRefresh ? 'old cache format' : 'recent lineage update';
+                console.log(`🔄 Triggering background refresh to update cache (reason: ${refreshReason})...`);
                 // Don't await - let it run in background without blocking
                 // Use forceReload=true to bypass cache and get fresh data with sovereign_lineage
                 setTimeout(() => {
