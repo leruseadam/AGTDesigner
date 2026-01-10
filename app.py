@@ -10040,13 +10040,8 @@ def get_available_tags():
         
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            # CRITICAL: Align tags to ensure sovereign_lineage is included from database
-            try:
-                store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                if store_name_align:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-            except Exception as align_err:
-                logging.warning(f"Could not align cached tags in fast_load: {align_err}")
+            # PERFORMANCE FIX: Skip alignment for cached tags - they're already aligned when cached
+            # Re-aligning on every request defeats the purpose of caching (adds 200-500ms of DB queries)
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
             return jsonify({
