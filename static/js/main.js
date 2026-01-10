@@ -2765,7 +2765,8 @@ const TagManager = {
                 
                 // Check lineage filter - only apply if not empty and not "All"
                 if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                    const tagLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                    // CRITICAL: Use EXACT same lineage as DOCX generation (currentLineage matches COALESCE result)
+                    const tagLineage = (tag.currentLineage || tag.sovereign_lineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                     if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) {
                         return false;
                     }
@@ -2888,7 +2889,8 @@ const TagManager = {
                 }
                 
                 // Always add lineage options (show all lineages)
-                const rawLineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
+                // CRITICAL: Use EXACT same lineage as DOCX generation (currentLineage matches COALESCE result)
+                const rawLineage = (tag.currentLineage || tag.sovereign_lineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (rawLineage) {
                     availableOptions.lineage.add(rawLineage);
                 }
@@ -2979,7 +2981,8 @@ const TagManager = {
                 if (normalizedTagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) return false;
             }
             if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                const tagLineage = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '').toString().trim();
+                // CRITICAL: Use EXACT same lineage as DOCX generation (currentLineage matches COALESCE result)
+                const tagLineage = (tag.currentLineage || tag.sovereign_lineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) return false;
             }
             return true;
@@ -3240,7 +3243,8 @@ const TagManager = {
             
             // Check lineage filter - only apply if not empty and not "All"
             if (lineageFilter && lineageFilter.trim() !== '' && lineageFilter.toLowerCase() !== 'all') {
-                const tagLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                // CRITICAL: Use EXACT same lineage as DOCX generation (currentLineage matches COALESCE result)
+                const tagLineage = (tag.currentLineage || tag.sovereign_lineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (tagLineage.toLowerCase() !== lineageFilter.toLowerCase()) {
                     return false;
                 }
@@ -6962,39 +6966,25 @@ const TagManager = {
         }
         
         // Set data-lineage attribute for CSS coloring on both row and tagElement
-        // CRITICAL FIX: Use EXACT same lineage priority as docx generation
-        // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
-        // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+        // CRITICAL FIX: Use EXACT same lineage as DOCX generation
+        // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+        // Backend sets tag['currentLineage'] = effective_lineage (the COALESCE result)
+        // So use currentLineage directly - it already matches DOCX output!
         let lineage;
-        // CRITICAL: Use EXACT same priority as docx generation - check sovereign_lineage FIRST
-        if (tag.sovereign_lineage) {
-            // Product-level sovereign_lineage (user changes) - highest priority (same as docx generation)
+        // Use currentLineage first (already matches DOCX COALESCE result)
+        if (tag.currentLineage) {
+            lineage = tag.currentLineage;
+        } else if (tag.sovereign_lineage) {
+            // Fallback to sovereign_lineage if currentLineage not set
             lineage = tag.sovereign_lineage;
-        } else if (tag.canonical_lineage || tag.currentLineage) {
-            // Strain-level canonical_lineage or currentLineage - database lineage
-            lineage = tag.canonical_lineage || tag.currentLineage;
-            // CRITICAL: Log when we're overriding Excel lineage with database lineage
-            if (tag.Lineage && tag.Lineage.toUpperCase() !== lineage.toUpperCase()) {
-                console.log(`🔄 TagManager: Using database lineage for "${displayName}": Excel="${tag.Lineage}" → DB="${lineage}"`);
-            }
-            // CRITICAL: Overwrite Excel Lineage in tag object to ensure consistency
-            if (tag.Lineage !== lineage) {
-                tag.Lineage = lineage;
-                tag.lineage = lineage.toLowerCase();
-                console.log(`✅ TagManager: Updated tag object for "${displayName}" - set Lineage to database value: "${lineage}"`);
-            }
+        } else if (tag.canonical_lineage) {
+            // Fallback to canonical_lineage
+            lineage = tag.canonical_lineage;
         } else {
-            // CRITICAL: Only fallback to Excel Lineage if database lineage is completely missing
-            // This should rarely happen if backend lineage alignment is working correctly
+            // Final fallback to Excel Lineage
             lineage = tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
             if (lineage && lineage !== 'MIXED') {
-                console.warn(`⚠️ TagManager: Tag "${displayName}" missing database lineage (canonical_lineage/currentLineage), using Excel Lineage: "${lineage}"`);
-                console.warn(`⚠️ TagManager: Tag object fields:`, {
-                    canonical_lineage: tag.canonical_lineage,
-                    currentLineage: tag.currentLineage,
-                    Lineage: tag.Lineage,
-                    lineage: tag.lineage
-                });
+                console.warn(`⚠️ TagManager: Tag "${displayName}" missing database lineage, using Excel Lineage: "${lineage}"`);
             }
         }
         
@@ -7421,14 +7411,19 @@ const TagManager = {
         // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
-        // CRITICAL FIX: Use EXACT same lineage priority as docx generation for dropdown
-        // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
-        // Check tag object DIRECTLY using same priority as docx generation
+        // CRITICAL FIX: Use EXACT same lineage as DOCX generation
+        // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+        // Backend sets tag['currentLineage'] = effective_lineage (the COALESCE result)
+        // So use currentLineage directly - it already matches DOCX output!
         let tagDbLineage = '';
-        if (tag.sovereign_lineage) {
+        if (tag.currentLineage) {
+            tagDbLineage = tag.currentLineage.toString().toUpperCase().trim();
+        } else if (tag.sovereign_lineage) {
             tagDbLineage = tag.sovereign_lineage.toString().toUpperCase().trim();
-        } else if (tag.canonical_lineage || tag.currentLineage) {
-            tagDbLineage = (tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase().trim();
+        } else if (tag.canonical_lineage) {
+            tagDbLineage = tag.canonical_lineage.toString().toUpperCase().trim();
+        } else if (tag.Lineage) {
+            tagDbLineage = tag.Lineage.toString().toUpperCase().trim();
         }
         
         if (tagDbLineage) {
