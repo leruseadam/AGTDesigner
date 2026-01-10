@@ -10244,20 +10244,33 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
+                # CRITICAL PERFORMANCE FIX: Skip database enrichment if fast_load=1 AND we have cached tags
+                # This allows instant refresh without database queries
+                skip_db_enrichment = fast_load and cached_tags is not None
+                if skip_db_enrichment:
+                    logging.info(f"⚡ PERFORMANCE: Skipping database enrichment (fast_load=1 + cached tags exist)")
+
                 # CRITICAL: Strip Excel Lineage field - UI uses database lineage only
                 for tag in simple_tags:
                     # Remove all Excel lineage fields
                     tag.pop('Lineage', None)
                     tag.pop('lineage', None)
                     tag.pop('Lineage*', None)
-                logging.info(f"🗑️ STRIPPED Excel Lineage field from {len(simple_tags)} tags - database lineage only")
+                
+                if not skip_db_enrichment:
+                    logging.info(f"🗑️ STRIPPED Excel Lineage field from {len(simple_tags)} tags - will enrich with database lineage")
+
+                if not skip_db_enrichment:
+                    logging.info(f"🗑️ STRIPPED Excel Lineage field from {len(simple_tags)} tags - will enrich with database lineage")
 
                 # CRITICAL: Enrich with database lineage after stripping Excel lineage
                 # This populates currentLineage, canonical_lineage from database
                 # Enrich with database lineage ONLY (don't add database products)
-                try:
-                    product_db = get_product_database(store_name)
-                    if product_db and simple_tags:
+                # PERFORMANCE: Skip database enrichment if fast_load=1 and cache exists
+                if not skip_db_enrichment:
+                    try:
+                        product_db = get_product_database(store_name)
+                        if product_db and simple_tags:
                             logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
                             product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
                             logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
@@ -10426,13 +10439,18 @@ def get_available_tags():
                                     logging.info(f"Failed to enrich with database DOH data: {doh_enrich_err}")
                                     import traceback
                                     logging.warning(traceback.format_exc())
-                except Exception as enrich_err:
-                    logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
-                    import traceback
-                    logging.warning(traceback.format_exc())
+                    except Exception as enrich_err:
+                        logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+                        import traceback
+                        logging.warning(traceback.format_exc())
+                else:
+                    # skip_db_enrichment=True: Use cached tags for instant refresh
+                    logging.info(f"⚡ FAST REFRESH: Returning {len(simple_tags)} tags without database queries")
 
             # CRITICAL FIX: Align tags with database lineage to add sovereign_lineage
-                # This ensures manual lineage edits are visible in the UI
+            # This ensures manual lineage edits are visible in the UI
+            # PERFORMANCE: Skip alignment if fast_load=1 and cache exists
+            if not skip_db_enrichment:
                 try:
                     if store_name and simple_tags:
                         logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage...")
@@ -10440,6 +10458,8 @@ def get_available_tags():
                         logging.info(f"✅ SIMPLE PATH: Tags aligned with database lineage")
                 except Exception as align_err:
                     logging.warning(f"Failed to align simple tags with database: {align_err}")
+            else:
+                logging.info(f"⚡ FAST REFRESH: Skipping database alignment (using cached lineage)")
 
                 safe_simple_tags = make_json_safe(simple_tags)
                 elapsed = (time.time() - start_time) * 1000
