@@ -7275,10 +7275,20 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 else:
                     tag['canonical_lineage'] = effective_lineage
                 tag['currentLineage'] = effective_lineage
-                # CRITICAL: Always set Lineage* and other fields using effective_lineage (prioritizes sovereign)
-                tag['Lineage'] = effective_lineage
-                tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
-                tag['lineage'] = effective_lineage.lower()
+                # CRITICAL: When we have sovereign_lineage, ALWAYS override Excel Lineage with it
+                # This ensures UI shows manual edits, not Excel values
+                if tag.get('sovereign_lineage'):
+                    # We have sovereign_lineage - use it for all fields (override Excel)
+                    tag['Lineage'] = effective_lineage
+                    tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
+                    tag['lineage'] = effective_lineage.lower()
+                else:
+                    # No sovereign_lineage - update Lineage* but preserve existing Lineage if present
+                    tag['Lineage*'] = effective_lineage
+                    tag['lineage'] = effective_lineage.lower()
+                    # Only set Lineage if it doesn't exist
+                    if 'Lineage' not in tag or not tag.get('Lineage'):
+                        tag['Lineage'] = effective_lineage
                 aligned_count += 1
             else:
                 # Old format (backward compatibility)
@@ -10044,12 +10054,12 @@ def get_available_tags():
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
             file_cached_tags = cache.get(file_cache_key)
             if file_cached_tags:
-                logging.info(f"⚡ FILE CACHE HIT: Using background-processed cache in fast_load mode")
+                logging.info(f"⚡ INSTANT CACHE HIT: Using fully enriched tags from background processing ({len(file_cached_tags)} tags)")
                 cached_tags = file_cached_tags
         
         if cached_tags and fast_load:
-            logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            # CRITICAL: Align tags to ensure sovereign_lineage is included from database
+            logging.info(f"⚡ FAST RETURN: {len(cached_tags)} cached tags already enriched with database lineage")
+            # Cached tags from background processing already have database enrichment - just return them
             try:
                 store_name_align = get_current_store_name(allow_fallback=False) or store_name
                 if store_name_align:
