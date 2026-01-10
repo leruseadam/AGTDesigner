@@ -10040,8 +10040,30 @@ def get_available_tags():
         
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            # PERFORMANCE FIX: Skip alignment for cached tags - they're already aligned when cached
-            # Re-aligning on every request defeats the purpose of caching (adds 200-500ms of DB queries)
+            # CRITICAL: Check if lineage was recently updated - if so, re-align to get fresh DB lineage
+            lineage_update_ts = session.get('lineage_update_timestamp')
+            needs_realignment = False
+            if lineage_update_ts:
+                try:
+                    # Within 10 minutes of lineage update, re-align cached tags
+                    needs_realignment = (time.time() - float(lineage_update_ts)) < 600
+                except Exception:
+                    needs_realignment = False
+            
+            if needs_realignment:
+                logging.info(f"🔄 Recent lineage update detected - re-aligning cached tags with database")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                        # Clear the timestamp after alignment so we don't keep re-aligning
+                        if 'lineage_update_timestamp' in session:
+                            del session['lineage_update_timestamp']
+                            session.modified = True
+                            logging.info("✅ Cleared lineage_update_timestamp after re-alignment")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+            
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
             return jsonify({
@@ -10049,6 +10071,44 @@ def get_available_tags():
                 'total_count': len(safe_cached_tags),
                 'source': 'cache-fast-load',
                 'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
+            })
+        
+        # CRITICAL: Also return cached tags even when fast_load=0, but re-align if lineage updated
+        # This handles the case where UI sends fast_load=0 to ensure fresh lineage
+        if cached_tags and not fast_load:
+            logging.info(f"⚡ CACHE HIT (slow mode): Checking if re-alignment needed for {len(cached_tags)} tags")
+            lineage_update_ts = session.get('lineage_update_timestamp')
+            needs_realignment = False
+            if lineage_update_ts:
+                try:
+                    # Within 10 minutes of lineage update, re-align cached tags
+                    needs_realignment = (time.time() - float(lineage_update_ts)) < 600
+                except Exception:
+                    needs_realignment = False
+            
+            if needs_realignment:
+                logging.info(f"🔄 SLOW MODE: Recent lineage update detected - re-aligning cached tags with database")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                        # Clear the timestamp after alignment so we don't keep re-aligning
+                        if 'lineage_update_timestamp' in session:
+                            del session['lineage_update_timestamp']
+                            session.modified = True
+                            logging.info("✅ Cleared lineage_update_timestamp after re-alignment")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+            else:
+                logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
+            
+            safe_cached_tags = make_json_safe(cached_tags)
+            elapsed = (time.time() - start_time) * 1000
+            return jsonify({
+                'tags': safe_cached_tags,
+                'total_count': len(safe_cached_tags),
+                'source': 'cache-slow-mode',
+                'message': f'Loaded {len(safe_cached_tags)} tags from cache (slow mode with lineage check)'
             })
 
         # CRITICAL: Validate that the session file matches the selected store
