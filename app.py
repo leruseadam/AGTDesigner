@@ -7195,24 +7195,17 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 strain_sovereign_raw = row[3]
                 strain_canonical_raw = row[4]
 
-                def _clean_lineage(val, field_name=''):
+                def _clean_lineage(val):
                     if val is None:
                         return None
                     txt = str(val).strip().upper()
-                    # CRITICAL: Don't clean sovereign_lineage values - preserve them as-is for UI display
-                    # Only clean if it's explicitly 'NONE' without spaces
                     if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
                         return None
-                    # For sovereign_lineage, preserve the original value (even if it has spaces like 'NON E')
-                    # The frontend will handle validation
-                    if 'sovereign' in field_name.lower() and txt:
-                        # Return original uppercase value for sovereign_lineage - don't normalize further
-                        return str(val).strip().upper()
                     return txt
 
                 db_lineage = _clean_lineage(db_lineage_raw)
-                product_sovereign = _clean_lineage(product_sovereign_raw, 'product_sovereign')
-                strain_sovereign = _clean_lineage(strain_sovereign_raw, 'strain_sovereign')
+                product_sovereign = _clean_lineage(product_sovereign_raw)
+                strain_sovereign = _clean_lineage(strain_sovereign_raw)
                 strain_canonical = _clean_lineage(strain_canonical_raw)
 
                 if db_name and db_lineage:
@@ -7257,15 +7250,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 effective_lineage = db_lineage  # Default to COALESCEd result
 
                 # CRITICAL FIX: ONLY set sovereign_lineage when present; do not emit 'NONE' or None
-                # ALWAYS prioritize product_sovereign over strain_sovereign (product-level edits override strain-level)
                 if lineage_info['product_sovereign']:
                     tag['sovereign_lineage'] = lineage_info['product_sovereign']
                     effective_lineage = lineage_info['product_sovereign']
-                    logging.debug(f"✅ Set sovereign_lineage from product for '{name}': {lineage_info['product_sovereign']}")
                 elif lineage_info['strain_sovereign']:
                     tag['sovereign_lineage'] = lineage_info['strain_sovereign']
                     effective_lineage = lineage_info['strain_sovereign']
-                    logging.debug(f"✅ Set sovereign_lineage from strain for '{name}': {lineage_info['strain_sovereign']}")
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
                 # Always set canonical_lineage and currentLineage for UI compatibility
@@ -7275,20 +7265,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 else:
                     tag['canonical_lineage'] = effective_lineage
                 tag['currentLineage'] = effective_lineage
-                # CRITICAL: When we have sovereign_lineage, ALWAYS override Excel Lineage with it
-                # This ensures UI shows manual edits, not Excel values
-                if tag.get('sovereign_lineage'):
-                    # We have sovereign_lineage - use it for all fields (override Excel)
-                    tag['Lineage'] = effective_lineage
-                    tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
-                    tag['lineage'] = effective_lineage.lower()
-                else:
-                    # No sovereign_lineage - update Lineage* but preserve existing Lineage if present
-                    tag['Lineage*'] = effective_lineage
-                    tag['lineage'] = effective_lineage.lower()
-                    # Only set Lineage if it doesn't exist
-                    if 'Lineage' not in tag or not tag.get('Lineage'):
-                        tag['Lineage'] = effective_lineage
+                # CRITICAL: Always set Lineage* and other fields using effective_lineage (prioritizes sovereign)
+                tag['Lineage'] = effective_lineage
+                tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
+                tag['lineage'] = effective_lineage.lower()
                 aligned_count += 1
             else:
                 # Old format (backward compatibility)
@@ -10045,7 +10025,8 @@ def get_available_tags():
 
         # PERFORMANCE: Allow caching (keyed by file + timestamp) to avoid recomputing tags on every request.
         # CRITICAL: Only check cache AFTER verifying Excel file exists
-        cached_tags = None if prefer_db or nocache else cache.get(cache_key)
+        # CRITICAL FIX: ALWAYS check cache first - prefer_db only affects enrichment, not caching
+        cached_tags = None if nocache else cache.get(cache_key)
         
         # Respect nocache fully: only use file cache when nocache is not requested
         if not cached_tags and fast_load and session_file_path and not nocache:
@@ -10054,12 +10035,12 @@ def get_available_tags():
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
             file_cached_tags = cache.get(file_cache_key)
             if file_cached_tags:
-                logging.info(f"⚡ INSTANT CACHE HIT: Using fully enriched tags from background processing ({len(file_cached_tags)} tags)")
+                logging.info(f"⚡ FILE CACHE HIT: Using background-processed cache in fast_load mode")
                 cached_tags = file_cached_tags
         
         if cached_tags and fast_load:
-            logging.info(f"⚡ FAST RETURN: {len(cached_tags)} cached tags already enriched with database lineage")
-            # Cached tags from background processing already have database enrichment - just return them
+            logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
+            # CRITICAL: Align tags to ensure sovereign_lineage is included from database
             try:
                 store_name_align = get_current_store_name(allow_fallback=False) or store_name
                 if store_name_align:
@@ -10164,15 +10145,20 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
-                # CRITICAL: SKIP ALL DATABASE OPERATIONS - ONLY USE EXCEL TAGS
-                # User requested: "STOP LOADING DATABASE TAGS. ONLY LOAD EXCEL"
-                # Skip database enrichment entirely - use Excel data as-is
-                logging.info(f"⚡ EXCEL-ONLY MODE: Skipping all database enrichment - using {len(simple_tags)} Excel tags as-is")
-                if False:  # Disabled - never run database enrichment
-                    # Enrich with database lineage ONLY (don't add database products)
-                    try:
-                        product_db = get_product_database(store_name)
-                        if product_db and simple_tags:
+                # CRITICAL: Strip Excel Lineage field - UI uses database lineage only
+                for tag in simple_tags:
+                    # Remove all Excel lineage fields
+                    tag.pop('Lineage', None)
+                    tag.pop('lineage', None)
+                    tag.pop('Lineage*', None)
+                logging.info(f"🗑️ STRIPPED Excel Lineage field from {len(simple_tags)} tags - database lineage only")
+
+                # CRITICAL: Enrich with database lineage after stripping Excel lineage
+                # This populates currentLineage, canonical_lineage from database
+                # Enrich with database lineage ONLY (don't add database products)
+                try:
+                    product_db = get_product_database(store_name)
+                    if product_db and simple_tags:
                             logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database lineage...")
                             product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
                             logging.info(f"🔍 SIMPLE PATH: Querying database for {len(product_names)} product names...")
