@@ -17587,10 +17587,11 @@ const TagManager = {
                     // No cache found - fetch from server
                     console.log('📊 No cache found - fetching tags from server...');
                     const loaded = await this.fetchAndUpdateAvailableTags();
-                if (loaded) {
-                    console.log('✅ Tags loaded from database in init()');
-                } else {
-                    console.warn('⚠️ Tags not loaded in init()');
+                    if (loaded) {
+                        console.log('✅ Tags loaded from server in init()');
+                    } else {
+                        console.warn('⚠️ Tags not loaded in init()');
+                    }
                 }
                 
                 // CRITICAL FIX: Clear splash timeout since we completed successfully
