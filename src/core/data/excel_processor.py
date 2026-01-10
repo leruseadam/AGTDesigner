@@ -5639,7 +5639,9 @@ class ExcelProcessor:
                 "Product Name*": "string",
                 "Product Type*": "string",
                 "Lineage": "string",
-                "Product Brand": "string"
+                "Product Brand": "string",
+                "Price*": "string",  # Ensure price is read
+                "Price": "string"    # Alternative price column
             }
             
             # Read with minimal processing
@@ -5708,6 +5710,18 @@ class ExcelProcessor:
             # Only essential processing
             if len(df) == 0:
                 return df
+            
+            # CRITICAL: Log which columns are present to debug price issues
+            self.logger.info(f"[PYTHONANYWHERE-FAST] DataFrame columns: {list(df.columns)}")
+            price_columns = [col for col in df.columns if 'price' in col.lower()]
+            if price_columns:
+                self.logger.info(f"[PYTHONANYWHERE-FAST] Found price columns: {price_columns}")
+                # Check if price data exists
+                for col in price_columns:
+                    non_empty = df[col].notna().sum()
+                    self.logger.info(f"[PYTHONANYWHERE-FAST] Column '{col}' has {non_empty}/{len(df)} non-empty values")
+            else:
+                self.logger.warning(f"[PYTHONANYWHERE-FAST] NO PRICE COLUMNS FOUND IN EXCEL FILE!")
             
             # Ensure required columns exist
             required_columns = ['Product Name*', 'Product Type*', 'Lineage', 'Product Brand']
