@@ -5725,6 +5725,49 @@ class ExcelProcessor:
                 df = df[~df['Product Type*'].isin(excluded_types)]
                 df.reset_index(drop=True, inplace=True)
             
+            # CRITICAL: Process JointRatio for pre-roll products (same as minimal_load)
+            try:
+                if 'Product Type*' in df.columns:
+                    # Add JointRatio column if it doesn't exist
+                    if 'JointRatio' not in df.columns:
+                        df['JointRatio'] = ''
+
+                    # Process JointRatio for pre-roll products
+                    preroll_mask = df['Product Type*'].str.strip().str.lower().isin(['pre-roll', 'infused pre-roll'])
+
+                    if preroll_mask.any():
+                        self.logger.info(f"[PYTHONANYWHERE-FAST] Processing JointRatio for {preroll_mask.sum()} pre-roll products")
+
+                        # Vectorized extraction using pandas str methods
+                        product_name_col = 'Product Name*' if 'Product Name*' in df.columns else 'ProductName'
+                        if product_name_col in df.columns:
+                            # Create a working subset for prerolls with empty JointRatio
+                            preroll_df = df[preroll_mask & ((df['JointRatio'] == '') | df['JointRatio'].isna())].copy()
+
+                            if not preroll_df.empty:
+                                product_names = preroll_df[product_name_col].astype(str)
+
+                                # Extract "0.5g x 2" patterns using vectorized regex
+                                import re
+                                pattern = r'(\d*\.?\d+g)\s*x\s*(\d+)(?:\s*Pack)?'
+                                matches = product_names.str.extract(pattern, flags=re.IGNORECASE)
+
+                                # Where we have both weight and count, format as "weight x count"
+                                has_both = matches[0].notna() & matches[1].notna()
+                                df.loc[preroll_df[has_both].index, 'JointRatio'] = matches.loc[has_both, 0] + ' x ' + matches.loc[has_both, 1]
+
+                                # Where we only have weight pattern, extract just weight
+                                missing_ratio = ~has_both
+                                if missing_ratio.any():
+                                    weight_pattern = r'(\d*\.?\d+g)'
+                                    weight_only = product_names[missing_ratio].str.extract(weight_pattern, flags=re.IGNORECASE)[0]
+                                    df.loc[preroll_df[missing_ratio & weight_only.notna()].index, 'JointRatio'] = weight_only[weight_only.notna()]
+
+                        self.logger.info(f"[PYTHONANYWHERE-FAST] JointRatio processing completed for pre-roll products")
+
+            except Exception as joint_error:
+                self.logger.warning(f"[PYTHONANYWHERE-FAST] JointRatio processing failed: {joint_error}")
+            
             self.logger.info(f"[PYTHONANYWHERE-FAST] Minimal processing completed: {len(df)} rows remaining")
             return df
             
