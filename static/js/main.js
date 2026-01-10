@@ -14333,7 +14333,14 @@ const TagManager = {
     },
 
     async undoMove() {
+        // CRITICAL FIX: Prevent concurrent undo operations that could cause infinite loops
+        if (this._undoInProgress) {
+            console.warn('⚠️ Undo already in progress, ignoring duplicate call');
+            return;
+        }
+
         try {
+            this._undoInProgress = true;
             console.log('🔙 Undoing last checkbox action...');
 
             // Initialize undo/redo stacks if needed
@@ -14391,11 +14398,12 @@ const TagManager = {
             if (checkbox) {
                 // Update the checkboxInfo with the NEW state (after undo click will toggle it)
                 const currentState = checkbox.checked;
+                const newState = !currentState;
 
                 // Create redo info with the state AFTER the undo action
                 const redoInfo = {
                     ...checkboxInfo,
-                    checked: !currentState, // After clicking, it will be toggled
+                    checked: newState,
                     element: checkbox
                 };
 
@@ -14403,17 +14411,29 @@ const TagManager = {
                 this.state.redoStack.push(redoInfo);
                 console.log(`📚 Added to redo stack: ${redoInfo.id}, will restore to checked=${redoInfo.checked}`);
 
-                // Prevent this click from being added to undo stack
+                // CRITICAL FIX: Prevent this action from being tracked in undo stack
+                // Also prevent any reloads or cascading updates during undo
                 this.state.skipUndoTracking = true;
-                checkbox.click();
+                this._undoInProgress = true;
+
+                // CRITICAL FIX: Directly toggle checkbox instead of using .click() to avoid triggering handlers
+                // that might cause reloads or infinite loops
+                checkbox.checked = newState;
+                
+                // Manually dispatch a change event so other handlers can respond, but in a controlled way
+                const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+                checkbox.dispatchEvent(changeEvent);
+
+                // Use a longer timeout to ensure all handlers complete before re-enabling
                 setTimeout(() => {
                     this.state.skipUndoTracking = false;
+                    this._undoInProgress = false;
                     // CRITICAL FIX: Re-enable checkbox and reattach handlers after undo
                     this._ensureCheckboxesEnabled();
                     if (typeof this._reinitializeCheckboxHandlers === 'function') {
                         this._reinitializeCheckboxHandlers();
                     }
-                }, 100);
+                }, 300);
 
                 if (window.Toast) {
                     Toast.show('success', `Undone: ${checkboxInfo.id}`);
@@ -14433,6 +14453,12 @@ const TagManager = {
             if (window.Toast) {
                 Toast.show('error', `Undo failed: ${error.message}`);
             }
+            this._undoInProgress = false;
+        } finally {
+            // Ensure flag is cleared even if there's an error
+            setTimeout(() => {
+                this._undoInProgress = false;
+            }, 500);
         }
     },
 
@@ -18420,8 +18446,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log('🔙🔙🔙 UNDO BUTTON CLICKED - EVENT FIRED! 🔙🔙🔙');
                 e.preventDefault();
                 e.stopPropagation();
+                e.stopImmediatePropagation();
                 console.log('🔙 Undo button clicked');
                 verboseLog('Undo button clicked');
+
+                // CRITICAL FIX: Prevent multiple simultaneous undo operations
+                if (window.TagManager && window.TagManager._undoInProgress) {
+                    console.warn('⚠️ Undo already in progress, ignoring duplicate click');
+                    return;
+                }
 
                 if (window.TagManager && typeof window.TagManager.undoMove === 'function') {
                     console.log('✅ Calling TagManager.undoMove()');
