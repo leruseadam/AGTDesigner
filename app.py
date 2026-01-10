@@ -3286,10 +3286,20 @@ def upload_file():
                                 # Make JSON safe and cache
                                 safe_tags = make_json_safe(tags)
 
-                                # CRITICAL FIX: Use file-path-only cache key so frontend can access it
+                                # CRITICAL FIX: Use file-path-only cache key with version to bust old caches
                                 # Background thread doesn't have same session context as frontend request
                                 import hashlib
-                                cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
+                                cache_version = "v2_no_excel_lineage"  # Change this to bust all old caches
+                                cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
+                                
+                                # Clear any old cache keys (without version)
+                                old_cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
+                                try:
+                                    cache.delete(old_cache_key)
+                                    logging.info(f"[BACKGROUND] 🗑️ Cleared old cache key: {old_cache_key[:20]}...")
+                                except Exception:
+                                    pass
+                                
                                 cache.set(cache_key, safe_tags, timeout=300)
 
                                 cache_elapsed = (time.time() - cache_start) * 1000
@@ -3513,7 +3523,8 @@ def upload_file():
                                 # CRITICAL FIX: Use file-path-only cache key so frontend can access it
                                 # Background thread doesn't have same session context as frontend request
                                 import hashlib
-                                cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
+                                cache_version = "v2_no_excel_lineage"
+                                cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                                 cache.set(cache_key, safe_tags, timeout=300)
 
                                 cache_elapsed = (time.time() - cache_start) * 1000
@@ -10019,7 +10030,8 @@ def get_available_tags():
         # Respect nocache fully: only use file cache when nocache is not requested
         if not cached_tags and fast_load and session_file_path and not nocache:
             import hashlib
-            file_cache_key = f"tags_file_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
+            cache_version = "v2_no_excel_lineage"
+            file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
             file_cached_tags = cache.get(file_cache_key)
             if file_cached_tags:
                 logging.info(f"⚡ FILE CACHE HIT: Using background-processed cache in fast_load mode")
@@ -10743,7 +10755,8 @@ def get_available_tags():
                     file_path = session.get('file_path')
                     if file_path:
                         import hashlib
-                        cache_key = f"tags_file_{hashlib.sha256(file_path.encode()).hexdigest()}"
+                        cache_version = "v2_no_excel_lineage"
+                        cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                         try:
                             cache.delete(cache_key)
                             logging.info(f"🧹 Cleared background cache to prevent stale data")
@@ -14206,7 +14219,8 @@ def get_filter_options():
             session_file_path = session.get('file_path', '')
             if session_file_path:
                 import hashlib
-                file_cache_key = f"tags_file_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
+                cache_version = "v2_no_excel_lineage"
+                file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
                 cached_tags = cache.get(file_cache_key)
                 if cached_tags and len(cached_tags) > 0:
                     logging.info(f"⚡ PERFORMANCE: Using cached tags ({len(cached_tags)} tags) to generate filter options instead of reloading file")
