@@ -3509,7 +3509,8 @@ class ExcelProcessor:
                 'quantity': safe_get_value(quantity),
                 'DOH': safe_get_value(row.get('DOH', '')) or safe_get_value(row.get('DOH Compliant (Yes/No)', '')),  # Add DOH field for UI display
                 'DOH Compliant (Yes/No)': safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or safe_get_value(row.get('DOH', '')),  # Add alternative DOH field
-                'Price': price_value,  # Add Price field
+                'Price*': price_value,  # CRITICAL: Add Price* field (primary price field used by UI)
+                'Price': price_value,  # Add Price field for backward compatibility
                 'THC': ai_value,  # Add THC value
                 'CBD': ak_value,  # Add CBD value
                 'AI': ai_value,  # Add AI field for THC
