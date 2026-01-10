@@ -113,11 +113,19 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Use EXACT same lineage as DOCX generation
+  // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
   // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-  // Backend sets tag['currentLineage'] = effective_lineage (the COALESCE result)
-  // So use currentLineage directly - it already matches DOCX output!
-  const rawLineage = tag.currentLineage || tag.sovereign_lineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // sovereign_lineage can be from current session edits OR preexisting saved values
+  // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
+  let rawLineage = '';
+  if (tag.sovereign_lineage) {
+    const sovereignRaw = String(tag.sovereign_lineage).trim();
+    // Use if not empty and not explicitly 'NONE' (backend validates all other values)
+    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+      rawLineage = tag.sovereign_lineage;
+    }
+  }
+  if (!rawLineage) rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -286,11 +294,19 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Use EXACT same lineage as DOCX generation
+  // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
   // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-  // Backend sets tag['currentLineage'] = effective_lineage (the COALESCE result)
-  // So use currentLineage directly - it already matches DOCX output!
-  const rawLineage = tag.currentLineage || tag.sovereign_lineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // sovereign_lineage can be from current session edits OR preexisting saved values
+  // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
+  let rawLineage = '';
+  if (tag.sovereign_lineage) {
+    const sovereignRaw = String(tag.sovereign_lineage).trim();
+    // Use if not empty and not explicitly 'NONE' (backend validates all other values)
+    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+      rawLineage = tag.sovereign_lineage;
+    }
+  }
+  if (!rawLineage) rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
