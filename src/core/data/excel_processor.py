@@ -7871,7 +7871,9 @@ class ExcelProcessor:
                 'Quantity Received*': quantity,
                 'quantity': quantity,
                 'DOH': get_val('DOH'),
-                'Price': price_value,  # Add Price field
+                'JointRatio': get_val('JointRatio'),  # Add JointRatio for pre-roll products
+                'Price*': price_value,  # CRITICAL: Add Price* field (primary price field used by UI)
+                'Price': price_value,  # Add Price field for backward compatibility
                 'THC': ai_value,  # Add THC value
                 'CBD': ak_value,  # Add CBD value
                 'AI': ai_value,  # Add AI field for THC
