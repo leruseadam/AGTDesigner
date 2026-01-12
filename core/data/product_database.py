@@ -4340,32 +4340,32 @@ class ProductDatabase:
             cursor = conn.cursor()
             current_date = datetime.now().isoformat()
 
-            # CRITICAL FIX: Use normalized name and try both column names
-            # This ensures updates work even with formatting differences
+            # CRITICAL FIX: Update BOTH Lineage (Excel) AND sovereign_lineage (manual override)
+            # sovereign_lineage takes priority in COALESCE queries
             if vendor and brand:
                 cursor.execute('''
                     UPDATE products
-                    SET "Lineage" = ?
+                    SET "Lineage" = ?, sovereign_lineage = ?
                     WHERE ("Product Name*" = ? OR "ProductName" = ?)
                     AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (new_lineage, product_name, product_name, vendor, brand))
+                ''', (new_lineage, new_lineage, product_name, product_name, vendor, brand))
                 logger.info(f"Updated lineage for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
             else:
                 # Try exact match first
                 cursor.execute('''
                     UPDATE products
-                    SET "Lineage" = ?
+                    SET "Lineage" = ?, sovereign_lineage = ?
                     WHERE "Product Name*" = ? OR "ProductName" = ?
-                ''', (new_lineage, product_name, product_name))
+                ''', (new_lineage, new_lineage, product_name, product_name))
 
                 # If no rows updated with exact match, try case-insensitive match
                 if cursor.rowcount == 0:
                     cursor.execute('''
                         UPDATE products
-                        SET "Lineage" = ?
+                        SET "Lineage" = ?, sovereign_lineage = ?
                         WHERE LOWER(TRIM("Product Name*")) = LOWER(TRIM(?))
                         OR LOWER(TRIM("ProductName")) = LOWER(TRIM(?))
-                    ''', (new_lineage, product_name, product_name))
+                    ''', (new_lineage, new_lineage, product_name, product_name))
                     logger.info(f"Updated lineage for product '{product_name}' using case-insensitive match to '{new_lineage}'")
                 else:
                     logger.info(f"Updated lineage for product '{product_name}' to '{new_lineage}'")
