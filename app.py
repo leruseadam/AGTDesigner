@@ -10260,11 +10260,12 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
-                # CRITICAL PERFORMANCE FIX: Skip database enrichment if fast_load=1 AND we have cached tags
-                # This allows instant refresh without database queries
-                skip_db_enrichment = fast_load and cached_tags is not None
+                # CRITICAL PERFORMANCE FIX: ALWAYS skip database enrichment when fast_load=1
+                # This provides instant tag loading (<1 second) on PythonAnywhere
+                # Database lineage alignment happens on first slow-mode request (fast_load=0)
+                skip_db_enrichment = fast_load
                 if skip_db_enrichment:
-                    logging.info(f"⚡ PERFORMANCE: Skipping database enrichment (fast_load=1 + cached tags exist)")
+                    logging.info(f"⚡ PERFORMANCE: Skipping database enrichment (fast_load=1 for speed)")
 
                 # CRITICAL: Strip Excel Lineage field - UI uses database lineage only
                 for tag in simple_tags:
