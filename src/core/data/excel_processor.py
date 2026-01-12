@@ -3562,10 +3562,10 @@ class ExcelProcessor:
                 'CBD test result': cbd_content_value,
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
-                'productBrand': get_val('Product Brand'),
+                'productBrand': safe_get_value(row.get('Product Brand', '')),
                 # CRITICAL: DO NOT include Excel lineage - lineage ONLY comes from database
-                # 'lineage': get_val('Lineage') or 'MIXED',  # REMOVED - database only
-                'productType': get_val('Product Type*'),
+                # 'lineage': safe_get_value(row.get('Lineage', '')) or 'MIXED',  # REMOVED - database only
+                'productType': safe_get_value(row.get('Product Type*', '')),
                 'weight': raw_weight,
                 'weightWithUnits': weight_with_units,
                 'displayName': product_name
