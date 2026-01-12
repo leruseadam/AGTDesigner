@@ -2472,6 +2472,14 @@ def get_session_excel_processor():
             
             # CRITICAL FIX: Clear caches for new file but preserve selected tags
             logging.info(f"CRITICAL FIX: Clearing caches for new file (preserving selected tags)")
+            # Clear internal caches using the proper method
+            if hasattr(g.excel_processor, '_invalidate_caches'):
+                g.excel_processor._invalidate_caches()
+                logging.info(f"CRITICAL FIX: Cleared ExcelProcessor internal caches (_filter_options_cache, _available_tags_cache)")
+            # Also clear directly to be sure
+            if hasattr(g.excel_processor, '_filter_options_cache'):
+                g.excel_processor._filter_options_cache.clear()
+                logging.info(f"CRITICAL FIX: Cleared _filter_options_cache directly")
             if hasattr(g.excel_processor, '_file_cache'):
                 g.excel_processor._file_cache.clear()
                 logging.info(f"CRITICAL FIX: Cleared file cache")
@@ -10479,16 +10487,28 @@ def get_available_tags():
                                         logging.info(f"📋 Sample DOH mappings: {sample_doh}")
 
                                     # Apply DOH data to tags
+                                    # EXCEL PRIORITY: Only enrich from database if Excel doesn't already have a DOH value
+                                    # Excel is the source of truth since it's most up-to-date
                                     doh_enriched_count = 0
+                                    doh_preserved_count = 0
                                     for tag in simple_tags:
                                         product_name = tag.get('Product Name*')
                                         if product_name and product_name in doh_map:
-                                            db_doh_clean = doh_map[product_name]
-                                            tag['DOH'] = db_doh_clean
-                                            tag['DOH Compliant (Yes/No)'] = db_doh_clean
-                                            doh_enriched_count += 1
+                                            # Check if Excel already has a DOH value
+                                            excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
+                                            excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
+                                            
+                                            # Only use database DOH if Excel doesn't have a value (or has empty/invalid value)
+                                            if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
+                                                db_doh_clean = doh_map[product_name]
+                                                tag['DOH'] = db_doh_clean
+                                                tag['DOH Compliant (Yes/No)'] = db_doh_clean
+                                                doh_enriched_count += 1
+                                            else:
+                                                # Excel has a DOH value - preserve it (Excel is source of truth)
+                                                doh_preserved_count += 1
 
-                                    logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH data")
+                                    logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH (preserved {doh_preserved_count} Excel DOH values)")
                                 except Exception as doh_enrich_err:
                                     logging.info(f"Failed to enrich with database DOH data: {doh_enrich_err}")
                                     import traceback
