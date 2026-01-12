@@ -4,6 +4,7 @@ import logging
 import traceback
 import time
 import math
+import platform
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 import pandas as pd
@@ -312,6 +313,16 @@ def optimized_lineage_assignment(df, product_types, lineages, classic_types):
         # Fallback if Product Strain column doesn't exist - only for empty lineages
         nonclassic_default_mask = nonclassic_mask & empty_lineage_mask
         result[nonclassic_default_mask] = 'MIXED'
+    
+    # CRITICAL FIX: NEVER allow classic types to have MIXED lineage - override any accidental assignments
+    classic_with_mixed = classic_mask & (result == 'MIXED')
+    if classic_with_mixed.any():
+        # Fix any classic types that were incorrectly set to MIXED
+        result[classic_with_mixed] = 'HYBRID'
+        # Log warning if this happens
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"CRITICAL FIX: Prevented {classic_with_mixed.sum()} classic type products from being set to MIXED, changed to HYBRID")
     
     return result
 
@@ -1509,6 +1520,12 @@ class ExcelProcessor:
             if hasattr(self, 'df') and self.df is not None:
                 del self.df
             
+            # Windows-specific path normalization for better performance
+            is_windows = platform.system() == 'Windows'
+            if is_windows:
+                file_path = os.path.normpath(file_path)
+                self.logger.debug(f"[WINDOWS-OPT] Normalized path for Windows: {file_path}")
+            
             # Use optimized Excel reading with minimal processing
             excel_engines = ['openpyxl']
             df = None
@@ -1524,14 +1541,22 @@ class ExcelProcessor:
                         "Lineage": "string"
                     }
                     
+                    # Windows-specific optimizations for pandas read_excel with openpyxl
+                    read_excel_kwargs = {
+                        'engine': engine,
+                        'dtype': dtype_dict,
+                        'na_filter': False,  # Don't filter NA values for speed
+                        'keep_default_na': False,  # Don't use default NA values
+                    }
+                    
+                    # Windows performance optimizations
+                    if is_windows and engine == 'openpyxl':
+                        # Convert float optimization - disable for speed on Windows
+                        read_excel_kwargs['convert_float'] = False
+                        self.logger.debug("[WINDOWS-OPT] Applied Windows-specific Excel reading optimizations")
+                    
                     # Read with minimal processing - no NA filtering for speed
-                    df = pd.read_excel(
-                        file_path, 
-                        engine=engine,
-                        dtype=dtype_dict,
-                        na_filter=False,  # Don't filter NA values for speed
-                        keep_default_na=False  # Don't use default NA values
-                    )
+                    df = pd.read_excel(file_path, **read_excel_kwargs)
                     
                     self.logger.info(f"Successfully read file with {engine} engine: {len(df)} rows, {len(df.columns)} columns")
                     break
@@ -1876,6 +1901,12 @@ class ExcelProcessor:
                 self.logger.error(f"File not readable: {file_path}")
                 return False
             
+            # Windows-specific path normalization for better performance
+            is_windows = platform.system() == 'Windows'
+            if is_windows:
+                file_path = os.path.normpath(file_path)
+                self.logger.debug(f"[WINDOWS-OPT] Normalized path for Windows: {file_path}")
+            
             # Check file size (standard limit for both environments)
             file_size = os.path.getsize(file_path)
             max_size = 100 * 1024 * 1024  # 100MB limit (standard for both environments)
@@ -1925,15 +1956,23 @@ class ExcelProcessor:
                 import time
                 read_start = time.time()
                 
+                # Windows-specific optimizations for pandas read_excel with openpyxl
+                read_excel_kwargs = {
+                    'engine': excel_engine,
+                    'dtype': dtype_dict,
+                    'na_filter': False,  # Don't filter NA values - faster (already set)
+                    'keep_default_na': False,  # Don't use default NA values - faster (already set)
+                }
+                
+                # Windows performance optimizations
+                if is_windows and excel_engine == 'openpyxl':
+                    # Convert float optimization - disable for speed on Windows
+                    read_excel_kwargs['convert_float'] = False
+                    self.logger.debug("[WINDOWS-OPT] Applied Windows-specific Excel reading optimizations")
+                
                 # Optimize reading: na_filter=False and keep_default_na=False are already fastest
                 # For very large files, consider reading in chunks, but for now use optimized single read
-                df = pd.read_excel(
-                    file_path, 
-                    engine=excel_engine, 
-                    dtype=dtype_dict,
-                    na_filter=False,  # Don't filter NA values - faster (already set)
-                    keep_default_na=False  # Don't use default NA values - faster (already set)
-                )
+                df = pd.read_excel(file_path, **read_excel_kwargs)
                 
                 read_time = time.time() - read_start
                 self.logger.info(f"✅ File read completed in {read_time:.2f}s: {len(df)} rows, {len(df.columns)} columns")
@@ -5052,7 +5091,22 @@ class ExcelProcessor:
                             temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
                         ]
             # Get unique values for this filter type
-            if col in temp_df.columns:
+            # CRITICAL FIX: For brand filter, check multiple possible column names
+            actual_col = col
+            if filter_key == "brand":
+                # Try multiple possible column names for brand
+                possible_brand_cols = ["Product Brand", "ProductBrand", "Brand", "brand"]
+                for possible_col in possible_brand_cols:
+                    if possible_col in temp_df.columns:
+                        actual_col = possible_col
+                        break
+                else:
+                    # No brand column found - log warning and skip
+                    self.logger.warning(f"Brand filter: No brand column found. Available columns: {list(temp_df.columns)}")
+                    options[filter_key] = []
+                    continue
+            
+            if actual_col in temp_df.columns:
                 if filter_key == "weight":
                     # For weight, use the properly formatted weight with units
                     values = []
@@ -5080,8 +5134,21 @@ class ExcelProcessor:
                     else:
                         self.logger.warning("No weight values generated for filter dropdown")
                 else:
-                    values = temp_df[col].dropna().unique().tolist()
-                    values = [str(v) for v in values if str(v).strip()]
+                    # Use actual_col (which may be different from col for brand filter)
+                    # CRITICAL FIX: For brand filter, use a different approach to handle empty/NaN values
+                    if filter_key == "brand":
+                        # For brand, get ALL values including NaN/empty, then filter more carefully
+                        all_brand_values = temp_df[actual_col].astype(str).unique().tolist()
+                        # Filter out only true NaN values (represented as 'nan' string), but keep empty strings and "Unknown"
+                        values = [str(v).strip() for v in all_brand_values 
+                                 if str(v).strip() and str(v).strip().lower() not in ['nan', 'none', 'null']]
+                        if not values:
+                            # If still no values, log warning
+                            self.logger.warning(f"Brand filter: Column '{actual_col}' exists but contains no valid values. Sample values: {all_brand_values[:5] if len(all_brand_values) > 0 else 'N/A'}")
+                    else:
+                        # For other filters, use normal dropna approach
+                        values = temp_df[actual_col].dropna().unique().tolist()
+                        values = [str(v) for v in values if str(v).strip()]
                 
                 # Exclude unwanted product types from dropdown and apply product type normalization
                 if filter_key == "productType":

@@ -1603,7 +1603,12 @@ const TagManager = {
                 const renderCachedTags = () => {
                     this._updateAvailableTags(cachedTags, null);
                     verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
-                    this.buildFilterOptionsFromTags(cachedTags);
+                    // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
+                    // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
+                    const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
+                        ? this.state.originalTags 
+                        : cachedTags;
+                    this.buildFilterOptionsFromTags(tagsForFilters);
                     this._filtersBuiltThisSession = true; // Mark filters as built
                     setTimeout(() => {
                         if (typeof this.setupFilterEventListeners === 'function') {
@@ -5526,8 +5531,12 @@ const TagManager = {
         this._updateTagContainersVisibility(true);
         
         // PERFORMANCE: Build filters immediately from loaded tags (instant population)
+        // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
         if (tags && tags.length > 0 && !this._filtersBuiltFromTags) {
-            this.buildFilterOptionsFromTags(tags);
+            const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
+                ? this.state.originalTags 
+                : tags;
+            this.buildFilterOptionsFromTags(tagsForFilters);
             this._filtersBuiltFromTags = true; // Prevent duplicate builds
         }
         
@@ -10689,8 +10698,12 @@ const TagManager = {
                 this._updateAvailableTags(cachedTags, null);
                 console.log(`✅ INSTANT RENDER: ${cachedTags.length} tags displayed from cache`);
                 
-                // Build filters from cached tags immediately
-                this.buildFilterOptionsFromTags(cachedTags);
+                // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
+                // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
+                const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
+                    ? this.state.originalTags 
+                    : cachedTags;
+                this.buildFilterOptionsFromTags(tagsForFilters);
                 
                 // Hide splash since we have cached tags
                 if (this.hideActionSplash) {
@@ -10956,7 +10969,9 @@ const TagManager = {
                                 this.state.hydratedFromCache = true;
                                 cacheUsedForDisplay = true;
                                 this._updateAvailableTags(cachedTags, null);
-                                this.buildFilterOptionsFromTags(cachedTags);
+                                // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
+                                // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
+                                this.buildFilterOptionsFromTags(this.state.originalTags);
                                 // Hide splash since we have cached tags
                                 if (this.hideActionSplash) {
                                     this.hideActionSplash();
@@ -11202,9 +11217,13 @@ const TagManager = {
 
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
             // CRITICAL FIX: Only build if filters haven't been built yet to prevent duplicate rebuilds
+            // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
             if (tags && tags.length > 0 && !this._filtersBuiltThisSession) {
                 console.log('🔧 Building filters from fetched tags (first time this session)');
-                this.buildFilterOptionsFromTags(tags);
+                const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
+                    ? this.state.originalTags 
+                    : tags;
+                this.buildFilterOptionsFromTags(tagsForFilters);
                 this._filtersBuiltThisSession = true;
             } else if (this._filtersBuiltThisSession) {
                 console.log('⏭️ Skipping filter rebuild - already built this session');

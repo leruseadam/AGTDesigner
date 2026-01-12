@@ -3775,14 +3775,23 @@ def process_large_file_streaming(temp_path: str, filename: str, start_time: floa
         
         try:
             # Read file in chunks
+            # Windows optimization: Apply Windows-specific optimizations
+            is_windows = platform.system() == 'Windows'
+            base_read_kwargs = {
+                'dtype': str,  # Read as strings for speed
+                'na_filter': False,
+                'engine': 'openpyxl'
+            }
+            if is_windows:
+                base_read_kwargs['convert_float'] = False
+                logging.debug("[WINDOWS-OPT] Applied Windows-specific chunked Excel reading optimizations")
+            
             for chunk_start in range(0, total_rows, chunk_size):
                 chunk_df = pd.read_excel(
                     temp_path,
                     skiprows=chunk_start,
                     nrows=chunk_size,
-                    dtype=str,  # Read as strings for speed
-                    na_filter=False,
-                    engine='openpyxl'
+                    **base_read_kwargs
                 )
                 
                 if chunk_df.empty:
@@ -3993,15 +4002,20 @@ def upload_file_simple_pythonanywhere():
 
                 if not success:
                     try:
-                        df = pd.read_excel(
-                            temp_path,
-                            engine='openpyxl',
-                            dtype=str,
-                            na_filter=False,
-                            keep_default_na=False,
-                            converters=None,
-                            header=0
-                        )
+                        # Windows optimization: Apply Windows-specific optimizations
+                        is_windows = platform.system() == 'Windows'
+                        read_excel_kwargs = {
+                            'engine': 'openpyxl',
+                            'dtype': str,
+                            'na_filter': False,
+                            'keep_default_na': False,
+                            'converters': None,
+                            'header': 0
+                        }
+                        if is_windows:
+                            read_excel_kwargs['convert_float'] = False
+                            logging.debug("[WINDOWS-OPT] Applied Windows-specific Excel reading optimizations")
+                        df = pd.read_excel(temp_path, **read_excel_kwargs)
                         if not df.empty:
                             processor.df = df
                             success = True
