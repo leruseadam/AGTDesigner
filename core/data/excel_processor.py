@@ -3508,7 +3508,8 @@ class ExcelProcessor:
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': get_val('Product Brand'),
-                'lineage': get_val('Lineage') or 'MIXED',
+                # CRITICAL: DO NOT include Excel lineage - lineage ONLY comes from database
+                # 'lineage': get_val('Lineage') or 'MIXED',  # REMOVED - database only
                 'productType': get_val('Product Type*'),
                 'weight': raw_weight,
                 'weightWithUnits': weight_with_units,
@@ -3519,14 +3520,10 @@ class ExcelProcessor:
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
 
-            # Sanitize lineage - prioritize existing lineage, fall back to inference from name
-            existing_lineage = get_val('Lineage').strip().upper() if get_val('Lineage') else ''
-            if existing_lineage and existing_lineage in VALID_LINEAGES:
-                lineage = existing_lineage
-            else:
-                # No valid lineage column - infer from product name and type
-                product_type_for_inference = get_val('Product Type*')
-                lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+            # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
+            # Excel lineage column and name-based inference are completely ignored
+            # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
+            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
 
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
@@ -7675,7 +7672,8 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': get_val('Product Brand'),
                 'ProductBrand': get_val('Product Brand'),
-                'Lineage': get_val('Lineage') or 'MIXED',
+                # CRITICAL: DO NOT include Excel lineage - lineage ONLY comes from database
+                # 'Lineage': get_val('Lineage') or 'MIXED',  # REMOVED - database only
                 'Product Type*': get_val('Product Type*'),
                 'Product Type': get_val('Product Type*'),
                 'Weight*': raw_weight,
@@ -7703,7 +7701,8 @@ class ExcelProcessor:
                 # Also include the lowercase versions for backward compatibility
                 'vendor': vendor_value,
                 'productBrand': get_val('Product Brand'),
-                'lineage': get_val('Lineage') or 'MIXED',
+                # CRITICAL: DO NOT include Excel lineage - lineage ONLY comes from database
+                # 'lineage': get_val('Lineage') or 'MIXED',  # REMOVED - database only
                 'productType': get_val('Product Type*'),
                 'weight': raw_weight,
                 'weightWithUnits': weight_with_units,
@@ -7714,14 +7713,10 @@ class ExcelProcessor:
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
 
-            # Sanitize lineage - prioritize existing lineage, fall back to inference from name
-            existing_lineage = get_val('Lineage').strip().upper() if get_val('Lineage') else ''
-            if existing_lineage and existing_lineage in VALID_LINEAGES:
-                lineage = existing_lineage
-            else:
-                # No valid lineage column - infer from product name and type
-                product_type_for_inference = get_val('Product Type*')
-                lineage = self._infer_lineage_from_name(product_name, product_type_for_inference)
+            # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
+            # Excel lineage column and name-based inference are completely ignored
+            # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
+            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
 
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
