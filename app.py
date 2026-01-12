@@ -7264,11 +7264,14 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     effective_lineage = lineage_info['strain_sovereign']
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
-                # Always set canonical_lineage and currentLineage for UI compatibility
-                # Use effective_lineage (sovereign if exists, otherwise the COALESCEd result)
-                if lineage_info['strain_canonical'] and not (lineage_info['product_sovereign'] or lineage_info['strain_sovereign']):
+                # CRITICAL FIX: Always use strain canonical_lineage from strains table as the base
+                # Priority: product_sovereign > strain_sovereign > strain_canonical > product.Lineage
+                # The strains table canonical_lineage should always be available and used
+                if lineage_info['strain_canonical']:
+                    # Always set canonical_lineage from strains table (this is the "strains sheet" data)
                     tag['canonical_lineage'] = lineage_info['strain_canonical']
                 else:
+                    # Fallback if no strain canonical_lineage exists
                     tag['canonical_lineage'] = effective_lineage
                 tag['currentLineage'] = effective_lineage
                 # CRITICAL: Always set Lineage* and other fields using effective_lineage (prioritizes sovereign)
