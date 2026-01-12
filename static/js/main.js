@@ -1587,7 +1587,12 @@ const TagManager = {
             if (availableContainer) {
                 this._updateAvailableTags(cachedTags, null);
                 verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
-                this.buildFilterOptionsFromTags(cachedTags);
+                // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
+                // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
+                const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
+                    ? this.state.originalTags 
+                    : cachedTags;
+                this.buildFilterOptionsFromTags(tagsForFilters);
                 this._filtersBuiltThisSession = true; // Mark filters as built
                 setTimeout(() => {
                     if (typeof this.setupFilterEventListeners === 'function') {
