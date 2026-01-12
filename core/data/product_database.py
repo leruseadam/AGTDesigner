@@ -383,6 +383,7 @@ class ProductDatabase:
                         "Units" TEXT,
                         "Price" TEXT,
                         "Lineage" TEXT,
+                        sovereign_lineage TEXT,
                         first_seen_date TEXT NOT NULL,
                         last_seen_date TEXT NOT NULL,
                         total_occurrences INTEGER DEFAULT 1,
@@ -2922,6 +2923,7 @@ class ProductDatabase:
             # Define all expected columns using the actual database schema names
             expected_columns = [
                 ('strain_id', 'INTEGER'),
+                ('sovereign_lineage', 'TEXT'),  # CRITICAL: Store manual lineage changes
                 ('"Product Strain"', 'TEXT'),
                 ('"Quantity*"', 'TEXT'),
                 ('"DOH"', 'TEXT'),

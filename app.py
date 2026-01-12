@@ -10260,12 +10260,15 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
-                # CRITICAL PERFORMANCE FIX: ALWAYS skip database enrichment when fast_load=1
+                # CRITICAL PERFORMANCE FIX: Skip database enrichment when fast_load=1 UNLESS lineage was manually updated
                 # This provides instant tag loading (<1 second) on PythonAnywhere
-                # Database lineage alignment happens on first slow-mode request (fast_load=0)
-                skip_db_enrichment = fast_load
+                # EXCEPTION: If lineage_update_timestamp exists, ALWAYS apply database lineage (manual changes must show)
+                has_lineage_updates = bool(session.get('lineage_update_timestamp'))
+                skip_db_enrichment = fast_load and not has_lineage_updates
                 if skip_db_enrichment:
                     logging.info(f"⚡ PERFORMANCE: Skipping database enrichment (fast_load=1 for speed)")
+                elif has_lineage_updates:
+                    logging.info(f"🔄 LINEAGE UPDATE DETECTED: Forcing database enrichment even with fast_load=1")
 
                 # CRITICAL: Strip Excel Lineage field - UI uses DATABASE LINEAGE ONLY
                 # Excel lineage is NEVER used - all lineage comes from database via:
@@ -10754,10 +10757,10 @@ def get_available_tags():
                                         chunk = product_names[chunk_start:chunk_start + chunk_size]
                                         chunk_lower = [name.lower() for name in chunk]
                                         placeholders = ','.join(['?' for _ in chunk_lower])
-                                        # Match DOCX query: prioritize products.Lineage, fallback to strain canonical/sovereign
+                                        # CRITICAL: Prioritize manual lineage (sovereign) over Excel lineage
                                         cursor.execute(f'''
                                             SELECT p."Product Name*",
-                                                   COALESCE(p."Lineage", s.canonical_lineage, s.sovereign_lineage) as effective_lineage,
+                                                   COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
                                                    p.sovereign_lineage as product_sovereign
                                             FROM products p
                                             LEFT JOIN strains s ON p.strain_id = s.id
