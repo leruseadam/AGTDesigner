@@ -16888,6 +16888,29 @@ def clear_cache():
         # Clear initial data cache
         clear_initial_data_cache()
         
+        # CRITICAL FIX: Clear ExcelProcessor internal caches BEFORE resetting
+        excel_processor = get_session_excel_processor()
+        if excel_processor:
+            if hasattr(excel_processor, '_invalidate_caches'):
+                excel_processor._invalidate_caches()
+                logging.info("✅ Cleared ExcelProcessor internal caches (_filter_options_cache, _available_tags_cache)")
+            if hasattr(excel_processor, '_filter_options_cache'):
+                excel_processor._filter_options_cache.clear()
+                logging.info("✅ Cleared _filter_options_cache directly")
+            if hasattr(excel_processor, '_available_tags_cache'):
+                excel_processor._available_tags_cache.clear()
+                logging.info("✅ Cleared _available_tags_cache directly")
+        
+        # Clear Flask cache for filter options
+        try:
+            filter_options_cache_key = get_session_cache_key('filter_options')
+            web_filter_options_cache_key = get_session_cache_key('web_filter_options')
+            cache.delete(filter_options_cache_key)
+            cache.delete(web_filter_options_cache_key)
+            logging.info("✅ Cleared Flask cache for filter_options and web_filter_options")
+        except Exception as cache_err:
+            logging.warning(f"Could not clear Flask filter options cache: {cache_err}")
+        
         # Reset Excel processor to force fresh data loading
         reset_excel_processor()
         

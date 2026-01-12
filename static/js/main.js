@@ -112,11 +112,67 @@ window.safeReload = safeReload;
 window._reloadInProgress = false; // Make flag accessible
 
 // Memory-optimized performance utilities
+// Performance detection for slow computers
+const devicePerformance = (function() {
+    let detectedPerformance = null;
+    
+    function detectPerformance() {
+        if (detectedPerformance !== null) return detectedPerformance;
+        
+        // Detect hardware concurrency (CPU cores)
+        const cores = navigator.hardwareConcurrency || 4;
+        
+        // Detect device memory (if available)
+        const memory = navigator.deviceMemory || 4; // Default to 4GB if unknown
+        
+        // Run a quick benchmark
+        const start = performance.now();
+        for (let i = 0; i < 1000000; i++) {
+            Math.random();
+        }
+        const benchmarkTime = performance.now() - start;
+        
+        // Classify performance
+        // Slow: < 2 cores, < 4GB RAM, or benchmark > 50ms
+        // Medium: 2-4 cores, 4-8GB RAM, benchmark 20-50ms
+        // Fast: > 4 cores, > 8GB RAM, benchmark < 20ms
+        let performanceLevel = 'medium';
+        if (cores < 2 || memory < 4 || benchmarkTime > 50) {
+            performanceLevel = 'slow';
+        } else if (cores >= 4 && memory >= 8 && benchmarkTime < 20) {
+            performanceLevel = 'fast';
+        }
+        
+        detectedPerformance = {
+            level: performanceLevel,
+            cores: cores,
+            memory: memory,
+            benchmarkTime: benchmarkTime,
+            multiplier: performanceLevel === 'slow' ? 2.5 : performanceLevel === 'medium' ? 1.5 : 1.0
+        };
+        
+        console.log(`🔍 Device Performance: ${performanceLevel} (${cores} cores, ${memory}GB RAM, benchmark: ${benchmarkTime.toFixed(1)}ms)`);
+        return detectedPerformance;
+    }
+    
+    return {
+        get: detectPerformance,
+        isSlow: () => detectPerformance().level === 'slow',
+        isMedium: () => detectPerformance().level === 'medium',
+        isFast: () => detectPerformance().level === 'fast',
+        getMultiplier: () => detectPerformance().multiplier
+    };
+})();
+
 const performanceUtils = {
-    // Memory-efficient debounce with cleanup - optimized for Windows
+    // Memory-efficient debounce with cleanup - optimized for slow devices
     debounce(func, wait) {
         let timeout;
-        const optimizedWait = isWindows ? Math.max(wait * 0.5, 10) : wait; // Faster on Windows
+        const perf = devicePerformance.get();
+        // Increase debounce delay for slower devices to reduce UI lag
+        const optimizedWait = isWindows 
+            ? Math.max(wait * (isWindows ? 0.5 : 1) * perf.multiplier, 10) 
+            : Math.max(wait * perf.multiplier, 50); // Minimum 50ms for slower devices
         return function executedFunction(...args) {
             const later = () => {
                 clearTimeout(timeout);
@@ -800,14 +856,17 @@ const VALID_PRODUCT_TYPES = [
   "rso/co2 tankers"
 ];
 
-// Mac-like ultra-fast debounce function
+// Mac-like ultra-fast debounce function with performance adaptation
 const debounce = (func, delay) => {
     let timeoutId;
+    const perf = devicePerformance.get();
+    // Increase debounce delay for slower devices to reduce UI lag
+    const optimizedDelay = Math.max(delay * perf.multiplier, devicePerformance.isSlow() ? 100 : 50);
     
     return function(...args) {
         const context = this;
         clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => func.apply(context, args), delay);
+        timeoutId = setTimeout(() => func.apply(context, args), optimizedDelay);
     };
 };
 // Application Loading Splash Manager
