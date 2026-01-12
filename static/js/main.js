@@ -11484,8 +11484,43 @@ const TagManager = {
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
-                // REMOVED: Background refresh was causing multiple restarts
-                // Lineage is already aligned in the main fetch, no need for background refresh
+                // CRITICAL: Trigger background fetch with fast_load=0 to get DATABASE LINEAGE
+                // This ensures lineage ALWAYS comes from database, not Excel
+                // Non-blocking - runs in background after UI is already responsive
+                setTimeout(() => {
+                    console.log('🔄 Background: Fetching database lineage (fast_load=0)...');
+                    const timestamp = Date.now();
+                    fetch(`/api/available-tags?t=${timestamp}&fast_load=0&nocache=1`)
+                        .then(res => res.json())
+                        .then(data => {
+                            const freshTags = data.tags || data;
+                            if (Array.isArray(freshTags) && freshTags.length > 0) {
+                                // Update lineage in current tags from database
+                                const lineageMap = new Map();
+                                freshTags.forEach(tag => {
+                                    const name = tag['Product Name*'];
+                                    const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage;
+                                    if (name && dbLineage) {
+                                        lineageMap.set(name, dbLineage);
+                                    }
+                                });
+                                // Apply database lineage to displayed tags
+                                this.state.tags.forEach(tag => {
+                                    const name = tag['Product Name*'];
+                                    if (name && lineageMap.has(name)) {
+                                        tag.canonical_lineage = lineageMap.get(name);
+                                        tag.currentLineage = lineageMap.get(name);
+                                        tag.Lineage = lineageMap.get(name);
+                                        tag.lineage = lineageMap.get(name).toLowerCase();
+                                    }
+                                });
+                                console.log('✅ Database lineage applied to tags');
+                                // Re-render to show lineage colors
+                                this._updateAvailableTags(this.state.tags);
+                            }
+                        })
+                        .catch(err => console.warn('Background lineage fetch failed (non-critical):', err));
+                }, 1000); // 1 second delay to let UI settle
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
                 verboseLog('=== fetchAndUpdateAvailableTags END ===');

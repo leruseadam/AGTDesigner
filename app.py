@@ -10267,18 +10267,18 @@ def get_available_tags():
                 if skip_db_enrichment:
                     logging.info(f"⚡ PERFORMANCE: Skipping database enrichment (fast_load=1 for speed)")
 
-                # CRITICAL: Strip Excel Lineage field - UI uses database lineage only
+                # CRITICAL: Strip Excel Lineage field - UI uses DATABASE LINEAGE ONLY
+                # Excel lineage is NEVER used - all lineage comes from database via:
+                # 1. Background refresh (fast_load=0) or
+                # 2. Explicit lineage alignment via _align_tags_with_db_lineage()
                 for tag in simple_tags:
-                    # Remove all Excel lineage fields
+                    # Remove all Excel lineage fields to ensure database is the only source
                     tag.pop('Lineage', None)
                     tag.pop('lineage', None)
                     tag.pop('Lineage*', None)
                 
                 if not skip_db_enrichment:
-                    logging.info(f"🗑️ STRIPPED Excel Lineage field from {len(simple_tags)} tags - will enrich with database lineage")
-
-                if not skip_db_enrichment:
-                    logging.info(f"🗑️ STRIPPED Excel Lineage field from {len(simple_tags)} tags - will enrich with database lineage")
+                    logging.info(f"🗑️ STRIPPED Excel Lineage from {len(simple_tags)} tags - will enrich with DATABASE lineage only")
 
                 # CRITICAL: Enrich with database lineage after stripping Excel lineage
                 # This populates currentLineage, canonical_lineage from database
