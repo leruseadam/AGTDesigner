@@ -16860,44 +16860,40 @@ const TagManager = {
             verboseLog(`✅ All ${foundCount} filter event listeners attached successfully`);
         }
         
-        // CRITICAL FIX: Periodic check to ensure brand filter listener stays attached
-        // This prevents the brand filter from "stopping working" if the listener gets detached
-        if (!self._brandFilterHealthCheck) {
-            self._brandFilterHealthCheck = setInterval(() => {
-                const brandFilterElement = document.getElementById('brandFilter');
-                if (brandFilterElement && !brandFilterElement._filterChangeHandler) {
-                    console.warn('⚠️ Brand filter listener missing - reattaching...');
-                    // Re-attach just the brand filter listener
-                    const brandFilterId = 'brandFilter';
-                    const filterType = self.getFilterTypeFromId(brandFilterId);
+        // CRITICAL FIX: Ensure brand filter listener is properly attached
+        // Double-check that brand filter has its listener attached
+        const brandFilterElement = document.getElementById('brandFilter');
+        if (brandFilterElement && !brandFilterElement._filterChangeHandler) {
+            console.warn('⚠️ Brand filter listener not attached during initial setup - this should not happen');
+            // This should not be necessary if setup is correct, but ensure it's attached
+            const brandFilterId = 'brandFilter';
+            const filterType = self.getFilterTypeFromId(brandFilterId);
+            
+            brandFilterElement._filterChangeHandler = (event) => {
+                try {
+                    console.log(`🔥 BRAND FILTER CHANGED: "${event.target.value}"`);
+                    const value = event.target.value;
                     
-                    brandFilterElement._filterChangeHandler = (event) => {
-                        try {
-                            console.log(`🔥 BRAND FILTER CHANGED: "${event.target.value}"`);
-                            const value = event.target.value;
-                            
-                            if (self._filterThrottleTimers && self._filterThrottleTimers[brandFilterId]) {
-                                clearTimeout(self._filterThrottleTimers[brandFilterId]);
-                            }
-                            
-                            if (!self._filterThrottleTimers) {
-                                self._filterThrottleTimers = {};
-                            }
-                            
-                            self._filterThrottleTimers[brandFilterId] = setTimeout(() => {
-                                requestAnimationFrame(() => {
-                                    immediateFilterUpdate(filterType, value);
-                                });
-                            }, 25);
-                        } catch (error) {
-                            console.error('Error in brand filter change handler:', error);
-                        }
-                    };
+                    if (self._filterThrottleTimers && self._filterThrottleTimers[brandFilterId]) {
+                        clearTimeout(self._filterThrottleTimers[brandFilterId]);
+                    }
                     
-                    brandFilterElement.addEventListener('change', brandFilterElement._filterChangeHandler);
-                    console.log('✅ Brand filter listener reattached');
+                    if (!self._filterThrottleTimers) {
+                        self._filterThrottleTimers = {};
+                    }
+                    
+                    self._filterThrottleTimers[brandFilterId] = setTimeout(() => {
+                        requestAnimationFrame(() => {
+                            immediateFilterUpdate(filterType, value);
+                        });
+                    }, 25);
+                } catch (error) {
+                    console.error('Error in brand filter change handler:', error);
                 }
-            }, 2000); // Check every 2 seconds
+            };
+            
+            brandFilterElement.addEventListener('change', brandFilterElement._filterChangeHandler);
+            console.log('✅ Brand filter listener attached during fallback check');
         }
     },
 

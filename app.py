@@ -1103,6 +1103,21 @@ def reset_excel_processor():
     logging.info("Resetting Excel processor - clearing all data")
     
     if _excel_processor is not None:
+        # CRITICAL FIX: Clear internal caches FIRST before clearing data
+        if hasattr(_excel_processor, '_invalidate_caches'):
+            _excel_processor._invalidate_caches()
+            logging.info("✅ Cleared ExcelProcessor internal caches (_filter_options_cache, _available_tags_cache)")
+        
+        # Explicitly clear filter options cache
+        if hasattr(_excel_processor, '_filter_options_cache'):
+            _excel_processor._filter_options_cache.clear()
+            logging.info("✅ Cleared _filter_options_cache directly")
+        
+        # Explicitly clear available tags cache
+        if hasattr(_excel_processor, '_available_tags_cache'):
+            _excel_processor._available_tags_cache.clear()
+            logging.info("✅ Cleared _available_tags_cache directly")
+        
         # Explicitly clear all data
         if hasattr(_excel_processor, 'df') and _excel_processor.df is not None:
             del _excel_processor.df
