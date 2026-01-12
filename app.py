@@ -10073,13 +10073,18 @@ def get_available_tags():
                 'message': 'No Excel file uploaded. Please upload an Excel file to see products in CURRENT INVENTORY.'
             }), 200
 
+        # CRITICAL: Check if lineage was updated BEFORE checking cache
+        # If lineage was updated, we must bypass cache to get fresh database lineage
+        has_lineage_updates = bool(session.get('lineage_update_timestamp'))
+        bypass_cache_for_lineage = has_lineage_updates and nocache
+
         # PERFORMANCE: Allow caching (keyed by file + timestamp) to avoid recomputing tags on every request.
         # CRITICAL: Only check cache AFTER verifying Excel file exists
-        # CRITICAL FIX: ALWAYS check cache first - prefer_db only affects enrichment, not caching
-        cached_tags = None if nocache else cache.get(cache_key)
-        
+        # CRITICAL: Bypass cache if lineage was updated and nocache=1
+        cached_tags = None if (nocache or bypass_cache_for_lineage) else cache.get(cache_key)
+
         # Respect nocache fully: only use file cache when nocache is not requested
-        if not cached_tags and fast_load and session_file_path and not nocache:
+        if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
             import hashlib
             cache_version = "v2_no_excel_lineage"
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
@@ -10106,11 +10111,10 @@ def get_available_tags():
                     store_name_align = get_current_store_name(allow_fallback=False) or store_name
                     if store_name_align:
                         cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # Clear the timestamp after alignment so we don't keep re-aligning
-                        if 'lineage_update_timestamp' in session:
-                            del session['lineage_update_timestamp']
-                            session.modified = True
-                            logging.info("✅ Cleared lineage_update_timestamp after re-alignment")
+                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
+                        # It must persist to ensure cache uses the correct timestamp-based key
+                        # The timestamp changes the cache key, so old cached tags won't be used
+                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
                 except Exception as align_err:
                     logging.warning(f"Could not align cached tags after lineage update: {align_err}")
             
@@ -10152,11 +10156,9 @@ def get_available_tags():
                         # Mark that we've aligned tags in this session
                         session['tags_aligned_this_session'] = True
                         session.modified = True
-                        # Clear the timestamp after alignment so we don't keep re-aligning
-                        if 'lineage_update_timestamp' in session:
-                            del session['lineage_update_timestamp']
-                            session.modified = True
-                            logging.info("✅ Cleared lineage_update_timestamp after re-alignment")
+                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
+                        # It must persist to change the cache key and ensure fresh database lineage
+                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
                 except Exception as align_err:
                     logging.warning(f"Could not align cached tags after lineage update: {align_err}")
             else:
@@ -12167,15 +12169,12 @@ def get_available_tags():
                 prefer_db, len(database_tags) if 'database_tags' in locals() else 'unknown'
             ))
         
-        # PERFORMANCE: Clear lineage refresh flag after a successful response so future
-        # requests can use fast-load and cached tags without forced lineage alignment.
-        try:
-            if 'lineage_update_timestamp' in session:
-                del session['lineage_update_timestamp']
-                session.modified = True
-                logging.info("✅ Cleared lineage_update_timestamp after successful available-tags response")
-        except Exception as clear_ts_err:
-            logging.debug(f"Could not clear lineage_update_timestamp: {clear_ts_err}")
+        # CRITICAL FIX: DO NOT delete lineage_update_timestamp here
+        # The timestamp must persist because:
+        # 1. It changes the cache key to ensure fresh tags are served
+        # 2. It's saved to .last_upload.json for page reload persistence
+        # 3. Deleting it would cause subsequent requests to use old cache with Excel lineage
+        # The timestamp will be updated only when lineage is updated again
         
         resp = jsonify({
             'tags': safe_all_tags,  # Frontend expects 'tags' property
