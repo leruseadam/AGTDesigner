@@ -13831,24 +13831,32 @@ def get_web_available_tags():
                     import traceback
                     logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
-            # Normalize all tags (both database and Excel lineage)
+            # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
             simple_tags = []
             for tag in excel_tags:
-                # Get final lineage (database takes priority, Excel as fallback)
-                final_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage')
+                # CRITICAL FIX: Prioritize canonical_lineage from strains table (the "strains sheet")
+                # Priority: canonical_lineage (from strains) > currentLineage > sovereign_lineage > Lineage
+                final_lineage = (
+                    tag.get('canonical_lineage') or  # From strains table - this is the "strains sheet" data
+                    tag.get('currentLineage') or 
+                    tag.get('sovereign_lineage') or
+                    tag.get('Lineage')
+                )
                 
                 if final_lineage and str(final_lineage).strip():
                     lineage_clean = str(final_lineage).strip().upper()
-                    # Ensure all fields are set consistently
+                    # CRITICAL: Always preserve canonical_lineage from strains table if it exists
                     if tag.get('canonical_lineage'):
-                        # Database lineage - set all fields
+                        # Database lineage from strains table - preserve canonical_lineage
+                        tag['canonical_lineage'] = lineage_clean  # Keep strains table canonical_lineage
                         tag['currentLineage'] = lineage_clean
-                        tag['canonical_lineage'] = lineage_clean
                         tag['Lineage'] = lineage_clean
                         tag['Lineage*'] = lineage_clean
                         tag['lineage'] = lineage_clean.lower()
                     else:
-                        # Excel lineage only (new product) - set Excel fields
+                        # No strains table data - set all fields to the available lineage
+                        tag['currentLineage'] = lineage_clean
+                        tag['canonical_lineage'] = lineage_clean  # Set it even if not from strains
                         tag['Lineage'] = lineage_clean
                         tag['Lineage*'] = lineage_clean
                         tag['lineage'] = lineage_clean.lower()
