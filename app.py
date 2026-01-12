@@ -2835,6 +2835,11 @@ def index():
                             session['uploaded_filename'] = last_upload.get('filename', '')
                             session['upload_timestamp'] = last_upload.get('timestamp', 0)
                             session['file_store'] = persisted_store
+                            # CRITICAL FIX: Restore lineage_update_timestamp to preserve lineage changes after page reload
+                            lineage_timestamp = last_upload.get('lineage_update_timestamp')
+                            if lineage_timestamp:
+                                session['lineage_update_timestamp'] = lineage_timestamp
+                                logging.info(f"✅ Restored lineage_update_timestamp: {lineage_timestamp}")
                             session.modified = True
                             logging.info(f"✅ Restored upload from persistent file: {uploaded_file}")
                         else:
@@ -3152,7 +3157,8 @@ def upload_file():
                     'file_path': normalized_file_path,
                     'filename': file.filename,
                     'timestamp': timestamp,
-                    'store': selected_store
+                    'store': selected_store,
+                    'lineage_update_timestamp': None  # Will be set when lineage is updated
                 }, f)
             logging.info(f"✅ Saved upload info to persistent file: {persistence_file}")
             logging.info(f"✅ Normalized file path stored: {normalized_file_path}")
@@ -9518,11 +9524,15 @@ def clear_available_tags_cache(reason=None):
         # Clear file-specific caches using both possible session keys
         session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
         upload_timestamp = session.get('upload_timestamp', '')
+        lineage_update_timestamp = session.get('lineage_update_timestamp', '')
         if session_file_path:
             _clear_key(get_session_cache_key(f'available_tags_{session_file_path}'))
             # CRITICAL FIX: Also clear cache with upload_timestamp (used in line 10000)
             if upload_timestamp:
                 _clear_key(get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}'))
+            # CRITICAL FIX: Also clear cache with lineage_update_timestamp to prevent serving stale lineage after update
+            if lineage_update_timestamp:
+                _clear_key(get_session_cache_key(f'available_tags_{session_file_path}_{lineage_update_timestamp}'))
         
         # Also clear file-based cache on disk for current store
         try:
@@ -10030,10 +10040,16 @@ def get_available_tags():
 
         # CRITICAL FIX: Include upload timestamp in cache key to ensure each upload has unique cache
         # This prevents serving stale data from previous uploads or other sessions
+        # CRITICAL FIX: Use lineage_update_timestamp if available to invalidate cache after lineage changes
         upload_timestamp = session.get('upload_timestamp', '')
+        lineage_update_timestamp = session.get('lineage_update_timestamp', '')
+        effective_timestamp = lineage_update_timestamp if lineage_update_timestamp else upload_timestamp
         if has_excel_data and session_file_path:
-            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
-            logging.info(f"📦 Cache key with timestamp: ..._{upload_timestamp}")
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}')
+            if lineage_update_timestamp:
+                logging.info(f"📦 Cache key with lineage_update_timestamp: ..._{effective_timestamp}")
+            else:
+                logging.info(f"📦 Cache key with upload_timestamp: ..._{effective_timestamp}")
         else:
             cache_key = get_session_cache_key('available_tags')
             # CRITICAL: If no Excel data, clear any old file-specific caches to prevent stale data
@@ -13015,7 +13031,8 @@ def update_lineage():
             except Exception as cache_clear_err:
                 logging.warning(f"Could not clear filter options cache: {cache_clear_err}")
             # CRITICAL FIX: Set lineage_update_timestamp to force fresh lineage alignment in available-tags endpoint
-            session['lineage_update_timestamp'] = time.time()
+            lineage_timestamp = time.time()
+            session['lineage_update_timestamp'] = lineage_timestamp
             # Ensure the modified timestamp is persisted across workers (PythonAnywhere multi-worker fix)
             try:
                 session.modified = True
@@ -13023,6 +13040,22 @@ def update_lineage():
                 # Fallback: Flask normally tracks modifications automatically, so this is just extra safety
                 pass
             logging.info("✅ Set lineage_update_timestamp to force fresh lineage alignment (session marked modified)")
+
+            # CRITICAL FIX: Persist lineage_update_timestamp to .last_upload.json to survive page reloads
+            try:
+                import json
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    with open(persistence_file, 'r') as f:
+                        last_upload = json.load(f)
+                    last_upload['lineage_update_timestamp'] = lineage_timestamp
+                    with open(persistence_file, 'w') as f:
+                        json.dump(last_upload, f)
+                    logging.info(f"✅ Persisted lineage_update_timestamp to .last_upload.json: {lineage_timestamp}")
+                else:
+                    logging.warning("⚠️ .last_upload.json not found, cannot persist lineage_update_timestamp")
+            except Exception as persist_err:
+                logging.warning(f"Could not persist lineage_update_timestamp to .last_upload.json: {persist_err}")
             # CRITICAL FIX: Clear Excel processor from both global and request context to force reload with fresh database lineage
             global _excel_processor
             if hasattr(g, 'excel_processor'):
