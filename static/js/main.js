@@ -2557,7 +2557,20 @@ const TagManager = {
                 }
                 
                 // Brand - CRITICAL FIX: Check all possible brand field names consistently
-                const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || tag['brand'] || '';
+                // Check in order of most likely to least likely
+                let brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || tag['brand'] || '';
+                
+                // If still empty, check all keys that might contain brand
+                if (!brand || !brand.trim()) {
+                    const brandKeys = Object.keys(tag).filter(k => k.toLowerCase().includes('brand'));
+                    for (const key of brandKeys) {
+                        const value = tag[key];
+                        if (value && typeof value === 'string' && value.trim()) {
+                            brand = value;
+                            break;
+                        }
+                    }
+                }
                 
                 // DEBUG: Log first few brands to diagnose empty filter issue
                 if (filterOptions.brand.size < 5 && brand && brand.trim()) {
