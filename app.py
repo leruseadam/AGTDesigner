@@ -13961,6 +13961,21 @@ def get_web_available_tags():
                         tag['Lineage'] = lineage_clean
                         tag['Lineage*'] = lineage_clean
                         tag['lineage'] = lineage_clean.lower()
+                else:
+                    # CRITICAL FIX: If no lineage found after alignment, ensure lineage fields are still set
+                    # This prevents lineage from being empty - use defaults based on product type
+                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                    default_lineage = 'HYBRID' if is_classic else 'MIXED'
+                    
+                    # Set default lineage to ensure it's always present
+                    tag['currentLineage'] = default_lineage
+                    tag['canonical_lineage'] = default_lineage
+                    tag['Lineage'] = default_lineage
+                    tag['Lineage*'] = default_lineage
+                    tag['lineage'] = default_lineage.lower()
+                    logging.debug(f"⚠️ WEB: No lineage found for '{tag.get('Product Name*', 'Unknown')}' after alignment - using default '{default_lineage}'")
                 simple_tags.append(tag)
             
             safe_tags = make_json_safe(simple_tags)
