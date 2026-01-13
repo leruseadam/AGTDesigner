@@ -7577,14 +7577,21 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 
                 # Step 5: Set canonical_lineage from strain_canonical - NEVER overwrite after this
                 # This ensures the user's strains sheet data is ALWAYS used
-                # BUT: NEVER set canonical_lineage to MIXED
+                # BUT: NEVER set canonical_lineage to MIXED - convert to HYBRID if needed
                 if strain_canonical_value:
-                    # Already checked above that it's not MIXED
+                    # Already checked above that it's not MIXED, but double-check anyway
                     final_canonical = strain_canonical_value
-                    # Double-check for classic types
-                    if is_classic and str(final_canonical).strip().upper() == 'MIXED':
+                    final_canonical_clean = str(final_canonical).strip().upper()
+                    
+                    # CRITICAL: NEVER allow MIXED for canonical_lineage - convert to HYBRID
+                    if final_canonical_clean == 'MIXED':
+                        final_canonical = 'HYBRID'
+                        logging.warning(f"🚫 CRITICAL: Prevented MIXED strain_canonical for '{name}' - changing to HYBRID (canonical_lineage can NEVER be MIXED)")
+                    # Double-check for classic types (redundant but safe)
+                    elif is_classic and final_canonical_clean == 'MIXED':
                         final_canonical = 'HYBRID'
                         logging.warning(f"🚫 CRITICAL: Prevented MIXED strain_canonical for classic type '{name}' - changing to HYBRID")
+                    
                     # ALWAYS set from strain_canonical - this is what the user told us to use
                     tag['canonical_lineage'] = final_canonical
                     logging.info(f"✅ Set canonical_lineage='{final_canonical}' from strain_canonical='{strain_canonical_value}' for '{name}' (user's strains sheet)")
@@ -14360,7 +14367,11 @@ def get_web_available_tags():
                             logging.debug(f"✅ NORMALIZE '{product_name}': Using canonical_lineage='{canonical_clean}' from strains table")
                     else:
                         # No strains table data - set all fields to the available lineage
-                        # CRITICAL: Never set canonical_lineage to MIXED
+                        # CRITICAL: Never set canonical_lineage to MIXED - convert to HYBRID for classic types
+                        product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                        
                         if lineage_clean != 'MIXED':
                             tag['currentLineage'] = lineage_clean
                             tag['canonical_lineage'] = lineage_clean  # Set it even if not from strains
@@ -14369,22 +14380,38 @@ def get_web_available_tags():
                             tag['lineage'] = lineage_clean.lower()
                             logging.debug(f"⚠️ NORMALIZE '{product_name}': No canonical_lineage, using '{lineage_clean}' from other sources")
                         else:
-                            logging.warning(f"🚫 NORMALIZE '{product_name}': Skipping MIXED lineage - no valid lineage available")
+                            # CRITICAL: If lineage is MIXED, convert to HYBRID for classic types
+                            if is_classic:
+                                lineage_clean = 'HYBRID'
+                                logging.warning(f"🚫 NORMALIZE '{product_name}': Converting MIXED to HYBRID for classic type '{product_type}'")
+                            else:
+                                logging.warning(f"🚫 NORMALIZE '{product_name}': Skipping MIXED lineage - no valid lineage available")
+                                lineage_clean = None
+                        
+                        # Only set fields if we have a valid lineage
+                        if lineage_clean:
+                            tag['currentLineage'] = lineage_clean
+                            tag['canonical_lineage'] = lineage_clean
+                            tag['Lineage'] = lineage_clean
+                            tag['Lineage*'] = lineage_clean
+                            tag['lineage'] = lineage_clean.lower()
                 else:
                     # CRITICAL FIX: If no lineage found after alignment, ensure lineage fields are still set
                     # This prevents lineage from being empty - use defaults based on product type
+                    # CRITICAL: NEVER use MIXED for canonical_lineage - always use HYBRID for classic types, HYBRID for non-classic too
                     product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
                     CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
                     is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                    default_lineage = 'HYBRID' if is_classic else 'MIXED'
+                    # CRITICAL: Always use HYBRID as default - NEVER MIXED for canonical_lineage
+                    default_lineage = 'HYBRID'  # Always HYBRID, never MIXED
                     
                     # Set default lineage to ensure it's always present
                     tag['currentLineage'] = default_lineage
-                    tag['canonical_lineage'] = default_lineage
+                    tag['canonical_lineage'] = default_lineage  # NEVER MIXED
                     tag['Lineage'] = default_lineage
                     tag['Lineage*'] = default_lineage
                     tag['lineage'] = default_lineage.lower()
-                    logging.debug(f"⚠️ WEB: No lineage found for '{tag.get('Product Name*', 'Unknown')}' after alignment - using default '{default_lineage}'")
+                    logging.debug(f"⚠️ WEB: No lineage found for '{tag.get('Product Name*', 'Unknown')}' after alignment - using default '{default_lineage}' (never MIXED)")
                 simple_tags.append(tag)
             
             safe_tags = make_json_safe(simple_tags)
@@ -21113,7 +21140,7 @@ def vendor_strain_browser():
             strains_data.append({
                 'strain_name': str(strain_name).strip(),
                 'current_lineage': str(current_lineage or '').strip() or 'MIXED',
-                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'HYBRID',  # NEVER MIXED for canonical_lineage
                 'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'vendor_count': int(vendor_count),
@@ -21164,7 +21191,7 @@ def vendor_strain_browser():
                 'vendor': vendor,
                 'strain_name': str(strain_name).strip(),
                 'current_lineage': str(current_lineage or '').strip() or 'MIXED',
-                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'HYBRID',  # NEVER MIXED for canonical_lineage
                 'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'brand_count': int(brand_count),
