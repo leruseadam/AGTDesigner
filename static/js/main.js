@@ -7143,7 +7143,7 @@ const TagManager = {
         // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
         // This ensures UI displays correct lineage even if database/Excel has wrong value
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        const classicTypes = ['flower', 'pre-roll', 'blunt', 'flavored blunt', 'joint', 'cone', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
         if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
             lineage = 'HYBRID';

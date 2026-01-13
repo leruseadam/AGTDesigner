@@ -1,8 +1,9 @@
 // Classic types that should show "Lineage" instead of "Brand"
 if (typeof window.CLASSIC_TYPES === 'undefined') {
   window.CLASSIC_TYPES = [
-    "flower", "pre-roll", "concentrate", "infused pre-roll", 
-    "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+    "flower", "pre-roll", "blunt", "flavored blunt", "joint", "cone",
+    "concentrate", "infused pre-roll", "solventless concentrate", 
+    "vape cartridge", "rso/co2 tankers"
   ];
 }
 // Use window.CLASSIC_TYPES directly to avoid duplicate const declaration
