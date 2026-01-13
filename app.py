@@ -2079,21 +2079,37 @@ def initialize_excel_processor():
             if has_request_context():
                 session_file_path = session.get('file_path')
                 if session_file_path and os.path.exists(session_file_path):
-                    logging.info(f"✅ Found session file in initialize_excel_processor: {session_file_path}")
-                    # Check if already loaded
-                    if excel_processor._last_loaded_file != session_file_path or not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
-                        logging.info(f"📂 Loading session file in initialize_excel_processor: {session_file_path}")
-                        success = excel_processor.load_file(session_file_path)
-                        if success:
-                            excel_processor._last_loaded_file = session_file_path
-                            row_count = len(excel_processor.df) if hasattr(excel_processor, 'df') and excel_processor.df is not None else 0
-                            logging.info(f"✅ Session file loaded successfully with {row_count} records")
-                            return  # Don't load default file if session file was loaded
-                        else:
-                            logging.warning(f"⚠️ Failed to load session file: {session_file_path}")
+                    # CRITICAL FIX: Validate that session file is not an exported file
+                    # Exported files have patterns like "AGT_*_Transformed_Data_*.xlsx" or are in downloads
+                    filename = os.path.basename(session_file_path)
+                    is_exported_file = (
+                        'Transformed_Data' in filename or
+                        'processed_excel' in filename.lower() or
+                        filename.startswith('AGT_') and '_Transformed_' in filename
+                    )
+                    
+                    if is_exported_file:
+                        logging.warning(f"⚠️ Session file_path points to exported file, clearing: {session_file_path}")
+                        session['file_path'] = None
+                        session['uploaded_filename'] = None
+                        session.modified = True
+                        session_file_path = None
                     else:
-                        logging.info(f"✅ Session file already loaded: {session_file_path}")
-                        return  # Don't load default file if session file is already loaded
+                        logging.info(f"✅ Found session file in initialize_excel_processor: {session_file_path}")
+                        # Check if already loaded
+                        if excel_processor._last_loaded_file != session_file_path or not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
+                            logging.info(f"📂 Loading session file in initialize_excel_processor: {session_file_path}")
+                            success = excel_processor.load_file(session_file_path)
+                            if success:
+                                excel_processor._last_loaded_file = session_file_path
+                                row_count = len(excel_processor.df) if hasattr(excel_processor, 'df') and excel_processor.df is not None else 0
+                                logging.info(f"✅ Session file loaded successfully with {row_count} records")
+                                return  # Don't load default file if session file was loaded
+                            else:
+                                logging.warning(f"⚠️ Failed to load session file: {session_file_path}")
+                        else:
+                            logging.info(f"✅ Session file already loaded: {session_file_path}")
+                            return  # Don't load default file if session file is already loaded
         except Exception as session_check_error:
             logging.debug(f"Could not check session in initialize_excel_processor: {session_check_error}")
         
@@ -3977,6 +3993,16 @@ def upload_file_simple_pythonanywhere():
         session['uploaded_filename'] = sanitized_filename
         session['selected_tags'] = []
         session.modified = True
+        
+        # CRITICAL FIX: Clear DEFAULT_FILE_CACHE to prevent loading old cached file paths
+        # This ensures that when a new file is uploaded, the app doesn't load a previously cached default file
+        try:
+            from src.core.data.excel_processor import DEFAULT_FILE_CACHE
+            DEFAULT_FILE_CACHE.clear()
+            logging.info("✅ Cleared DEFAULT_FILE_CACHE after file upload to prevent loading old cached files")
+        except Exception as cache_clear_err:
+            logging.warning(f"Could not clear DEFAULT_FILE_CACHE: {cache_clear_err}")
+        
         update_processing_status(file.filename, 'processing')
 
         from flask import copy_current_request_context
@@ -4145,6 +4171,14 @@ def upload_instant():
         session['file_path'] = temp_path
         session['uploaded_filename'] = sanitized_filename
         session['selected_tags'] = []
+        
+        # CRITICAL FIX: Clear DEFAULT_FILE_CACHE to prevent loading old cached file paths
+        try:
+            from src.core.data.excel_processor import DEFAULT_FILE_CACHE
+            DEFAULT_FILE_CACHE.clear()
+            logging.info("✅ Cleared DEFAULT_FILE_CACHE after file upload")
+        except Exception as cache_clear_err:
+            logging.warning(f"Could not clear DEFAULT_FILE_CACHE: {cache_clear_err}")
         session.modified = True
 
         # Start background processing
@@ -4285,6 +4319,14 @@ def upload_file_simple():
         # Store uploaded file path in session
         session['file_path'] = file_path
         session['selected_tags'] = []
+        
+        # CRITICAL FIX: Clear DEFAULT_FILE_CACHE to prevent loading old cached file paths
+        try:
+            from src.core.data.excel_processor import DEFAULT_FILE_CACHE
+            DEFAULT_FILE_CACHE.clear()
+            logging.info("✅ Cleared DEFAULT_FILE_CACHE after file upload")
+        except Exception as cache_clear_err:
+            logging.warning(f"Could not clear DEFAULT_FILE_CACHE: {cache_clear_err}")
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time

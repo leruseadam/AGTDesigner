@@ -2572,8 +2572,18 @@ const TagManager = {
                     });
                 }
                 
-                if (brand && brand.trim() && brand.trim().toLowerCase() !== 'unknown' && brand.trim().toLowerCase() !== 'n/a') {
-                    filterOptions.brand.add(brand.trim());
+                // CRITICAL FIX: Only filter out truly empty/invalid brands, be more permissive
+                // Allow brands even if they're "unknown" or "n/a" - let the user decide
+                if (brand && brand.trim() && brand.trim().length > 0) {
+                    const brandTrimmed = brand.trim();
+                    // Only exclude if it's explicitly empty or just whitespace
+                    if (brandTrimmed.toLowerCase() !== 'unknown' && brandTrimmed.toLowerCase() !== 'n/a' && brandTrimmed.toLowerCase() !== 'none') {
+                        filterOptions.brand.add(brandTrimmed);
+                    } else if (filterOptions.brand.size === 0) {
+                        // If no brands found yet, include even "unknown" to show something
+                        console.log(`⚠️ Only found "${brandTrimmed}" brand - including it anyway to populate filter`);
+                        filterOptions.brand.add(brandTrimmed);
+                    }
                 }
                 
                 // Product Type - exclude deactivated and sample types

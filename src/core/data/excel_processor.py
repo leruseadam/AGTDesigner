@@ -617,6 +617,36 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
                     # Look for any Excel file, prioritize "A Greener Today"
                     # Skip temporary Excel files (starting with ~$)
                     if filename.lower().endswith(('.xlsx', '.xls')) and not filename.startswith('~$'):
+                        # CRITICAL FIX: Exclude exported files - these should never be loaded as default files
+                        filename_lower = filename.lower()
+                        is_exported_file = (
+                            'transformed_data' in filename_lower or
+                            'transformed data' in filename_lower or
+                            'processed_excel' in filename_lower or
+                            'processed excel' in filename_lower or
+                            (filename.startswith('AGT_') and '_Transformed_' in filename) or
+                            (filename.startswith('AGT_') and 'TAGS_' in filename) or
+                            (filename.startswith('AGT_') and '_Transformed' in filename) or
+                            ('tags_' in filename_lower and 'transformed' in filename_lower) or
+                            'export' in filename_lower or
+                            'download' in filename_lower or
+                            # Additional pattern: files with vendor name + transformed/export patterns
+                            (any(char.isupper() for char in filename[:10]) and 'transformed' in filename_lower)
+                        )
+                        if is_exported_file:
+                            logger.debug(f"Skipping exported file: {filename}")
+                            continue
+                        
+                        # CRITICAL FIX: Also check if file is in Downloads folder and looks like an export
+                        # Downloads folder often contains exported files that users downloaded
+                        if 'downloads' in str(location).lower() and not 'inventory' in filename_lower:
+                            # If it's in Downloads and doesn't have "inventory" in the name, be more cautious
+                            # Only allow files that clearly look like inventory files
+                            if not ('a greener today' in filename_lower and 'inventory' in filename_lower):
+                                # Skip files in Downloads that don't look like inventory files
+                                logger.debug(f"Skipping file in Downloads (not an inventory file): {filename}")
+                                continue
+                        
                         # If store_name is provided, filter by store name in filename
                         if store_name:
                             # Extract the actual store name part (e.g., "Bothell" from "AGT_Bothell")
