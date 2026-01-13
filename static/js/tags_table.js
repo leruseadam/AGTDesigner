@@ -467,7 +467,8 @@ class TagsTable {
     console.log('Creating DOH dropdown for tag:', tagName, 'DOH Status:', dohStatus);
 
     // Add DOH and High CBD images if applicable
-    const dohValue = (tag.DOH || '').toString().toUpperCase();
+    // CRITICAL FIX: Use dohStatus (which includes both DOH and 'DOH Compliant (Yes/No)') instead of just tag.DOH
+    const dohValue = (dohStatus || '').toString().toUpperCase().trim();
     const productTypeLower = productType.toLowerCase().trim();
     // More robust High CBD check - handle variations in product type format
     const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
@@ -483,7 +484,7 @@ class TagsTable {
     if (isHighCbdProduct) {
       // High CBD products get only the High CBD badge, regardless of DOH status
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-    } else if (dohValue === 'YES') {
+    } else if (dohValue === 'YES' || dohValue === 'DOH') {
       if (tagName.toLowerCase().includes('high thc')) {
         dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
       } else {
@@ -494,8 +495,6 @@ class TagsTable {
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
     } else if (dohValue === 'THC') {
       dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-    } else if (dohValue === 'DOH') {
-      dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
     }
 
     return `
