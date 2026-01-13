@@ -10953,17 +10953,23 @@ const TagManager = {
                     // Skip prefer_db for web clients (fast_load includes lineage), use for desktop if needed
                     const preferDbParam = isWebClient ? '' : (forceDbLineage ? '&prefer_db=1' : '');
                     
-                    // Use web endpoint for web clients, regular endpoint for localhost/desktop
-                    const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
-                    
+                    // ⚡ ULTRA-FAST: Try instant database endpoint first (on first retry only)
+                    let baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+
+                    // Try instant endpoint on first attempt for maximum speed
+                    if (retryCount === 0 && isDatabaseMode) {
+                        baseEndpoint = '/api/available-tags-instant';
+                        console.log('⚡ Using INSTANT endpoint for maximum speed (database-only)');
+                    }
+
                     // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
-                    const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
+                    const optimizedFetchUrl = retryCount === 0 && fastLoadParam ?
                         `${baseEndpoint}?t=${timestamp}${fastLoadParam}${preferDbParam}` :
                         `${baseEndpoint}?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
-                    
-                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
+
+                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient}, instant: ${baseEndpoint.includes('instant')})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
-                    
+
                     // ⚡ AGGRESSIVE CACHING: Web clients use longer cache (30 min), desktop uses shorter (5 min)
                     const cacheMaxAge = isWebClient ? 1800 : 300; // Web: 30min, Desktop: 5min
                     response = await fetch(optimizedFetchUrl, {

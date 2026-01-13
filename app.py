@@ -5523,16 +5523,36 @@ def process_lightning():
         with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = file_path
-        
+
+        # CRITICAL FIX: Sync Excel data to database immediately after load
+        # This ensures all products and strains are in the database before any lineage queries
+        try:
+            selected_store = get_current_store_name(allow_fallback=True)
+            if selected_store:
+                product_db = get_product_database(selected_store)
+                if product_db and processor.df is not None and not processor.df.empty:
+                    logging.info(f"🔄 Syncing {len(processor.df)} rows from Excel to database...")
+                    sync_result = product_db.store_excel_data(processor.df, source_file=file_path)
+                    logging.info(f"✅ Database sync complete: {sync_result}")
+                else:
+                    logging.warning("⚠️ Could not sync to database: database or DataFrame not available")
+            else:
+                logging.warning("⚠️ Could not sync to database: no store selected")
+        except Exception as sync_err:
+            # Don't fail the upload if sync fails - just log the error
+            logging.error(f"❌ Database sync failed (upload still successful): {sync_err}")
+            import traceback
+            logging.error(traceback.format_exc())
+
         # PC optimization: Skip cache clearing for better performance
         if not is_windows:
             # Clear minimal caches only
             cache.delete('full_excel_cache_key')
             cache.delete('dropdown_cache_key')
-        
+
         process_time = time.time() - start_time
         logging.info(f"[LIGHTNING] Processing completed in {process_time:.3f}s")
-        
+
         return jsonify({
             'success': True,
             'message': f'File processed successfully in {process_time:.3f}s',
@@ -19684,6 +19704,62 @@ def diagnostic_check():
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
+@app.route('/api/available-tags-instant', methods=['GET'])
+def get_available_tags_instant():
+    """ULTRA-FAST endpoint: Returns tags from database only, no Excel processing."""
+    try:
+        store_name = get_current_store_name(allow_fallback=True)
+        if not store_name:
+            return jsonify({'error': 'No store selected'}), 400
+
+        product_db = get_product_database(store_name)
+        if not product_db:
+            return jsonify({'error': 'Database not available'}), 500
+
+        # Query database directly for maximum speed
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+
+        # Get all products with essential fields only
+        cursor.execute('''
+            SELECT
+                p."Product Name*",
+                p."Product Type*",
+                p."Vendor/Supplier*",
+                p."Product Brand",
+                p."Weight*",
+                COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
+            FROM products p
+            LEFT JOIN strains s ON p.strain_id = s.id
+            ORDER BY p.id DESC
+            LIMIT 5000
+        ''')
+
+        tags = []
+        for row in cursor.fetchall():
+            tags.append({
+                'Product Name*': row[0],
+                'ProductName': row[0],
+                'Product Type*': row[1],
+                'Vendor/Supplier*': row[2],
+                'Product Brand': row[3],
+                'Weight*': row[4],
+                'Lineage': row[5],
+                'lineage': row[5],
+                'canonical_lineage': row[5],
+                'currentLineage': row[5]
+            })
+
+        return jsonify({
+            'tags': tags,
+            'total_count': len(tags),
+            'source': 'database-instant',
+            'store': store_name
+        })
+    except Exception as e:
+        logging.error(f"Instant tags error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/available-tags-lite', methods=['GET'])
 def get_available_tags_lite():
     """Ultra-lightweight version of available-tags for resource-constrained environments."""

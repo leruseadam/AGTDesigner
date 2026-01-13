@@ -205,12 +205,19 @@ class StrainLineageEditor {
             });
 
             if (!response.ok) {
+                // If strain not found in database (404), that's OK - it will be created on save
+                // Only fall back to cached value for true errors
+                if (response.status === 404) {
+                    console.info(`Strain '${strainName}' not yet in database - will be created on save`);
+                    return null;
+                }
                 console.warn('Failed to fetch strain lineage from database');
                 return null;
             }
 
             const data = await response.json();
-            return data.lineage || data.sovereign_lineage || data.canonical_lineage;
+            // Priority: sovereign_lineage (manual edits) > canonical_lineage (Excel data)
+            return data.sovereign_lineage || data.canonical_lineage || data.lineage;
         } catch (error) {
             console.warn('Error fetching strain lineage from database:', error);
             return null;

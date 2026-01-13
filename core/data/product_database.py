@@ -987,28 +987,36 @@ class ProductDatabase:
                 del self._cache[key]
     
     def get_mode_lineage(self, strain_id: int) -> str:
-        """Return the most common (mode) lineage for a strain from the products table."""
+        """Return the most common (mode) lineage for a strain from the products table.
+        CRITICAL: Excludes MIXED and other invalid lineages to prevent corruption."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             # First get the strain name from the strains table
             cursor.execute('SELECT strain_name FROM strains WHERE id = ?', (strain_id,))
             strain_result = cursor.fetchone()
             if not strain_result:
                 return None
-            
+
             strain_name = strain_result[0]
-            
-            # Then find the most common lineage for this strain in products
+
+            # CRITICAL: Only consider valid classic lineages (exclude MIXED, brand names, etc.)
+            # This prevents MIXED from corrupting canonical_lineage values
+            valid_lineages = ('SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND')
+
+            # Then find the most common VALID lineage for this strain in products
             cursor.execute('''
                 SELECT "Lineage", COUNT(*) as count
                 FROM products
-                WHERE "Product Strain" = ? AND "Lineage" IS NOT NULL AND "Lineage" != ''
+                WHERE "Product Strain" = ?
+                  AND "Lineage" IS NOT NULL
+                  AND "Lineage" != ''
+                  AND UPPER(TRIM("Lineage")) IN (?, ?, ?, ?, ?, ?, ?)
                 GROUP BY "Lineage"
                 ORDER BY count DESC
                 LIMIT 1
-            ''', (strain_name,))
+            ''', (strain_name,) + valid_lineages)
             result = cursor.fetchone()
             if result:
                 return result[0]
