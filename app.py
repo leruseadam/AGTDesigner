@@ -7353,14 +7353,22 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     extracted_strain = product_db._extract_strain_from_product_name(name, product_type) if hasattr(product_db, '_extract_strain_from_product_name') else None
                     
                     if extracted_strain:
-                        # Try to find products with this strain name
-                        # Look for any product in lineage_map that contains this strain
+                        # Normalize the extracted strain name
+                        normalized_strain = product_db._normalize_strain_name(extracted_strain) if hasattr(product_db, '_normalize_strain_name') else extracted_strain.strip().lower()
                         strain_lower = extracted_strain.lower().strip()
-                        for map_key, map_value in lineage_map.items():
-                            if strain_lower in str(map_key).lower():
-                                lineage_info = map_value
-                                logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' -> found product '{map_key}'")
-                                break
+                        
+                        # Try direct strain name match first (from strain mapping we added above)
+                        lineage_info = lineage_map.get(normalized_strain) or lineage_map.get(strain_lower) or lineage_map.get(extracted_strain)
+                        
+                        if lineage_info:
+                            logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' (normalized: '{normalized_strain}')")
+                        else:
+                            # Fallback: Look for any product in lineage_map that contains this strain
+                            for map_key, map_value in lineage_map.items():
+                                if strain_lower in str(map_key).lower() or normalized_strain in str(map_key).lower():
+                                    lineage_info = map_value
+                                    logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' -> found product '{map_key}'")
+                                    break
                 except Exception as strain_err:
                     logging.debug(f"Could not extract strain for '{name}': {strain_err}")
             
