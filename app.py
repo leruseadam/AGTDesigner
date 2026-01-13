@@ -7267,7 +7267,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p.sovereign_lineage as product_sovereign,
                        s.sovereign_lineage as strain_sovereign,
-                       s.canonical_lineage as strain_canonical
+                       s.canonical_lineage as strain_canonical,
+                       p."Product Strain" as product_strain
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
