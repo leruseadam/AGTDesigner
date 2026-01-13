@@ -2576,10 +2576,14 @@ class TemplateProcessor:
                 if not lineage_val:
                     self.logger.debug(f"No lineage found in record or cache")
             
-            # CRITICAL FIX: Ensure classic types always have lineage data
+            # CRITICAL FIX: Ensure classic types always have lineage data and NEVER have MIXED
             if not lineage_val or lineage_val.strip() == "":
                 lineage_val = "HYBRID"
                 self.logger.info(f"🔧 FALLBACK LINEAGE: Set HYBRID lineage for classic type '{product_name}' (no lineage data available)")
+            elif lineage_val.strip().upper() == 'MIXED':
+                # CRITICAL: NEVER allow MIXED for classic types - always use HYBRID
+                lineage_val = "HYBRID"
+                self.logger.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{product_name}' - changed to HYBRID")
             
             # Set Lineage to strain lineage for classic types
             if lineage_val:

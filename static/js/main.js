@@ -12336,13 +12336,53 @@ const TagManager = {
                 this._skipEnrichment = true;
             }
             
-            // CRITICAL FIX: Fetch filters AFTER tags are loaded to ensure data is ready
-            await this.fetchAndUpdateAvailableTags();
-            await this.fetchAndUpdateSelectedTags();
-
-            // PERFORMANCE: No delay needed - fetch filters immediately
-            // Now fetch filters with retry mechanism
-            await this.fetchAndPopulateFilters();
+            // PERFORMANCE FIX: Check cache first before making network requests
+            // This provides instant refresh when cache is available
+            const cacheLoaded = this.hydrateAvailableTagsFromCache();
+            
+            // PERFORMANCE FIX: Run operations in parallel where possible
+            // If cache was loaded, tags are already displayed - just refresh selected tags and filters
+            // Otherwise, fetch available tags from server (most important operation)
+            let availableTagsPromise;
+            if (cacheLoaded) {
+                console.log('⚡ Cache hit - using cached tags for instant refresh');
+                // Cache already loaded and rendered - just do a lightweight background refresh
+                // Use fast_load=1 to avoid expensive database operations
+                availableTagsPromise = Promise.resolve(true);
+            } else {
+                console.log('📊 No cache - fetching from server');
+                availableTagsPromise = this.fetchAndUpdateAvailableTags();
+            }
+            
+            // Fetch selected tags and filters in parallel (non-blocking for UI)
+            // These are independent operations that can run concurrently
+            const selectedTagsPromise = this.fetchAndUpdateSelectedTags().catch(err => {
+                console.warn('Selected tags fetch failed (non-critical):', err);
+                return false;
+            });
+            
+            const filtersPromise = this.fetchAndPopulateFilters().catch(err => {
+                console.warn('Filters fetch failed (non-critical):', err);
+                return false;
+            });
+            
+            // Wait for available tags first (most important)
+            await availableTagsPromise;
+            
+            // Then wait for selected tags and filters in parallel (they're independent)
+            await Promise.all([selectedTagsPromise, filtersPromise]);
+            
+            // PERFORMANCE: If cache was loaded, trigger background refresh to update with latest data
+            // This ensures data is fresh without blocking the UI
+            if (cacheLoaded) {
+                console.log('⚡ Triggering background refresh to update cache with latest data...');
+                // Non-blocking background refresh - don't await
+                setTimeout(() => {
+                    this.fetchAndUpdateAvailableTags(true).catch(err => {
+                        console.warn('Background refresh failed (non-critical):', err);
+                    });
+                }, 500); // Small delay to let UI render first
+            }
             
             // PERFORMANCE: After tags are displayed, enrich them in background
             if (isPostUpload && this._skipEnrichment) {

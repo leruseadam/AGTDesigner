@@ -7363,7 +7363,20 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 if 'effective_lineage' not in locals():
                     effective_lineage = lineage_info.get('strain_canonical') or db_lineage
                 
-                # Step 4: Set all lineage fields to ensure user's values are used everywhere
+                # Step 4: CRITICAL FIX - NEVER allow MIXED for classic types
+                # Check if this is a classic type and ensure MIXED is converted to HYBRID
+                product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                
+                if is_classic and effective_lineage and str(effective_lineage).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
+                    effective_lineage = 'HYBRID'
+                    # Also update canonical_lineage if it was MIXED
+                    if tag.get('canonical_lineage') and str(tag.get('canonical_lineage')).strip().upper() == 'MIXED':
+                        tag['canonical_lineage'] = 'HYBRID'
+                
+                # Step 5: Set all lineage fields to ensure user's values are used everywhere
                 tag['currentLineage'] = effective_lineage
                 tag['Lineage'] = effective_lineage
                 tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
