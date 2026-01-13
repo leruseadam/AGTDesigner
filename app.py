@@ -13948,15 +13948,16 @@ def get_web_available_tags():
                     import traceback
                     logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
-            # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
+            # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table (user's "strains sheet" data)
             simple_tags = []
             for tag in excel_tags:
-                # CRITICAL FIX: Prioritize canonical_lineage from strains table (the "strains sheet")
-                # Priority: canonical_lineage (from strains) > currentLineage > sovereign_lineage > Lineage
+                # CRITICAL FIX: ALWAYS prioritize canonical_lineage from strains table (user's "strains sheet" data)
+                # This ensures user's lineage values are ALWAYS used
+                # Priority: canonical_lineage (from strains - user's data) > sovereign_lineage (manual edits) > currentLineage > Lineage
                 final_lineage = (
-                    tag.get('canonical_lineage') or  # From strains table - this is the "strains sheet" data
+                    tag.get('canonical_lineage') or  # From strains table - this is the user's "strains sheet" data - ALWAYS use first
+                    tag.get('sovereign_lineage') or  # Manual edits - second priority
                     tag.get('currentLineage') or 
-                    tag.get('sovereign_lineage') or
                     tag.get('Lineage')
                 )
                 
