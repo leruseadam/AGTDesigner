@@ -7263,8 +7263,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                                 if normalized_strain:
                                     potential_strains.add(normalized_strain)
                             potential_strains.add(extracted_strain.lower().strip())
+                            
+                            # CRITICAL DEBUG: Log Blackberry Kush extraction
+                            if 'blackberry kush' in pname.lower():
+                                logging.info(f"🎯 BLACKBERRY KUSH EXTRACTION: '{pname}' -> extracted_strain='{extracted_strain}', normalized='{normalized_strain if hasattr(product_db, "_normalize_strain_name") else "N/A"}'")
                     except Exception as extract_err:
-                        logging.debug(f"Could not extract strain from '{pname}': {extract_err}")
+                        logging.error(f"❌ Could not extract strain from '{pname}': {extract_err}")
+                        if 'blackberry kush' in pname.lower():
+                            logging.error(f"🎯 BLACKBERRY KUSH EXTRACTION FAILED: {extract_err}")
+                        import traceback
+                        logging.error(f"Extraction traceback: {traceback.format_exc()}")
         
         if not product_names:
             logging.debug("⚡ No products need lineage alignment")
