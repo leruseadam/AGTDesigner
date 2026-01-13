@@ -7390,6 +7390,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             else:
                 # Old format (backward compatibility)
                 db_lineage = lineage_info
+                
+                # CRITICAL FIX: NEVER allow MIXED for classic types
+                product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                
+                if is_classic and db_lineage and str(db_lineage).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
+                    db_lineage = 'HYBRID'
+                
                 if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
                     tag['Lineage'] = db_lineage
                     tag['Lineage*'] = db_lineage  # CRITICAL: Set Excel column name for UI
