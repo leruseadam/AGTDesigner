@@ -20906,6 +20906,66 @@ def get_strain_product_count():
         logging.error(f"Error getting strain product count: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/get-strain-lineage', methods=['POST'])
+def get_strain_lineage():
+    """Get the current lineage for a specific strain from the database (prioritizes sovereign_lineage)."""
+    try:
+        data = request.get_json()
+        strain_name = data.get('strain_name')
+
+        if not strain_name:
+            return jsonify({'error': 'Missing strain_name'}), 400
+
+        try:
+            store_name = get_current_store_name()
+            product_db = get_product_database(store_name)
+            if not product_db:
+                return jsonify({'error': 'Product database not available'}), 500
+
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+
+            # CRITICAL: Query strains table with priority: sovereign_lineage > canonical_lineage
+            cursor.execute('''
+                SELECT
+                    strain_name,
+                    COALESCE(sovereign_lineage, canonical_lineage) as lineage,
+                    sovereign_lineage,
+                    canonical_lineage
+                FROM strains
+                WHERE strain_name = ? OR LOWER(TRIM(strain_name)) = LOWER(TRIM(?))
+                LIMIT 1
+            ''', (strain_name, strain_name))
+
+            result = cursor.fetchone()
+
+            if not result:
+                return jsonify({
+                    'success': False,
+                    'error': f'Strain "{strain_name}" not found in database',
+                    'lineage': None
+                }), 404
+
+            db_strain_name, lineage, sovereign_lineage, canonical_lineage = result
+
+            return jsonify({
+                'success': True,
+                'strain_name': db_strain_name,
+                'lineage': lineage,
+                'sovereign_lineage': sovereign_lineage,
+                'canonical_lineage': canonical_lineage
+            })
+
+        except Exception as db_error:
+            logging.error(f"Failed to get strain lineage: {db_error}")
+            logging.error(f"Database error details: {traceback.format_exc()}")
+            return jsonify({'error': f'Database query failed: {str(db_error)}'}), 500
+
+    except Exception as e:
+        logging.error(f"Error getting strain lineage: {e}")
+        logging.error(f"Error details: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/get-all-strains', methods=['GET'])
 def get_all_strains():
     """Get all strains from the master database with their current lineages."""

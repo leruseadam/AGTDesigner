@@ -170,26 +170,50 @@ class StrainLineageEditor {
 
     async openEditor(strainName, currentLineage) {
         console.log('StrainLineageEditor: Opening editor for', strainName, currentLineage);
-        
+
         try {
             this.currentStrain = strainName;
-            this.currentLineage = currentLineage;
+            // CRITICAL FIX: Fetch current lineage from database instead of using cached value
+            // This ensures manual database changes are reflected in the UI
+            this.currentLineage = await this.fetchCurrentLineageFromDatabase(strainName) || currentLineage;
+            console.log('StrainLineageEditor: Using lineage from database:', this.currentLineage);
             this.isLoading = true;
             this.preventClose = true;
             this.modalState = 'opening';
 
             // Wait for initialization
             await this.waitForInitialization();
-            
+
             // Load editor content
             await this.loadEditorContent();
-            
+
             // Show modal
             this.showModal();
-            
+
         } catch (error) {
             console.error('StrainLineageEditor: Error opening editor:', error);
             this.handleError('Failed to open lineage editor: ' + error.message);
+        }
+    }
+
+    async fetchCurrentLineageFromDatabase(strainName) {
+        try {
+            const response = await fetch('/api/get-strain-lineage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ strain_name: strainName })
+            });
+
+            if (!response.ok) {
+                console.warn('Failed to fetch strain lineage from database');
+                return null;
+            }
+
+            const data = await response.json();
+            return data.lineage || data.sovereign_lineage || data.canonical_lineage;
+        } catch (error) {
+            console.warn('Error fetching strain lineage from database:', error);
+            return null;
         }
     }
 
