@@ -10820,23 +10820,72 @@ def get_available_tags():
             logging.info(f"⚠️ Recent lineage update detected - bypassing cache to fetch fresh database lineage")
             cached_tags = None  # Force fresh fetch with database lineage
 
-        # If fast_load with no cache and no immediate in-memory tags, fail fast with processing to unblock UI
-        if fast_load and not cached_tags and (session_file_path or file_exists):
-            elapsed_fast = (time.time() - start_time) * 1000
-            logging.info(f"⚡ FAST-LOAD: No cached tags yet (elapsed {elapsed_fast:.1f}ms) - returning processing to unblock UI")
-            return jsonify({
-                'tags': [],
-                'total_count': 0,
-                'source': 'processing',
-                'message': 'File is being processed. Tags will load momentarily.'
-            }), 202
-
-        # CRITICAL PERFORMANCE FIX: With fast_load=1, NEVER load Excel or do database queries synchronously
+        # CRITICAL PERFORMANCE FIX: With fast_load=1 or no cache, NEVER load Excel or do database queries synchronously
         # This prevents 5-minute waits in production. Return 202 immediately and let background processing handle it.
-        if fast_load and session_file_path and file_exists and not cached_tags:
-            # PERFORMANCE: Skip all expensive operations - just return processing status
+        # OPTIMIZATION: Return 202 immediately if no cache exists (even without fast_load explicitly set)
+        # This ensures fast response when cache is cleared on page load
+        if (fast_load or not cached_tags) and session_file_path and file_exists and not cached_tags:
+            # PERFORMANCE: Skip all expensive operations - just return processing status immediately
             # Background thread or next request (with cache) will handle the actual loading
-            logging.info(f"⚡ FAST-LOAD: Skipping expensive Excel/DB operations - returning 202 immediately")
+            logging.info(f"⚡ FAST-LOAD: Skipping expensive Excel/DB operations - returning 202 immediately (no cache exists)")
+            
+            # CRITICAL: Start background processing thread to populate cache for next request
+            # This ensures cache is ready quickly for subsequent requests or polling
+            try:
+                import threading
+                def background_load():
+                    try:
+                        # Process in background without blocking
+                        from src.core.data.excel_processor import ExcelProcessor
+                        bg_processor = ExcelProcessor(store_name=store_name)
+                        if hasattr(bg_processor, 'pythonanywhere_fast_load'):
+                            bg_processor.pythonanywhere_fast_load(session_file_path)
+                        elif hasattr(bg_processor, 'ultra_fast_load'):
+                            bg_processor.ultra_fast_load(session_file_path)
+                        elif hasattr(bg_processor, 'fast_load_file'):
+                            bg_processor.fast_load_file(session_file_path)
+                        else:
+                            bg_processor.load_file(session_file_path)
+                        
+                        # Get tags and align with database lineage BEFORE caching
+                        if bg_processor.df is not None and not bg_processor.df.empty:
+                            bg_tags = bg_processor.get_available_tags(filters=None)
+                            
+                            # CRITICAL FIX: Align tags with database lineage to ensure user's lineage is used
+                            if store_name and bg_tags:
+                                try:
+                                    logging.info(f"🔄 Background: Aligning {len(bg_tags)} tags with database lineage...")
+                                    bg_tags = _align_tags_with_db_lineage(bg_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                                    canonical_count = len([t for t in bg_tags if t.get('canonical_lineage')])
+                                    logging.info(f"✅ Background: Successfully aligned {canonical_count} tags with database lineage (canonical_lineage from strains table)")
+                                except Exception as align_err:
+                                    logging.error(f"❌ Background: Lineage alignment failed: {align_err}")
+                                    import traceback
+                                    logging.error(f"Background alignment traceback: {traceback.format_exc()}")
+                            
+                            # Strip Excel lineage (database lineage is already set via alignment)
+                            for tag in bg_tags:
+                                tag.pop('Lineage', None)  # Remove Excel Lineage column
+                                tag.pop('lineage', None)  # Remove lowercase lineage
+                                tag.pop('Lineage*', None)  # Remove Excel Lineage* column
+                                # Keep canonical_lineage, currentLineage, sovereign_lineage - these are from database
+                            
+                            # Cache the processed tags WITH database lineage
+                            safe_bg_tags = make_json_safe(bg_tags)
+                            cache.set(cache_key, safe_bg_tags, timeout=3600)
+                            logging.info(f"✅ Background processing complete: cached {len(safe_bg_tags)} tags WITH database lineage")
+                    except Exception as bg_err:
+                        logging.error(f"❌ Background processing failed: {bg_err}")
+                        import traceback
+                        logging.error(f"Background processing traceback: {traceback.format_exc()}")
+                
+                # Start background thread (fire and forget)
+                thread = threading.Thread(target=background_load, daemon=True)
+                thread.start()
+                logging.info("🚀 Started background processing thread")
+            except Exception as thread_err:
+                logging.warning(f"Could not start background thread (non-critical): {thread_err}")
+            
             return jsonify({
                 'tags': [],
                 'total_count': 0,

@@ -10876,6 +10876,7 @@ const TagManager = {
             // PERFORMANCE: Always use fast_load=1 for fast tag loading
             // Backend will do lightweight lineage alignment even in fast_load mode
             // This dramatically speeds up initial tag loading while still getting correct lineage
+            // CRITICAL: Always use fast_load=1, especially when cache is cleared on page load
             const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
@@ -10968,14 +10969,13 @@ const TagManager = {
                     if (response.status === 202) {
                         processingRetryCount++;
                         
-                        // PERFORMANCE: After half of max retries, try to show cached data immediately
-                        if (processingRetryCount === Math.floor(maxProcessingRetries / 2)) {
-                            verboseLog('⏳ File processing taking a while, showing cached data while waiting...');
-                            const cachedTags = this.hydrateAvailableTagsFromCache();
-                            if (cachedTags) {
-                                verboseLog('✅ Showing cached tags immediately while file processes in background');
-                                // Continue waiting for fresh data, but user sees cached data now
-                            }
+                        // PERFORMANCE: For faster experience, use shorter retry intervals when processing
+                        // Retry after 500ms instead of waiting longer
+                        const retryDelay = 500; // 500ms between retries for faster response
+                        
+                        // PERFORMANCE: After a few retries, start polling with shorter intervals
+                        if (processingRetryCount === 1) {
+                            verboseLog('⏳ File is processing in background, will poll every 500ms...');
                         }
                         
                         if (processingRetryCount >= maxProcessingRetries) {
@@ -10989,8 +10989,8 @@ const TagManager = {
                             throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
                         }
                         
-                        // PERFORMANCE: Skip progressive delay - retry immediately for speed
-                        // Removed delay to speed up tag loading
+                        // PERFORMANCE: Short delay before retry to allow background processing to complete
+                        await new Promise(resolve => setTimeout(resolve, retryDelay));
                         
                         verboseLog(`⏳ File still processing (202), retrying... (${processingRetryCount}/${maxProcessingRetries})`);
                         continue; // Retry without incrementing error retry count
