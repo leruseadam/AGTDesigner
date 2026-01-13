@@ -12525,6 +12525,16 @@ const TagManager = {
 
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
+        
+        // PERFORMANCE FIX: Clear cache on every page load to ensure fresh data
+        console.log('🗑️ Clearing cache on page load to ensure fresh data...');
+        this.clearAvailableTagsCache();
+        
+        // Also clear backend cache if endpoint exists
+        fetch('/api/clear-cache', { method: 'POST' }).catch(err => {
+            console.warn('Could not clear backend cache (non-critical):', err);
+        });
+        
         const availableTagsContainer = document.getElementById('availableTags');
         console.log('📦 Available tags container found:', !!availableTagsContainer);
         if (availableTagsContainer) {
@@ -12542,10 +12552,10 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
 
-        // CRITICAL FIX: Try to hydrate from cache IMMEDIATELY before showing any splash
-        // This ensures tags appear instantly on page load if cache exists
-        const alreadyHydrated = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
-        const hydrated = alreadyHydrated || this.hydrateAvailableTagsFromCache();
+        // PERFORMANCE FIX: Cache is cleared on page load, so skip cache hydration
+        // Always fetch fresh data from server on page load
+        const alreadyHydrated = false; // Don't use cache on page load
+        const hydrated = false; // Always fetch fresh data
 
         if (hydrated) {
             // Cache exists and hydrated - skip splash completely

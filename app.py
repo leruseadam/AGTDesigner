@@ -7313,10 +7313,14 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     lineage_map[db_name.lower().strip()] = lineage_info
         
         if not lineage_map:
+            logging.warning(f"⚠️ LINEAGE ALIGNMENT: No lineage found in database for {len(product_names)} products. Products searched: {product_names[:5]}...")
             return aligned_tags
+        
+        logging.info(f"✅ LINEAGE ALIGNMENT: Found lineage for {len(lineage_map)} products in database")
         
         # Apply lineage to tags
         aligned_count = 0
+        unmatched_count = 0
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
@@ -7326,6 +7330,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             # Try exact match first (like docx generation), then normalized, then lowercase
             lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
             if not lineage_info:
+                unmatched_count += 1
+                if unmatched_count <= 5:  # Log first 5 unmatched
+                    logging.debug(f"⚠️ LINEAGE ALIGNMENT: No lineage found for '{name}' - tried exact, normalized, and lowercase")
                 continue
             
             # Handle both old format (string) and new format (dict with source info)
@@ -7353,15 +7360,23 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     # If no sovereign_lineage, use canonical_lineage as effective lineage
                     if not lineage_info.get('product_sovereign') and not lineage_info.get('strain_sovereign'):
                         effective_lineage = lineage_info['strain_canonical']
+                        logging.debug(f"✅ Using strain canonical_lineage '{lineage_info['strain_canonical']}' as effective lineage for '{name}'")
                 else:
                     # Fallback if no strain canonical_lineage exists
-                    tag['canonical_lineage'] = effective_lineage if 'effective_lineage' in locals() else db_lineage
-                    if 'effective_lineage' not in locals():
+                    if 'effective_lineage' in locals():
+                        tag['canonical_lineage'] = effective_lineage
+                    elif db_lineage:
+                        tag['canonical_lineage'] = db_lineage
                         effective_lineage = db_lineage
+                    else:
+                        # No lineage at all - will use default later
+                        logging.warning(f"⚠️ No lineage found for '{name}' - no strain_canonical, no db_lineage")
                 
                 # Step 3: Ensure effective_lineage is set (use canonical if no sovereign)
                 if 'effective_lineage' not in locals():
                     effective_lineage = lineage_info.get('strain_canonical') or db_lineage
+                    if not effective_lineage:
+                        logging.warning(f"⚠️ No effective_lineage determined for '{name}' - will use default")
                 
                 # Step 4: CRITICAL FIX - NEVER allow MIXED for classic types
                 # Check if this is a classic type and ensure MIXED is converted to HYBRID
@@ -7410,12 +7425,17 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         
         if aligned_count > 0:
             logging.info(f"✅ Aligned {aligned_count}/{len(aligned_tags)} tags with database lineage (force_overwrite={force_overwrite})")
-            # DEBUG: Log a sample aligned tag to verify sovereign_lineage is set
-            sample_aligned = next((t for t in aligned_tags if isinstance(t, dict) and t.get('sovereign_lineage')), None)
+            if unmatched_count > 0:
+                logging.warning(f"⚠️ {unmatched_count} tags could not be matched to database lineage")
+            # DEBUG: Log a sample aligned tag to verify lineage is set
+            sample_aligned = next((t for t in aligned_tags if isinstance(t, dict) and (t.get('canonical_lineage') or t.get('currentLineage'))), None)
             if sample_aligned:
-                logging.info(f"📋 Sample aligned tag: {sample_aligned.get('Product Name*')} -> sovereign_lineage={sample_aligned.get('sovereign_lineage')}")
+                logging.info(f"📋 Sample aligned tag: '{sample_aligned.get('Product Name*')}' -> canonical_lineage={sample_aligned.get('canonical_lineage')}, currentLineage={sample_aligned.get('currentLineage')}, sovereign_lineage={sample_aligned.get('sovereign_lineage')}")
         else:
-            logging.warning(f"⚠️ No tags were aligned! lineage_map size: {len(lineage_map)}, tags count: {len(aligned_tags)}")
+            logging.error(f"❌ CRITICAL: No tags were aligned! lineage_map size: {len(lineage_map)}, tags count: {len(aligned_tags)}")
+            if lineage_map:
+                logging.error(f"   Lineage map has {len(lineage_map)} entries but no tags matched. Sample map keys: {list(lineage_map.keys())[:5]}")
+                logging.error(f"   Sample tag names: {[t.get('Product Name*') for t in aligned_tags[:5] if isinstance(t, dict)]}")
 
         return aligned_tags
     except Exception as e:
