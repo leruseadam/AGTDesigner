@@ -7529,28 +7529,44 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 
                 # Step 2: CRITICAL - ALWAYS use strain canonical_lineage from strains table FIRST
                 # This is the user's "strains sheet" data - it should NEVER be overwritten
+                # BUT: NEVER use MIXED - skip it and use next priority source
                 strain_canonical_value = lineage_info.get('strain_canonical')
+                
+                # CRITICAL FIX: Skip MIXED values - they should never overwrite valid lineage
+                # If strain_canonical is MIXED, treat it as if it doesn't exist
+                if strain_canonical_value and str(strain_canonical_value).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 SKIPPING MIXED strain_canonical for '{name}' - will use next priority source")
+                    strain_canonical_value = None
                 
                 # Step 3: Determine effective_lineage with proper priority
                 # Priority: product_sovereign (manual edits) > strain_sovereign > strain_canonical (strains sheet) > product.Lineage
+                # CRITICAL: Skip MIXED values at each step
+                effective_lineage = None
                 if lineage_info.get('product_sovereign'):
-                    effective_lineage = lineage_info['product_sovereign']
-                    logging.debug(f"✅ Using product_sovereign '{effective_lineage}' for '{name}' (manual edit)")
-                elif lineage_info.get('strain_sovereign'):
-                    effective_lineage = lineage_info['strain_sovereign']
-                    logging.debug(f"✅ Using strain_sovereign '{effective_lineage}' for '{name}'")
-                elif strain_canonical_value:
+                    product_sovereign_clean = str(lineage_info['product_sovereign']).strip().upper()
+                    if product_sovereign_clean != 'MIXED':
+                        effective_lineage = lineage_info['product_sovereign']
+                        logging.debug(f"✅ Using product_sovereign '{effective_lineage}' for '{name}' (manual edit)")
+                if not effective_lineage and lineage_info.get('strain_sovereign'):
+                    strain_sovereign_clean = str(lineage_info['strain_sovereign']).strip().upper()
+                    if strain_sovereign_clean != 'MIXED':
+                        effective_lineage = lineage_info['strain_sovereign']
+                        logging.debug(f"✅ Using strain_sovereign '{effective_lineage}' for '{name}'")
+                if not effective_lineage and strain_canonical_value:
                     # CRITICAL: Use strain_canonical from strains table (user's strains sheet)
+                    # Already checked above that it's not MIXED
                     effective_lineage = strain_canonical_value
                     logging.info(f"✅ Using strain canonical_lineage '{strain_canonical_value}' for '{name}' (user's strains sheet)")
-                elif db_lineage:
-                    effective_lineage = db_lineage
-                    logging.debug(f"✅ Using db_lineage '{db_lineage}' for '{name}' (fallback)")
-                else:
-                    effective_lineage = None
-                    logging.warning(f"⚠️ No lineage found for '{name}' - no strain_canonical, no db_lineage, no sovereign")
+                if not effective_lineage and db_lineage:
+                    db_lineage_clean = str(db_lineage).strip().upper()
+                    if db_lineage_clean != 'MIXED':
+                        effective_lineage = db_lineage
+                        logging.debug(f"✅ Using db_lineage '{db_lineage}' for '{name}' (fallback)")
                 
-                # Step 4: CRITICAL FIX - NEVER allow MIXED for classic types
+                if not effective_lineage:
+                    logging.warning(f"⚠️ No valid lineage found for '{name}' - all sources were MIXED or missing")
+                
+                # Step 4: CRITICAL FIX - NEVER allow MIXED for classic types (double-check)
                 product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
                 CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
                 is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
@@ -7561,9 +7577,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 
                 # Step 5: Set canonical_lineage from strain_canonical - NEVER overwrite after this
                 # This ensures the user's strains sheet data is ALWAYS used
+                # BUT: NEVER set canonical_lineage to MIXED
                 if strain_canonical_value:
-                    # CRITICAL: Prevent MIXED for classic types
+                    # Already checked above that it's not MIXED
                     final_canonical = strain_canonical_value
+                    # Double-check for classic types
                     if is_classic and str(final_canonical).strip().upper() == 'MIXED':
                         final_canonical = 'HYBRID'
                         logging.warning(f"🚫 CRITICAL: Prevented MIXED strain_canonical for classic type '{name}' - changing to HYBRID")
@@ -7572,7 +7590,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     logging.info(f"✅ Set canonical_lineage='{final_canonical}' from strain_canonical='{strain_canonical_value}' for '{name}' (user's strains sheet)")
                 elif not tag.get('canonical_lineage') and db_lineage:
                     # Fallback: only set if not already set and no strain_canonical
-                    tag['canonical_lineage'] = db_lineage
+                    # CRITICAL: Never set canonical_lineage to MIXED
+                    db_lineage_clean = str(db_lineage).strip().upper()
+                    if db_lineage_clean != 'MIXED':
+                        tag['canonical_lineage'] = db_lineage
+                    else:
+                        logging.warning(f"🚫 SKIPPING MIXED db_lineage for canonical_lineage for '{name}'")
                 
                 # Step 6: Set all lineage fields to ensure user's values are used everywhere
                 if effective_lineage:
@@ -7590,16 +7613,22 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 # Old format (backward compatibility)
                 db_lineage = lineage_info
                 
-                # CRITICAL FIX: NEVER allow MIXED for classic types
-                product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                # CRITICAL FIX: NEVER use MIXED - skip it entirely
+                if db_lineage and str(db_lineage).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 SKIPPING MIXED db_lineage for '{name}' (old format) - will not set lineage")
+                    db_lineage = None
                 
-                if is_classic and db_lineage and str(db_lineage).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
-                    db_lineage = 'HYBRID'
+                # CRITICAL FIX: NEVER allow MIXED for classic types (double-check)
+                if db_lineage:
+                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                    
+                    if is_classic and str(db_lineage).strip().upper() == 'MIXED':
+                        logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
+                        db_lineage = 'HYBRID'
                 
-                if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                if db_lineage and (force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage'))):
                     tag['Lineage'] = db_lineage
                     tag['Lineage*'] = db_lineage  # CRITICAL: Set Excel column name for UI
                     tag['lineage'] = db_lineage.lower()
@@ -14278,10 +14307,25 @@ def get_web_available_tags():
                 # CRITICAL FIX: ALWAYS prioritize canonical_lineage from strains table (user's "strains sheet" data)
                 # This ensures user's lineage values are ALWAYS used
                 # Priority: canonical_lineage (from strains - user's data) > sovereign_lineage (manual edits) > currentLineage > Lineage
+                # BUT: NEVER use MIXED - skip it and use next priority source
                 original_canonical = tag.get('canonical_lineage')
                 original_sovereign = tag.get('sovereign_lineage')
                 original_current = tag.get('currentLineage')
                 original_lineage = tag.get('Lineage')
+                
+                # CRITICAL: Skip MIXED values - they should never overwrite valid lineage
+                if original_canonical and str(original_canonical).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED canonical_lineage for '{product_name}' - will use next priority source")
+                    original_canonical = None
+                if original_sovereign and str(original_sovereign).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED sovereign_lineage for '{product_name}' - will use next priority source")
+                    original_sovereign = None
+                if original_current and str(original_current).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED currentLineage for '{product_name}' - will use next priority source")
+                    original_current = None
+                if original_lineage and str(original_lineage).strip().upper() == 'MIXED':
+                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED Lineage for '{product_name}' - will use next priority source")
+                    original_lineage = None
                 
                 final_lineage = (
                     original_canonical or  # From strains table - this is the user's "strains sheet" data - ALWAYS use first
@@ -14303,20 +14347,29 @@ def get_web_available_tags():
                         # Database lineage from strains table - preserve canonical_lineage EXACTLY as set by alignment
                         # Only clean/uppercase it, but preserve the value
                         canonical_clean = str(original_canonical).strip().upper()
-                        tag['canonical_lineage'] = canonical_clean  # Keep strains table canonical_lineage EXACTLY
-                        tag['currentLineage'] = canonical_clean
-                        tag['Lineage'] = canonical_clean
-                        tag['Lineage*'] = canonical_clean
-                        tag['lineage'] = canonical_clean.lower()
-                        logging.debug(f"✅ NORMALIZE '{product_name}': Using canonical_lineage='{canonical_clean}' from strains table")
+                        # Double-check: Never set canonical_lineage to MIXED
+                        if canonical_clean == 'MIXED':
+                            logging.error(f"❌ CRITICAL: Attempted to set canonical_lineage to MIXED for '{product_name}' - this should never happen!")
+                            canonical_clean = None
+                        if canonical_clean:
+                            tag['canonical_lineage'] = canonical_clean  # Keep strains table canonical_lineage EXACTLY
+                            tag['currentLineage'] = canonical_clean
+                            tag['Lineage'] = canonical_clean
+                            tag['Lineage*'] = canonical_clean
+                            tag['lineage'] = canonical_clean.lower()
+                            logging.debug(f"✅ NORMALIZE '{product_name}': Using canonical_lineage='{canonical_clean}' from strains table")
                     else:
                         # No strains table data - set all fields to the available lineage
-                        tag['currentLineage'] = lineage_clean
-                        tag['canonical_lineage'] = lineage_clean  # Set it even if not from strains
-                        tag['Lineage'] = lineage_clean
-                        tag['Lineage*'] = lineage_clean
-                        tag['lineage'] = lineage_clean.lower()
-                        logging.debug(f"⚠️ NORMALIZE '{product_name}': No canonical_lineage, using '{lineage_clean}' from other sources")
+                        # CRITICAL: Never set canonical_lineage to MIXED
+                        if lineage_clean != 'MIXED':
+                            tag['currentLineage'] = lineage_clean
+                            tag['canonical_lineage'] = lineage_clean  # Set it even if not from strains
+                            tag['Lineage'] = lineage_clean
+                            tag['Lineage*'] = lineage_clean
+                            tag['lineage'] = lineage_clean.lower()
+                            logging.debug(f"⚠️ NORMALIZE '{product_name}': No canonical_lineage, using '{lineage_clean}' from other sources")
+                        else:
+                            logging.warning(f"🚫 NORMALIZE '{product_name}': Skipping MIXED lineage - no valid lineage available")
                 else:
                     # CRITICAL FIX: If no lineage found after alignment, ensure lineage fields are still set
                     # This prevents lineage from being empty - use defaults based on product type

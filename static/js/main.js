@@ -7579,8 +7579,14 @@ const TagManager = {
             tagDbLineage = tag.currentLineage.toString().toUpperCase().trim();
         }
         // Priority 3: canonical_lineage (strain canonical fallback)
+        // CRITICAL: NEVER use MIXED - skip it and use next priority source
         if (!tagDbLineage && tag.canonical_lineage) {
-            tagDbLineage = tag.canonical_lineage.toString().toUpperCase().trim();
+            const canonicalClean = tag.canonical_lineage.toString().toUpperCase().trim();
+            if (canonicalClean !== 'MIXED') {
+                tagDbLineage = canonicalClean;
+            } else {
+                console.warn(`🚫 SKIPPING MIXED canonical_lineage for '${displayName}' - will use next priority source`);
+            }
         }
         // Priority 4: Excel Lineage (final fallback)
         if (!tagDbLineage && tag.Lineage) {
