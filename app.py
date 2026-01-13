@@ -7609,32 +7609,35 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 
                 # Step 5: Set canonical_lineage from strain_canonical - NEVER overwrite after this
                 # This ensures the user's strains sheet data is ALWAYS used
-                # BUT: NEVER set canonical_lineage to MIXED - convert to HYBRID if needed
+                # CRITICAL: Normalize strain_canonical based on product type
                 if strain_canonical_value:
-                    # Already checked above that it's not MIXED, but double-check anyway
                     final_canonical = strain_canonical_value
                     final_canonical_clean = str(final_canonical).strip().upper()
                     
-                    # CRITICAL: NEVER allow MIXED for canonical_lineage - convert to HYBRID
-                    if final_canonical_clean == 'MIXED':
-                        final_canonical = 'HYBRID'
-                        logging.warning(f"🚫 CRITICAL: Prevented MIXED strain_canonical for '{name}' - changing to HYBRID (canonical_lineage can NEVER be MIXED)")
-                    # Double-check for classic types (redundant but safe)
-                    elif is_classic and final_canonical_clean == 'MIXED':
-                        final_canonical = 'HYBRID'
-                        logging.warning(f"🚫 CRITICAL: Prevented MIXED strain_canonical for classic type '{name}' - changing to HYBRID")
+                    # CRITICAL: Normalize canonical lineage based on product type
+                    # Classic types: MIXED → HYBRID
+                    # Nonclassic types: SATIVA/INDICA/HYBRID → MIXED (displayed as THC)
+                    if product_type:
+                        from src.core.constants import normalize_lineage_for_product_type
+                        final_canonical = normalize_lineage_for_product_type(final_canonical_clean, product_type)
+                        if final_canonical_clean != final_canonical:
+                            logging.warning(f"🔄 Normalized canonical_lineage for '{name}': {final_canonical_clean} → {final_canonical} (type: {product_type})")
                     
                     # ALWAYS set from strain_canonical - this is what the user told us to use
                     tag['canonical_lineage'] = final_canonical
                     logging.info(f"✅ Set canonical_lineage='{final_canonical}' from strain_canonical='{strain_canonical_value}' for '{name}' (user's strains sheet)")
                 elif not tag.get('canonical_lineage') and db_lineage:
                     # Fallback: only set if not already set and no strain_canonical
-                    # CRITICAL: Never set canonical_lineage to MIXED
+                    # CRITICAL: Normalize db_lineage based on product type
                     db_lineage_clean = str(db_lineage).strip().upper()
-                    if db_lineage_clean != 'MIXED':
-                        tag['canonical_lineage'] = db_lineage
+                    if product_type:
+                        from src.core.constants import normalize_lineage_for_product_type
+                        db_lineage_normalized = normalize_lineage_for_product_type(db_lineage_clean, product_type)
+                        tag['canonical_lineage'] = db_lineage_normalized
+                        if db_lineage_clean != db_lineage_normalized:
+                            logging.warning(f"🔄 Normalized canonical_lineage from db for '{name}': {db_lineage_clean} → {db_lineage_normalized}")
                     else:
-                        logging.warning(f"🚫 SKIPPING MIXED db_lineage for canonical_lineage for '{name}'")
+                        tag['canonical_lineage'] = db_lineage
                 
                 # Step 6: Set all lineage fields to ensure user's values are used everywhere
                 if effective_lineage:
