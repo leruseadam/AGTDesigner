@@ -202,13 +202,18 @@ function createTagRow(tag) {
                             dropdownLineage = 'HYBRID';
                           }
                           
+                          // CRITICAL FIX: Normalize dropdownLineage for comparison (must match normalization used for options)
+                          const dropdownLineageNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
+                            ? window.normalizeLineageValue(dropdownLineage)
+                            : String(dropdownLineage).trim().toUpperCase();
+                          
                           return uniqueLineages.map(lin => {
                             const linNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
                               ? window.normalizeLineageValue(lin)
                               : String(lin).trim().toUpperCase();
                             
-                            // Compare normalized values directly - use converted lineage for classic types
-                            const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
+                            // Compare normalized values directly
+                            const selected = (dropdownLineageNormalized === linNormalized) ? 'selected' : '';
                             const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
                             return `<option value="${lin}" ${selected}>${displayName}</option>`;
                           }).join('');
@@ -439,10 +444,13 @@ class TagsTable {
       console.log(`🔄 TAGS_TABLE DROPDOWN FIX: Converting ${lineage} to HYBRID for classic type "${tagName}" (${productType})`);
     }
     
+    // CRITICAL FIX: Normalize dropdownLineage for comparison (must match normalization used for options)
+    const dropdownLineageNormalized = window.normalizeLineageValue(dropdownLineage);
+    
     const dropdownOptions = uniqueLineages.map(lin => {
-      // Both values are already normalized - direct comparison
+      // Both values are normalized for comparison
       const linNormalized = window.normalizeLineageValue(lin);
-      const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
+      const selected = (dropdownLineageNormalized === linNormalized) ? 'selected' : '';
       const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
