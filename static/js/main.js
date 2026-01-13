@@ -7143,8 +7143,7 @@ const TagManager = {
         // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
         // This ensures UI displays correct lineage even if database/Excel has wrong value
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        // MUST MATCH backend CLASSIC_TYPES in src/core/constants.py
-        const classicTypes = ['flower', 'bud', 'pre-roll', 'preroll', 'infused pre-roll', 'blunt', 'flavored blunt', 'concentrate', 'solventless concentrate', 'live resin', 'rosin', 'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'];
+        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
         if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
             lineage = 'HYBRID';
@@ -7580,14 +7579,8 @@ const TagManager = {
             tagDbLineage = tag.currentLineage.toString().toUpperCase().trim();
         }
         // Priority 3: canonical_lineage (strain canonical fallback)
-        // CRITICAL: NEVER use MIXED - skip it and use next priority source
         if (!tagDbLineage && tag.canonical_lineage) {
-            const canonicalClean = tag.canonical_lineage.toString().toUpperCase().trim();
-            if (canonicalClean !== 'MIXED') {
-                tagDbLineage = canonicalClean;
-            } else {
-                console.warn(`🚫 SKIPPING MIXED canonical_lineage for '${displayName}' - will use next priority source`);
-            }
+            tagDbLineage = tag.canonical_lineage.toString().toUpperCase().trim();
         }
         // Priority 4: Excel Lineage (final fallback)
         if (!tagDbLineage && tag.Lineage) {
@@ -8896,8 +8889,7 @@ const TagManager = {
         // CRITICAL FIX: Check if this is a nonclassic product type
         // For nonclassic types, don't propagate lineage changes to other products
         const productType = (source['Product Type*'] || source.ProductType || source.Type || '').toString().trim().toLowerCase();
-        // MUST MATCH backend CLASSIC_TYPES in src/core/constants.py
-        const classicTypes = ['flower', 'bud', 'pre-roll', 'preroll', 'infused pre-roll', 'blunt', 'flavored blunt', 'concentrate', 'solventless concentrate', 'live resin', 'rosin', 'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'];
+        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isNonclassic = !classicTypes.includes(productType);
         
         if (isNonclassic) {
@@ -10674,11 +10666,11 @@ const TagManager = {
             }
         }, 60000); // 60 second safety timeout
         
-        // PERFORMANCE FIX: Only show loading state if no cache exists
-        // If cache exists, it will be displayed instantly, so no need for loading message
-        if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0) && !hasCache) {
+        // CRITICAL FIX: Immediately show loading state if container is empty
+        // This prevents upload prompt from flashing while tags are being fetched
+        if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0)) {
             const currentContent = availableTagsContainer.innerHTML.trim();
-            // Only show loading if container is empty or showing upload prompt AND no cache
+            // Only show loading if container is empty or showing upload prompt
             if (!currentContent || currentContent.includes('upload-prompt') || currentContent.includes('Upload Excel')) {
                 availableTagsContainer.innerHTML = `
                     <div style="
@@ -10705,16 +10697,10 @@ const TagManager = {
         const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
         const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
         
-        // PERFORMANCE FIX: Check cache FIRST before showing splash
-        // Only show loading message if we truly don't have cache
-        const cacheKey = this.getAvailableTagsCacheKey();
-        const hasActualCache = (window.sessionStorage && sessionStorage.getItem(cacheKey)) || 
-                               (window.localStorage && localStorage.getItem(cacheKey));
-        
-        // CRITICAL FIX: Only show splash if no cache exists AND no existing tags
-        // This prevents showing loading message when cache will be used
-        if (storeConfirmed && !hasExistingTags && !hasCache && !hasActualCache) {
-            // Initial load with no cache - show loading UI
+        // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
+        // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
+        if (storeConfirmed && !hasExistingTags && !hasCache) {
+            // Initial load - show full loading UI with better message
             this.showActionSplash('Loading tags from server...');
             if (availableTagsContainer) {
                 availableTagsContainer.innerHTML = `
@@ -10723,7 +10709,7 @@ const TagManager = {
                             <span class="visually-hidden">Loading...</span>
                         </div>
                         <p class="mt-2 text-white">Loading tags from server...</p>
-                        <p class="mt-1 text-white-50 small">This may take a few seconds</p>
+                        <p class="mt-1 text-white-50 small">This may take up to 30 seconds for large datasets</p>
                     </div>
                 `;
             }
@@ -10731,7 +10717,7 @@ const TagManager = {
             // Store not confirmed - don't show loading, let store modal show
             verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
         } else if (storeConfirmed && hasExistingTags) {
-            // Reload/refresh - show minimal splash (cache will be used for instant display)
+            // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
             this.showActionSplash('Refreshing tags...');
             // Also show loading indicator in container if it exists
             // BUT don't grey out on initial page load - only on refresh
@@ -10741,9 +10727,6 @@ const TagManager = {
                 availableTagsContainer.style.opacity = '0.6';
                 availableTagsContainer.style.pointerEvents = 'none';
             }
-        } else if (hasCache || hasActualCache) {
-            // Cache exists - don't show splash, will display instantly
-            verboseLog('Cache exists - skipping splash for instant load');
         }
         // If cache exists and no existing tags, skip splash for instant load
         
@@ -10893,7 +10876,6 @@ const TagManager = {
             // PERFORMANCE: Always use fast_load=1 for fast tag loading
             // Backend will do lightweight lineage alignment even in fast_load mode
             // This dramatically speeds up initial tag loading while still getting correct lineage
-            // CRITICAL: Always use fast_load=1, especially when cache is cleared on page load
             const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
@@ -10901,11 +10883,11 @@ const TagManager = {
             let response;
             let responseData;
             
-            // ⚡ PERFORMANCE: Reduce timeouts for faster failure recovery
-            // With background processing and 202 responses, we want fast feedback
-            const maxRetries = isWebClient ? 2 : 3; // Allow a few retries
-            const maxProcessingRetries = isWebClient ? 10 : 15; // More processing retries (202 responses are fast)
-            const fetchTimeout = isWebClient ? 15000 : 3000; // Web: 15s (reduced from 30s), Desktop: 3s (reduced from 5s)
+            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (30s)
+            // Desktop/localhost should respond quickly with fast_load=1
+            const maxRetries = isWebClient ? 1 : 2; // Fewer retries for web
+            const maxProcessingRetries = isWebClient ? 1 : 2; // Reduce processing retries
+            const fetchTimeout = isWebClient ? 30000 : 5000; // Web: 30s, Desktop: 5s
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -10955,23 +10937,17 @@ const TagManager = {
                     // Skip prefer_db for web clients (fast_load includes lineage), use for desktop if needed
                     const preferDbParam = isWebClient ? '' : (forceDbLineage ? '&prefer_db=1' : '');
                     
-                    // ⚡ ULTRA-FAST: Try instant database endpoint first (on first retry only)
-                    let baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
-
-                    // Try instant endpoint on first attempt for maximum speed
-                    if (retryCount === 0 && isDatabaseMode) {
-                        baseEndpoint = '/api/available-tags-instant';
-                        console.log('⚡ Using INSTANT endpoint for maximum speed (database-only)');
-                    }
-
+                    // Use web endpoint for web clients, regular endpoint for localhost/desktop
+                    const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+                    
                     // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
-                    const optimizedFetchUrl = retryCount === 0 && fastLoadParam ?
+                    const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
                         `${baseEndpoint}?t=${timestamp}${fastLoadParam}${preferDbParam}` :
                         `${baseEndpoint}?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
-
-                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient}, instant: ${baseEndpoint.includes('instant')})`);
+                    
+                    console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
-
+                    
                     // ⚡ AGGRESSIVE CACHING: Web clients use longer cache (30 min), desktop uses shorter (5 min)
                     const cacheMaxAge = isWebClient ? 1800 : 300; // Web: 30min, Desktop: 5min
                     response = await fetch(optimizedFetchUrl, {
@@ -10992,23 +10968,13 @@ const TagManager = {
                     if (response.status === 202) {
                         processingRetryCount++;
                         
-                        // PERFORMANCE: For faster experience, use shorter retry intervals when processing
-                        // Retry after 500ms instead of waiting longer
-                        const retryDelay = 500; // 500ms between retries for faster response
-                        
-                        // PERFORMANCE: After a few retries, start polling with shorter intervals
-                        if (processingRetryCount === 1) {
-                            verboseLog('⏳ File is processing in background, will poll every 500ms...');
-                        }
-                        
-                        // PERFORMANCE: After first retry, try to show any available cache (even if stale)
-                        // This provides instant feedback while processing continues
-                        if (processingRetryCount === 2) {
-                            verboseLog('⏳ Processing ongoing, checking for cached data to show immediately...');
+                        // PERFORMANCE: After half of max retries, try to show cached data immediately
+                        if (processingRetryCount === Math.floor(maxProcessingRetries / 2)) {
+                            verboseLog('⏳ File processing taking a while, showing cached data while waiting...');
                             const cachedTags = this.hydrateAvailableTagsFromCache();
                             if (cachedTags) {
-                                verboseLog('✅ Found cached data - displaying immediately while processing continues in background');
-                                // Continue processing in background but user sees data now
+                                verboseLog('✅ Showing cached tags immediately while file processes in background');
+                                // Continue waiting for fresh data, but user sees cached data now
                             }
                         }
                         
@@ -11023,8 +10989,8 @@ const TagManager = {
                             throw new Error('File is still processing. Please wait a moment and refresh the page, or try uploading again.');
                         }
                         
-                        // PERFORMANCE: Short delay before retry to allow background processing to complete
-                        await new Promise(resolve => setTimeout(resolve, retryDelay));
+                        // PERFORMANCE: Skip progressive delay - retry immediately for speed
+                        // Removed delay to speed up tag loading
                         
                         verboseLog(`⏳ File still processing (202), retrying... (${processingRetryCount}/${maxProcessingRetries})`);
                         continue; // Retry without incrementing error retry count
@@ -12370,53 +12336,13 @@ const TagManager = {
                 this._skipEnrichment = true;
             }
             
-            // PERFORMANCE FIX: Check cache first before making network requests
-            // This provides instant refresh when cache is available
-            const cacheLoaded = this.hydrateAvailableTagsFromCache();
-            
-            // PERFORMANCE FIX: Run operations in parallel where possible
-            // If cache was loaded, tags are already displayed - just refresh selected tags and filters
-            // Otherwise, fetch available tags from server (most important operation)
-            let availableTagsPromise;
-            if (cacheLoaded) {
-                console.log('⚡ Cache hit - using cached tags for instant refresh');
-                // Cache already loaded and rendered - just do a lightweight background refresh
-                // Use fast_load=1 to avoid expensive database operations
-                availableTagsPromise = Promise.resolve(true);
-            } else {
-                console.log('📊 No cache - fetching from server');
-                availableTagsPromise = this.fetchAndUpdateAvailableTags();
-            }
-            
-            // Fetch selected tags and filters in parallel (non-blocking for UI)
-            // These are independent operations that can run concurrently
-            const selectedTagsPromise = this.fetchAndUpdateSelectedTags().catch(err => {
-                console.warn('Selected tags fetch failed (non-critical):', err);
-                return false;
-            });
-            
-            const filtersPromise = this.fetchAndPopulateFilters().catch(err => {
-                console.warn('Filters fetch failed (non-critical):', err);
-                return false;
-            });
-            
-            // Wait for available tags first (most important)
-            await availableTagsPromise;
-            
-            // Then wait for selected tags and filters in parallel (they're independent)
-            await Promise.all([selectedTagsPromise, filtersPromise]);
-            
-            // PERFORMANCE: If cache was loaded, trigger background refresh to update with latest data
-            // This ensures data is fresh without blocking the UI
-            if (cacheLoaded) {
-                console.log('⚡ Triggering background refresh to update cache with latest data...');
-                // Non-blocking background refresh - don't await
-                setTimeout(() => {
-                    this.fetchAndUpdateAvailableTags(true).catch(err => {
-                        console.warn('Background refresh failed (non-critical):', err);
-                    });
-                }, 500); // Small delay to let UI render first
-            }
+            // CRITICAL FIX: Fetch filters AFTER tags are loaded to ensure data is ready
+            await this.fetchAndUpdateAvailableTags();
+            await this.fetchAndUpdateSelectedTags();
+
+            // PERFORMANCE: No delay needed - fetch filters immediately
+            // Now fetch filters with retry mechanism
+            await this.fetchAndPopulateFilters();
             
             // PERFORMANCE: After tags are displayed, enrich them in background
             if (isPostUpload && this._skipEnrichment) {
@@ -12559,11 +12485,6 @@ const TagManager = {
 
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
-        
-        // PERFORMANCE FIX: Use cache for instant display, then refresh in background for fresh data
-        // This provides instant UI while ensuring data is fresh
-        console.log('⚡ Using cache-first approach: show cached data instantly, refresh in background...');
-        
         const availableTagsContainer = document.getElementById('availableTags');
         console.log('📦 Available tags container found:', !!availableTagsContainer);
         if (availableTagsContainer) {
@@ -12581,8 +12502,8 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
 
-        // PERFORMANCE FIX: Try to hydrate from cache for instant display
-        // Then refresh in background to ensure data is fresh
+        // CRITICAL FIX: Try to hydrate from cache IMMEDIATELY before showing any splash
+        // This ensures tags appear instantly on page load if cache exists
         const alreadyHydrated = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
         const hydrated = alreadyHydrated || this.hydrateAvailableTagsFromCache();
 
@@ -12654,19 +12575,32 @@ const TagManager = {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
 
-            // PERFORMANCE FIX: Always refresh in background after showing cached data
-            // This ensures data is fresh while user sees instant UI
-            console.log('🔄 Cache displayed instantly - refreshing in background for fresh data...');
-            setTimeout(() => {
-                if (!this._checkingExistingData) {
-                    // Use force reload to bypass cache and get fresh data
-                    this.fetchAndUpdateAvailableTags(true).then(() => {
-                        console.log('✅ Background refresh complete - data is now fresh');
-                    }).catch(err => {
-                        console.warn('Background refresh failed (non-critical):', err);
-                    });
+            // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
+            // This prevents unnecessary reloads on every page refresh
+            try {
+                const cacheKey = this.getAvailableTagsCacheKey();
+                const cachedData = sessionStorage.getItem(cacheKey);
+                if (cachedData) {
+                    const payload = JSON.parse(cachedData);
+                    const cacheAge = Date.now() - (payload.timestamp || 0);
+                    const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
+
+                    if (cacheAge > CACHE_MAX_AGE) {
+                        console.log(`🔄 Cache is ${Math.round(cacheAge / 1000)}s old, refreshing in background...`);
+                        setTimeout(() => {
+                            if (!this._checkingExistingData && !this.state.initialized) {
+                                this.checkForExistingData().catch(err => {
+                                    console.warn('Background refresh after cache load failed (non-critical):', err);
+                                });
+                            }
+                        }, 2000); // Increased delay to avoid interfering with cache load
+                    } else {
+                        console.log(`✅ Cache is fresh (${Math.round(cacheAge / 1000)}s old), skipping background refresh`);
+                    }
                 }
-            }, 100); // Small delay to let UI render first, then refresh
+            } catch (e) {
+                console.warn('Could not check cache age:', e);
+            }
 
             // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();
@@ -12675,10 +12609,6 @@ const TagManager = {
             // No cache - load from server (splash already shown at start of init())
             console.log('❌ No cache available, will load from server');
             AppLoadingSplash.updateProgress(40, 'Loading from server...');
-            
-            // PERFORMANCE: Use fast_load=1 for faster initial response
-            // Set flag to use fast loading mode
-            this._useFastLoad = true;
         }
 
         // Initialize empty state first (but don't clear if we have tags)
@@ -14277,8 +14207,10 @@ const TagManager = {
         }
         
         // Define classic types (matching backend CLASSIC_TYPES)
-        // MUST MATCH backend CLASSIC_TYPES in src/core/constants.py
-        const classicTypes = ['flower', 'bud', 'pre-roll', 'preroll', 'infused pre-roll', 'blunt', 'flavored blunt', 'concentrate', 'solventless concentrate', 'live resin', 'rosin', 'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'];
+        const classicTypes = [
+            'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
+            'flower - outdoor', 'flower - indoor', 'flower - greenhouse'
+        ];
         
         // Check if lineage is empty/invalid (matching backend empty_lineage_mask)
         const isEmptyLineage = !currentLineage || 

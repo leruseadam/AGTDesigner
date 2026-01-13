@@ -1187,36 +1187,28 @@ class ProductDatabase:
                 del self._cache[key]
     
     def get_mode_lineage(self, strain_id: int) -> str:
-        """Return the most common (mode) lineage for a strain from the products table.
-        CRITICAL: Excludes MIXED and other invalid lineages to prevent corruption."""
+        """Return the most common (mode) lineage for a strain from the products table."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-
+            
             # First get the strain name from the strains table
             cursor.execute('SELECT strain_name FROM strains WHERE id = ?', (strain_id,))
             strain_result = cursor.fetchone()
             if not strain_result:
                 return None
-
+            
             strain_name = strain_result[0]
-
-            # CRITICAL: Only consider valid classic lineages (exclude MIXED, brand names, etc.)
-            # This prevents MIXED from corrupting canonical_lineage values
-            valid_lineages = ('SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND')
-
-            # Then find the most common VALID lineage for this strain in products
+            
+            # Then find the most common lineage for this strain in products
             cursor.execute('''
                 SELECT "Lineage", COUNT(*) as count
                 FROM products
-                WHERE "Product Strain" = ?
-                  AND "Lineage" IS NOT NULL
-                  AND "Lineage" != ''
-                  AND UPPER(TRIM("Lineage")) IN (?, ?, ?, ?, ?, ?, ?)
+                WHERE "Product Strain" = ? AND "Lineage" IS NOT NULL AND "Lineage" != ''
                 GROUP BY "Lineage"
                 ORDER BY count DESC
                 LIMIT 1
-            ''', (strain_name,) + valid_lineages)
+            ''', (strain_name,))
             result = cursor.fetchone()
             if result:
                 return result[0]
@@ -1224,124 +1216,6 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error getting mode lineage for strain_id {strain_id}: {e}")
             return None
-
-    def _fix_strain_variations_auto(self):
-        """Automatically fix strain variations to share the same lineage.
-        This runs after every Excel upload to ensure consistency.
-
-        Core strains (without suffixes) are authoritative.
-        Variations inherit the core strain's lineage.
-        Manual edits (sovereign_lineage) are always preserved.
-        """
-        from collections import defaultdict
-
-        # Common suffixes that indicate variations
-        VARIATION_SUFFIXES = [
-            'small buds', 'smalls', 'popcorn', 'shake', 'trim',
-            'outdoor', 'indoor', 'greenhouse',
-            'special', 'original', 'classic', 'premium',
-            'rso tanker', 'terp crystal', 'live resin', 'live rosin',
-            'hash rosin', 'badder', 'batter', 'sauce', 'diamonds',
-            'crumble', 'wax', 'shatter', 'sugar'
-        ]
-
-        def extract_core_strain(strain_name):
-            """Extract core strain name by removing suffixes."""
-            if not strain_name:
-                return None
-
-            strain_lower = strain_name.lower().strip()
-
-            for suffix in VARIATION_SUFFIXES:
-                if strain_lower.endswith(suffix):
-                    core = strain_name[:-(len(suffix))].strip().rstrip('-').strip()
-                    return core
-
-            return strain_name  # No suffix, this is the core
-
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-
-            # Get all strains
-            cursor.execute('''
-                SELECT id, strain_name, sovereign_lineage, canonical_lineage
-                FROM strains
-                WHERE strain_name IS NOT NULL AND strain_name != ''
-            ''')
-
-            all_strains = cursor.fetchall()
-
-            # Group by core strain name
-            core_groups = defaultdict(list)
-            for strain_id, strain_name, sov_lineage, can_lineage in all_strains:
-                core = extract_core_strain(strain_name)
-                core_groups[core].append({
-                    'id': strain_id,
-                    'name': strain_name,
-                    'core': core,
-                    'sovereign': sov_lineage,
-                    'canonical': can_lineage,
-                    'is_core': (core == strain_name)
-                })
-
-            # Fix inconsistent groups
-            fixed_count = 0
-
-            for core, strains in core_groups.items():
-                if len(strains) <= 1:
-                    continue  # No variations
-
-                # Check if lineages are inconsistent
-                lineages = set(s['sovereign'] or s['canonical'] for s in strains if (s['sovereign'] or s['canonical']))
-
-                if len(lineages) <= 1:
-                    continue  # Already consistent
-
-                # Find core strain
-                core_strain = None
-                for s in strains:
-                    if s['is_core']:
-                        core_strain = s
-                        break
-
-                if not core_strain:
-                    # No exact core, use first alphabetically
-                    core_strain = sorted(strains, key=lambda x: x['name'])[0]
-
-                # Get authoritative lineage
-                auth_lineage = core_strain['sovereign'] or core_strain['canonical']
-
-                if not auth_lineage:
-                    continue  # Core has no lineage
-
-                # Update variations (skip those with sovereign_lineage)
-                for variant in strains:
-                    if variant['id'] == core_strain['id']:
-                        continue  # Skip core itself
-
-                    if variant['sovereign']:
-                        continue  # Skip manual edits
-
-                    if variant['canonical'] != auth_lineage:
-                        cursor.execute('''
-                            UPDATE strains
-                            SET canonical_lineage = ?,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                        ''', (auth_lineage, variant['id']))
-                        fixed_count += 1
-
-            conn.commit()
-
-            if fixed_count > 0:
-                logger.info(f"🔄 AUTO-FIX: Synchronized {fixed_count} strain variations")
-
-            return fixed_count
-
-        except Exception as e:
-            logger.error(f"Error in automatic strain variation fix: {e}")
-            return 0
 
     def update_all_canonical_lineages_to_mode(self):
         """Update all strains' canonical_lineage to the mode lineage from the products table.
@@ -2468,16 +2342,7 @@ class ProductDatabase:
             
             # Log rejection summary to provide insight into data quality issues
             self.log_rejection_summary()
-
-            # AUTOMATIC FIX: Ensure strain variations share the same lineage
-            # This runs automatically after every Excel upload
-            try:
-                logger.info("🔄 AUTO-FIX: Synchronizing strain variation lineages...")
-                self._fix_strain_variations_auto()
-                logger.info("✅ AUTO-FIX: Strain variation lineages synchronized")
-            except Exception as variation_fix_error:
-                logger.warning(f"⚠️ AUTO-FIX: Strain variation sync failed (non-fatal): {variation_fix_error}")
-
+            
             return result
             
         except sqlite3.OperationalError as op_error:

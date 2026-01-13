@@ -5523,36 +5523,16 @@ def process_lightning():
         with excel_processor_lock:
             _excel_processor = processor
             _excel_processor._last_loaded_file = file_path
-
-        # CRITICAL FIX: Sync Excel data to database immediately after load
-        # This ensures all products and strains are in the database before any lineage queries
-        try:
-            selected_store = get_current_store_name(allow_fallback=True)
-            if selected_store:
-                product_db = get_product_database(selected_store)
-                if product_db and processor.df is not None and not processor.df.empty:
-                    logging.info(f"🔄 Syncing {len(processor.df)} rows from Excel to database...")
-                    sync_result = product_db.store_excel_data(processor.df, source_file=file_path)
-                    logging.info(f"✅ Database sync complete: {sync_result}")
-                else:
-                    logging.warning("⚠️ Could not sync to database: database or DataFrame not available")
-            else:
-                logging.warning("⚠️ Could not sync to database: no store selected")
-        except Exception as sync_err:
-            # Don't fail the upload if sync fails - just log the error
-            logging.error(f"❌ Database sync failed (upload still successful): {sync_err}")
-            import traceback
-            logging.error(traceback.format_exc())
-
+        
         # PC optimization: Skip cache clearing for better performance
         if not is_windows:
             # Clear minimal caches only
             cache.delete('full_excel_cache_key')
             cache.delete('dropdown_cache_key')
-
+        
         process_time = time.time() - start_time
         logging.info(f"[LIGHTNING] Processing completed in {process_time:.3f}s")
-
+        
         return jsonify({
             'success': True,
             'message': f'File processed successfully in {process_time:.3f}s',
@@ -7263,37 +7243,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         
         # Collect product names for lookup (always include; alignment now force-overwrites)
         product_names = []
-        potential_strains = set()  # Collect all potential strain names for direct query
         for t in aligned_tags:
             if isinstance(t, dict) and t.get('Product Name*'):
-                pname = t.get('Product Name*')
-                product_names.append(pname)
-                
-                # CRITICAL: Extract strain names from product names BEFORE querying
-                # This allows us to query strains table directly for "Blackberry Kush" etc.
-                if product_db and hasattr(product_db, '_extract_strain_from_product_name'):
-                    try:
-                        product_type = t.get('Product Type*', t.get('ProductType', '')).lower()
-                        extracted_strain = product_db._extract_strain_from_product_name(pname, product_type)
-                        if extracted_strain:
-                            potential_strains.add(extracted_strain)
-                            # Also add normalized version
-                            if hasattr(product_db, '_normalize_strain_name'):
-                                normalized_strain = product_db._normalize_strain_name(extracted_strain)
-                                if normalized_strain:
-                                    potential_strains.add(normalized_strain)
-                            potential_strains.add(extracted_strain.lower().strip())
-                            
-                            # CRITICAL DEBUG: Log Blackberry Kush extraction
-                            if 'blackberry kush' in pname.lower():
-                                normalized_debug = normalized_strain if (hasattr(product_db, '_normalize_strain_name') and normalized_strain) else 'N/A'
-                                logging.info(f"🎯 BLACKBERRY KUSH EXTRACTION: '{pname}' -> extracted_strain='{extracted_strain}', normalized='{normalized_debug}'")
-                    except Exception as extract_err:
-                        logging.error(f"❌ Could not extract strain from '{pname}': {extract_err}")
-                        if 'blackberry kush' in pname.lower():
-                            logging.error(f"🎯 BLACKBERRY KUSH EXTRACTION FAILED: {extract_err}")
-                        import traceback
-                        logging.error(f"Extraction traceback: {traceback.format_exc()}")
+                product_names.append(t.get('Product Name*'))
         
         if not product_names:
             logging.debug("⚡ No products need lineage alignment")
@@ -7303,73 +7255,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
-        # CRITICAL: Query strains table FIRST for all potential strains
-        # This ensures we can match products by strain name even if product name doesn't match
-        if potential_strains:
-            strain_placeholders = ','.join(['?' for _ in potential_strains])
-            try:
-                logging.info(f"🔍 DIRECT STRAIN QUERY: Querying strains table for {len(potential_strains)} potential strains: {list(potential_strains)[:5]}...")
-                
-                # CRITICAL DEBUG: Log if Blackberry Kush is in potential_strains
-                if any('blackberry' in str(s).lower() and 'kush' in str(s).lower() for s in potential_strains):
-                    logging.info(f"🎯 BLACKBERRY KUSH IN POTENTIAL_STRAINS: {[s for s in potential_strains if 'blackberry' in str(s).lower() and 'kush' in str(s).lower()]}")
-                
-                cursor.execute(f'''
-                    SELECT s.strain_name, s.normalized_name,
-                           s.sovereign_lineage as strain_sovereign,
-                           s.canonical_lineage as strain_canonical
-                    FROM strains s
-                    WHERE s.strain_name IN ({strain_placeholders})
-                       OR s.normalized_name IN ({strain_placeholders})
-                       OR LOWER(TRIM(s.strain_name)) IN ({strain_placeholders})
-                ''', list(potential_strains) * 3)
-                
-                strain_matches = 0
-                for strain_row in cursor.fetchall():
-                    strain_name = strain_row[0]
-                    normalized_strain_name = strain_row[1]
-                    strain_sovereign_raw = strain_row[2]
-                    strain_canonical_raw = strain_row[3]
-                    
-                    def _clean_lineage(val):
-                        if val is None:
-                            return None
-                        txt = str(val).strip().upper()
-                        if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
-                            return None
-                        return txt
-                    
-                    strain_sovereign = _clean_lineage(strain_sovereign_raw)
-                    strain_canonical = _clean_lineage(strain_canonical_raw)
-                    
-                    if strain_canonical or strain_sovereign:
-                        # Map strain directly to lineage info
-                        strain_lineage_info = {
-                            'lineage': strain_canonical or strain_sovereign,
-                            'has_sovereign': bool(strain_sovereign),
-                            'product_sovereign': None,
-                            'strain_sovereign': strain_sovereign,
-                            'strain_canonical': strain_canonical
-                        }
-                        
-                        # Map by strain name, normalized name, and lowercase
-                        lineage_map[strain_name] = strain_lineage_info
-                        if normalized_strain_name:
-                            lineage_map[normalized_strain_name] = strain_lineage_info
-                        lineage_map[strain_name.lower().strip()] = strain_lineage_info
-                        if normalized_strain_name:
-                            lineage_map[normalized_strain_name.lower().strip()] = strain_lineage_info
-                        
-                        strain_matches += 1
-                        logging.info(f"✅ DIRECT STRAIN QUERY: Found '{strain_name}' (normalized: '{normalized_strain_name}') -> canonical={strain_canonical}, sovereign={strain_sovereign}")
-                
-                if strain_matches > 0:
-                    logging.info(f"✅ DIRECT STRAIN QUERY: Matched {strain_matches} strains from strains table")
-            except Exception as strain_query_err:
-                logging.error(f"❌ DIRECT STRAIN QUERY failed: {strain_query_err}")
-                import traceback
-                logging.error(f"Strain query traceback: {traceback.format_exc()}")
-        
         # CRITICAL FIX: Use EXACT same query as docx generation for consistency
         # Match by "Product Name*" exactly like docx generation (tag_generator.py line 909)
         chunk_size = 400
@@ -7378,13 +7263,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             placeholders = ','.join(['?' for _ in chunk])
         # EXACT same query as docx generation - but also return individual fields to preserve priority
             cursor.execute(f'''
-                SELECT p."Product Name*",
+                SELECT p."Product Name*", 
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p.sovereign_lineage as product_sovereign,
                        s.sovereign_lineage as strain_sovereign,
-                       s.canonical_lineage as strain_canonical,
-                       p."Product Strain" as product_strain,
-                       p."DOH Compliant (Yes/No)" as doh
+                       s.canonical_lineage as strain_canonical
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
@@ -7396,8 +7279,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 product_sovereign_raw = row[2]
                 strain_sovereign_raw = row[3]
                 strain_canonical_raw = row[4]
-                product_strain = row[5]  # Extract product_strain from query result
-                doh_raw = row[6]  # Extract DOH from query result
 
                 def _clean_lineage(val):
                     if val is None:
@@ -7412,27 +7293,17 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 strain_sovereign = _clean_lineage(strain_sovereign_raw)
                 strain_canonical = _clean_lineage(strain_canonical_raw)
 
-                # CRITICAL FIX: Store lineage info if we have ANY lineage data (not just db_lineage)
-                # This ensures strain_canonical is always used even if COALESCE returns None
-                if db_name and (db_lineage or product_sovereign or strain_sovereign or strain_canonical):
-                    lineage_clean = db_lineage  # May be None if COALESCE found nothing, but we still have strain_canonical
+                if db_name and db_lineage:
+                    lineage_clean = db_lineage
                     # Store lineage with source info for proper field assignment
                     # CRITICAL: product_sovereign/strain_sovereign/strain_canonical are already cleaned and uppercased by _clean_lineage
                     # They are either a clean uppercase string or None - do NOT call str() again
-                    # CRITICAL FIX: Clean DOH value for storage
-                    doh_clean = None
-                    if doh_raw is not None:
-                        doh_str = str(doh_raw).strip().upper()
-                        if doh_str and doh_str not in ['', 'NAN', 'NONE', 'NULL']:
-                            doh_clean = doh_str
-                    
                     lineage_info = {
-                        'lineage': lineage_clean,  # May be None - that's OK, we'll use strain_canonical
+                        'lineage': lineage_clean,
                         'has_sovereign': bool(product_sovereign or strain_sovereign),
                         'product_sovereign': product_sovereign,  # Already cleaned - don't call str() again
                         'strain_sovereign': strain_sovereign,    # Already cleaned - don't call str() again
-                        'strain_canonical': strain_canonical,    # Already cleaned - don't call str() again
-                        'doh': doh_clean  # CRITICAL: Store DOH value for tag update
+                        'strain_canonical': strain_canonical     # Already cleaned - don't call str() again
                     }
                     # Map by original name (exact match like docx generation)
                     lineage_map[db_name] = lineage_info
@@ -7440,37 +7311,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     normalized = product_db._normalize_product_name(db_name)
                     lineage_map[normalized] = lineage_info
                     lineage_map[db_name.lower().strip()] = lineage_info
-                    
-                    # Log what we found for debugging
-                    if strain_canonical:
-                        logging.debug(f"✅ Found lineage for '{db_name}': strain_canonical={strain_canonical}, db_lineage={db_lineage}, sovereign={product_sovereign or strain_sovereign}, strain='{product_strain}'")
-                    elif db_lineage:
-                        logging.debug(f"✅ Found lineage for '{db_name}': db_lineage={db_lineage} (no strain_canonical), strain='{product_strain}'")
-                    
-                    # CRITICAL: Also map by strain name if available (for products that don't match by name)
-                    # This allows "Blackberry Kush Infused Pre-Roll by 2727 - 1g" to match via strain "Blackberry Kush"
-                    if product_strain and product_db:
-                        try:
-                            normalized_strain = product_db._normalize_strain_name(product_strain) if hasattr(product_db, '_normalize_strain_name') else str(product_strain).strip().lower()
-                            if normalized_strain and normalized_strain not in lineage_map:
-                                # Map strain name to lineage info for fallback matching
-                                lineage_map[normalized_strain] = lineage_info
-                                lineage_map[product_strain.lower().strip()] = lineage_info
-                                logging.debug(f"✅ Also mapped strain '{product_strain}' (normalized: '{normalized_strain}') to lineage for fallback matching")
-                        except Exception as strain_map_err:
-                            logging.debug(f"Could not map strain '{product_strain}': {strain_map_err}")
-                elif db_name:
-                    logging.debug(f"⚠️ No lineage data found for '{db_name}' in database")
         
         if not lineage_map:
-            logging.warning(f"⚠️ LINEAGE ALIGNMENT: No lineage found in database for {len(product_names)} products. Products searched: {product_names[:5]}...")
             return aligned_tags
-        
-        logging.info(f"✅ LINEAGE ALIGNMENT: Found lineage for {len(lineage_map)} products in database")
         
         # Apply lineage to tags
         aligned_count = 0
-        unmatched_count = 0
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
@@ -7478,213 +7324,44 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             if not name:
                 continue
             # Try exact match first (like docx generation), then normalized, then lowercase
-            normalized_name = product_db._normalize_product_name(name)
-            lower_name = str(name).lower().strip()
-            
-            lineage_info = lineage_map.get(name) or lineage_map.get(normalized_name) or lineage_map.get(lower_name)
-            
-            # CRITICAL: For products with strain names, also try matching by extracted strain name
-            # Example: "Blackberry Kush Infused Pre-Roll by 2727 - 1g" -> try "Blackberry Kush"
-            if not lineage_info and product_db:
-                try:
-                    # Extract strain from product name (for classic types)
-                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                    extracted_strain = product_db._extract_strain_from_product_name(name, product_type) if hasattr(product_db, '_extract_strain_from_product_name') else None
-                    
-                    if extracted_strain:
-                        # Normalize the extracted strain name
-                        normalized_strain = product_db._normalize_strain_name(extracted_strain) if hasattr(product_db, '_normalize_strain_name') else extracted_strain.strip().lower()
-                        strain_lower = extracted_strain.lower().strip()
-                        
-                        # Try direct strain name match first (from strain mapping we added above)
-                        lineage_info = lineage_map.get(normalized_strain) or lineage_map.get(strain_lower) or lineage_map.get(extracted_strain)
-                        
-                        if lineage_info:
-                            logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' (normalized: '{normalized_strain}')")
-                            if 'blackberry kush' in name.lower():
-                                logging.info(f"🎯 BLACKBERRY KUSH DEBUG: Found lineage via strain match - lineage_info={lineage_info}")
-                        else:
-                            # Fallback: Look for any product in lineage_map that contains this strain
-                            for map_key, map_value in lineage_map.items():
-                                if strain_lower in str(map_key).lower() or normalized_strain in str(map_key).lower():
-                                    lineage_info = map_value
-                                    logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' -> found product '{map_key}'")
-                                    if 'blackberry kush' in name.lower():
-                                        logging.info(f"🎯 BLACKBERRY KUSH DEBUG: Found lineage via product match - lineage_info={lineage_info}")
-                                    break
-                except Exception as strain_err:
-                    logging.debug(f"Could not extract strain for '{name}': {strain_err}")
-            
+            lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
             if not lineage_info:
-                unmatched_count += 1
-                # CRITICAL: Always log "Blackberry Kush" products for debugging
-                if 'blackberry kush' in name.lower() or unmatched_count <= 10:
-                    logging.warning(f"⚠️ LINEAGE ALIGNMENT: No lineage found for '{name}'")
-                    logging.warning(f"   Tried: exact='{name}', normalized='{normalized_name}', lowercase='{lower_name}'")
-                    logging.warning(f"   Available map keys (first 5): {list(lineage_map.keys())[:5]}")
-                    if product_db and hasattr(product_db, '_extract_strain_from_product_name'):
-                        try:
-                            product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                            extracted_strain = product_db._extract_strain_from_product_name(name, product_type)
-                            logging.warning(f"   Extracted strain: '{extracted_strain}'")
-                        except Exception:
-                            pass
                 continue
-            else:
-                # Log successful match for first few OR for Blackberry Kush
-                if aligned_count < 5 or 'blackberry kush' in name.lower():
-                    match_type = "exact" if name in lineage_map else ("normalized" if normalized_name in lineage_map else "lowercase")
-                    logging.info(f"✅ LINEAGE ALIGNMENT: Matched '{name}' via {match_type} match")
-                    if isinstance(lineage_info, dict):
-                        logging.info(f"   Lineage data: canonical={lineage_info.get('strain_canonical')}, sovereign={lineage_info.get('product_sovereign') or lineage_info.get('strain_sovereign')}, COALESCEd={lineage_info.get('lineage')}")
             
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
-                db_lineage = lineage_info.get('lineage')  # This is already COALESCEd (sovereign > canonical > Lineage), may be None
-                
-                # CRITICAL FIX: Ensure user's lineage values are ALWAYS used
-                # Priority: product_sovereign (manual edits) > strain_sovereign > strain_canonical (strains sheet) > product.Lineage
-                # The strains table canonical_lineage is the user's "strains sheet" data and should always be used when available
-                
-                # Step 1: Set sovereign_lineage if present (manual edits take highest priority)
-                if lineage_info.get('product_sovereign'):
+                db_lineage = lineage_info['lineage']  # This is already COALESCEd (sovereign > canonical > Lineage)
+                # CRITICAL: Prioritize sovereign_lineage - use it as effective lineage if it exists
+                effective_lineage = db_lineage  # Default to COALESCEd result
+
+                # CRITICAL FIX: ONLY set sovereign_lineage when present; do not emit 'NONE' or None
+                if lineage_info['product_sovereign']:
                     tag['sovereign_lineage'] = lineage_info['product_sovereign']
                     effective_lineage = lineage_info['product_sovereign']
-                    logging.debug(f"✅ Using product_sovereign '{lineage_info['product_sovereign']}' for '{name}'")
-                elif lineage_info.get('strain_sovereign'):
+                elif lineage_info['strain_sovereign']:
                     tag['sovereign_lineage'] = lineage_info['strain_sovereign']
                     effective_lineage = lineage_info['strain_sovereign']
-                    logging.debug(f"✅ Using strain_sovereign '{lineage_info['strain_sovereign']}' for '{name}'")
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
-                # Step 2: CRITICAL - ALWAYS use strain canonical_lineage from strains table FIRST
-                # This is the user's "strains sheet" data - it should NEVER be overwritten
-                # BUT: NEVER use MIXED - skip it and use next priority source
-                strain_canonical_value = lineage_info.get('strain_canonical')
-                
-                # CRITICAL FIX: Skip MIXED values - they should never overwrite valid lineage
-                # If strain_canonical is MIXED, treat it as if it doesn't exist
-                if strain_canonical_value and str(strain_canonical_value).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 SKIPPING MIXED strain_canonical for '{name}' - will use next priority source")
-                    strain_canonical_value = None
-                
-                # Step 3: Determine effective_lineage with proper priority
-                # Priority: product_sovereign (manual edits) > strain_sovereign > strain_canonical (strains sheet) > product.Lineage
-                # CRITICAL: Skip MIXED values at each step
-                effective_lineage = None
-                if lineage_info.get('product_sovereign'):
-                    product_sovereign_clean = str(lineage_info['product_sovereign']).strip().upper()
-                    if product_sovereign_clean != 'MIXED':
-                        effective_lineage = lineage_info['product_sovereign']
-                        logging.debug(f"✅ Using product_sovereign '{effective_lineage}' for '{name}' (manual edit)")
-                if not effective_lineage and lineage_info.get('strain_sovereign'):
-                    strain_sovereign_clean = str(lineage_info['strain_sovereign']).strip().upper()
-                    if strain_sovereign_clean != 'MIXED':
-                        effective_lineage = lineage_info['strain_sovereign']
-                        logging.debug(f"✅ Using strain_sovereign '{effective_lineage}' for '{name}'")
-                if not effective_lineage and strain_canonical_value:
-                    # CRITICAL: Use strain_canonical from strains table (user's strains sheet)
-                    # Already checked above that it's not MIXED
-                    effective_lineage = strain_canonical_value
-                    logging.info(f"✅ Using strain canonical_lineage '{strain_canonical_value}' for '{name}' (user's strains sheet)")
-                if not effective_lineage and db_lineage:
-                    db_lineage_clean = str(db_lineage).strip().upper()
-                    if db_lineage_clean != 'MIXED':
-                        effective_lineage = db_lineage
-                        logging.debug(f"✅ Using db_lineage '{db_lineage}' for '{name}' (fallback)")
-                
-                if not effective_lineage:
-                    logging.warning(f"⚠️ No valid lineage found for '{name}' - all sources were MIXED or missing")
-                
-                # Step 4: CRITICAL FIX - Normalize lineage based on product type
-                # Classic types: Convert MIXED/THC → HYBRID
-                # Nonclassic types: Convert SATIVA/INDICA/HYBRID → MIXED (displayed as THC)
-                product_type = tag.get('Product Type*', tag.get('ProductType', ''))
-                if effective_lineage and product_type:
-                    from src.core.constants import normalize_lineage_for_product_type
-                    old_lineage = str(effective_lineage).strip().upper()
-                    effective_lineage = normalize_lineage_for_product_type(old_lineage, product_type)
-                    if old_lineage != effective_lineage:
-                        logging.warning(f"🔄 Normalized lineage for '{name}': {old_lineage} → {effective_lineage} (type: {product_type})")
-                
-                # Step 5: Set canonical_lineage from strain_canonical - NEVER overwrite after this
-                # This ensures the user's strains sheet data is ALWAYS used
-                # CRITICAL: Normalize strain_canonical based on product type
-                if strain_canonical_value:
-                    final_canonical = strain_canonical_value
-                    final_canonical_clean = str(final_canonical).strip().upper()
-                    
-                    # CRITICAL: Normalize canonical lineage based on product type
-                    # Classic types: MIXED → HYBRID
-                    # Nonclassic types: SATIVA/INDICA/HYBRID → MIXED (displayed as THC)
-                    if product_type:
-                        from src.core.constants import normalize_lineage_for_product_type
-                        final_canonical = normalize_lineage_for_product_type(final_canonical_clean, product_type)
-                        if final_canonical_clean != final_canonical:
-                            logging.warning(f"🔄 Normalized canonical_lineage for '{name}': {final_canonical_clean} → {final_canonical} (type: {product_type})")
-                    
-                    # ALWAYS set from strain_canonical - this is what the user told us to use
-                    tag['canonical_lineage'] = final_canonical
-                    logging.info(f"✅ Set canonical_lineage='{final_canonical}' from strain_canonical='{strain_canonical_value}' for '{name}' (user's strains sheet)")
-                elif not tag.get('canonical_lineage') and db_lineage:
-                    # Fallback: only set if not already set and no strain_canonical
-                    # CRITICAL: Normalize db_lineage based on product type
-                    db_lineage_clean = str(db_lineage).strip().upper()
-                    if product_type:
-                        from src.core.constants import normalize_lineage_for_product_type
-                        db_lineage_normalized = normalize_lineage_for_product_type(db_lineage_clean, product_type)
-                        tag['canonical_lineage'] = db_lineage_normalized
-                        if db_lineage_clean != db_lineage_normalized:
-                            logging.warning(f"🔄 Normalized canonical_lineage from db for '{name}': {db_lineage_clean} → {db_lineage_normalized}")
-                    else:
-                        tag['canonical_lineage'] = db_lineage
-                
-                # Step 6: Set all lineage fields to ensure user's values are used everywhere
-                if effective_lineage:
-                    tag['currentLineage'] = effective_lineage
-                    tag['Lineage'] = effective_lineage
-                    tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
-                    tag['lineage'] = effective_lineage.lower()
-                
-                # CRITICAL FIX: Set DOH field from database if available
-                # Only set DOH if Excel doesn't already have a value (Excel is source of truth)
-                doh_value = lineage_info.get('doh')
-                if doh_value:
-                    # Check if Excel already has DOH value
-                    excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
-                    excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
-                    
-                    # Only use database DOH if Excel doesn't have a value
-                    if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
-                        tag['DOH'] = doh_value
-                        tag['DOH Compliant (Yes/No)'] = doh_value
-                        logging.debug(f"✅ Set DOH from database: '{name}' -> '{doh_value}'")
-                
-                # CRITICAL: Log to verify user's lineage is being used
-                if strain_canonical_value:
-                    logging.info(f"✅ FINAL: '{name}' -> canonical_lineage='{tag.get('canonical_lineage')}', effective_lineage='{effective_lineage}', strain_canonical='{strain_canonical_value}' (user's strains sheet)")
-                
+                # CRITICAL FIX: Always use strain canonical_lineage from strains table as the base
+                # Priority: product_sovereign > strain_sovereign > strain_canonical > product.Lineage
+                # The strains table canonical_lineage should always be available and used
+                if lineage_info['strain_canonical']:
+                    # Always set canonical_lineage from strains table (this is the "strains sheet" data)
+                    tag['canonical_lineage'] = lineage_info['strain_canonical']
+                else:
+                    # Fallback if no strain canonical_lineage exists
+                    tag['canonical_lineage'] = effective_lineage
+                tag['currentLineage'] = effective_lineage
+                # CRITICAL: Always set Lineage* and other fields using effective_lineage (prioritizes sovereign)
+                tag['Lineage'] = effective_lineage
+                tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
+                tag['lineage'] = effective_lineage.lower()
                 aligned_count += 1
             else:
                 # Old format (backward compatibility)
                 db_lineage = lineage_info
-                
-                # CRITICAL FIX: NEVER use MIXED - skip it entirely
-                if db_lineage and str(db_lineage).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 SKIPPING MIXED db_lineage for '{name}' (old format) - will not set lineage")
-                    db_lineage = None
-                
-                # CRITICAL FIX: NEVER allow MIXED for classic types (double-check)
-                if db_lineage:
-                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                    
-                    if is_classic and str(db_lineage).strip().upper() == 'MIXED':
-                        logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
-                        db_lineage = 'HYBRID'
-                
-                if db_lineage and (force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage'))):
+                if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
                     tag['Lineage'] = db_lineage
                     tag['Lineage*'] = db_lineage  # CRITICAL: Set Excel column name for UI
                     tag['lineage'] = db_lineage.lower()
@@ -7694,52 +7371,17 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         
         if aligned_count > 0:
             logging.info(f"✅ Aligned {aligned_count}/{len(aligned_tags)} tags with database lineage (force_overwrite={force_overwrite})")
-            if unmatched_count > 0:
-                logging.warning(f"⚠️ {unmatched_count} tags could not be matched to database lineage")
-            # DEBUG: Log a sample aligned tag to verify lineage is set
-            sample_aligned = next((t for t in aligned_tags if isinstance(t, dict) and (t.get('canonical_lineage') or t.get('currentLineage'))), None)
+            # DEBUG: Log a sample aligned tag to verify sovereign_lineage is set
+            sample_aligned = next((t for t in aligned_tags if isinstance(t, dict) and t.get('sovereign_lineage')), None)
             if sample_aligned:
-                logging.info(f"📋 Sample aligned tag: '{sample_aligned.get('Product Name*')}' -> canonical_lineage={sample_aligned.get('canonical_lineage')}, currentLineage={sample_aligned.get('currentLineage')}, sovereign_lineage={sample_aligned.get('sovereign_lineage')}")
+                logging.info(f"📋 Sample aligned tag: {sample_aligned.get('Product Name*')} -> sovereign_lineage={sample_aligned.get('sovereign_lineage')}")
         else:
-            logging.error(f"❌ CRITICAL: No tags were aligned! lineage_map size: {len(lineage_map)}, tags count: {len(aligned_tags)}")
-            if lineage_map:
-                logging.error(f"   Lineage map has {len(lineage_map)} entries but no tags matched. Sample map keys: {list(lineage_map.keys())[:5]}")
-                logging.error(f"   Sample tag names: {[t.get('Product Name*') for t in aligned_tags[:5] if isinstance(t, dict)]}")
+            logging.warning(f"⚠️ No tags were aligned! lineage_map size: {len(lineage_map)}, tags count: {len(aligned_tags)}")
 
         return aligned_tags
     except Exception as e:
         logging.warning(f"Lineage alignment failed: {e}")
         return tags
-
-def _cleanup_canonical_lineage_mixed(tags):
-    """
-    CRITICAL FINAL SAFEGUARD: Remove any MIXED values from canonical_lineage.
-    This ensures canonical_lineage NEVER contains MIXED, even if it somehow got through previous checks.
-    """
-    if not tags:
-        return tags
-    
-    fixed_count = 0
-    for tag in tags:
-        if not isinstance(tag, dict):
-            continue
-        
-        canonical = tag.get('canonical_lineage')
-        if canonical and str(canonical).strip().upper() == 'MIXED':
-            product_name = tag.get('Product Name*', 'Unknown')
-            product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-            
-            # Convert to HYBRID (never MIXED for canonical_lineage)
-            tag['canonical_lineage'] = 'HYBRID'
-            fixed_count += 1
-            logging.warning(f"🚫 FINAL CLEANUP: Removed MIXED from canonical_lineage for '{product_name}' -> set to HYBRID (is_classic={is_classic})")
-    
-    if fixed_count > 0:
-        logging.warning(f"🚫 FINAL CLEANUP: Fixed {fixed_count} tags with MIXED canonical_lineage")
-    
-    return tags
 
 def _calculate_joint_ratio_for_record(db_record):
     """Get joint ratio for pre-roll products from database record, parsing from name if needed."""
@@ -10541,34 +10183,28 @@ def get_available_tags():
         
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
+            # CRITICAL: Check if lineage was recently updated - if so, re-align to get fresh DB lineage
+            lineage_update_ts = session.get('lineage_update_timestamp')
+            needs_realignment = False
+            if lineage_update_ts:
+                try:
+                    # Within 10 minutes of lineage update, re-align cached tags
+                    needs_realignment = (time.time() - float(lineage_update_ts)) < 600
+                except Exception:
+                    needs_realignment = False
             
-            # CRITICAL FIX: ALWAYS align cached tags with database lineage to ensure user's lineage is used
-            # This is especially important because old cached tags may not have database lineage
-            try:
-                store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                if store_name_align and cached_tags:
-                    logging.info(f"🔄 Aligning {len(cached_tags)} cached tags with database lineage...")
-                    
-                    # CRITICAL DEBUG: Check Blackberry Kush before alignment
-                    blackberry_before = [t for t in cached_tags if 'blackberry kush' in str(t.get('Product Name*', '')).lower()]
-                    if blackberry_before:
-                        for bb in blackberry_before[:1]:
-                            logging.info(f"🎯 BLACKBERRY KUSH BEFORE ALIGNMENT: canonical_lineage={bb.get('canonical_lineage')}, currentLineage={bb.get('currentLineage')}")
-                    
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    
-                    # CRITICAL DEBUG: Check Blackberry Kush after alignment
-                    blackberry_after = [t for t in cached_tags if 'blackberry kush' in str(t.get('Product Name*', '')).lower()]
-                    if blackberry_after:
-                        for bb in blackberry_after[:1]:
-                            logging.info(f"🎯 BLACKBERRY KUSH AFTER ALIGNMENT: canonical_lineage={bb.get('canonical_lineage')}, currentLineage={bb.get('currentLineage')}")
-                    
-                    canonical_count = len([t for t in cached_tags if t.get('canonical_lineage')])
-                    logging.info(f"✅ Aligned cached tags: {canonical_count} tags now have canonical_lineage from strains table")
-            except Exception as align_err:
-                logging.error(f"❌ Could not align cached tags with database lineage: {align_err}")
-                import traceback
-                logging.error(f"Alignment traceback: {traceback.format_exc()}")
+            if needs_realignment:
+                logging.info(f"🔄 Recent lineage update detected - re-aligning cached tags with database")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
+                        # It must persist to ensure cache uses the correct timestamp-based key
+                        # The timestamp changes the cache key, so old cached tags won't be used
+                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
             
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
@@ -10598,27 +10234,22 @@ def get_available_tags():
                 except Exception:
                     pass
             
-            # CRITICAL FIX: ALWAYS align cached tags with database lineage, not just when needs_realignment
-            # This ensures user's lineage from strains table is always used
-            reason = "first request of session" if first_request else ("recent lineage update" if needs_realignment else "ensuring lineage is present")
-            logging.info(f"🔄 SLOW MODE: Aligning cached tags with database ({reason})")
-            try:
-                store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                if store_name_align and cached_tags:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    canonical_count = len([t for t in cached_tags if t.get('canonical_lineage')])
-                    logging.info(f"✅ SLOW MODE: Aligned cached tags - {canonical_count} tags now have canonical_lineage from strains table")
-                    # Mark that we've aligned tags in this session
-                    session['tags_aligned_this_session'] = True
-                    session.modified = True
-                    # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                    # It must persist to change the cache key and ensure fresh database lineage
-            except Exception as align_err:
-                logging.error(f"❌ SLOW MODE: Could not align cached tags with database lineage: {align_err}")
-                import traceback
-                logging.error(f"Alignment traceback: {traceback.format_exc()}")
-            
-            if False:  # Disabled - we always align now
+            if needs_realignment:
+                reason = "first request of session" if first_request else "recent lineage update"
+                logging.info(f"🔄 SLOW MODE: Re-aligning cached tags with database ({reason})")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                        # Mark that we've aligned tags in this session
+                        session['tags_aligned_this_session'] = True
+                        session.modified = True
+                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
+                        # It must persist to change the cache key and ensure fresh database lineage
+                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+            else:
                 logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
             
             safe_cached_tags = make_json_safe(cached_tags)
@@ -10839,15 +10470,6 @@ def get_available_tags():
                                             tag['sovereign_lineage'] = lineage_data['sovereign']
                                     else:
                                         db_lineage_clean = lineage_data
-
-                                    # CRITICAL FIX: NEVER allow MIXED for classic types
-                                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                                    
-                                    if is_classic and db_lineage_clean and str(db_lineage_clean).strip().upper() == 'MIXED':
-                                        logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{product_name}' (type: '{product_type}') - changing to HYBRID")
-                                        db_lineage_clean = 'HYBRID'
 
                                     tag['currentLineage'] = db_lineage_clean
                                     tag['canonical_lineage'] = db_lineage_clean
@@ -11106,72 +10728,23 @@ def get_available_tags():
             logging.info(f"⚠️ Recent lineage update detected - bypassing cache to fetch fresh database lineage")
             cached_tags = None  # Force fresh fetch with database lineage
 
-        # CRITICAL PERFORMANCE FIX: With fast_load=1 or no cache, NEVER load Excel or do database queries synchronously
+        # If fast_load with no cache and no immediate in-memory tags, fail fast with processing to unblock UI
+        if fast_load and not cached_tags and (session_file_path or file_exists):
+            elapsed_fast = (time.time() - start_time) * 1000
+            logging.info(f"⚡ FAST-LOAD: No cached tags yet (elapsed {elapsed_fast:.1f}ms) - returning processing to unblock UI")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'processing',
+                'message': 'File is being processed. Tags will load momentarily.'
+            }), 202
+
+        # CRITICAL PERFORMANCE FIX: With fast_load=1, NEVER load Excel or do database queries synchronously
         # This prevents 5-minute waits in production. Return 202 immediately and let background processing handle it.
-        # OPTIMIZATION: Return 202 immediately if no cache exists (even without fast_load explicitly set)
-        # This ensures fast response when cache is cleared on page load
-        if (fast_load or not cached_tags) and session_file_path and file_exists and not cached_tags:
-            # PERFORMANCE: Skip all expensive operations - just return processing status immediately
+        if fast_load and session_file_path and file_exists and not cached_tags:
+            # PERFORMANCE: Skip all expensive operations - just return processing status
             # Background thread or next request (with cache) will handle the actual loading
-            logging.info(f"⚡ FAST-LOAD: Skipping expensive Excel/DB operations - returning 202 immediately (no cache exists)")
-            
-            # CRITICAL: Start background processing thread to populate cache for next request
-            # This ensures cache is ready quickly for subsequent requests or polling
-            try:
-                import threading
-                def background_load():
-                    try:
-                        # Process in background without blocking
-                        from src.core.data.excel_processor import ExcelProcessor
-                        bg_processor = ExcelProcessor(store_name=store_name)
-                        if hasattr(bg_processor, 'pythonanywhere_fast_load'):
-                            bg_processor.pythonanywhere_fast_load(session_file_path)
-                        elif hasattr(bg_processor, 'ultra_fast_load'):
-                            bg_processor.ultra_fast_load(session_file_path)
-                        elif hasattr(bg_processor, 'fast_load_file'):
-                            bg_processor.fast_load_file(session_file_path)
-                        else:
-                            bg_processor.load_file(session_file_path)
-                        
-                        # Get tags and align with database lineage BEFORE caching
-                        if bg_processor.df is not None and not bg_processor.df.empty:
-                            bg_tags = bg_processor.get_available_tags(filters=None)
-                            
-                            # CRITICAL FIX: Align tags with database lineage to ensure user's lineage is used
-                            if store_name and bg_tags:
-                                try:
-                                    logging.info(f"🔄 Background: Aligning {len(bg_tags)} tags with database lineage...")
-                                    bg_tags = _align_tags_with_db_lineage(bg_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                                    canonical_count = len([t for t in bg_tags if t.get('canonical_lineage')])
-                                    logging.info(f"✅ Background: Successfully aligned {canonical_count} tags with database lineage (canonical_lineage from strains table)")
-                                except Exception as align_err:
-                                    logging.error(f"❌ Background: Lineage alignment failed: {align_err}")
-                                    import traceback
-                                    logging.error(f"Background alignment traceback: {traceback.format_exc()}")
-                            
-                            # Strip Excel lineage (database lineage is already set via alignment)
-                            for tag in bg_tags:
-                                tag.pop('Lineage', None)  # Remove Excel Lineage column
-                                tag.pop('lineage', None)  # Remove lowercase lineage
-                                tag.pop('Lineage*', None)  # Remove Excel Lineage* column
-                                # Keep canonical_lineage, currentLineage, sovereign_lineage - these are from database
-                            
-                            # Cache the processed tags WITH database lineage
-                            safe_bg_tags = make_json_safe(bg_tags)
-                            cache.set(cache_key, safe_bg_tags, timeout=3600)
-                            logging.info(f"✅ Background processing complete: cached {len(safe_bg_tags)} tags WITH database lineage")
-                    except Exception as bg_err:
-                        logging.error(f"❌ Background processing failed: {bg_err}")
-                        import traceback
-                        logging.error(f"Background processing traceback: {traceback.format_exc()}")
-                
-                # Start background thread (fire and forget)
-                thread = threading.Thread(target=background_load, daemon=True)
-                thread.start()
-                logging.info("🚀 Started background processing thread")
-            except Exception as thread_err:
-                logging.warning(f"Could not start background thread (non-critical): {thread_err}")
-            
+            logging.info(f"⚡ FAST-LOAD: Skipping expensive Excel/DB operations - returning 202 immediately")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
@@ -11315,12 +10888,8 @@ def get_available_tags():
                                         product_name = tag.get('Product Name*')
                                         if product_name and product_name in lineage_map:
                                             lineage_data = lineage_map[product_name]
-                                            # CRITICAL: Don't overwrite canonical_lineage if it was already set from strain_canonical
-                                            # The _align_tags_with_db_lineage function will set it correctly from strains table
                                             tag['currentLineage'] = lineage_data['lineage']
-                                            # Only set canonical_lineage if not already set (preserve strain_canonical if present)
-                                            if not tag.get('canonical_lineage'):
-                                                tag['canonical_lineage'] = lineage_data['lineage']
+                                            tag['canonical_lineage'] = lineage_data['lineage']
                                             tag['Lineage'] = lineage_data['lineage']
                                             tag['Lineage*'] = lineage_data['lineage']
                                             tag['lineage'] = lineage_data['lineage'].lower()
@@ -11365,21 +10934,8 @@ def get_available_tags():
                                         product_name = tag.get('Product Name*')
                                         if product_name and product_name in lineage_map:
                                             db_lineage_clean = lineage_map[product_name]
-                                            
-                                            # CRITICAL FIX: NEVER allow MIXED for classic types
-                                            product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                                            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                                            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                                            
-                                            if is_classic and db_lineage_clean and str(db_lineage_clean).strip().upper() == 'MIXED':
-                                                logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{product_name}' (type: '{product_type}') - changing to HYBRID")
-                                                db_lineage_clean = 'HYBRID'
-                                            
                                             tag['currentLineage'] = db_lineage_clean
-                                            # CRITICAL: Don't overwrite canonical_lineage if it was already set from strain_canonical
-                                            # The _align_tags_with_db_lineage function will set it correctly from strains table
-                                            if not tag.get('canonical_lineage'):
-                                                tag['canonical_lineage'] = db_lineage_clean
+                                            tag['canonical_lineage'] = db_lineage_clean
                                             tag['Lineage'] = db_lineage_clean
                                             tag['lineage'] = db_lineage_clean.lower()
 
@@ -11390,11 +10946,15 @@ def get_available_tags():
                             logging.warning(traceback.format_exc())
                     else:
                         # PERFORMANCE: During fast_load, populate lineage from Excel only (no DB query)
-                        # CRITICAL FIX: NEVER use Excel lineage - always use database lineage
-                        # Even in fast_load, we should align with database to ensure user's lineage values are used
-                        # This prevents Excel lineage from overwriting database lineage
-                        logging.info(f"⚡ FAST-LOAD: Skipping database enrichment for speed, but Excel lineage will NOT be used")
-                        # DO NOT set lineage from Excel - it will be set by _align_tags_with_db_lineage() later
+                        # This prevents 5-minute waits in production
+                        for tag in excel_tags:
+                            excel_lineage = tag.get('Lineage')
+                            if excel_lineage and str(excel_lineage).strip():
+                                excel_lineage_clean = str(excel_lineage).strip().upper()
+                                tag['currentLineage'] = excel_lineage_clean
+                                tag['canonical_lineage'] = excel_lineage_clean
+                                tag['lineage'] = excel_lineage_clean.lower()
+                        logging.info(f"⚡ FAST-LOAD: Skipped database enrichment - using Excel lineage only")
 
                     safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
 
@@ -12135,11 +11695,16 @@ def get_available_tags():
                                                     default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                     current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
                                                     
-                                                    # CRITICAL: Normalize lineage based on product type
-                                                    # Classic types: Convert MIXED/THC → HYBRID
-                                                    # Nonclassic types: Convert SATIVA/INDICA/HYBRID → MIXED (THC)
-                                                    from src.core.constants import normalize_lineage_for_product_type
-                                                    current_lineage = normalize_lineage_for_product_type(current_lineage, product_type)
+                                                    # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
+                                                    # For classic types, convert both THC and MIXED to HYBRID
+                                                    # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                                                    if is_classic_type:
+                                                        if current_lineage == 'THC' or current_lineage == 'MIXED':
+                                                            current_lineage = 'HYBRID'
+                                                    else:
+                                                        # For non-classic types, "THC" is an abbreviation for "MIXED"
+                                                        if current_lineage == 'THC':
+                                                            current_lineage = 'MIXED'
                                                     
                                                     # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
                                                     # Even if one exists, ensure both are set to the same value
@@ -12159,13 +11724,15 @@ def get_available_tags():
                                                 default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                 current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
                                                 
-                                                # CRITICAL: Normalize lineage based on product type
-                                                # Classic types: Convert MIXED/THC → HYBRID
-                                                # Nonclassic types: Convert SATIVA/INDICA/HYBRID → MIXED (THC)
-                                                from src.core.constants import normalize_lineage_for_product_type
-                                                current_lineage = normalize_lineage_for_product_type(current_lineage, product_type)
-                                                # For backward compatibility, keep THC→MIXED conversion
-                                                if current_lineage == 'THC':
+                                                # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
+                                                # For classic types, convert both THC and MIXED to HYBRID
+                                                # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
+                                                if is_classic_type:
+                                                    if current_lineage == 'THC' or current_lineage == 'MIXED':
+                                                        current_lineage = 'HYBRID'
+                                                else:
+                                                    # For non-classic types, "THC" is an abbreviation for "MIXED"
+                                                    if current_lineage == 'THC':
                                                         current_lineage = 'MIXED'
                                                 if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
                                                     if current_lineage:
@@ -14331,8 +13898,6 @@ def get_web_available_tags():
                 # CRITICAL: Align tags even for web endpoint to ensure sovereign_lineage is included
                 try:
                     cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    # CRITICAL FINAL SAFEGUARD: Remove any MIXED from canonical_lineage
-                    cached_tags = _cleanup_canonical_lineage_mixed(cached_tags)
                 except Exception as align_err:
                     logging.warning(f"WEB: Could not align cached tags: {align_err}")
                 safe_cached_tags = make_json_safe(cached_tags)
@@ -14360,136 +13925,43 @@ def get_web_available_tags():
                 try:
                     logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
                     excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    
-                    # CRITICAL: Check how many tags have canonical_lineage (from strains table)
-                    canonical_count = len([t for t in excel_tags if t.get('canonical_lineage')])
-                    sovereign_count = len([t for t in excel_tags if t.get('sovereign_lineage')])
                     matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
-                    
                     logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
-                    logging.info(f"   - {canonical_count} tags have canonical_lineage (from strains table - user's data)")
-                    logging.info(f"   - {sovereign_count} tags have sovereign_lineage (manual edits)")
-                    
-                    # Log sample of tags with canonical_lineage to verify
-                    sample_with_canonical = [t for t in excel_tags[:10] if t.get('canonical_lineage')]
-                    if sample_with_canonical:
-                        for sample in sample_with_canonical[:3]:
-                            logging.info(f"   📋 Sample: '{sample.get('Product Name*')}' -> canonical_lineage='{sample.get('canonical_lineage')}'")
                 except Exception as align_err:
-                    logging.error(f"❌ WEB: Lineage alignment failed, using Excel lineage: {align_err}")
+                    logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
                     import traceback
-                    logging.error(f"WEB: Alignment error traceback: {traceback.format_exc()}")
+                    logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
-            # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table (user's "strains sheet" data)
+            # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
             simple_tags = []
             for tag in excel_tags:
-                product_name = tag.get('Product Name*', 'Unknown')
-                
-                # CRITICAL FIX: ALWAYS prioritize canonical_lineage from strains table (user's "strains sheet" data)
-                # This ensures user's lineage values are ALWAYS used
-                # Priority: canonical_lineage (from strains - user's data) > sovereign_lineage (manual edits) > currentLineage > Lineage
-                # BUT: NEVER use MIXED - skip it and use next priority source
-                original_canonical = tag.get('canonical_lineage')
-                original_sovereign = tag.get('sovereign_lineage')
-                original_current = tag.get('currentLineage')
-                original_lineage = tag.get('Lineage')
-                
-                # CRITICAL: Skip MIXED values - they should never overwrite valid lineage
-                if original_canonical and str(original_canonical).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED canonical_lineage for '{product_name}' - will use next priority source")
-                    original_canonical = None
-                if original_sovereign and str(original_sovereign).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED sovereign_lineage for '{product_name}' - will use next priority source")
-                    original_sovereign = None
-                if original_current and str(original_current).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED currentLineage for '{product_name}' - will use next priority source")
-                    original_current = None
-                if original_lineage and str(original_lineage).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 NORMALIZE: Skipping MIXED Lineage for '{product_name}' - will use next priority source")
-                    original_lineage = None
-                
+                # CRITICAL FIX: Prioritize canonical_lineage from strains table (the "strains sheet")
+                # Priority: canonical_lineage (from strains) > currentLineage > sovereign_lineage > Lineage
                 final_lineage = (
-                    original_canonical or  # From strains table - this is the user's "strains sheet" data - ALWAYS use first
-                    original_sovereign or  # Manual edits - second priority
-                    original_current or 
-                    original_lineage
+                    tag.get('canonical_lineage') or  # From strains table - this is the "strains sheet" data
+                    tag.get('currentLineage') or 
+                    tag.get('sovereign_lineage') or
+                    tag.get('Lineage')
                 )
-                
-                # CRITICAL: Log what we have before normalization
-                if original_canonical:
-                    logging.debug(f"📋 NORMALIZE '{product_name}': Found canonical_lineage='{original_canonical}' (user's strains sheet data)")
                 
                 if final_lineage and str(final_lineage).strip():
                     lineage_clean = str(final_lineage).strip().upper()
-                    
-                    # CRITICAL: ALWAYS preserve canonical_lineage from strains table if it exists
-                    # If canonical_lineage was set by alignment, it's from the strains table - NEVER overwrite it
-                    if original_canonical:
-                        # Database lineage from strains table - preserve canonical_lineage EXACTLY as set by alignment
-                        # Only clean/uppercase it, but preserve the value
-                        canonical_clean = str(original_canonical).strip().upper()
-                        # Double-check: Never set canonical_lineage to MIXED
-                        if canonical_clean == 'MIXED':
-                            logging.error(f"❌ CRITICAL: Attempted to set canonical_lineage to MIXED for '{product_name}' - this should never happen!")
-                            canonical_clean = None
-                        if canonical_clean:
-                            tag['canonical_lineage'] = canonical_clean  # Keep strains table canonical_lineage EXACTLY
-                            tag['currentLineage'] = canonical_clean
-                            tag['Lineage'] = canonical_clean
-                            tag['Lineage*'] = canonical_clean
-                            tag['lineage'] = canonical_clean.lower()
-                            logging.debug(f"✅ NORMALIZE '{product_name}': Using canonical_lineage='{canonical_clean}' from strains table")
+                    # CRITICAL: Always preserve canonical_lineage from strains table if it exists
+                    if tag.get('canonical_lineage'):
+                        # Database lineage from strains table - preserve canonical_lineage
+                        tag['canonical_lineage'] = lineage_clean  # Keep strains table canonical_lineage
+                        tag['currentLineage'] = lineage_clean
+                        tag['Lineage'] = lineage_clean
+                        tag['Lineage*'] = lineage_clean
+                        tag['lineage'] = lineage_clean.lower()
                     else:
                         # No strains table data - set all fields to the available lineage
-                        # CRITICAL: Never set canonical_lineage to MIXED - convert to HYBRID for classic types
-                        product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                        
-                        if lineage_clean != 'MIXED':
-                            tag['currentLineage'] = lineage_clean
-                            tag['canonical_lineage'] = lineage_clean  # Set it even if not from strains
-                            tag['Lineage'] = lineage_clean
-                            tag['Lineage*'] = lineage_clean
-                            tag['lineage'] = lineage_clean.lower()
-                            logging.debug(f"⚠️ NORMALIZE '{product_name}': No canonical_lineage, using '{lineage_clean}' from other sources")
-                        else:
-                            # CRITICAL: If lineage is MIXED, convert to HYBRID for classic types
-                            if is_classic:
-                                lineage_clean = 'HYBRID'
-                                logging.warning(f"🚫 NORMALIZE '{product_name}': Converting MIXED to HYBRID for classic type '{product_type}'")
-                            else:
-                                logging.warning(f"🚫 NORMALIZE '{product_name}': Skipping MIXED lineage - no valid lineage available")
-                                lineage_clean = None
-                        
-                        # Only set fields if we have a valid lineage
-                        if lineage_clean:
-                            tag['currentLineage'] = lineage_clean
-                            tag['canonical_lineage'] = lineage_clean
-                            tag['Lineage'] = lineage_clean
-                            tag['Lineage*'] = lineage_clean
-                            tag['lineage'] = lineage_clean.lower()
-                else:
-                    # CRITICAL FIX: If no lineage found after alignment, ensure lineage fields are still set
-                    # This prevents lineage from being empty - use defaults based on product type
-                    # CRITICAL: NEVER use MIXED for canonical_lineage - always use HYBRID for classic types, HYBRID for non-classic too
-                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                    # CRITICAL: Always use HYBRID as default - NEVER MIXED for canonical_lineage
-                    default_lineage = 'HYBRID'  # Always HYBRID, never MIXED
-                    
-                    # Set default lineage to ensure it's always present
-                    tag['currentLineage'] = default_lineage
-                    tag['canonical_lineage'] = default_lineage  # NEVER MIXED
-                    tag['Lineage'] = default_lineage
-                    tag['Lineage*'] = default_lineage
-                    tag['lineage'] = default_lineage.lower()
-                    logging.debug(f"⚠️ WEB: No lineage found for '{tag.get('Product Name*', 'Unknown')}' after alignment - using default '{default_lineage}' (never MIXED)")
+                        tag['currentLineage'] = lineage_clean
+                        tag['canonical_lineage'] = lineage_clean  # Set it even if not from strains
+                        tag['Lineage'] = lineage_clean
+                        tag['Lineage*'] = lineage_clean
+                        tag['lineage'] = lineage_clean.lower()
                 simple_tags.append(tag)
-            
-            # CRITICAL FINAL SAFEGUARD: Remove any MIXED from canonical_lineage before sending to frontend
-            simple_tags = _cleanup_canonical_lineage_mixed(simple_tags)
             
             safe_tags = make_json_safe(simple_tags)
             
@@ -19726,62 +19198,6 @@ def diagnostic_check():
             'error': str(e),
             'timestamp': datetime.now().isoformat()
         }), 500
-@app.route('/api/available-tags-instant', methods=['GET'])
-def get_available_tags_instant():
-    """ULTRA-FAST endpoint: Returns tags from database only, no Excel processing."""
-    try:
-        store_name = get_current_store_name(allow_fallback=True)
-        if not store_name:
-            return jsonify({'error': 'No store selected'}), 400
-
-        product_db = get_product_database(store_name)
-        if not product_db:
-            return jsonify({'error': 'Database not available'}), 500
-
-        # Query database directly for maximum speed
-        conn = product_db._get_connection()
-        cursor = conn.cursor()
-
-        # Get all products with essential fields only
-        cursor.execute('''
-            SELECT
-                p."Product Name*",
-                p."Product Type*",
-                p."Vendor/Supplier*",
-                p."Product Brand",
-                p."Weight*",
-                COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage
-            FROM products p
-            LEFT JOIN strains s ON p.strain_id = s.id
-            ORDER BY p.id DESC
-            LIMIT 5000
-        ''')
-
-        tags = []
-        for row in cursor.fetchall():
-            tags.append({
-                'Product Name*': row[0],
-                'ProductName': row[0],
-                'Product Type*': row[1],
-                'Vendor/Supplier*': row[2],
-                'Product Brand': row[3],
-                'Weight*': row[4],
-                'Lineage': row[5],
-                'lineage': row[5],
-                'canonical_lineage': row[5],
-                'currentLineage': row[5]
-            })
-
-        return jsonify({
-            'tags': tags,
-            'total_count': len(tags),
-            'source': 'database-instant',
-            'store': store_name
-        })
-    except Exception as e:
-        logging.error(f"Instant tags error: {e}")
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/available-tags-lite', methods=['GET'])
 def get_available_tags_lite():
     """Ultra-lightweight version of available-tags for resource-constrained environments."""
@@ -21004,66 +20420,6 @@ def get_strain_product_count():
         logging.error(f"Error getting strain product count: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/get-strain-lineage', methods=['POST'])
-def get_strain_lineage():
-    """Get the current lineage for a specific strain from the database (prioritizes sovereign_lineage)."""
-    try:
-        data = request.get_json()
-        strain_name = data.get('strain_name')
-
-        if not strain_name:
-            return jsonify({'error': 'Missing strain_name'}), 400
-
-        try:
-            store_name = get_current_store_name()
-            product_db = get_product_database(store_name)
-            if not product_db:
-                return jsonify({'error': 'Product database not available'}), 500
-
-            conn = product_db._get_connection()
-            cursor = conn.cursor()
-
-            # CRITICAL: Query strains table with priority: sovereign_lineage > canonical_lineage
-            cursor.execute('''
-                SELECT
-                    strain_name,
-                    COALESCE(sovereign_lineage, canonical_lineage) as lineage,
-                    sovereign_lineage,
-                    canonical_lineage
-                FROM strains
-                WHERE strain_name = ? OR LOWER(TRIM(strain_name)) = LOWER(TRIM(?))
-                LIMIT 1
-            ''', (strain_name, strain_name))
-
-            result = cursor.fetchone()
-
-            if not result:
-                return jsonify({
-                    'success': False,
-                    'error': f'Strain "{strain_name}" not found in database',
-                    'lineage': None
-                }), 404
-
-            db_strain_name, lineage, sovereign_lineage, canonical_lineage = result
-
-            return jsonify({
-                'success': True,
-                'strain_name': db_strain_name,
-                'lineage': lineage,
-                'sovereign_lineage': sovereign_lineage,
-                'canonical_lineage': canonical_lineage
-            })
-
-        except Exception as db_error:
-            logging.error(f"Failed to get strain lineage: {db_error}")
-            logging.error(f"Database error details: {traceback.format_exc()}")
-            return jsonify({'error': f'Database query failed: {str(db_error)}'}), 500
-
-    except Exception as e:
-        logging.error(f"Error getting strain lineage: {e}")
-        logging.error(f"Error details: {traceback.format_exc()}")
-        return jsonify({'error': str(e)}), 500
-
 @app.route('/api/get-all-strains', methods=['GET'])
 def get_all_strains():
     """Get all strains from the master database with their current lineages."""
@@ -21333,7 +20689,7 @@ def vendor_strain_browser():
             strains_data.append({
                 'strain_name': str(strain_name).strip(),
                 'current_lineage': str(current_lineage or '').strip() or 'MIXED',
-                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'HYBRID',  # NEVER MIXED for canonical_lineage
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
                 'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'vendor_count': int(vendor_count),
@@ -21384,7 +20740,7 @@ def vendor_strain_browser():
                 'vendor': vendor,
                 'strain_name': str(strain_name).strip(),
                 'current_lineage': str(current_lineage or '').strip() or 'MIXED',
-                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'HYBRID',  # NEVER MIXED for canonical_lineage
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
                 'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'brand_count': int(brand_count),

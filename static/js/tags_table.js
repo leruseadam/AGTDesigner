@@ -135,28 +135,7 @@ function createTagRow(tag) {
   const productType = tag['Product Type*'] || tag.Type || '';
   const isClassicType = productType && getUniqueLineages(productType).length === 6;
   if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
-    console.log(`🔄 Converting ${lineage} → HYBRID for classic type: ${productType}`);
     lineage = 'HYBRID';
-  }
-  
-  // CRITICAL FIX: For NON-classic types, restrict lineage to MIXED/CBD/PARAPHERNALIA only
-  // If database/Excel provides SATIVA/INDICA/HYBRID, convert to MIXED (displayed as THC)
-  if (!isClassicType && lineage) {
-    const classicLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
-    const validNonclassicLineages = ['MIXED', 'THC', 'CBD', 'PARAPHERNALIA', 'PARA'];
-    
-    // Convert classic lineages to MIXED for nonclassic types
-    if (classicLineages.includes(lineage)) {
-      console.log(`🔄 Converting classic lineage ${lineage} → MIXED for nonclassic type: ${productType}`);
-      lineage = 'MIXED';
-    } else if (lineage === 'THC') {
-      // THC is an abbreviation for MIXED
-      lineage = 'MIXED';
-    } else if (!validNonclassicLineages.includes(lineage)) {
-      // Unknown lineage, default to MIXED
-      console.log(`⚠️ Unknown lineage ${lineage} for nonclassic type, defaulting to MIXED`);
-      lineage = 'MIXED';
-    }
   }
   
   // Only convert if lineage is empty
@@ -340,20 +319,6 @@ class TagsTable {
     lineage = 'HYBRID';
   }
   
-  // CRITICAL FIX: For NON-classic types, restrict lineage to MIXED/CBD only
-  // If database/Excel provides SATIVA/INDICA/HYBRID, coerce to MIXED in UI
-  if (!isClassicType && lineage) {
-    const normalized = (typeof window.normalizeLineageValue !== 'undefined')
-      ? window.normalizeLineageValue(lineage)
-      : String(lineage).trim().toUpperCase();
-    // Only allow CBD or MIXED for non-classic types
-    if (normalized !== 'CBD' && normalized !== 'MIXED') {
-      lineage = 'MIXED';
-    } else {
-      lineage = normalized;
-    }
-  }
-  
   // Only set default if lineage is completely missing
   if (!lineage) {
     lineage = isClassicType ? 'HYBRID' : 'MIXED';
@@ -494,16 +459,7 @@ class TagsTable {
     console.log('Creating DOH dropdown for tag:', tagName, 'DOH Status:', dohStatus);
 
     // Add DOH and High CBD images if applicable
-    // CRITICAL FIX: Use dohStatus (which includes both DOH and 'DOH Compliant (Yes/No)') instead of just tag.DOH
-    // Normalize dohValue to handle all possible formats
-    const dohValueRaw = (dohStatus || '').toString().trim();
-    const dohValue = dohValueRaw.toUpperCase();
-    
-    // Debug logging to help diagnose missing badges
-    if (dohValue && dohValue !== 'NO' && dohValue !== 'NONE') {
-      console.log(`🔍 DOH Badge Check for "${tagName}": dohStatus="${dohStatus}", dohValue="${dohValue}"`);
-    }
-    
+    const dohValue = (tag.DOH || '').toString().toUpperCase();
     const productTypeLower = productType.toLowerCase().trim();
     // More robust High CBD check - handle variations in product type format
     const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
@@ -519,24 +475,19 @@ class TagsTable {
     if (isHighCbdProduct) {
       // High CBD products get only the High CBD badge, regardless of DOH status
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-    } else if (dohValue === 'YES' || dohValue === 'DOH' || dohValue === 'Y') {
-      // DOH compliant - show DOH badge (or High THC if product name contains "high thc")
+    } else if (dohValue === 'YES') {
       if (tagName.toLowerCase().includes('high thc')) {
         dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
       } else {
         dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
       }
-      console.log(`✅ DOH badge added for "${tagName}" (dohValue: ${dohValue})`);
     } else if (dohValue === 'CBD') {
       // DOH status is CBD - show High CBD badge (only for non-High CBD product types)
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-      console.log(`✅ High CBD badge added for "${tagName}" (dohValue: ${dohValue})`);
     } else if (dohValue === 'THC') {
       dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-      console.log(`✅ High THC badge added for "${tagName}" (dohValue: ${dohValue})`);
-    } else if (dohValue && dohValue !== 'NO' && dohValue !== 'NONE') {
-      // Unknown DOH value - log for debugging
-      console.warn(`⚠️ Unknown DOH value for "${tagName}": "${dohValue}" (raw: "${dohValueRaw}")`);
+    } else if (dohValue === 'DOH') {
+      dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
     }
 
     return `

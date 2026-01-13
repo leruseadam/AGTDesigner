@@ -3578,8 +3578,7 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                # CRITICAL FIX: NEVER set Lineage from Excel - lineage ONLY comes from database
-                # 'Lineage': safe_get_value(row.get('Lineage', '')),  # REMOVED - Excel lineage never used
+                'Lineage': safe_get_value(row.get('Lineage', '')),
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -3623,10 +3622,10 @@ class ExcelProcessor:
             # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
             # Excel lineage column and name-based inference are completely ignored
             # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
-            # DO NOT set Lineage here - it will be set by database alignment
-            # lineage = 'MIXED'  # REMOVED - never set placeholder lineage
-            # tag['Lineage'] = lineage  # REMOVED - never set Excel lineage
-            # tag['lineage'] = lineage  # REMOVED - never set Excel lineage
+            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
+
+            tag['Lineage'] = lineage
+            tag['lineage'] = lineage
 
             # CRITICAL: For pre-rolls, use JointRatio as WeightUnits display value
             if product_type in ['pre-roll', 'infused pre-roll']:
@@ -3792,10 +3791,6 @@ class ExcelProcessor:
                     # Only update fields that are commonly changed in database (lineage, DOH, etc.)
                     if db_record.get('Lineage'):
                         db_lineage = str(db_record.get('Lineage', '')).strip().upper()
-                        # CRITICAL: Normalize lineage based on product type
-                        from src.core.constants import normalize_lineage_for_product_type
-                        product_type = tag.get('Product Type*', tag.get('Product Type', ''))
-                        db_lineage = normalize_lineage_for_product_type(db_lineage, product_type)
                         tag['Lineage'] = db_lineage
                         tag['lineage'] = db_lineage
                         tag['canonical_lineage'] = db_lineage
@@ -8029,10 +8024,10 @@ class ExcelProcessor:
             # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
             # Excel lineage column and name-based inference are completely ignored
             # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
-            # DO NOT set Lineage here - it will be set by database alignment
-            # lineage = 'MIXED'  # REMOVED - never set placeholder lineage
-            # tag['Lineage'] = lineage  # REMOVED - never set Excel lineage
-            # tag['lineage'] = lineage  # REMOVED - never set Excel lineage
+            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
+
+            tag['Lineage'] = lineage
+            tag['lineage'] = lineage
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()

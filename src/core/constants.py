@@ -129,12 +129,6 @@ VALID_CLASSIC_LINEAGES = {
     "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD"
 }
 
-# Valid lineage values for nonclassic types (edibles, tinctures, topicals, etc.)
-# Nonclassic types should ONLY have MIXED (displayed as THC), CBD, or PARAPHERNALIA
-VALID_NONCLASSIC_LINEAGES = {
-    "MIXED", "THC", "CBD", "PARAPHERNALIA", "PARA"
-}
-
 # Excluded product types and patterns
 EXCLUDED_PRODUCT_TYPES = [
     "Samples - Educational", 
@@ -200,68 +194,3 @@ PREROLL_ALLOWED_BRANDS = [
     # "COOKIES",
     # "PHAT PANDA",
 ]
-
-
-def normalize_lineage_for_product_type(lineage: str, product_type: str) -> str:
-    """
-    Normalize lineage value based on product type.
-    
-    For classic types (flower, pre-roll, concentrate, etc.):
-        - Allows: SATIVA, INDICA, HYBRID, HYBRID/SATIVA, HYBRID/INDICA, CBD
-        - Converts MIXED/THC -> HYBRID
-        
-    For nonclassic types (edibles, tinctures, topicals, etc.):
-        - Allows: MIXED (displayed as THC), CBD, PARAPHERNALIA
-        - Converts any classic lineages (SATIVA/INDICA/HYBRID) -> MIXED (THC)
-    
-    Args:
-        lineage: Raw lineage value
-        product_type: Product type string
-        
-    Returns:
-        Normalized lineage value
-    """
-    if not lineage or not product_type:
-        return "HYBRID"  # Safe default
-    
-    lineage_upper = str(lineage).strip().upper()
-    product_type_lower = str(product_type).strip().lower()
-    
-    # Check if this is a classic type
-    is_classic = product_type_lower in [ct.lower() for ct in CLASSIC_TYPES]
-    
-    if is_classic:
-        # Classic types: convert MIXED/THC to HYBRID, keep valid classic lineages
-        if lineage_upper in ["MIXED", "THC"]:
-            return "HYBRID"
-        elif lineage_upper in VALID_CLASSIC_LINEAGES:
-            return lineage_upper
-        else:
-            return "HYBRID"  # Default for classic types
-    else:
-        # Nonclassic types: convert classic lineages to MIXED (displayed as THC)
-        # Only allow MIXED, THC, CBD, PARAPHERNALIA
-        if lineage_upper in ["CBD", "PARAPHERNALIA", "PARA"]:
-            return lineage_upper
-        elif lineage_upper in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA"]:
-            # Convert classic lineages to MIXED for nonclassic types
-            return "MIXED"  # Will be displayed as "THC" in UI
-        elif lineage_upper in ["MIXED", "THC"]:
-            return "MIXED"  # Will be displayed as "THC" in UI
-        else:
-            return "MIXED"  # Default for nonclassic types
-
-
-def is_classic_type(product_type: str) -> bool:
-    """
-    Check if a product type is a classic type.
-    
-    Args:
-        product_type: Product type string
-        
-    Returns:
-        True if classic type, False otherwise
-    """
-    if not product_type:
-        return False
-    return str(product_type).strip().lower() in [ct.lower() for ct in CLASSIC_TYPES]

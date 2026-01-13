@@ -2576,26 +2576,16 @@ class TemplateProcessor:
                 if not lineage_val:
                     self.logger.debug(f"No lineage found in record or cache")
             
-            # CRITICAL FIX: Ensure classic types always have lineage data and NEVER have MIXED
+            # CRITICAL FIX: Ensure classic types always have lineage data
             if not lineage_val or lineage_val.strip() == "":
                 lineage_val = "HYBRID"
                 self.logger.info(f"🔧 FALLBACK LINEAGE: Set HYBRID lineage for classic type '{product_name}' (no lineage data available)")
-            elif lineage_val.strip().upper() == 'MIXED':
-                # CRITICAL: NEVER allow MIXED for classic types - always use HYBRID
-                lineage_val = "HYBRID"
-                self.logger.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{product_name}' - changed to HYBRID")
             
             # Set Lineage to strain lineage for classic types
             if lineage_val:
                 # Debug: Log the lineage value to see if it has leading spaces
                 self.logger.debug(f"DEBUG: Original lineage_val: '{repr(lineage_val)}'")
                 cleaned_lineage_val = lineage_val.strip()
-                
-                # CRITICAL FIX: NEVER allow MIXED for classic types
-                if cleaned_lineage_val.upper() == 'MIXED':
-                    cleaned_lineage_val = 'HYBRID'
-                    self.logger.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{product_name}' - changed to HYBRID")
-                
                 self.logger.debug(f"DEBUG: Cleaned lineage_val: '{repr(cleaned_lineage_val)}'")
                 
                 # CRITICAL FIX: For horizontal and vertical templates, preserve the full lineage value
@@ -2606,10 +2596,6 @@ class TemplateProcessor:
                         if cleaned_lineage_val.upper().startswith(classic_lineage.upper()):
                             # Extract only the lineage part, not the brand
                             cleaned_lineage_val = cleaned_lineage_val[:len(classic_lineage)]
-                            # CRITICAL: If extracted lineage is MIXED for classic type, change to HYBRID
-                            if cleaned_lineage_val.upper() == 'MIXED':
-                                cleaned_lineage_val = 'HYBRID'
-                                self.logger.warning(f"🚫 CRITICAL: Prevented MIXED lineage extraction for classic type '{product_name}' - changed to HYBRID")
                             self.logger.debug(f"DEBUG: Extracted lineage only: '{cleaned_lineage_val}' from '{lineage_val}'")
                             break
                 else:
