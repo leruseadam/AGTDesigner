@@ -7274,6 +7274,74 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 WHERE p."Product Name*" IN ({placeholders})
                 ORDER BY p.id DESC
             ''', chunk)
+            
+            # CRITICAL: Also query strains table directly for any strains mentioned in product names
+            # This ensures we can match products by strain name even if product name doesn't match
+            # Extract potential strain names from product names in this chunk
+            potential_strains = set()
+            for pname in chunk:
+                if product_db and hasattr(product_db, '_extract_strain_from_product_name'):
+                    try:
+                        # Try to extract strain from product name
+                        # We'll check product type later, but for now try classic types
+                        extracted = product_db._extract_strain_from_product_name(pname, 'pre-roll')
+                        if extracted:
+                            potential_strains.add(extracted)
+                            # Also try normalized version
+                            normalized_strain = product_db._normalize_strain_name(extracted) if hasattr(product_db, '_normalize_strain_name') else extracted.strip().lower()
+                            potential_strains.add(normalized_strain)
+                    except Exception:
+                        pass
+            
+            # Query strains table directly for these potential strains
+            if potential_strains:
+                strain_placeholders = ','.join(['?' for _ in potential_strains])
+                try:
+                    cursor.execute(f'''
+                        SELECT s.strain_name, s.normalized_name,
+                               s.sovereign_lineage as strain_sovereign,
+                               s.canonical_lineage as strain_canonical
+                        FROM strains s
+                        WHERE s.strain_name IN ({strain_placeholders})
+                           OR s.normalized_name IN ({strain_placeholders})
+                    ''', list(potential_strains) + list(potential_strains))
+                    
+                    for strain_row in cursor.fetchall():
+                        strain_name = strain_row[0]
+                        normalized_strain_name = strain_row[1]
+                        strain_sovereign_raw = strain_row[2]
+                        strain_canonical_raw = strain_row[3]
+                        
+                        def _clean_lineage(val):
+                            if val is None:
+                                return None
+                            txt = str(val).strip().upper()
+                            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                                return None
+                            return txt
+                        
+                        strain_sovereign = _clean_lineage(strain_sovereign_raw)
+                        strain_canonical = _clean_lineage(strain_canonical_raw)
+                        
+                        if strain_canonical or strain_sovereign:
+                            # Map strain directly to lineage info
+                            strain_lineage_info = {
+                                'lineage': strain_canonical or strain_sovereign,
+                                'has_sovereign': bool(strain_sovereign),
+                                'product_sovereign': None,
+                                'strain_sovereign': strain_sovereign,
+                                'strain_canonical': strain_canonical
+                            }
+                            
+                            # Map by strain name and normalized name
+                            lineage_map[strain_name] = strain_lineage_info
+                            if normalized_strain_name:
+                                lineage_map[normalized_strain_name] = strain_lineage_info
+                            lineage_map[strain_name.lower().strip()] = strain_lineage_info
+                            
+                            logging.info(f"✅ DIRECT STRAIN QUERY: Found '{strain_name}' (normalized: '{normalized_strain_name}') -> canonical={strain_canonical}, sovereign={strain_sovereign}")
+                except Exception as strain_query_err:
+                    logging.debug(f"Could not query strains directly: {strain_query_err}")
             for row in cursor.fetchall():
                 db_name = row[0]
                 db_lineage_raw = row[1]
