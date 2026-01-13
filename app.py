@@ -10962,15 +10962,11 @@ def get_available_tags():
                             logging.warning(traceback.format_exc())
                     else:
                         # PERFORMANCE: During fast_load, populate lineage from Excel only (no DB query)
-                        # This prevents 5-minute waits in production
-                        for tag in excel_tags:
-                            excel_lineage = tag.get('Lineage')
-                            if excel_lineage and str(excel_lineage).strip():
-                                excel_lineage_clean = str(excel_lineage).strip().upper()
-                                tag['currentLineage'] = excel_lineage_clean
-                                tag['canonical_lineage'] = excel_lineage_clean
-                                tag['lineage'] = excel_lineage_clean.lower()
-                        logging.info(f"⚡ FAST-LOAD: Skipped database enrichment - using Excel lineage only")
+                        # CRITICAL FIX: NEVER use Excel lineage - always use database lineage
+                        # Even in fast_load, we should align with database to ensure user's lineage values are used
+                        # This prevents Excel lineage from overwriting database lineage
+                        logging.info(f"⚡ FAST-LOAD: Skipping database enrichment for speed, but Excel lineage will NOT be used")
+                        # DO NOT set lineage from Excel - it will be set by _align_tags_with_db_lineage() later
 
                     safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
 

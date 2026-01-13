@@ -3578,7 +3578,8 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': safe_get_value(row.get('Lineage', '')),
+                # CRITICAL FIX: NEVER set Lineage from Excel - lineage ONLY comes from database
+                # 'Lineage': safe_get_value(row.get('Lineage', '')),  # REMOVED - Excel lineage never used
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
