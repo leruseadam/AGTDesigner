@@ -3792,6 +3792,10 @@ class ExcelProcessor:
                     # Only update fields that are commonly changed in database (lineage, DOH, etc.)
                     if db_record.get('Lineage'):
                         db_lineage = str(db_record.get('Lineage', '')).strip().upper()
+                        # CRITICAL: Normalize lineage based on product type
+                        from src.core.constants import normalize_lineage_for_product_type
+                        product_type = tag.get('Product Type*', tag.get('Product Type', ''))
+                        db_lineage = normalize_lineage_for_product_type(db_lineage, product_type)
                         tag['Lineage'] = db_lineage
                         tag['lineage'] = db_lineage
                         tag['canonical_lineage'] = db_lineage
