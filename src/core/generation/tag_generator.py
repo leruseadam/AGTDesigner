@@ -1224,13 +1224,19 @@ def process_chunk(args):
             else:
                 # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 
                 # use brand name for Lineage, not the raw Excel lineage value
-                # This prevents "CBD" from appearing in non-classic type labels
+                # This prevents classic lineages from appearing in non-classic type labels
                 # If no brand is available, use default "MIXED" - DO NOT fall back to Excel lineage
                 if product_brand and str(product_brand).strip():
                     lineage_val = product_brand.upper()
                 else:
                     lineage_val = 'MIXED'  # Default for non-classic types
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
+                
+            # CRITICAL: Normalize lineage based on product type
+            # This ensures nonclassic types NEVER have classic lineages (SATIVA/INDICA/HYBRID)
+            # and classic types NEVER have MIXED
+            from src.core.constants import normalize_lineage_for_product_type
+            lineage_val = normalize_lineage_for_product_type(lineage_val, product_type)
                 
             # No extra space before Lineage in the output
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering

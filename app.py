@@ -7596,14 +7596,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 if not effective_lineage:
                     logging.warning(f"⚠️ No valid lineage found for '{name}' - all sources were MIXED or missing")
                 
-                # Step 4: CRITICAL FIX - NEVER allow MIXED for classic types (double-check)
-                product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                
-                if is_classic and effective_lineage and str(effective_lineage).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
-                    effective_lineage = 'HYBRID'
+                # Step 4: CRITICAL FIX - Normalize lineage based on product type
+                # Classic types: Convert MIXED/THC → HYBRID
+                # Nonclassic types: Convert SATIVA/INDICA/HYBRID → MIXED (displayed as THC)
+                product_type = tag.get('Product Type*', tag.get('ProductType', ''))
+                if effective_lineage and product_type:
+                    from src.core.constants import normalize_lineage_for_product_type
+                    old_lineage = str(effective_lineage).strip().upper()
+                    effective_lineage = normalize_lineage_for_product_type(old_lineage, product_type)
+                    if old_lineage != effective_lineage:
+                        logging.warning(f"🔄 Normalized lineage for '{name}': {old_lineage} → {effective_lineage} (type: {product_type})")
                 
                 # Step 5: Set canonical_lineage from strain_canonical - NEVER overwrite after this
                 # This ensures the user's strains sheet data is ALWAYS used
@@ -12130,16 +12132,11 @@ def get_available_tags():
                                                     default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                     current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
                                                     
-                                                    # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
-                                                    # For classic types, convert both THC and MIXED to HYBRID
-                                                    # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                                    if is_classic_type:
-                                                        if current_lineage == 'THC' or current_lineage == 'MIXED':
-                                                            current_lineage = 'HYBRID'
-                                                    else:
-                                                        # For non-classic types, "THC" is an abbreviation for "MIXED"
-                                                        if current_lineage == 'THC':
-                                                            current_lineage = 'MIXED'
+                                                    # CRITICAL: Normalize lineage based on product type
+                                                    # Classic types: Convert MIXED/THC → HYBRID
+                                                    # Nonclassic types: Convert SATIVA/INDICA/HYBRID → MIXED (THC)
+                                                    from src.core.constants import normalize_lineage_for_product_type
+                                                    current_lineage = normalize_lineage_for_product_type(current_lineage, product_type)
                                                     
                                                     # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
                                                     # Even if one exists, ensure both are set to the same value
@@ -12159,15 +12156,13 @@ def get_available_tags():
                                                 default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                 current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
                                                 
-                                                # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
-                                                # For classic types, convert both THC and MIXED to HYBRID
-                                                # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                                if is_classic_type:
-                                                    if current_lineage == 'THC' or current_lineage == 'MIXED':
-                                                        current_lineage = 'HYBRID'
-                                                else:
-                                                    # For non-classic types, "THC" is an abbreviation for "MIXED"
-                                                    if current_lineage == 'THC':
+                                                # CRITICAL: Normalize lineage based on product type
+                                                # Classic types: Convert MIXED/THC → HYBRID
+                                                # Nonclassic types: Convert SATIVA/INDICA/HYBRID → MIXED (THC)
+                                                from src.core.constants import normalize_lineage_for_product_type
+                                                current_lineage = normalize_lineage_for_product_type(current_lineage, product_type)
+                                                # For backward compatibility, keep THC→MIXED conversion
+                                                if current_lineage == 'THC':
                                                         current_lineage = 'MIXED'
                                                 if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
                                                     if current_lineage:
