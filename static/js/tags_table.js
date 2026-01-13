@@ -980,9 +980,24 @@ class TagsTable {
         console.log(`🔧 [LINEAGE UPDATE] Extracted tagName from DOM: ${tagName}`);
       }
       
-      const newLineage = selectElement.value;
+      // CRITICAL FIX: Read value multiple ways to handle edge cases where last option doesn't register
+      let newLineage = selectElement.value;
+      if (!newLineage && selectElement.selectedIndex >= 0) {
+        // Fallback: get value from selectedIndex if value is empty
+        const selectedOption = selectElement.options[selectElement.selectedIndex];
+        if (selectedOption) {
+          newLineage = selectedOption.value;
+          console.log(`🔧 [LINEAGE UPDATE] Using selectedIndex fallback: ${newLineage}`);
+        }
+      }
       if (!newLineage) {
-        console.error('❌ [LINEAGE UPDATE] No lineage value selected', { tagName, selectElementValue: selectElement.value });
+        console.error('❌ [LINEAGE UPDATE] No lineage value selected', { 
+          tagName, 
+          selectElementValue: selectElement.value,
+          selectedIndex: selectElement.selectedIndex,
+          optionsLength: selectElement.options.length,
+          lastOptionValue: selectElement.options.length > 0 ? selectElement.options[selectElement.options.length - 1].value : 'N/A'
+        });
         return;
       }
       

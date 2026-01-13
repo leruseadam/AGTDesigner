@@ -8474,17 +8474,19 @@ def generate_labels():
                                         record['Lineage'] = str(db_lineage).strip().upper()
                                         enriched_count += 1
 
-                                # Price - CRITICAL FIX: Always set price with fallback
+                                # Price - CRITICAL FIX: NEVER use fallback prices - preserve Excel price or leave empty
                                 db_price = _extract_price_from_database_product(processed_db)
                                 if db_price:
                                     formatted_price = _format_price_value(db_price)
                                 else:
-                                    # Fallback to existing price or default
-                                    formatted_price = record.get('Price', '') or record.get('Price*', '') or '$0.00'
+                                    # CRITICAL: NO FALLBACK - preserve existing Excel price or leave empty
+                                    formatted_price = record.get('Price', '') or record.get('Price*', '') or ''
                                 
-                                record['Price'] = formatted_price
-                                record['Price*'] = formatted_price
-                                record['Price* (Tier Name for Bulk)'] = formatted_price
+                                # Only set price if we have a valid value (don't overwrite with empty)
+                                if formatted_price and formatted_price.strip() and formatted_price.strip() != '$0.00':
+                                    record['Price'] = formatted_price
+                                    record['Price*'] = formatted_price
+                                    record['Price* (Tier Name for Bulk)'] = formatted_price
 
                                 # DescAndWeight - CRITICAL FIX: Always set DescAndWeight with fallback
                                 db_desc_and_weight = processed_db.get('DescAndWeight', '')
@@ -8512,13 +8514,17 @@ def generate_labels():
             # CRITICAL FIX: Ensure ALL records have DescAndWeight and Price set (even if not enriched)
             # PERFORMANCE: Fast validation loop - only process records that need fixing
             for record in records:
-                # Ensure Price is always set (fast check)
-                price = record.get('Price', '')
-                if not price or (isinstance(price, str) and price.strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']):
-                    price_fallback = record.get('Price*', '') or record.get('Med Price', '') or '$0.00'
-                    record['Price'] = price_fallback
-                    record['Price*'] = price_fallback
-                    record['Price* (Tier Name for Bulk)'] = price_fallback
+                # CRITICAL FIX: NEVER set default prices - preserve existing price or leave empty
+                # Only use existing price fields, never fallback to $0.00 or any default
+                price = record.get('Price', '') or record.get('Price*', '') or record.get('Med Price', '')
+                if price and price.strip() and price.strip().lower() not in ['none', 'nan', 'n/a', '']:
+                    # Only set price if we have a valid value from Excel
+                    if not record.get('Price'):
+                        record['Price'] = price
+                    if not record.get('Price*'):
+                        record['Price*'] = price
+                    if not record.get('Price* (Tier Name for Bulk)'):
+                        record['Price* (Tier Name for Bulk)'] = price
                 
                 # Ensure DescAndWeight is always set (fast check)
                 desc_and_weight = record.get('DescAndWeight', '')
@@ -10493,20 +10499,24 @@ def get_available_tags():
                                     doh_preserved_count = 0
                                     for tag in simple_tags:
                                         product_name = tag.get('Product Name*')
-                                        if product_name and product_name in doh_map:
-                                            # Check if Excel already has a DOH value
-                                            excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
-                                            excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
-                                            
-                                            # Only use database DOH if Excel doesn't have a value (or has empty/invalid value)
-                                            if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
+                                        
+                                        # Check if Excel already has a DOH value (check both field names)
+                                        excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
+                                        excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
+                                        
+                                        # Only use database DOH if Excel doesn't have a value (or has empty/invalid value)
+                                        if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
+                                            # Excel doesn't have DOH - use database if available
+                                            if product_name and product_name in doh_map:
                                                 db_doh_clean = doh_map[product_name]
                                                 tag['DOH'] = db_doh_clean
                                                 tag['DOH Compliant (Yes/No)'] = db_doh_clean
                                                 doh_enriched_count += 1
-                                            else:
-                                                # Excel has a DOH value - preserve it (Excel is source of truth)
-                                                doh_preserved_count += 1
+                                        else:
+                                            # Excel has a DOH value - ensure it's set in both fields (Excel is source of truth)
+                                            tag['DOH'] = excel_doh_clean
+                                            tag['DOH Compliant (Yes/No)'] = excel_doh_clean
+                                            doh_preserved_count += 1
 
                                     logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH (preserved {doh_preserved_count} Excel DOH values)")
                                 except Exception as doh_enrich_err:

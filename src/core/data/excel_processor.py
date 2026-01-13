@@ -5087,6 +5087,18 @@ class ExcelProcessor:
             "doh": "DOH",
             "highCbd": "Product Type*"  # Will be processed specially for high CBD detection
         }
+        
+        # CRITICAL FIX: Detect actual brand column name once before the loop
+        brand_column_name = None
+        possible_brand_cols = ["Product Brand", "ProductBrand", "Brand", "brand"]
+        for possible_col in possible_brand_cols:
+            if possible_col in df.columns:
+                brand_column_name = possible_col
+                self.logger.info(f"Brand filter: Detected brand column name: '{brand_column_name}'")
+                break
+        if not brand_column_name:
+            self.logger.warning(f"Brand filter: No brand column found in DataFrame. Available columns: {list(df.columns)}")
+        
         options = {}
         import math
         def clean_list(lst):
@@ -5099,21 +5111,22 @@ class ExcelProcessor:
                 if key == filter_key:
                     continue  # Skip filtering by itself
                 if value and value != "All":
-                    filter_col = filter_map.get(key)
+                    # CRITICAL FIX: Use detected brand column name for brand filters in other filters
+                    if key == "brand" and brand_column_name:
+                        filter_col = brand_column_name
+                    else:
+                        filter_col = filter_map.get(key)
                     if filter_col and filter_col in temp_df.columns:
                         temp_df = temp_df[
                             temp_df[filter_col].astype(str).str.lower().str.strip() == value.lower().strip()
                         ]
             # Get unique values for this filter type
-            # CRITICAL FIX: For brand filter, check multiple possible column names
+            # CRITICAL FIX: For brand filter, use the pre-detected column name
             actual_col = col
             if filter_key == "brand":
-                # Try multiple possible column names for brand
-                possible_brand_cols = ["Product Brand", "ProductBrand", "Brand", "brand"]
-                for possible_col in possible_brand_cols:
-                    if possible_col in temp_df.columns:
-                        actual_col = possible_col
-                        break
+                if brand_column_name:
+                    actual_col = brand_column_name
+                    self.logger.debug(f"Brand filter: Using detected column '{actual_col}'")
                 else:
                     # No brand column found - log warning and skip
                     self.logger.warning(f"Brand filter: No brand column found. Available columns: {list(temp_df.columns)}")
