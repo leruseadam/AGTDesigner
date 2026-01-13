@@ -7527,35 +7527,30 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     logging.debug(f"✅ Using strain_sovereign '{lineage_info['strain_sovereign']}' for '{name}'")
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
-                # Step 2: CRITICAL - Always use strain canonical_lineage from strains table (user's "strains sheet" data)
-                # This ensures the user's lineage values are ALWAYS used when available
-                if lineage_info.get('strain_canonical'):
-                    # Always set canonical_lineage from strains table (this is the "strains sheet" data)
-                    tag['canonical_lineage'] = lineage_info['strain_canonical']
-                    # If no sovereign_lineage, use canonical_lineage as effective lineage
-                    if 'effective_lineage' not in locals():
-                        effective_lineage = lineage_info['strain_canonical']
-                        logging.debug(f"✅ Using strain canonical_lineage '{lineage_info['strain_canonical']}' as effective lineage for '{name}' (user's strains sheet)")
+                # Step 2: CRITICAL - ALWAYS use strain canonical_lineage from strains table FIRST
+                # This is the user's "strains sheet" data - it should NEVER be overwritten
+                strain_canonical_value = lineage_info.get('strain_canonical')
+                
+                # Step 3: Determine effective_lineage with proper priority
+                # Priority: product_sovereign (manual edits) > strain_sovereign > strain_canonical (strains sheet) > product.Lineage
+                if lineage_info.get('product_sovereign'):
+                    effective_lineage = lineage_info['product_sovereign']
+                    logging.debug(f"✅ Using product_sovereign '{effective_lineage}' for '{name}' (manual edit)")
+                elif lineage_info.get('strain_sovereign'):
+                    effective_lineage = lineage_info['strain_sovereign']
+                    logging.debug(f"✅ Using strain_sovereign '{effective_lineage}' for '{name}'")
+                elif strain_canonical_value:
+                    # CRITICAL: Use strain_canonical from strains table (user's strains sheet)
+                    effective_lineage = strain_canonical_value
+                    logging.info(f"✅ Using strain canonical_lineage '{strain_canonical_value}' for '{name}' (user's strains sheet)")
                 elif db_lineage:
-                    # Fallback if no strain canonical_lineage exists - use COALESCEd db_lineage
-                    tag['canonical_lineage'] = db_lineage
-                    if 'effective_lineage' not in locals():
-                        effective_lineage = db_lineage
-                        logging.debug(f"✅ Using db_lineage '{db_lineage}' for '{name}' (no strain_canonical)")
+                    effective_lineage = db_lineage
+                    logging.debug(f"✅ Using db_lineage '{db_lineage}' for '{name}' (fallback)")
                 else:
-                    # No lineage at all - will use default later
+                    effective_lineage = None
                     logging.warning(f"⚠️ No lineage found for '{name}' - no strain_canonical, no db_lineage, no sovereign")
                 
-                # Step 3: Ensure effective_lineage is set (use canonical if no sovereign)
-                if 'effective_lineage' not in locals():
-                    effective_lineage = lineage_info.get('strain_canonical') or db_lineage
-                    if not effective_lineage:
-                        logging.warning(f"⚠️ No effective_lineage determined for '{name}' - will use default")
-                    else:
-                        logging.debug(f"✅ Set effective_lineage to '{effective_lineage}' for '{name}'")
-                
                 # Step 4: CRITICAL FIX - NEVER allow MIXED for classic types
-                # Check if this is a classic type and ensure MIXED is converted to HYBRID
                 product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
                 CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
                 is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
@@ -7563,19 +7558,32 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 if is_classic and effective_lineage and str(effective_lineage).strip().upper() == 'MIXED':
                     logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
                     effective_lineage = 'HYBRID'
-                    # Also update canonical_lineage if it was MIXED
-                    if tag.get('canonical_lineage') and str(tag.get('canonical_lineage')).strip().upper() == 'MIXED':
-                        tag['canonical_lineage'] = 'HYBRID'
                 
-                # Step 5: Set all lineage fields to ensure user's values are used everywhere
-                tag['currentLineage'] = effective_lineage
-                tag['Lineage'] = effective_lineage
-                tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
-                tag['lineage'] = effective_lineage.lower()
+                # Step 5: Set canonical_lineage from strain_canonical - NEVER overwrite after this
+                # This ensures the user's strains sheet data is ALWAYS used
+                if strain_canonical_value:
+                    # CRITICAL: Prevent MIXED for classic types
+                    final_canonical = strain_canonical_value
+                    if is_classic and str(final_canonical).strip().upper() == 'MIXED':
+                        final_canonical = 'HYBRID'
+                        logging.warning(f"🚫 CRITICAL: Prevented MIXED strain_canonical for classic type '{name}' - changing to HYBRID")
+                    # ALWAYS set from strain_canonical - this is what the user told us to use
+                    tag['canonical_lineage'] = final_canonical
+                    logging.info(f"✅ Set canonical_lineage='{final_canonical}' from strain_canonical='{strain_canonical_value}' for '{name}' (user's strains sheet)")
+                elif not tag.get('canonical_lineage') and db_lineage:
+                    # Fallback: only set if not already set and no strain_canonical
+                    tag['canonical_lineage'] = db_lineage
+                
+                # Step 6: Set all lineage fields to ensure user's values are used everywhere
+                if effective_lineage:
+                    tag['currentLineage'] = effective_lineage
+                    tag['Lineage'] = effective_lineage
+                    tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
+                    tag['lineage'] = effective_lineage.lower()
                 
                 # CRITICAL: Log to verify user's lineage is being used
-                if lineage_info.get('strain_canonical'):
-                    logging.debug(f"✅ Using strain canonical_lineage '{lineage_info['strain_canonical']}' for '{name}' (user's strains sheet data)")
+                if strain_canonical_value:
+                    logging.info(f"✅ FINAL: '{name}' -> canonical_lineage='{tag.get('canonical_lineage')}', effective_lineage='{effective_lineage}', strain_canonical='{strain_canonical_value}' (user's strains sheet)")
                 
                 aligned_count += 1
             else:
@@ -11192,8 +11200,12 @@ def get_available_tags():
                                         product_name = tag.get('Product Name*')
                                         if product_name and product_name in lineage_map:
                                             lineage_data = lineage_map[product_name]
+                                            # CRITICAL: Don't overwrite canonical_lineage if it was already set from strain_canonical
+                                            # The _align_tags_with_db_lineage function will set it correctly from strains table
                                             tag['currentLineage'] = lineage_data['lineage']
-                                            tag['canonical_lineage'] = lineage_data['lineage']
+                                            # Only set canonical_lineage if not already set (preserve strain_canonical if present)
+                                            if not tag.get('canonical_lineage'):
+                                                tag['canonical_lineage'] = lineage_data['lineage']
                                             tag['Lineage'] = lineage_data['lineage']
                                             tag['Lineage*'] = lineage_data['lineage']
                                             tag['lineage'] = lineage_data['lineage'].lower()
@@ -11249,7 +11261,10 @@ def get_available_tags():
                                                 db_lineage_clean = 'HYBRID'
                                             
                                             tag['currentLineage'] = db_lineage_clean
-                                            tag['canonical_lineage'] = db_lineage_clean
+                                            # CRITICAL: Don't overwrite canonical_lineage if it was already set from strain_canonical
+                                            # The _align_tags_with_db_lineage function will set it correctly from strains table
+                                            if not tag.get('canonical_lineage'):
+                                                tag['canonical_lineage'] = db_lineage_clean
                                             tag['Lineage'] = db_lineage_clean
                                             tag['lineage'] = db_lineage_clean.lower()
 

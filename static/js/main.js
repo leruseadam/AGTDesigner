@@ -10666,11 +10666,11 @@ const TagManager = {
             }
         }, 60000); // 60 second safety timeout
         
-        // CRITICAL FIX: Immediately show loading state if container is empty
-        // This prevents upload prompt from flashing while tags are being fetched
-        if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0)) {
+        // PERFORMANCE FIX: Only show loading state if no cache exists
+        // If cache exists, it will be displayed instantly, so no need for loading message
+        if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0) && !hasCache) {
             const currentContent = availableTagsContainer.innerHTML.trim();
-            // Only show loading if container is empty or showing upload prompt
+            // Only show loading if container is empty or showing upload prompt AND no cache
             if (!currentContent || currentContent.includes('upload-prompt') || currentContent.includes('Upload Excel')) {
                 availableTagsContainer.innerHTML = `
                     <div style="
@@ -10697,10 +10697,16 @@ const TagManager = {
         const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
         const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
         
-        // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
-        // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
-        if (storeConfirmed && !hasExistingTags && !hasCache) {
-            // Initial load - show full loading UI with better message
+        // PERFORMANCE FIX: Check cache FIRST before showing splash
+        // Only show loading message if we truly don't have cache
+        const cacheKey = this.getAvailableTagsCacheKey();
+        const hasActualCache = (window.sessionStorage && sessionStorage.getItem(cacheKey)) || 
+                               (window.localStorage && localStorage.getItem(cacheKey));
+        
+        // CRITICAL FIX: Only show splash if no cache exists AND no existing tags
+        // This prevents showing loading message when cache will be used
+        if (storeConfirmed && !hasExistingTags && !hasCache && !hasActualCache) {
+            // Initial load with no cache - show loading UI
             this.showActionSplash('Loading tags from server...');
             if (availableTagsContainer) {
                 availableTagsContainer.innerHTML = `
@@ -10709,7 +10715,7 @@ const TagManager = {
                             <span class="visually-hidden">Loading...</span>
                         </div>
                         <p class="mt-2 text-white">Loading tags from server...</p>
-                        <p class="mt-1 text-white-50 small">This may take up to 30 seconds for large datasets</p>
+                        <p class="mt-1 text-white-50 small">This may take a few seconds</p>
                     </div>
                 `;
             }
@@ -10717,7 +10723,7 @@ const TagManager = {
             // Store not confirmed - don't show loading, let store modal show
             verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
         } else if (storeConfirmed && hasExistingTags) {
-            // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
+            // Reload/refresh - show minimal splash (cache will be used for instant display)
             this.showActionSplash('Refreshing tags...');
             // Also show loading indicator in container if it exists
             // BUT don't grey out on initial page load - only on refresh
@@ -10727,6 +10733,9 @@ const TagManager = {
                 availableTagsContainer.style.opacity = '0.6';
                 availableTagsContainer.style.pointerEvents = 'none';
             }
+        } else if (hasCache || hasActualCache) {
+            // Cache exists - don't show splash, will display instantly
+            verboseLog('Cache exists - skipping splash for instant load');
         }
         // If cache exists and no existing tags, skip splash for instant load
         
