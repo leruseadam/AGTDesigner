@@ -7317,9 +7317,22 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     
                     # Log what we found for debugging
                     if strain_canonical:
-                        logging.debug(f"✅ Found lineage for '{db_name}': strain_canonical={strain_canonical}, db_lineage={db_lineage}, sovereign={product_sovereign or strain_sovereign}")
+                        logging.debug(f"✅ Found lineage for '{db_name}': strain_canonical={strain_canonical}, db_lineage={db_lineage}, sovereign={product_sovereign or strain_sovereign}, strain='{product_strain}'")
                     elif db_lineage:
-                        logging.debug(f"✅ Found lineage for '{db_name}': db_lineage={db_lineage} (no strain_canonical)")
+                        logging.debug(f"✅ Found lineage for '{db_name}': db_lineage={db_lineage} (no strain_canonical), strain='{product_strain}'")
+                    
+                    # CRITICAL: Also map by strain name if available (for products that don't match by name)
+                    # This allows "Blackberry Kush Infused Pre-Roll by 2727 - 1g" to match via strain "Blackberry Kush"
+                    if product_strain and product_db:
+                        try:
+                            normalized_strain = product_db._normalize_strain_name(product_strain) if hasattr(product_db, '_normalize_strain_name') else str(product_strain).strip().lower()
+                            if normalized_strain and normalized_strain not in lineage_map:
+                                # Map strain name to lineage info for fallback matching
+                                lineage_map[normalized_strain] = lineage_info
+                                lineage_map[product_strain.lower().strip()] = lineage_info
+                                logging.debug(f"✅ Also mapped strain '{product_strain}' (normalized: '{normalized_strain}') to lineage for fallback matching")
+                        except Exception as strain_map_err:
+                            logging.debug(f"Could not map strain '{product_strain}': {strain_map_err}")
                 elif db_name:
                     logging.debug(f"⚠️ No lineage data found for '{db_name}' in database")
         
