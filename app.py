@@ -10309,22 +10309,27 @@ def get_available_tags():
                 except Exception:
                     pass
             
-            if needs_realignment:
-                reason = "first request of session" if first_request else "recent lineage update"
-                logging.info(f"🔄 SLOW MODE: Re-aligning cached tags with database ({reason})")
-                try:
-                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                    if store_name_align:
-                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # Mark that we've aligned tags in this session
-                        session['tags_aligned_this_session'] = True
-                        session.modified = True
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to change the cache key and ensure fresh database lineage
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
-                except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
-            else:
+            # CRITICAL FIX: ALWAYS align cached tags with database lineage, not just when needs_realignment
+            # This ensures user's lineage from strains table is always used
+            reason = "first request of session" if first_request else ("recent lineage update" if needs_realignment else "ensuring lineage is present")
+            logging.info(f"🔄 SLOW MODE: Aligning cached tags with database ({reason})")
+            try:
+                store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                if store_name_align and cached_tags:
+                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                    canonical_count = len([t for t in cached_tags if t.get('canonical_lineage')])
+                    logging.info(f"✅ SLOW MODE: Aligned cached tags - {canonical_count} tags now have canonical_lineage from strains table")
+                    # Mark that we've aligned tags in this session
+                    session['tags_aligned_this_session'] = True
+                    session.modified = True
+                    # CRITICAL FIX: DO NOT delete lineage_update_timestamp
+                    # It must persist to change the cache key and ensure fresh database lineage
+            except Exception as align_err:
+                logging.error(f"❌ SLOW MODE: Could not align cached tags with database lineage: {align_err}")
+                import traceback
+                logging.error(f"Alignment traceback: {traceback.format_exc()}")
+            
+            if False:  # Disabled - we always align now
                 logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
             
             safe_cached_tags = make_json_safe(cached_tags)
