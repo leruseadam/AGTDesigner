@@ -3325,7 +3325,21 @@ class ExcelProcessor:
                             ~filtered_df['Product Type*'].astype(str).str.lower().str.strip().str.startswith('high cbd')
                         ]
                 else:
-                    column = column_mapping.get(filter_key)
+                    # CRITICAL FIX: For brand filter, check multiple possible column names
+                    if filter_key == 'brand':
+                        # Try multiple possible column names for brand
+                        possible_brand_cols = ["Product Brand", "ProductBrand", "Brand", "brand"]
+                        column = None
+                        for possible_col in possible_brand_cols:
+                            if possible_col in filtered_df.columns:
+                                column = possible_col
+                                break
+                        if not column:
+                            self.logger.warning(f"Brand filter: No brand column found. Available columns: {list(filtered_df.columns)}")
+                            continue
+                    else:
+                        column = column_mapping.get(filter_key)
+                    
                     if column and column in filtered_df.columns:
                         # Convert both the column and the filter value to lowercase for case-insensitive comparison
                         filtered_df = filtered_df[
