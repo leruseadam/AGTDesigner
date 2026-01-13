@@ -8025,10 +8025,10 @@ class ExcelProcessor:
             # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
             # Excel lineage column and name-based inference are completely ignored
             # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
-            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
-
-            tag['Lineage'] = lineage
-            tag['lineage'] = lineage
+            # DO NOT set Lineage here - it will be set by database alignment
+            # lineage = 'MIXED'  # REMOVED - never set placeholder lineage
+            # tag['Lineage'] = lineage  # REMOVED - never set Excel lineage
+            # tag['lineage'] = lineage  # REMOVED - never set Excel lineage
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
