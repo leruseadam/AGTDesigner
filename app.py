@@ -7293,13 +7293,15 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 strain_sovereign = _clean_lineage(strain_sovereign_raw)
                 strain_canonical = _clean_lineage(strain_canonical_raw)
 
-                if db_name and db_lineage:
-                    lineage_clean = db_lineage
+                # CRITICAL FIX: Store lineage info if we have ANY lineage data (not just db_lineage)
+                # This ensures strain_canonical is always used even if COALESCE returns None
+                if db_name and (db_lineage or product_sovereign or strain_sovereign or strain_canonical):
+                    lineage_clean = db_lineage  # May be None if COALESCE found nothing, but we still have strain_canonical
                     # Store lineage with source info for proper field assignment
                     # CRITICAL: product_sovereign/strain_sovereign/strain_canonical are already cleaned and uppercased by _clean_lineage
                     # They are either a clean uppercase string or None - do NOT call str() again
                     lineage_info = {
-                        'lineage': lineage_clean,
+                        'lineage': lineage_clean,  # May be None - that's OK, we'll use strain_canonical
                         'has_sovereign': bool(product_sovereign or strain_sovereign),
                         'product_sovereign': product_sovereign,  # Already cleaned - don't call str() again
                         'strain_sovereign': strain_sovereign,    # Already cleaned - don't call str() again
@@ -7311,6 +7313,14 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     normalized = product_db._normalize_product_name(db_name)
                     lineage_map[normalized] = lineage_info
                     lineage_map[db_name.lower().strip()] = lineage_info
+                    
+                    # Log what we found for debugging
+                    if strain_canonical:
+                        logging.debug(f"✅ Found lineage for '{db_name}': strain_canonical={strain_canonical}, db_lineage={db_lineage}, sovereign={product_sovereign or strain_sovereign}")
+                    elif db_lineage:
+                        logging.debug(f"✅ Found lineage for '{db_name}': db_lineage={db_lineage} (no strain_canonical)")
+                elif db_name:
+                    logging.debug(f"⚠️ No lineage data found for '{db_name}' in database")
         
         if not lineage_map:
             logging.warning(f"⚠️ LINEAGE ALIGNMENT: No lineage found in database for {len(product_names)} products. Products searched: {product_names[:5]}...")
