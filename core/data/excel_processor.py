@@ -3481,7 +3481,8 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),
+                # CRITICAL: Do NOT set Lineage from Excel here - it will be normalized below based on product type
+                # 'Lineage': safe_get_value(row.get('Lineage', 'MIXED')),  # REMOVED
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -3523,10 +3524,12 @@ class ExcelProcessor:
             # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
             # Excel lineage column and name-based inference are completely ignored
             # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
-            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
-
-            tag['Lineage'] = lineage
-            tag['lineage'] = lineage
+            from src.core.constants import normalize_lineage_for_product_type, is_classic_type
+            excel_lineage = safe_get_value(row.get('Lineage', ''))
+            if not excel_lineage or excel_lineage in ['nan', 'NaN', '']: excel_lineage = 'HYBRID' if is_classic_type(tag.get('Product Type*', '')) else 'MIXED'
+            normalized_lineage = normalize_lineage_for_product_type(excel_lineage, tag.get('Product Type*', ''))
+            tag['Lineage'] = normalized_lineage
+            tag['lineage'] = normalized_lineage
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
@@ -7716,10 +7719,12 @@ class ExcelProcessor:
             # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
             # Excel lineage column and name-based inference are completely ignored
             # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
-            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
-
-            tag['Lineage'] = lineage
-            tag['lineage'] = lineage
+            from src.core.constants import normalize_lineage_for_product_type, is_classic_type
+            excel_lineage = safe_get_value(row.get('Lineage', ''))
+            if not excel_lineage or excel_lineage in ['nan', 'NaN', '']: excel_lineage = 'HYBRID' if is_classic_type(tag.get('Product Type*', '')) else 'MIXED'
+            normalized_lineage = normalize_lineage_for_product_type(excel_lineage, tag.get('Product Type*', ''))
+            tag['Lineage'] = normalized_lineage
+            tag['lineage'] = normalized_lineage
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()
