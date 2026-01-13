@@ -7266,7 +7266,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                             
                             # CRITICAL DEBUG: Log Blackberry Kush extraction
                             if 'blackberry kush' in pname.lower():
-                                logging.info(f"🎯 BLACKBERRY KUSH EXTRACTION: '{pname}' -> extracted_strain='{extracted_strain}', normalized='{normalized_strain if hasattr(product_db, "_normalize_strain_name") else "N/A"}'")
+                                normalized_debug = normalized_strain if (hasattr(product_db, '_normalize_strain_name') and normalized_strain) else 'N/A'
+                                logging.info(f"🎯 BLACKBERRY KUSH EXTRACTION: '{pname}' -> extracted_strain='{extracted_strain}', normalized='{normalized_debug}'")
                     except Exception as extract_err:
                         logging.error(f"❌ Could not extract strain from '{pname}': {extract_err}")
                         if 'blackberry kush' in pname.lower():
