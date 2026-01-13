@@ -10266,28 +10266,20 @@ def get_available_tags():
         
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            # CRITICAL: Check if lineage was recently updated - if so, re-align to get fresh DB lineage
-            lineage_update_ts = session.get('lineage_update_timestamp')
-            needs_realignment = False
-            if lineage_update_ts:
-                try:
-                    # Within 10 minutes of lineage update, re-align cached tags
-                    needs_realignment = (time.time() - float(lineage_update_ts)) < 600
-                except Exception:
-                    needs_realignment = False
             
-            if needs_realignment:
-                logging.info(f"🔄 Recent lineage update detected - re-aligning cached tags with database")
-                try:
-                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                    if store_name_align:
-                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to ensure cache uses the correct timestamp-based key
-                        # The timestamp changes the cache key, so old cached tags won't be used
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
-                except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+            # CRITICAL FIX: ALWAYS align cached tags with database lineage to ensure user's lineage is used
+            # This is especially important because old cached tags may not have database lineage
+            try:
+                store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                if store_name_align and cached_tags:
+                    logging.info(f"🔄 Aligning {len(cached_tags)} cached tags with database lineage...")
+                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                    canonical_count = len([t for t in cached_tags if t.get('canonical_lineage')])
+                    logging.info(f"✅ Aligned cached tags: {canonical_count} tags now have canonical_lineage from strains table")
+            except Exception as align_err:
+                logging.error(f"❌ Could not align cached tags with database lineage: {align_err}")
+                import traceback
+                logging.error(f"Alignment traceback: {traceback.format_exc()}")
             
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
