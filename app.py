@@ -7243,9 +7243,28 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         
         # Collect product names for lookup (always include; alignment now force-overwrites)
         product_names = []
+        potential_strains = set()  # Collect all potential strain names for direct query
         for t in aligned_tags:
             if isinstance(t, dict) and t.get('Product Name*'):
-                product_names.append(t.get('Product Name*'))
+                pname = t.get('Product Name*')
+                product_names.append(pname)
+                
+                # CRITICAL: Extract strain names from product names BEFORE querying
+                # This allows us to query strains table directly for "Blackberry Kush" etc.
+                if product_db and hasattr(product_db, '_extract_strain_from_product_name'):
+                    try:
+                        product_type = t.get('Product Type*', t.get('ProductType', '')).lower()
+                        extracted_strain = product_db._extract_strain_from_product_name(pname, product_type)
+                        if extracted_strain:
+                            potential_strains.add(extracted_strain)
+                            # Also add normalized version
+                            if hasattr(product_db, '_normalize_strain_name'):
+                                normalized_strain = product_db._normalize_strain_name(extracted_strain)
+                                if normalized_strain:
+                                    potential_strains.add(normalized_strain)
+                            potential_strains.add(extracted_strain.lower().strip())
+                    except Exception as extract_err:
+                        logging.debug(f"Could not extract strain from '{pname}': {extract_err}")
         
         if not product_names:
             logging.debug("⚡ No products need lineage alignment")
@@ -7254,6 +7273,68 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         lineage_map = {}
         conn = product_db._get_connection()
         cursor = conn.cursor()
+        
+        # CRITICAL: Query strains table FIRST for all potential strains
+        # This ensures we can match products by strain name even if product name doesn't match
+        if potential_strains:
+            strain_placeholders = ','.join(['?' for _ in potential_strains])
+            try:
+                logging.info(f"🔍 DIRECT STRAIN QUERY: Querying strains table for {len(potential_strains)} potential strains: {list(potential_strains)[:5]}...")
+                cursor.execute(f'''
+                    SELECT s.strain_name, s.normalized_name,
+                           s.sovereign_lineage as strain_sovereign,
+                           s.canonical_lineage as strain_canonical
+                    FROM strains s
+                    WHERE s.strain_name IN ({strain_placeholders})
+                       OR s.normalized_name IN ({strain_placeholders})
+                       OR LOWER(TRIM(s.strain_name)) IN ({strain_placeholders})
+                ''', list(potential_strains) * 3)
+                
+                strain_matches = 0
+                for strain_row in cursor.fetchall():
+                    strain_name = strain_row[0]
+                    normalized_strain_name = strain_row[1]
+                    strain_sovereign_raw = strain_row[2]
+                    strain_canonical_raw = strain_row[3]
+                    
+                    def _clean_lineage(val):
+                        if val is None:
+                            return None
+                        txt = str(val).strip().upper()
+                        if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                            return None
+                        return txt
+                    
+                    strain_sovereign = _clean_lineage(strain_sovereign_raw)
+                    strain_canonical = _clean_lineage(strain_canonical_raw)
+                    
+                    if strain_canonical or strain_sovereign:
+                        # Map strain directly to lineage info
+                        strain_lineage_info = {
+                            'lineage': strain_canonical or strain_sovereign,
+                            'has_sovereign': bool(strain_sovereign),
+                            'product_sovereign': None,
+                            'strain_sovereign': strain_sovereign,
+                            'strain_canonical': strain_canonical
+                        }
+                        
+                        # Map by strain name, normalized name, and lowercase
+                        lineage_map[strain_name] = strain_lineage_info
+                        if normalized_strain_name:
+                            lineage_map[normalized_strain_name] = strain_lineage_info
+                        lineage_map[strain_name.lower().strip()] = strain_lineage_info
+                        if normalized_strain_name:
+                            lineage_map[normalized_strain_name.lower().strip()] = strain_lineage_info
+                        
+                        strain_matches += 1
+                        logging.info(f"✅ DIRECT STRAIN QUERY: Found '{strain_name}' (normalized: '{normalized_strain_name}') -> canonical={strain_canonical}, sovereign={strain_sovereign}")
+                
+                if strain_matches > 0:
+                    logging.info(f"✅ DIRECT STRAIN QUERY: Matched {strain_matches} strains from strains table")
+            except Exception as strain_query_err:
+                logging.error(f"❌ DIRECT STRAIN QUERY failed: {strain_query_err}")
+                import traceback
+                logging.error(f"Strain query traceback: {traceback.format_exc()}")
         
         # CRITICAL FIX: Use EXACT same query as docx generation for consistency
         # Match by "Product Name*" exactly like docx generation (tag_generator.py line 909)
