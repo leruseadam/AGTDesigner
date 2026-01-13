@@ -7662,6 +7662,36 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         logging.warning(f"Lineage alignment failed: {e}")
         return tags
 
+def _cleanup_canonical_lineage_mixed(tags):
+    """
+    CRITICAL FINAL SAFEGUARD: Remove any MIXED values from canonical_lineage.
+    This ensures canonical_lineage NEVER contains MIXED, even if it somehow got through previous checks.
+    """
+    if not tags:
+        return tags
+    
+    fixed_count = 0
+    for tag in tags:
+        if not isinstance(tag, dict):
+            continue
+        
+        canonical = tag.get('canonical_lineage')
+        if canonical and str(canonical).strip().upper() == 'MIXED':
+            product_name = tag.get('Product Name*', 'Unknown')
+            product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+            
+            # Convert to HYBRID (never MIXED for canonical_lineage)
+            tag['canonical_lineage'] = 'HYBRID'
+            fixed_count += 1
+            logging.warning(f"🚫 FINAL CLEANUP: Removed MIXED from canonical_lineage for '{product_name}' -> set to HYBRID (is_classic={is_classic})")
+    
+    if fixed_count > 0:
+        logging.warning(f"🚫 FINAL CLEANUP: Fixed {fixed_count} tags with MIXED canonical_lineage")
+    
+    return tags
+
 def _calculate_joint_ratio_for_record(db_record):
     """Get joint ratio for pre-roll products from database record, parsing from name if needed."""
     import re
@@ -14259,6 +14289,8 @@ def get_web_available_tags():
                 # CRITICAL: Align tags even for web endpoint to ensure sovereign_lineage is included
                 try:
                     cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                    # CRITICAL FINAL SAFEGUARD: Remove any MIXED from canonical_lineage
+                    cached_tags = _cleanup_canonical_lineage_mixed(cached_tags)
                 except Exception as align_err:
                     logging.warning(f"WEB: Could not align cached tags: {align_err}")
                 safe_cached_tags = make_json_safe(cached_tags)
@@ -14413,6 +14445,9 @@ def get_web_available_tags():
                     tag['lineage'] = default_lineage.lower()
                     logging.debug(f"⚠️ WEB: No lineage found for '{tag.get('Product Name*', 'Unknown')}' after alignment - using default '{default_lineage}' (never MIXED)")
                 simple_tags.append(tag)
+            
+            # CRITICAL FINAL SAFEGUARD: Remove any MIXED from canonical_lineage before sending to frontend
+            simple_tags = _cleanup_canonical_lineage_mixed(simple_tags)
             
             safe_tags = make_json_safe(simple_tags)
             
