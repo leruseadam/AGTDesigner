@@ -7338,12 +7338,23 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             if not name:
                 continue
             # Try exact match first (like docx generation), then normalized, then lowercase
-            lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
+            normalized_name = product_db._normalize_product_name(name)
+            lower_name = str(name).lower().strip()
+            
+            lineage_info = lineage_map.get(name) or lineage_map.get(normalized_name) or lineage_map.get(lower_name)
+            
             if not lineage_info:
                 unmatched_count += 1
-                if unmatched_count <= 5:  # Log first 5 unmatched
-                    logging.debug(f"⚠️ LINEAGE ALIGNMENT: No lineage found for '{name}' - tried exact, normalized, and lowercase")
+                if unmatched_count <= 10:  # Log first 10 unmatched for debugging
+                    logging.warning(f"⚠️ LINEAGE ALIGNMENT: No lineage found for '{name}'")
+                    logging.warning(f"   Tried: exact='{name}', normalized='{normalized_name}', lowercase='{lower_name}'")
+                    logging.warning(f"   Available map keys (first 5): {list(lineage_map.keys())[:5]}")
                 continue
+            else:
+                # Log successful match for first few
+                if aligned_count < 5:
+                    match_type = "exact" if name in lineage_map else ("normalized" if normalized_name in lineage_map else "lowercase")
+                    logging.debug(f"✅ LINEAGE ALIGNMENT: Matched '{name}' via {match_type} match")
             
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
