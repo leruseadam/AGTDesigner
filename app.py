@@ -7343,18 +7343,48 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             
             lineage_info = lineage_map.get(name) or lineage_map.get(normalized_name) or lineage_map.get(lower_name)
             
+            # CRITICAL: For products with strain names, also try matching by extracted strain name
+            # Example: "Blackberry Kush Infused Pre-Roll by 2727 - 1g" -> try "Blackberry Kush"
+            if not lineage_info and product_db:
+                try:
+                    # Extract strain from product name (for classic types)
+                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                    extracted_strain = product_db._extract_strain_from_product_name(name, product_type) if hasattr(product_db, '_extract_strain_from_product_name') else None
+                    
+                    if extracted_strain:
+                        # Try to find products with this strain name
+                        # Look for any product in lineage_map that contains this strain
+                        strain_lower = extracted_strain.lower().strip()
+                        for map_key, map_value in lineage_map.items():
+                            if strain_lower in str(map_key).lower():
+                                lineage_info = map_value
+                                logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' -> found product '{map_key}'")
+                                break
+                except Exception as strain_err:
+                    logging.debug(f"Could not extract strain for '{name}': {strain_err}")
+            
             if not lineage_info:
                 unmatched_count += 1
-                if unmatched_count <= 10:  # Log first 10 unmatched for debugging
+                # CRITICAL: Always log "Blackberry Kush" products for debugging
+                if 'blackberry kush' in name.lower() or unmatched_count <= 10:
                     logging.warning(f"⚠️ LINEAGE ALIGNMENT: No lineage found for '{name}'")
                     logging.warning(f"   Tried: exact='{name}', normalized='{normalized_name}', lowercase='{lower_name}'")
                     logging.warning(f"   Available map keys (first 5): {list(lineage_map.keys())[:5]}")
+                    if product_db and hasattr(product_db, '_extract_strain_from_product_name'):
+                        try:
+                            product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                            extracted_strain = product_db._extract_strain_from_product_name(name, product_type)
+                            logging.warning(f"   Extracted strain: '{extracted_strain}'")
+                        except Exception:
+                            pass
                 continue
             else:
-                # Log successful match for first few
-                if aligned_count < 5:
+                # Log successful match for first few OR for Blackberry Kush
+                if aligned_count < 5 or 'blackberry kush' in name.lower():
                     match_type = "exact" if name in lineage_map else ("normalized" if normalized_name in lineage_map else "lowercase")
-                    logging.debug(f"✅ LINEAGE ALIGNMENT: Matched '{name}' via {match_type} match")
+                    logging.info(f"✅ LINEAGE ALIGNMENT: Matched '{name}' via {match_type} match")
+                    if isinstance(lineage_info, dict):
+                        logging.info(f"   Lineage data: canonical={lineage_info.get('strain_canonical')}, sovereign={lineage_info.get('product_sovereign') or lineage_info.get('strain_sovereign')}, COALESCEd={lineage_info.get('lineage')}")
             
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):

@@ -10884,11 +10884,11 @@ const TagManager = {
             let response;
             let responseData;
             
-            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (30s)
-            // Desktop/localhost should respond quickly with fast_load=1
-            const maxRetries = isWebClient ? 1 : 2; // Fewer retries for web
-            const maxProcessingRetries = isWebClient ? 1 : 2; // Reduce processing retries
-            const fetchTimeout = isWebClient ? 30000 : 5000; // Web: 30s, Desktop: 5s
+            // ⚡ PERFORMANCE: Reduce timeouts for faster failure recovery
+            // With background processing and 202 responses, we want fast feedback
+            const maxRetries = isWebClient ? 2 : 3; // Allow a few retries
+            const maxProcessingRetries = isWebClient ? 10 : 15; // More processing retries (202 responses are fast)
+            const fetchTimeout = isWebClient ? 15000 : 3000; // Web: 15s (reduced from 30s), Desktop: 3s (reduced from 5s)
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -10976,6 +10976,17 @@ const TagManager = {
                         // PERFORMANCE: After a few retries, start polling with shorter intervals
                         if (processingRetryCount === 1) {
                             verboseLog('⏳ File is processing in background, will poll every 500ms...');
+                        }
+                        
+                        // PERFORMANCE: After first retry, try to show any available cache (even if stale)
+                        // This provides instant feedback while processing continues
+                        if (processingRetryCount === 2) {
+                            verboseLog('⏳ Processing ongoing, checking for cached data to show immediately...');
+                            const cachedTags = this.hydrateAvailableTagsFromCache();
+                            if (cachedTags) {
+                                verboseLog('✅ Found cached data - displaying immediately while processing continues in background');
+                                // Continue processing in background but user sees data now
+                            }
                         }
                         
                         if (processingRetryCount >= maxProcessingRetries) {
@@ -12526,14 +12537,9 @@ const TagManager = {
         console.log('🚀 === TAGMANAGER INIT FUNCTION CALLED ===');
         console.log('⚡ TagManager initializing...');
         
-        // PERFORMANCE FIX: Clear cache on every page load to ensure fresh data
-        console.log('🗑️ Clearing cache on page load to ensure fresh data...');
-        this.clearAvailableTagsCache();
-        
-        // Also clear backend cache if endpoint exists
-        fetch('/api/clear-cache', { method: 'POST' }).catch(err => {
-            console.warn('Could not clear backend cache (non-critical):', err);
-        });
+        // PERFORMANCE FIX: Use cache for instant display, then refresh in background for fresh data
+        // This provides instant UI while ensuring data is fresh
+        console.log('⚡ Using cache-first approach: show cached data instantly, refresh in background...');
         
         const availableTagsContainer = document.getElementById('availableTags');
         console.log('📦 Available tags container found:', !!availableTagsContainer);
@@ -12552,10 +12558,10 @@ const TagManager = {
         // Skip platform detection for Mac-like speed
         // this.detectPlatform();
 
-        // PERFORMANCE FIX: Cache is cleared on page load, so skip cache hydration
-        // Always fetch fresh data from server on page load
-        const alreadyHydrated = false; // Don't use cache on page load
-        const hydrated = false; // Always fetch fresh data
+        // PERFORMANCE FIX: Try to hydrate from cache for instant display
+        // Then refresh in background to ensure data is fresh
+        const alreadyHydrated = this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;
+        const hydrated = alreadyHydrated || this.hydrateAvailableTagsFromCache();
 
         if (hydrated) {
             // Cache exists and hydrated - skip splash completely
@@ -12625,32 +12631,19 @@ const TagManager = {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
 
-            // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
-            // This prevents unnecessary reloads on every page refresh
-            try {
-                const cacheKey = this.getAvailableTagsCacheKey();
-                const cachedData = sessionStorage.getItem(cacheKey);
-                if (cachedData) {
-                    const payload = JSON.parse(cachedData);
-                    const cacheAge = Date.now() - (payload.timestamp || 0);
-                    const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
-
-                    if (cacheAge > CACHE_MAX_AGE) {
-                        console.log(`🔄 Cache is ${Math.round(cacheAge / 1000)}s old, refreshing in background...`);
-                        setTimeout(() => {
-                            if (!this._checkingExistingData && !this.state.initialized) {
-                                this.checkForExistingData().catch(err => {
-                                    console.warn('Background refresh after cache load failed (non-critical):', err);
-                                });
-                            }
-                        }, 2000); // Increased delay to avoid interfering with cache load
-                    } else {
-                        console.log(`✅ Cache is fresh (${Math.round(cacheAge / 1000)}s old), skipping background refresh`);
-                    }
+            // PERFORMANCE FIX: Always refresh in background after showing cached data
+            // This ensures data is fresh while user sees instant UI
+            console.log('🔄 Cache displayed instantly - refreshing in background for fresh data...');
+            setTimeout(() => {
+                if (!this._checkingExistingData) {
+                    // Use force reload to bypass cache and get fresh data
+                    this.fetchAndUpdateAvailableTags(true).then(() => {
+                        console.log('✅ Background refresh complete - data is now fresh');
+                    }).catch(err => {
+                        console.warn('Background refresh failed (non-critical):', err);
+                    });
                 }
-            } catch (e) {
-                console.warn('Could not check cache age:', e);
-            }
+            }, 100); // Small delay to let UI render first, then refresh
 
             // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();
@@ -12659,6 +12652,10 @@ const TagManager = {
             // No cache - load from server (splash already shown at start of init())
             console.log('❌ No cache available, will load from server');
             AppLoadingSplash.updateProgress(40, 'Loading from server...');
+            
+            // PERFORMANCE: Use fast_load=1 for faster initial response
+            // Set flag to use fast loading mode
+            this._useFastLoad = true;
         }
 
         // Initialize empty state first (but don't clear if we have tags)
