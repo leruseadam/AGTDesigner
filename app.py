@@ -7331,10 +7331,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
                 db_lineage = lineage_info['lineage']  # This is already COALESCEd (sovereign > canonical > Lineage)
-                # CRITICAL: Prioritize sovereign_lineage - use it as effective lineage if it exists
-                effective_lineage = db_lineage  # Default to COALESCEd result
-
-                # CRITICAL FIX: ONLY set sovereign_lineage when present; do not emit 'NONE' or None
+                
+                # CRITICAL FIX: Ensure user's lineage values are ALWAYS used
+                # Priority: product_sovereign (manual edits) > strain_sovereign > strain_canonical (strains sheet) > product.Lineage
+                # The strains table canonical_lineage is the user's "strains sheet" data and should always be used when available
+                
+                # Step 1: Set sovereign_lineage if present (manual edits take highest priority)
                 if lineage_info['product_sovereign']:
                     tag['sovereign_lineage'] = lineage_info['product_sovereign']
                     effective_lineage = lineage_info['product_sovereign']
@@ -7343,20 +7345,34 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     effective_lineage = lineage_info['strain_sovereign']
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
-                # CRITICAL FIX: Always use strain canonical_lineage from strains table as the base
-                # Priority: product_sovereign > strain_sovereign > strain_canonical > product.Lineage
-                # The strains table canonical_lineage should always be available and used
+                # Step 2: CRITICAL - Always use strain canonical_lineage from strains table (user's "strains sheet" data)
+                # This ensures the user's lineage values are ALWAYS used when available
                 if lineage_info['strain_canonical']:
                     # Always set canonical_lineage from strains table (this is the "strains sheet" data)
                     tag['canonical_lineage'] = lineage_info['strain_canonical']
+                    # If no sovereign_lineage, use canonical_lineage as effective lineage
+                    if not lineage_info.get('product_sovereign') and not lineage_info.get('strain_sovereign'):
+                        effective_lineage = lineage_info['strain_canonical']
                 else:
                     # Fallback if no strain canonical_lineage exists
-                    tag['canonical_lineage'] = effective_lineage
+                    tag['canonical_lineage'] = effective_lineage if 'effective_lineage' in locals() else db_lineage
+                    if 'effective_lineage' not in locals():
+                        effective_lineage = db_lineage
+                
+                # Step 3: Ensure effective_lineage is set (use canonical if no sovereign)
+                if 'effective_lineage' not in locals():
+                    effective_lineage = lineage_info.get('strain_canonical') or db_lineage
+                
+                # Step 4: Set all lineage fields to ensure user's values are used everywhere
                 tag['currentLineage'] = effective_lineage
-                # CRITICAL: Always set Lineage* and other fields using effective_lineage (prioritizes sovereign)
                 tag['Lineage'] = effective_lineage
                 tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
                 tag['lineage'] = effective_lineage.lower()
+                
+                # CRITICAL: Log to verify user's lineage is being used
+                if lineage_info.get('strain_canonical'):
+                    logging.debug(f"✅ Using strain canonical_lineage '{lineage_info['strain_canonical']}' for '{name}' (user's strains sheet data)")
+                
                 aligned_count += 1
             else:
                 # Old format (backward compatibility)
