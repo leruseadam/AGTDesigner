@@ -10510,6 +10510,15 @@ def get_available_tags():
                                     else:
                                         db_lineage_clean = lineage_data
 
+                                    # CRITICAL FIX: NEVER allow MIXED for classic types
+                                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                                    
+                                    if is_classic and db_lineage_clean and str(db_lineage_clean).strip().upper() == 'MIXED':
+                                        logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{product_name}' (type: '{product_type}') - changing to HYBRID")
+                                        db_lineage_clean = 'HYBRID'
+
                                     tag['currentLineage'] = db_lineage_clean
                                     tag['canonical_lineage'] = db_lineage_clean
                                     tag['Lineage'] = db_lineage_clean
