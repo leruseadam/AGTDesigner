@@ -7375,6 +7375,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 product_sovereign_raw = row[2]
                 strain_sovereign_raw = row[3]
                 strain_canonical_raw = row[4]
+                product_strain = row[5]  # Extract product_strain from query result
 
                 def _clean_lineage(val):
                     if val is None:
