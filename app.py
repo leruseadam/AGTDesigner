@@ -10418,7 +10418,21 @@ def get_available_tags():
                 store_name_align = get_current_store_name(allow_fallback=False) or store_name
                 if store_name_align and cached_tags:
                     logging.info(f"🔄 Aligning {len(cached_tags)} cached tags with database lineage...")
+                    
+                    # CRITICAL DEBUG: Check Blackberry Kush before alignment
+                    blackberry_before = [t for t in cached_tags if 'blackberry kush' in str(t.get('Product Name*', '')).lower()]
+                    if blackberry_before:
+                        for bb in blackberry_before[:1]:
+                            logging.info(f"🎯 BLACKBERRY KUSH BEFORE ALIGNMENT: canonical_lineage={bb.get('canonical_lineage')}, currentLineage={bb.get('currentLineage')}")
+                    
                     cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                    
+                    # CRITICAL DEBUG: Check Blackberry Kush after alignment
+                    blackberry_after = [t for t in cached_tags if 'blackberry kush' in str(t.get('Product Name*', '')).lower()]
+                    if blackberry_after:
+                        for bb in blackberry_after[:1]:
+                            logging.info(f"🎯 BLACKBERRY KUSH AFTER ALIGNMENT: canonical_lineage={bb.get('canonical_lineage')}, currentLineage={bb.get('currentLineage')}")
+                    
                     canonical_count = len([t for t in cached_tags if t.get('canonical_lineage')])
                     logging.info(f"✅ Aligned cached tags: {canonical_count} tags now have canonical_lineage from strains table")
             except Exception as align_err:
