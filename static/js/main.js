@@ -7143,7 +7143,8 @@ const TagManager = {
         // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
         // This ensures UI displays correct lineage even if database/Excel has wrong value
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        // MUST MATCH backend CLASSIC_TYPES in src/core/constants.py
+        const classicTypes = ['flower', 'bud', 'pre-roll', 'preroll', 'infused pre-roll', 'blunt', 'flavored blunt', 'concentrate', 'solventless concentrate', 'live resin', 'rosin', 'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
         if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
             lineage = 'HYBRID';
@@ -8895,7 +8896,8 @@ const TagManager = {
         // CRITICAL FIX: Check if this is a nonclassic product type
         // For nonclassic types, don't propagate lineage changes to other products
         const productType = (source['Product Type*'] || source.ProductType || source.Type || '').toString().trim().toLowerCase();
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        // MUST MATCH backend CLASSIC_TYPES in src/core/constants.py
+        const classicTypes = ['flower', 'bud', 'pre-roll', 'preroll', 'infused pre-roll', 'blunt', 'flavored blunt', 'concentrate', 'solventless concentrate', 'live resin', 'rosin', 'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'];
         const isNonclassic = !classicTypes.includes(productType);
         
         if (isNonclassic) {
@@ -14275,10 +14277,8 @@ const TagManager = {
         }
         
         // Define classic types (matching backend CLASSIC_TYPES)
-        const classicTypes = [
-            'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
-            'flower - outdoor', 'flower - indoor', 'flower - greenhouse'
-        ];
+        // MUST MATCH backend CLASSIC_TYPES in src/core/constants.py
+        const classicTypes = ['flower', 'bud', 'pre-roll', 'preroll', 'infused pre-roll', 'blunt', 'flavored blunt', 'concentrate', 'solventless concentrate', 'live resin', 'rosin', 'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'];
         
         // Check if lineage is empty/invalid (matching backend empty_lineage_mask)
         const isEmptyLineage = !currentLineage || 
