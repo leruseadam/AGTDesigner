@@ -7378,12 +7378,13 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             placeholders = ','.join(['?' for _ in chunk])
         # EXACT same query as docx generation - but also return individual fields to preserve priority
             cursor.execute(f'''
-                SELECT p."Product Name*", 
+                SELECT p."Product Name*",
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p.sovereign_lineage as product_sovereign,
                        s.sovereign_lineage as strain_sovereign,
                        s.canonical_lineage as strain_canonical,
-                       p."Product Strain" as product_strain
+                       p."Product Strain" as product_strain,
+                       p."DOH Compliant (Yes/No)" as doh
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
@@ -7396,6 +7397,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 strain_sovereign_raw = row[3]
                 strain_canonical_raw = row[4]
                 product_strain = row[5]  # Extract product_strain from query result
+                doh_raw = row[6]  # Extract DOH from query result
 
                 def _clean_lineage(val):
                     if val is None:
@@ -7417,12 +7419,20 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     # Store lineage with source info for proper field assignment
                     # CRITICAL: product_sovereign/strain_sovereign/strain_canonical are already cleaned and uppercased by _clean_lineage
                     # They are either a clean uppercase string or None - do NOT call str() again
+                    # CRITICAL FIX: Clean DOH value for storage
+                    doh_clean = None
+                    if doh_raw is not None:
+                        doh_str = str(doh_raw).strip().upper()
+                        if doh_str and doh_str not in ['', 'NAN', 'NONE', 'NULL']:
+                            doh_clean = doh_str
+                    
                     lineage_info = {
                         'lineage': lineage_clean,  # May be None - that's OK, we'll use strain_canonical
                         'has_sovereign': bool(product_sovereign or strain_sovereign),
                         'product_sovereign': product_sovereign,  # Already cleaned - don't call str() again
                         'strain_sovereign': strain_sovereign,    # Already cleaned - don't call str() again
-                        'strain_canonical': strain_canonical     # Already cleaned - don't call str() again
+                        'strain_canonical': strain_canonical,    # Already cleaned - don't call str() again
+                        'doh': doh_clean  # CRITICAL: Store DOH value for tag update
                     }
                     # Map by original name (exact match like docx generation)
                     lineage_map[db_name] = lineage_info
@@ -7630,6 +7640,20 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     tag['Lineage'] = effective_lineage
                     tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
                     tag['lineage'] = effective_lineage.lower()
+                
+                # CRITICAL FIX: Set DOH field from database if available
+                # Only set DOH if Excel doesn't already have a value (Excel is source of truth)
+                doh_value = lineage_info.get('doh')
+                if doh_value:
+                    # Check if Excel already has DOH value
+                    excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
+                    excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
+                    
+                    # Only use database DOH if Excel doesn't have a value
+                    if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
+                        tag['DOH'] = doh_value
+                        tag['DOH Compliant (Yes/No)'] = doh_value
+                        logging.debug(f"✅ Set DOH from database: '{name}' -> '{doh_value}'")
                 
                 # CRITICAL: Log to verify user's lineage is being used
                 if strain_canonical_value:
