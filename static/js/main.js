@@ -1069,6 +1069,24 @@ const TagManager = {
     get SIMPLIFIED_RENDER_THRESHOLD() {
         return isWindows ? 300 : 900; // Much lower threshold on Windows (300 vs 500) for faster loading
     },
+    
+    // CRITICAL FIX: Restore recently updated lineages from localStorage on page load
+    // This ensures manual lineage edits persist across page reloads
+    _recentlyUpdatedLineages: (() => {
+        try {
+            const stored = localStorage.getItem('_recentlyUpdatedLineages');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                const map = new Map(Object.entries(parsed));
+                console.log(`✅ Restored ${map.size} recently updated lineages from localStorage on page load`);
+                return map;
+            }
+        } catch (e) {
+            console.warn('Failed to restore recently updated lineages from localStorage:', e);
+        }
+        return new Map();
+    })(),
+    
     state: {
         selectedTags: new Set(),
         isClearing: false, // Flag to prevent multiple simultaneous clear operations
