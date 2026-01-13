@@ -7456,12 +7456,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         
                         if lineage_info:
                             logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' (normalized: '{normalized_strain}')")
+                            if 'blackberry kush' in name.lower():
+                                logging.info(f"🎯 BLACKBERRY KUSH DEBUG: Found lineage via strain match - lineage_info={lineage_info}")
                         else:
                             # Fallback: Look for any product in lineage_map that contains this strain
                             for map_key, map_value in lineage_map.items():
                                 if strain_lower in str(map_key).lower() or normalized_strain in str(map_key).lower():
                                     lineage_info = map_value
                                     logging.info(f"🔍 LINEAGE ALIGNMENT: Matched '{name}' by strain '{extracted_strain}' -> found product '{map_key}'")
+                                    if 'blackberry kush' in name.lower():
+                                        logging.info(f"🎯 BLACKBERRY KUSH DEBUG: Found lineage via product match - lineage_info={lineage_info}")
                                     break
                 except Exception as strain_err:
                     logging.debug(f"Could not extract strain for '{name}': {strain_err}")
