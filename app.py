@@ -7337,46 +7337,49 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
-                db_lineage = lineage_info['lineage']  # This is already COALESCEd (sovereign > canonical > Lineage)
+                db_lineage = lineage_info.get('lineage')  # This is already COALESCEd (sovereign > canonical > Lineage), may be None
                 
                 # CRITICAL FIX: Ensure user's lineage values are ALWAYS used
                 # Priority: product_sovereign (manual edits) > strain_sovereign > strain_canonical (strains sheet) > product.Lineage
                 # The strains table canonical_lineage is the user's "strains sheet" data and should always be used when available
                 
                 # Step 1: Set sovereign_lineage if present (manual edits take highest priority)
-                if lineage_info['product_sovereign']:
+                if lineage_info.get('product_sovereign'):
                     tag['sovereign_lineage'] = lineage_info['product_sovereign']
                     effective_lineage = lineage_info['product_sovereign']
-                elif lineage_info['strain_sovereign']:
+                    logging.debug(f"✅ Using product_sovereign '{lineage_info['product_sovereign']}' for '{name}'")
+                elif lineage_info.get('strain_sovereign'):
                     tag['sovereign_lineage'] = lineage_info['strain_sovereign']
                     effective_lineage = lineage_info['strain_sovereign']
+                    logging.debug(f"✅ Using strain_sovereign '{lineage_info['strain_sovereign']}' for '{name}'")
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
                 # Step 2: CRITICAL - Always use strain canonical_lineage from strains table (user's "strains sheet" data)
                 # This ensures the user's lineage values are ALWAYS used when available
-                if lineage_info['strain_canonical']:
+                if lineage_info.get('strain_canonical'):
                     # Always set canonical_lineage from strains table (this is the "strains sheet" data)
                     tag['canonical_lineage'] = lineage_info['strain_canonical']
                     # If no sovereign_lineage, use canonical_lineage as effective lineage
-                    if not lineage_info.get('product_sovereign') and not lineage_info.get('strain_sovereign'):
+                    if 'effective_lineage' not in locals():
                         effective_lineage = lineage_info['strain_canonical']
-                        logging.debug(f"✅ Using strain canonical_lineage '{lineage_info['strain_canonical']}' as effective lineage for '{name}'")
-                else:
-                    # Fallback if no strain canonical_lineage exists
-                    if 'effective_lineage' in locals():
-                        tag['canonical_lineage'] = effective_lineage
-                    elif db_lineage:
-                        tag['canonical_lineage'] = db_lineage
+                        logging.debug(f"✅ Using strain canonical_lineage '{lineage_info['strain_canonical']}' as effective lineage for '{name}' (user's strains sheet)")
+                elif db_lineage:
+                    # Fallback if no strain canonical_lineage exists - use COALESCEd db_lineage
+                    tag['canonical_lineage'] = db_lineage
+                    if 'effective_lineage' not in locals():
                         effective_lineage = db_lineage
-                    else:
-                        # No lineage at all - will use default later
-                        logging.warning(f"⚠️ No lineage found for '{name}' - no strain_canonical, no db_lineage")
+                        logging.debug(f"✅ Using db_lineage '{db_lineage}' for '{name}' (no strain_canonical)")
+                else:
+                    # No lineage at all - will use default later
+                    logging.warning(f"⚠️ No lineage found for '{name}' - no strain_canonical, no db_lineage, no sovereign")
                 
                 # Step 3: Ensure effective_lineage is set (use canonical if no sovereign)
                 if 'effective_lineage' not in locals():
                     effective_lineage = lineage_info.get('strain_canonical') or db_lineage
                     if not effective_lineage:
                         logging.warning(f"⚠️ No effective_lineage determined for '{name}' - will use default")
+                    else:
+                        logging.debug(f"✅ Set effective_lineage to '{effective_lineage}' for '{name}'")
                 
                 # Step 4: CRITICAL FIX - NEVER allow MIXED for classic types
                 # Check if this is a classic type and ensure MIXED is converted to HYBRID
