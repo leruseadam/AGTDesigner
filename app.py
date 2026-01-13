@@ -7288,6 +7288,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             strain_placeholders = ','.join(['?' for _ in potential_strains])
             try:
                 logging.info(f"🔍 DIRECT STRAIN QUERY: Querying strains table for {len(potential_strains)} potential strains: {list(potential_strains)[:5]}...")
+                
+                # CRITICAL DEBUG: Log if Blackberry Kush is in potential_strains
+                if any('blackberry' in str(s).lower() and 'kush' in str(s).lower() for s in potential_strains):
+                    logging.info(f"🎯 BLACKBERRY KUSH IN POTENTIAL_STRAINS: {[s for s in potential_strains if 'blackberry' in str(s).lower() and 'kush' in str(s).lower()]}")
+                
                 cursor.execute(f'''
                     SELECT s.strain_name, s.normalized_name,
                            s.sovereign_lineage as strain_sovereign,
