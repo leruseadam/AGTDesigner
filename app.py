@@ -14012,36 +14012,65 @@ def get_web_available_tags():
                 try:
                     logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
                     excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                    
+                    # CRITICAL: Check how many tags have canonical_lineage (from strains table)
+                    canonical_count = len([t for t in excel_tags if t.get('canonical_lineage')])
+                    sovereign_count = len([t for t in excel_tags if t.get('sovereign_lineage')])
                     matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
+                    
                     logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
+                    logging.info(f"   - {canonical_count} tags have canonical_lineage (from strains table - user's data)")
+                    logging.info(f"   - {sovereign_count} tags have sovereign_lineage (manual edits)")
+                    
+                    # Log sample of tags with canonical_lineage to verify
+                    sample_with_canonical = [t for t in excel_tags[:10] if t.get('canonical_lineage')]
+                    if sample_with_canonical:
+                        for sample in sample_with_canonical[:3]:
+                            logging.info(f"   📋 Sample: '{sample.get('Product Name*')}' -> canonical_lineage='{sample.get('canonical_lineage')}'")
                 except Exception as align_err:
-                    logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
+                    logging.error(f"❌ WEB: Lineage alignment failed, using Excel lineage: {align_err}")
                     import traceback
-                    logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
+                    logging.error(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
             # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table (user's "strains sheet" data)
             simple_tags = []
             for tag in excel_tags:
+                product_name = tag.get('Product Name*', 'Unknown')
+                
                 # CRITICAL FIX: ALWAYS prioritize canonical_lineage from strains table (user's "strains sheet" data)
                 # This ensures user's lineage values are ALWAYS used
                 # Priority: canonical_lineage (from strains - user's data) > sovereign_lineage (manual edits) > currentLineage > Lineage
+                original_canonical = tag.get('canonical_lineage')
+                original_sovereign = tag.get('sovereign_lineage')
+                original_current = tag.get('currentLineage')
+                original_lineage = tag.get('Lineage')
+                
                 final_lineage = (
-                    tag.get('canonical_lineage') or  # From strains table - this is the user's "strains sheet" data - ALWAYS use first
-                    tag.get('sovereign_lineage') or  # Manual edits - second priority
-                    tag.get('currentLineage') or 
-                    tag.get('Lineage')
+                    original_canonical or  # From strains table - this is the user's "strains sheet" data - ALWAYS use first
+                    original_sovereign or  # Manual edits - second priority
+                    original_current or 
+                    original_lineage
                 )
+                
+                # CRITICAL: Log what we have before normalization
+                if original_canonical:
+                    logging.debug(f"📋 NORMALIZE '{product_name}': Found canonical_lineage='{original_canonical}' (user's strains sheet data)")
                 
                 if final_lineage and str(final_lineage).strip():
                     lineage_clean = str(final_lineage).strip().upper()
-                    # CRITICAL: Always preserve canonical_lineage from strains table if it exists
-                    if tag.get('canonical_lineage'):
-                        # Database lineage from strains table - preserve canonical_lineage
-                        tag['canonical_lineage'] = lineage_clean  # Keep strains table canonical_lineage
-                        tag['currentLineage'] = lineage_clean
-                        tag['Lineage'] = lineage_clean
-                        tag['Lineage*'] = lineage_clean
-                        tag['lineage'] = lineage_clean.lower()
+                    
+                    # CRITICAL: ALWAYS preserve canonical_lineage from strains table if it exists
+                    # If canonical_lineage was set by alignment, it's from the strains table - NEVER overwrite it
+                    if original_canonical:
+                        # Database lineage from strains table - preserve canonical_lineage EXACTLY as set by alignment
+                        # Only clean/uppercase it, but preserve the value
+                        canonical_clean = str(original_canonical).strip().upper()
+                        tag['canonical_lineage'] = canonical_clean  # Keep strains table canonical_lineage EXACTLY
+                        tag['currentLineage'] = canonical_clean
+                        tag['Lineage'] = canonical_clean
+                        tag['Lineage*'] = canonical_clean
+                        tag['lineage'] = canonical_clean.lower()
+                        logging.debug(f"✅ NORMALIZE '{product_name}': Using canonical_lineage='{canonical_clean}' from strains table")
                     else:
                         # No strains table data - set all fields to the available lineage
                         tag['currentLineage'] = lineage_clean
@@ -14049,6 +14078,7 @@ def get_web_available_tags():
                         tag['Lineage'] = lineage_clean
                         tag['Lineage*'] = lineage_clean
                         tag['lineage'] = lineage_clean.lower()
+                        logging.debug(f"⚠️ NORMALIZE '{product_name}': No canonical_lineage, using '{lineage_clean}' from other sources")
                 else:
                     # CRITICAL FIX: If no lineage found after alignment, ensure lineage fields are still set
                     # This prevents lineage from being empty - use defaults based on product type
