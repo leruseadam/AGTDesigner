@@ -13555,6 +13555,15 @@ def update_lineage():
                         logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update (tried exact, case-insensitive, and normalized matches)")
         except Exception as df_update_err:
             logging.error(f"❌ CRITICAL FAILURE: Could not update DataFrame lineage immediately: {df_update_err}")
+
+        # FINAL: Force full DataFrame refresh from database for all classic types
+        try:
+            excel_processor = get_excel_processor()
+            if excel_processor and hasattr(excel_processor, 'ensure_lineage_persistence'):
+                result = excel_processor.ensure_lineage_persistence()
+                logging.info(f"✅ ExcelProcessor DataFrame fully refreshed from database after lineage update: {result}")
+        except Exception as refresh_err:
+            logging.warning(f"Could not fully refresh ExcelProcessor DataFrame after lineage update: {refresh_err}")
             import traceback
             logging.error(traceback.format_exc())
         
