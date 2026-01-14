@@ -209,33 +209,32 @@ function createTagRow(tag) {
                         ${(() => {
                           const productType = tag['Product Type*'] || tag.Type || '';
                           const uniqueLineages = getUniqueLineages(productType);
+                          
+                          // CRITICAL FIX: Convert MIXED to appropriate value based on product type
                           let dropdownLineage = lineage;
                           const isClassicType = productType && getUniqueLineages(productType).length === 6;
                           if (isClassicType && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
                             dropdownLineage = 'HYBRID';
-                          } else if (!isClassicType) {
-                            // For nonclassic types, always restrict dropdown to THC or CBD only
-                            if (dropdownLineage === 'MIXED') {
-                              dropdownLineage = 'THC';
-                            }
-                            // If dropdownLineage is not THC or CBD, default to THC
-                            if (dropdownLineage !== 'THC' && dropdownLineage !== 'CBD') {
-                              dropdownLineage = 'THC';
-                            }
+                          } else if (!isClassicType && dropdownLineage === 'MIXED') {
+                            // For non-classic types, convert MIXED to THC
+                            dropdownLineage = 'THC';
                           }
+                          
+                          // CRITICAL FIX: Normalize dropdownLineage for comparison (must match normalization used for options)
                           const dropdownLineageNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
                             ? window.normalizeLineageValue(dropdownLineage)
                             : String(dropdownLineage).trim().toUpperCase();
-                          return uniqueLineages
-                            .filter(lin => lin === 'THC' || lin === 'CBD')
-                            .map(lin => {
-                              const linNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
-                                ? window.normalizeLineageValue(lin)
-                                : String(lin).trim().toUpperCase();
-                              const selected = (dropdownLineageNormalized === linNormalized) ? 'selected' : '';
-                              const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
-                              return `<option value="${lin}" ${selected}>${displayName}</option>`;
-                            }).join('');
+                          
+                          return uniqueLineages.map(lin => {
+                            const linNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
+                              ? window.normalizeLineageValue(lin)
+                              : String(lin).trim().toUpperCase();
+                            
+                            // Compare normalized values directly
+                            const selected = (dropdownLineageNormalized === linNormalized) ? 'selected' : '';
+                            const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
+                            return `<option value="${lin}" ${selected}>${displayName}</option>`;
+                          }).join('');
                         })()}
                     </select>
                 </div>
