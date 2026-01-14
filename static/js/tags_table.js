@@ -336,7 +336,17 @@ class TagsTable {
   
   // CRITICAL FIX: Only convert MIXED to HYBRID for classic types, and MIXED to THC for non-classic types
   const productType = tag['Product Type*'] || tag.Type || '';
-  const isClassicType = productType && getUniqueLineages(productType).length === 6;
+  const isClassicType = (() => {
+    const typeLower = (productType || '').toString().toLowerCase().trim();
+    const CLASSIC_TYPES = [
+      'flower', 'bud', 'pre-roll', 'infused pre-roll', 'preroll',
+      'concentrate', 'solventless concentrate', 'live resin', 'rosin', 
+      'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 
+      'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar',
+      'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'
+    ];
+    return CLASSIC_TYPES.some(ct => typeLower.includes(ct) || typeLower === ct);
+  })();
   if (isClassicType && lineage === 'MIXED') {
     lineage = 'HYBRID';
   } else if (!isClassicType && lineage) {
