@@ -1186,7 +1186,6 @@ def process_chunk(args):
                 if not lineage_val:
                     lineage_val = 'HYBRID'
                     logger.warning(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name}' (strain: '{product_strain}'), using default '{lineage_val}'")
-                            logger.warning(f"⚠️ DOCX LINEAGE: No product-level lineage found for '{product_name}' and no strain, using default '{lineage_val}'")
                     else:
                         # No product name, try strain-level only from cache
                         if product_strain:
