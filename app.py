@@ -7379,12 +7379,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         # EXACT same query as docx generation - but also return individual fields to preserve priority
             cursor.execute(f'''
                 SELECT p."Product Name*",
-                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
-                       p.sovereign_lineage as product_sovereign,
-                       s.sovereign_lineage as strain_sovereign,
                        s.canonical_lineage as strain_canonical,
-                       p."Product Strain" as product_strain,
-                       COALESCE(p."DOH Compliant (Yes/No)", p."DOH") as doh
+                       COALESCE(p."DOH Compliant (Yes/No)", p."DOH", s.doh_status) as doh
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
@@ -7392,75 +7388,31 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             ''', chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
-                db_lineage_raw = row[1]
-                product_sovereign_raw = row[2]
-                strain_sovereign_raw = row[3]
-                strain_canonical_raw = row[4]
-                product_strain = row[5]  # Extract product_strain from query result
-                doh_raw = row[6]  # Extract DOH from query result
+                strain_canonical_raw = row[1]
+                doh_raw = row[2]
 
-                def _clean_lineage(val):
-                    if val is None:
-                        return None
-                    txt = str(val).strip().upper()
-                    if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
-                        return None
-                    return txt
+                # Clean values
+                strain_canonical = None
+                if strain_canonical_raw:
+                    val = str(strain_canonical_raw).strip().upper()
+                    if val and val not in ['', 'NONE', 'NULL', 'NAN']:
+                        strain_canonical = val
 
-                db_lineage = _clean_lineage(db_lineage_raw)
-                product_sovereign = _clean_lineage(product_sovereign_raw)
-                strain_sovereign = _clean_lineage(strain_sovereign_raw)
-                strain_canonical = _clean_lineage(strain_canonical_raw)
+                doh_clean = None
+                if doh_raw:
+                    val = str(doh_raw).strip().upper()
+                    if val and val not in ['', 'NONE', 'NULL', 'NAN']:
+                        doh_clean = val
 
-                # CRITICAL FIX: Store lineage info if we have ANY lineage data (not just db_lineage)
-                # This ensures strain_canonical is always used even if COALESCE returns None
-                if db_name and (db_lineage or product_sovereign or strain_sovereign or strain_canonical):
-                    lineage_clean = db_lineage  # May be None if COALESCE found nothing, but we still have strain_canonical
-                    # Store lineage with source info for proper field assignment
-                    # CRITICAL: product_sovereign/strain_sovereign/strain_canonical are already cleaned and uppercased by _clean_lineage
-                    # They are either a clean uppercase string or None - do NOT call str() again
-                    # CRITICAL FIX: Clean DOH value for storage
-                    doh_clean = None
-                    if doh_raw is not None:
-                        doh_str = str(doh_raw).strip().upper()
-                        if doh_str and doh_str not in ['', 'NAN', 'NONE', 'NULL']:
-                            doh_clean = doh_str
-                    
+                if db_name and (strain_canonical or doh_clean):
                     lineage_info = {
-                        'lineage': lineage_clean,  # May be None - that's OK, we'll use strain_canonical
-                        'has_sovereign': bool(product_sovereign or strain_sovereign),
-                        'product_sovereign': product_sovereign,  # Already cleaned - don't call str() again
-                        'strain_sovereign': strain_sovereign,    # Already cleaned - don't call str() again
-                        'strain_canonical': strain_canonical,    # Already cleaned - don't call str() again
-                        'doh': doh_clean  # CRITICAL: Store DOH value for tag update
+                        'strain_canonical': strain_canonical,
+                        'doh': doh_clean
                     }
-                    # Map by original name (exact match like docx generation)
                     lineage_map[db_name] = lineage_info
-                    # Also map by normalized name for lookup
-                    normalized = product_db._normalize_product_name(db_name)
-                    lineage_map[normalized] = lineage_info
+                    lineage_map[product_db._normalize_product_name(db_name)] = lineage_info
                     lineage_map[db_name.lower().strip()] = lineage_info
-                    
-                    # Log what we found for debugging
-                    if strain_canonical:
-                        logging.debug(f"✅ Found lineage for '{db_name}': strain_canonical={strain_canonical}, db_lineage={db_lineage}, sovereign={product_sovereign or strain_sovereign}, strain='{product_strain}'")
-                    elif db_lineage:
-                        logging.debug(f"✅ Found lineage for '{db_name}': db_lineage={db_lineage} (no strain_canonical), strain='{product_strain}'")
-                    
-                    # CRITICAL: Also map by strain name if available (for products that don't match by name)
-                    # This allows "Blackberry Kush Infused Pre-Roll by 2727 - 1g" to match via strain "Blackberry Kush"
-                    if product_strain and product_db:
-                        try:
-                            normalized_strain = product_db._normalize_strain_name(product_strain) if hasattr(product_db, '_normalize_strain_name') else str(product_strain).strip().lower()
-                            if normalized_strain and normalized_strain not in lineage_map:
-                                # Map strain name to lineage info for fallback matching
-                                lineage_map[normalized_strain] = lineage_info
-                                lineage_map[product_strain.lower().strip()] = lineage_info
-                                logging.debug(f"✅ Also mapped strain '{product_strain}' (normalized: '{normalized_strain}') to lineage for fallback matching")
-                        except Exception as strain_map_err:
-                            logging.debug(f"Could not map strain '{product_strain}': {strain_map_err}")
-                elif db_name:
-                    logging.debug(f"⚠️ No lineage data found for '{db_name}' in database")
+                    logging.debug(f"✅ Found '{db_name}': lineage={strain_canonical}, doh={doh_clean}")
         
         if not lineage_map:
             logging.warning(f"⚠️ LINEAGE ALIGNMENT: No lineage found in database for {len(product_names)} products. Products searched: {product_names[:5]}...")
