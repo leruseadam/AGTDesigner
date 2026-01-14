@@ -113,35 +113,26 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
-  // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-  // sovereign_lineage can be from current session edits OR preexisting saved values
-  // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
-  let rawLineage = '';
-  if (tag.sovereign_lineage) {
-    const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty AND not 'NONE' (legacy placeholder value)
-    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
-      rawLineage = tag.sovereign_lineage;
-    }
+  // Match backend/output: lineage = sovereign_lineage if present and valid, else canonical_lineage, else currentLineage, else Lineage, else lineage
+  let lineage = '';
+  if (tag.sovereign_lineage && String(tag.sovereign_lineage).trim().toUpperCase() !== 'NONE') {
+    lineage = String(tag.sovereign_lineage).trim();
+  } else if (tag.canonical_lineage && String(tag.canonical_lineage).trim().toUpperCase() !== 'NONE') {
+    lineage = String(tag.canonical_lineage).trim();
+  } else if (tag.currentLineage && String(tag.currentLineage).trim().toUpperCase() !== 'NONE') {
+    lineage = String(tag.currentLineage).trim();
+  } else if (tag.Lineage && String(tag.Lineage).trim().toUpperCase() !== 'NONE') {
+    lineage = String(tag.Lineage).trim();
+  } else if (tag.lineage && String(tag.lineage).trim().toUpperCase() !== 'NONE') {
+    lineage = String(tag.lineage).trim();
   }
-  if (!rawLineage) rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
-  
-  // Normalize to uppercase, but keep the original value
-  let lineage = String(rawLineage || '').trim().toUpperCase();
-  
-  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
-  // This ensures UI displays correct lineage even if database/Excel has wrong value
-  const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
+  lineage = lineage.toUpperCase();
+  // Match backend/output: classic types never show MIXED/THC, always HYBRID; non-classic types: MIXED/THC = THC, CBD/CBG/CBN = CBD
+  const productType = tag['Product Type*'] || tag.Type || '';
   const isClassicType = productType && getUniqueLineages(productType).length === 6;
   if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
     lineage = 'HYBRID';
-  }
-  
-  // CRITICAL FIX: For NON-classic types, restrict lineage to THC/CBD only
-  // If database/Excel provides SATIVA/INDICA/HYBRID/MIXED, coerce to THC in UI
-  // BUT: Check product name for CBD/CBG/CBN to identify CBD products
-  if (!isClassicType && lineage) {
+  } else if (!isClassicType && lineage) {
     const normalized = (typeof window.normalizeLineageValue !== 'undefined')
       ? window.normalizeLineageValue(lineage)
       : String(lineage).trim().toUpperCase();
@@ -151,26 +142,19 @@ function createTagRow(tag) {
     if (isCbdProduct) {
       lineage = 'CBD';
     } else {
-      // Everything else (SATIVA, INDICA, HYBRID, MIXED, etc.) becomes THC
       lineage = 'THC';
     }
   }
-  
-  // Only convert if lineage is empty
   if (!lineage) {
-    lineage = isClassicType ? 'HYBRID' : 'MIXED';
+    lineage = isClassicType ? 'HYBRID' : 'THC';
   }
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
-    let tagName;
-    if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
-        tagName = tag.displayName || tag['Product Name*'] || tag.ProductName || '';
-    } else {
-        tagName = tag['Product Name*'] || tag.ProductName || '';
-    }
-    
-    const brand = tag['Product Brand'] || tag.Brand || '';
+    // Match backend/output: tagName = displayName if present, else Product Name*, else ProductName
+    let tagName = tag.displayName || tag['Product Name*'] || tag.ProductName || '';
+    // Match backend/output: brand = Product Brand if present, else brand
+    const brand = tag['Product Brand'] || tag.brand || tag.Brand || '';
     
     // Extract weight units from multiple possible sources
     let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
