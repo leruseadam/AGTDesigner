@@ -113,6 +113,20 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
+    // Use output-matching priority: sovereign_lineage, then canonical_lineage, then currentLineage, then Lineage, then lineage
+    let lineage = '';
+    if (tag.sovereign_lineage && String(tag.sovereign_lineage).trim().toUpperCase() !== 'NONE') {
+      lineage = String(tag.sovereign_lineage).trim();
+    } else if (tag.canonical_lineage && String(tag.canonical_lineage).trim().toUpperCase() !== 'NONE') {
+      lineage = String(tag.canonical_lineage).trim();
+    } else if (tag.currentLineage && String(tag.currentLineage).trim().toUpperCase() !== 'NONE') {
+      lineage = String(tag.currentLineage).trim();
+    } else if (tag.Lineage && String(tag.Lineage).trim().toUpperCase() !== 'NONE') {
+      lineage = String(tag.Lineage).trim();
+    } else if (tag.lineage && String(tag.lineage).trim().toUpperCase() !== 'NONE') {
+      lineage = String(tag.lineage).trim();
+    }
+    lineage = lineage.toUpperCase();
   // Match backend/output: lineage = sovereign_lineage if present and valid, else canonical_lineage, else currentLineage, else Lineage, else lineage
   let lineage = '';
   if (tag.sovereign_lineage && String(tag.sovereign_lineage).trim().toUpperCase() !== 'NONE') {
