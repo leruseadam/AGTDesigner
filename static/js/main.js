@@ -7579,11 +7579,33 @@ const TagManager = {
         // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
         let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
         
-        // SIMPLE: Use sovereign_lineage from backend (strains table), fallback to Excel
-        // ONLY use sovereign_lineage from backend (strains table)
+        // CRITICAL FIX: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
+        // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+        // sovereign_lineage can be from current session edits OR preexisting saved values
+        // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
         let tagDbLineage = '';
+        // Priority 1: sovereign_lineage (manual edits OR preexisting from database - highest priority)
+        // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
         if (tag.sovereign_lineage) {
-            const val = String(tag.sovereign_lineage).trim().toUpperCase();
+            const sovereignRaw = String(tag.sovereign_lineage).trim();
+            // Use if not empty AND not 'NONE' (legacy placeholder value)
+            if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+                tagDbLineage = sovereignRaw.toUpperCase().trim();
+            }
+        }
+        // Priority 2: currentLineage (matches DOCX COALESCE result)
+        if (!tagDbLineage && tag.currentLineage) {
+            const val = tag.currentLineage.toString().toUpperCase().trim();
+            if (val && val !== 'NONE') tagDbLineage = val;
+        }
+        // Priority 3: canonical_lineage (strain canonical fallback)
+        if (!tagDbLineage && tag.canonical_lineage) {
+            const val = tag.canonical_lineage.toString().toUpperCase().trim();
+            if (val && val !== 'NONE') tagDbLineage = val;
+        }
+        // Priority 4: Excel Lineage (final fallback)
+        if (!tagDbLineage && tag.Lineage) {
+            const val = tag.Lineage.toString().toUpperCase().trim();
             if (val && val !== 'NONE') tagDbLineage = val;
         }
         
@@ -7592,23 +7614,30 @@ const TagManager = {
         const isParaType = lowerType === 'paraphernalia' || lowerType.includes('paraphernalia');
 
         if (tagDbLineage) {
-            // Database lineage exists - use it exclusively
+            // Database lineage exists - use it exclusively, ignore Excel Lineage completely
             if (tagDbLineage !== normalizedLineage) {
-                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.sovereign_lineage)`);
+                const source = tag.sovereign_lineage ? 'sovereign_lineage' : (tag.canonical_lineage ? 'canonical_lineage' : 'currentLineage');
+                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.${source})`);
             }
             normalizedLineage = tagDbLineage;  // Force database lineage (same priority as docx generation)
+
             // CRITICAL FIX: For NON-CLASSIC types, convert classic lineages to THC/CBD only
+            // Non-classic types (edibles, tinctures, etc.) should only show THC or CBD
             if (!isClassicType && !isParaType) {
+                // Check if this is a CBD product by name (product name contains CBD/CBG/CBN)
                 const nameLower = (displayName || '').toLowerCase();
                 const isCbdProduct = normalizedLineage === 'CBD' ||
                                      normalizedLineage === 'CBD_BLEND' ||
                                      nameLower.includes('cbd') ||
                                      nameLower.includes('cbg') ||
                                      nameLower.includes('cbn');
+
                 if (isCbdProduct) {
+                    // CBD products should show CBD
                     normalizedLineage = 'CBD';
                     console.log(`🔄 NON-CLASSIC CBD: "${displayName}" → CBD`);
                 } else {
+                    // Everything else (SATIVA, INDICA, HYBRID, etc.) becomes THC for non-classic
                     const classicLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
                     if (classicLineages.includes(normalizedLineage)) {
                         console.log(`🔄 NON-CLASSIC THC: "${displayName}" ${normalizedLineage} → MIXED`);
@@ -7619,7 +7648,13 @@ const TagManager = {
         } else {
             // No database lineage - log warning for debugging
             if (isForSelectedTags && normalizedLineage && normalizedLineage !== 'MIXED') {
-                console.warn(`⚠️ Selected tag "${displayName}" has no sovereign_lineage, using: ${normalizedLineage}`);
+                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
+                console.warn(`⚠️ Tag object lineage fields:`, {
+                    canonical_lineage: tag.canonical_lineage || 'MISSING',
+                    currentLineage: tag.currentLineage || 'MISSING',
+                    Lineage: tag.Lineage || 'MISSING',
+                    lineage: tag.lineage || 'MISSING'
+                });
             }
         }
         
@@ -7656,6 +7691,7 @@ const TagManager = {
         if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
+            // CRITICAL FIX: Classic types should never get MIXED - use HYBRID instead
             if (isClassicType) {
                 lineageSelect.value = 'HYBRID';
                 console.log(`🔄 DROPDOWN FIX: Mapped invalid lineage "${normalizedLineage}" to HYBRID for classic type "${displayName}"`);
@@ -7665,20 +7701,48 @@ const TagManager = {
         } else if (normalizedLineage && uniqueLineages.some(opt => opt.value === normalizedLineage)) {
             lineageSelect.value = normalizedLineage;
         } else {
-            // Fallback: If no valid lineage, leave dropdown unset (do not use canonical_lineage/currentLineage)
-            lineageSelect.value = '';
+            // CRITICAL FIX: Smart fallback based on product type and lineage
+            if (isClassicType) {
+                // Classic types default to HYBRID
+                lineageSelect.value = 'HYBRID';
+                console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for classic type "${displayName}", defaulting to HYBRID`);
+            } else if (isParaType || normalizedLineage === 'PARA' || normalizedLineage === 'PARAPHERNALIA') {
+                // Paraphernalia items should always use PARA
+                lineageSelect.value = 'PARA';
+            } else if (normalizedLineage === 'HYBRID' && !isClassicType) {
+                // Non-classic items with HYBRID lineage (likely accessories/paraphernalia misclassified)
+                // Silently default to MIXED (THC) without warning since HYBRID isn't valid for non-classic
+                lineageSelect.value = 'MIXED';
+            } else {
+                // All other non-classic types default to MIXED
+                lineageSelect.value = 'MIXED';
+                console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for "${displayName}", defaulting to MIXED`);
+            }
         }
         
         // CRITICAL DEBUG: Log what lineage value was set in dropdown
         if (isForSelectedTags) {
             console.log(`🎯 Set lineage dropdown for SELECTED TAG "${displayName}":`, {
                 'sovereign_lineage': tag.sovereign_lineage || 'NONE',
+                'canonical_lineage': tag.canonical_lineage || 'NONE',
+                'currentLineage': tag.currentLineage || 'NONE',
+                'Excel Lineage': tag.Lineage || 'NONE',
                 'resolved lineage (used)': normalizedLineage,
                 'dropdown value set to': lineageSelect.value
             });
+            // Check if database lineage (sovereign/canonical) differs from Excel
+            const dbLin = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase();
+            if (dbLin && tag.Lineage) {
+                const excelLin = (tag.Lineage || '').toString().toUpperCase();
+                if (dbLin !== excelLin) {
+                    console.warn(`⚠️ LINEAGE MISMATCH for "${displayName}": database=${dbLin}, excel=${excelLin}, dropdown should show=${dbLin}, actual=${lineageSelect.value}`);
+                }
+            }
         }
         verboseLog(`🎯 Set lineage dropdown for ${displayName}:`, {
-            'sovereign_lineage': tag.sovereign_lineage,
+            'tag.canonical_lineage': tag.canonical_lineage,
+            'tag.currentLineage': tag.currentLineage,
+            'tag.Lineage': tag.Lineage,
             'resolved lineage': normalizedLineage,
             'dropdown value': lineageSelect.value
         });
