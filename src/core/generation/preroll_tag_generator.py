@@ -437,7 +437,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                     'product_name': record.get('Product Name*', record.get('ProductName', '')),
                     'description': record.get('Description', ''),
                     'price': record.get('Price', ''),
-                    'weight': record.get('CombinedWeight', record.get('WeightUnits', '')),
+                    # For preroll products, replace 'weight' with JointRatio in output
+                    'weight': record.get('JointRatio', record.get('CombinedWeight', record.get('WeightUnits', ''))),
                     'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
                     'brand': record.get('Product Brand', record.get('ProductBrand', '')),
                     'strain': record.get('Product Strain', ''),
