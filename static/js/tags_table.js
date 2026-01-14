@@ -210,11 +210,14 @@ function createTagRow(tag) {
                           const productType = tag['Product Type*'] || tag.Type || '';
                           const uniqueLineages = getUniqueLineages(productType);
                           
-                          // CRITICAL FIX: Convert MIXED/THC to HYBRID for classic types before dropdown creation
+                          // CRITICAL FIX: Convert MIXED to appropriate value based on product type
                           let dropdownLineage = lineage;
                           const isClassicType = productType && getUniqueLineages(productType).length === 6;
                           if (isClassicType && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
                             dropdownLineage = 'HYBRID';
+                          } else if (!isClassicType && dropdownLineage === 'MIXED') {
+                            // For non-classic types, convert MIXED to THC
+                            dropdownLineage = 'THC';
                           }
                           
                           // CRITICAL FIX: Normalize dropdownLineage for comparison (must match normalization used for options)
