@@ -1186,28 +1186,6 @@ def process_chunk(args):
                 if not lineage_val:
                     lineage_val = 'HYBRID'
                     logger.warning(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name}' (strain: '{product_strain}'), using default '{lineage_val}'")
-                    else:
-                        # No product name, try strain-level only from cache
-                        if product_strain:
-                            strain_info = strain_info_cache.get(product_strain)
-                            if strain_info:
-                                preferred = (
-                                    strain_info.get('display_lineage') or
-                                    strain_info.get('sovereign_lineage') or
-                                    strain_info.get('canonical_lineage')
-                                )
-                                if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
-                                    lineage_val = str(preferred).upper()
-                                else:
-                                    lineage_val = 'HYBRID'  # Default for classic types
-                            else:
-                                lineage_val = 'HYBRID'  # Default for classic types
-                        else:
-                            lineage_val = 'HYBRID'  # Default for classic types
-                except Exception as e:
-                    # Use default for classic types if database lookup fails
-                    lineage_val = 'HYBRID'  # Default for classic types
-                    logger.warning(f"⚠️ DOCX LINEAGE ERROR: Database lookup failed for '{product_name}', using default '{lineage_val}' - Error: {e}")
             else:
                 # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 
                 # use brand name for Lineage, not the raw Excel lineage value

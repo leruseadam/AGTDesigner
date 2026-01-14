@@ -7489,15 +7489,19 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
 
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
-                # For classic types: strain_canonical is the source of truth from strains table
+                # Priority: strains table > Excel
                 strain_canonical = lineage_info.get('strain_canonical')
                 doh_value = lineage_info.get('doh')
 
-                # SIMPLE: Use strain_canonical from strains table as the ONE lineage value
+                # Use strain_canonical from strains table as primary source
                 lineage = strain_canonical
                 if not lineage:
-                    # Fallback to db_lineage only if no strain data
-                    lineage = lineage_info.get('lineage')
+                    # Fallback to Excel lineage for new products not in strains table
+                    excel_lineage = tag.get('Lineage') or tag.get('Lineage*') or tag.get('lineage')
+                    if excel_lineage:
+                        lineage = str(excel_lineage).strip().upper()
+                        if lineage in ['', 'NONE', 'NAN', 'NULL']:
+                            lineage = None
 
                 # Set DOH from database if Excel doesn't have a value
                 excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
@@ -7511,7 +7515,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 if lineage and (force_overwrite or not tag.get('sovereign_lineage')):
                     tag['sovereign_lineage'] = lineage
                     aligned_count += 1
-                    logging.info(f"✅ ALIGNED '{name}': sovereign_lineage='{lineage}' (from strains table)")
+                    source = 'strains table' if strain_canonical else 'Excel'
+                    logging.info(f"✅ ALIGNED '{name}': sovereign_lineage='{lineage}' (from {source})")
             else:
                 # Old format: lineage_info is a string
                 lineage = str(lineage_info).strip().upper() if lineage_info else None
