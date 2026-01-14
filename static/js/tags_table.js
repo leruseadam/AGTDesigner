@@ -79,7 +79,7 @@ if (typeof window.normalizeLineageValue === 'undefined') {
 const getUniqueLineages = (productType = null) => {
   // Valid lineages for classic types (from VALID_CLASSIC_LINEAGES constant)
   const VALID_CLASSIC_LINEAGES = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD'];
-  const NONCLASSIC_LINEAGES = ['CBD','MIXED']; // Only CBD and MIXED for nonclassic types (edibles, tinctures, topicals, etc.)
+  const NONCLASSIC_LINEAGES = ['THC','CBD']; // Only THC and CBD for nonclassic types (MIXED = THC)
   const PARAPHERNALIA_LINEAGES = ['PARA']; // Only PARA for paraphernalia
   
   // If productType is provided, filter lineages based on type
@@ -138,17 +138,18 @@ function createTagRow(tag) {
     lineage = 'HYBRID';
   }
   
-  // CRITICAL FIX: For NON-classic types, restrict lineage to MIXED/CBD only
-  // If database/Excel provides SATIVA/INDICA/HYBRID, coerce to MIXED in UI
+  // CRITICAL FIX: For NON-classic types, restrict lineage to THC/CBD only
+  // If database/Excel provides SATIVA/INDICA/HYBRID/MIXED, coerce to THC in UI
   if (!isClassicType && lineage) {
     const normalized = (typeof window.normalizeLineageValue !== 'undefined')
       ? window.normalizeLineageValue(lineage)
       : String(lineage).trim().toUpperCase();
-    // Only allow CBD or MIXED for non-classic types
-    if (normalized !== 'CBD' && normalized !== 'MIXED') {
-      lineage = 'MIXED';
+    // Only allow CBD or THC for non-classic types (MIXED = THC)
+    if (normalized === 'CBD') {
+      lineage = 'CBD';
     } else {
-      lineage = normalized;
+      // Everything else (SATIVA, INDICA, HYBRID, MIXED, etc.) becomes THC
+      lineage = 'THC';
     }
   }
   
@@ -338,23 +339,24 @@ class TagsTable {
     lineage = 'HYBRID';
   }
   
-  // CRITICAL FIX: For NON-classic types, restrict lineage to MIXED/CBD only
-  // If database/Excel provides SATIVA/INDICA/HYBRID, coerce to MIXED in UI
+  // CRITICAL FIX: For NON-classic types, restrict lineage to THC/CBD only
+  // If database/Excel provides SATIVA/INDICA/HYBRID/MIXED, coerce to THC in UI
   if (!isClassicType && lineage) {
     const normalized = (typeof window.normalizeLineageValue !== 'undefined')
       ? window.normalizeLineageValue(lineage)
       : String(lineage).trim().toUpperCase();
-    // Only allow CBD or MIXED for non-classic types
-    if (normalized !== 'CBD' && normalized !== 'MIXED') {
-      lineage = 'MIXED';
+    // Only allow CBD or THC for non-classic types (MIXED = THC)
+    if (normalized === 'CBD') {
+      lineage = 'CBD';
     } else {
-      lineage = normalized;
+      // Everything else (SATIVA, INDICA, HYBRID, MIXED, etc.) becomes THC
+      lineage = 'THC';
     }
   }
   
   // Only set default if lineage is completely missing
   if (!lineage) {
-    lineage = isClassicType ? 'HYBRID' : 'MIXED';
+    lineage = isClassicType ? 'HYBRID' : 'THC';
   }
   
     // CRITICAL FIX: Check all possible DOH field variations (uppercase and lowercase)
@@ -464,13 +466,19 @@ class TagsTable {
     // Note: productType already declared above (line 233), reusing it here
     const uniqueLineages = getUniqueLineages(productType);
     
-    // CRITICAL FIX: Ensure lineage is converted from MIXED/THC to HYBRID for classic types before dropdown creation
+    // CRITICAL FIX: Ensure lineage is converted from MIXED to HYBRID for classic types before dropdown creation
     // This ensures the dropdown shows the correct selected value
     let dropdownLineage = lineage;
     const isClassicTypeForDropdown = productType && getUniqueLineages(productType).length === 6;
-    if (isClassicTypeForDropdown && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
+    if (isClassicTypeForDropdown && dropdownLineage === 'MIXED') {
       dropdownLineage = 'HYBRID';
       console.log(`🔄 TAGS_TABLE DROPDOWN FIX: Converting ${lineage} to HYBRID for classic type "${tagName}" (${productType})`);
+    }
+    
+    // CRITICAL FIX: For non-classic types, convert MIXED to THC for dropdown display
+    if (!isClassicTypeForDropdown && dropdownLineage === 'MIXED') {
+      dropdownLineage = 'THC';
+      console.log(`🔄 TAGS_TABLE NON-CLASSIC FIX: Converting MIXED to THC for non-classic type "${tagName}" (${productType})`);
     }
     
     // CRITICAL FIX: Normalize dropdownLineage for comparison (must match normalization used for options)
