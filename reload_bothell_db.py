@@ -16,21 +16,26 @@ def normalize_lineage(lineage):
     if pd.isna(lineage) or not lineage or str(lineage).strip() == '':
         return 'HYBRID'
     
-    lineage_str = str(lineage).strip().upper()
+    lineage_str = str(lineage).strip().lower()
     
-    # Map variations
-    if lineage_str in ['SATIVA', 'INDICA', 'HYBRID', 'CBD', 'MIXED']:
-        if lineage_str == 'MIXED':
-            return 'HYBRID'  # Convert MIXED to HYBRID for classic types
-        return lineage_str
+    # Map variations to standard uppercase formats
+    lineage_map = {
+        'sativa': 'SATIVA',
+        'indica': 'INDICA',
+        'hybrid': 'HYBRID',
+        'cbd': 'CBD',
+        'mixed': 'HYBRID',
+        'sativa_hybrid': 'HYBRID/SATIVA',
+        'sativa hybrid': 'HYBRID/SATIVA',
+        'hybrid/sativa': 'HYBRID/SATIVA',
+        'sativa/hybrid': 'HYBRID/SATIVA',
+        'indica_hybrid': 'HYBRID/INDICA',
+        'indica hybrid': 'HYBRID/INDICA',
+        'hybrid/indica': 'HYBRID/INDICA',
+        'indica/hybrid': 'HYBRID/INDICA',
+    }
     
-    if lineage_str in ['HYBRID/SATIVA', 'SATIVA/HYBRID']:
-        return 'HYBRID/SATIVA'
-    
-    if lineage_str in ['HYBRID/INDICA', 'INDICA/HYBRID']:
-        return 'HYBRID/INDICA'
-    
-    return 'HYBRID'  # Default
+    return lineage_map.get(lineage_str, 'HYBRID')  # Default to HYBRID
 
 print("Loading Excel file...")
 df = pd.read_excel(EXCEL_FILE, engine='openpyxl')
