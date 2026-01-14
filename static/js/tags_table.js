@@ -334,17 +334,12 @@ class TagsTable {
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
   
-  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
-  // This ensures UI displays correct lineage even if database/Excel has wrong value
+  // CRITICAL FIX: Only convert MIXED to HYBRID for classic types, and MIXED to THC for non-classic types
   const productType = tag['Product Type*'] || tag.Type || '';
   const isClassicType = productType && getUniqueLineages(productType).length === 6;
-  if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+  if (isClassicType && lineage === 'MIXED') {
     lineage = 'HYBRID';
-  }
-  
-  // CRITICAL FIX: For NON-classic types, restrict lineage to THC/CBD only
-  // If database/Excel provides SATIVA/INDICA/HYBRID/MIXED, coerce to THC in UI
-  if (!isClassicType && lineage) {
+  } else if (!isClassicType && lineage) {
     const normalized = (typeof window.normalizeLineageValue !== 'undefined')
       ? window.normalizeLineageValue(lineage)
       : String(lineage).trim().toUpperCase();
@@ -356,7 +351,6 @@ class TagsTable {
       lineage = 'THC';
     }
   }
-  
   // Only set default if lineage is completely missing
   if (!lineage) {
     lineage = isClassicType ? 'HYBRID' : 'THC';
