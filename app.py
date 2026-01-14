@@ -7654,7 +7654,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
                         tag['DOH'] = doh_value
                         tag['DOH Compliant (Yes/No)'] = doh_value
-                        logging.debug(f"✅ Set DOH from database: '{name}' -> '{doh_value}'")
+                        logging.info(f"✅ Set DOH from strains table: '{name}' -> '{doh_value}'")
+                    else:
+                        logging.debug(f"📋 Keeping Excel DOH for '{name}': '{excel_doh_clean}' (ignoring database DOH: '{doh_value}')")
+                else:
+                    logging.debug(f"ℹ️ No DOH value in strains table for '{name}'")
                 
                 # CRITICAL: Log to verify user's lineage is being used
                 if strain_canonical_value:

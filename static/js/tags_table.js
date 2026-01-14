@@ -357,8 +357,9 @@ class TagsTable {
     lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
   
-    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
-    console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
+    // CRITICAL FIX: Check all possible DOH field variations (uppercase and lowercase)
+    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || 'No';
+    console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus, '(from DOH:', tag.DOH, ', DOH Compliant:', tag['DOH Compliant (Yes/No)'], ', doh:', tag.doh, ')'); // Debug log
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;
