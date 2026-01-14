@@ -10182,29 +10182,19 @@ def get_available_tags():
                 cached_tags = file_cached_tags
         
         if cached_tags and fast_load:
-            logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            # CRITICAL: Check if lineage was recently updated - if so, re-align to get fresh DB lineage
-            lineage_update_ts = session.get('lineage_update_timestamp')
-            needs_realignment = False
-            if lineage_update_ts:
-                try:
-                    # Within 10 minutes of lineage update, re-align cached tags
-                    needs_realignment = (time.time() - float(lineage_update_ts)) < 600
-                except Exception:
-                    needs_realignment = False
+            logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load")
+            # CRITICAL FIX: ALWAYS re-align with database to ensure correct lineage and DOH data
+            needs_realignment = True  # Always align to ensure data correctness
             
             if needs_realignment:
-                logging.info(f"🔄 Recent lineage update detected - re-aligning cached tags with database")
+                logging.info(f"🔄 ALWAYS re-aligning cached tags with database for data correctness")
                 try:
                     store_name_align = get_current_store_name(allow_fallback=False) or store_name
                     if store_name_align:
                         cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to ensure cache uses the correct timestamp-based key
-                        # The timestamp changes the cache key, so old cached tags won't be used
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
+                        logging.info("✅ Re-aligned cached tags with database lineage")
                 except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+                    logging.warning(f"Could not align cached tags: {align_err}")
             
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
@@ -10215,42 +10205,23 @@ def get_available_tags():
                 'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
             })
         
-        # CRITICAL: Also return cached tags even when fast_load=0, but re-align if lineage updated OR first request of session
-        # This handles the case where UI sends fast_load=0 to ensure fresh lineage
+        # CRITICAL: Also return cached tags even when fast_load=0, but ALWAYS re-align with database
+        # This ensures correct lineage and DOH data from database
         if cached_tags and not fast_load:
-            logging.info(f"⚡ CACHE HIT (slow mode): Checking if re-alignment needed for {len(cached_tags)} tags")
+            logging.info(f"⚡ CACHE HIT (slow mode): Re-aligning {len(cached_tags)} tags with database")
             
-            # Check if this is first request of session (no tags_aligned_this_session flag)
-            first_request = not session.get('tags_aligned_this_session', False)
-            
-            # Check if lineage was recently updated
-            lineage_update_ts = session.get('lineage_update_timestamp')
-            needs_realignment = first_request  # Always align on first request
-            if lineage_update_ts:
-                try:
-                    # Within 10 minutes of lineage update, re-align cached tags
-                    if (time.time() - float(lineage_update_ts)) < 600:
-                        needs_realignment = True
-                except Exception:
-                    pass
+            # CRITICAL FIX: ALWAYS align on EVERY request to ensure data correctness
+            needs_realignment = True  # Always align to ensure fresh database data
             
             if needs_realignment:
-                reason = "first request of session" if first_request else "recent lineage update"
-                logging.info(f"🔄 SLOW MODE: Re-aligning cached tags with database ({reason})")
+                logging.info(f"🔄 SLOW MODE: ALWAYS re-aligning cached tags with database")
                 try:
                     store_name_align = get_current_store_name(allow_fallback=False) or store_name
                     if store_name_align:
                         cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # Mark that we've aligned tags in this session
-                        session['tags_aligned_this_session'] = True
-                        session.modified = True
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to change the cache key and ensure fresh database lineage
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
+                        logging.info("✅ Re-aligned cached tags with database lineage")
                 except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
-            else:
-                logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
+                    logging.warning(f"Could not align cached tags: {align_err}")
             
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
@@ -10350,34 +10321,25 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
-                # CRITICAL PERFORMANCE FIX: Skip database enrichment when fast_load=1 UNLESS lineage was manually updated
-                # This provides instant tag loading (<1 second) on PythonAnywhere
-                # EXCEPTION: If lineage_update_timestamp exists, ALWAYS apply database lineage (manual changes must show)
-                has_lineage_updates = bool(session.get('lineage_update_timestamp'))
-                skip_db_enrichment = fast_load and not has_lineage_updates
-                if skip_db_enrichment:
-                    logging.info(f"⚡ PERFORMANCE: Skipping database enrichment (fast_load=1 for speed)")
-                elif has_lineage_updates:
-                    logging.info(f"🔄 LINEAGE UPDATE DETECTED: Forcing database enrichment even with fast_load=1")
+                # CRITICAL FIX: ALWAYS enrich with database - NEVER skip this
+                # Database has the correct lineage and DOH data
+                # Excel data is incomplete and should only provide product names/weights
+                skip_db_enrichment = False
+                logging.info(f"🔄 ENFORCING database enrichment for ALL tags (ensuring correct lineage and DOH)")
 
                 # CRITICAL: Strip Excel Lineage field - UI uses DATABASE LINEAGE ONLY
-                # Excel lineage is NEVER used - all lineage comes from database via:
-                # 1. Background refresh (fast_load=0) or
-                # 2. Explicit lineage alignment via _align_tags_with_db_lineage()
+                # Excel lineage is NEVER used - all lineage comes from database
                 for tag in simple_tags:
                     # Remove all Excel lineage fields to ensure database is the only source
                     tag.pop('Lineage', None)
                     tag.pop('lineage', None)
                     tag.pop('Lineage*', None)
                 
-                if not skip_db_enrichment:
-                    logging.info(f"🗑️ STRIPPED Excel Lineage from {len(simple_tags)} tags - will enrich with DATABASE lineage only")
+                logging.info(f"🗑️ STRIPPED Excel Lineage from {len(simple_tags)} tags - will enrich with DATABASE lineage only")
 
-                # CRITICAL: Enrich with database lineage after stripping Excel lineage
-                # This populates currentLineage, canonical_lineage from database
-                # Enrich with database lineage ONLY (don't add database products)
-                # PERFORMANCE: Skip database enrichment if fast_load=1 and cache exists
-                if not skip_db_enrichment:
+                # CRITICAL: ALWAYS enrich with database lineage and DOH data
+                # This populates currentLineage, canonical_lineage, sovereign_lineage, DOH, doh_status
+                if True:  # Always execute database enrichment
                     try:
                         product_db = get_product_database(store_name)
                         if product_db and simple_tags:
