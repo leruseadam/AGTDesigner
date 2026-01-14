@@ -1,20 +1,3 @@
-@app.route('/api/available-tags', methods=['GET'])
-def api_available_tags():
-    """Serve available tags from persistent cache for fast UI refresh."""
-    store_name = session.get('selected_store') or 'default'
-    cached_tags = load_available_tags_cache(store_name)
-    if cached_tags:
-        return jsonify({'success': True, 'tags': cached_tags})
-    # If no cache, recompute and save
-    try:
-        processor = get_excel_processor()
-        tags = processor.get_available_tags(filters=None)
-        safe_tags = make_json_safe(tags)
-        save_available_tags_cache(store_name, safe_tags)
-        return jsonify({'success': True, 'tags': safe_tags})
-    except Exception as e:
-        logging.error(f"Error generating available tags: {e}")
-        return jsonify({'success': False, 'error': str(e)})
 # AGT Label Maker - Consolidated Web Application
 # ============================================
 # This is the sole, consolidated web version of the AGT Label Maker application.
@@ -7519,19 +7502,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         tag['DOH'] = doh_value
                         tag['DOH Compliant (Yes/No)'] = doh_value
                         logging.debug(f"✅ Set DOH from database for sovereign lineage: '{name}' -> '{doh_value}'")
+                    else:
+                        # If both Excel and database DOH are missing/invalid, set a default placeholder
+                        tag['DOH'] = 'MISSING'
+                        tag['DOH Compliant (Yes/No)'] = 'MISSING'
+                        logging.debug(f"⚠️ DOH missing for '{name}', set to 'MISSING'")
                 else:
                     # Excel DOH is present and valid, keep it
                     tag['DOH'] = excel_doh_clean
                     tag['DOH Compliant (Yes/No)'] = excel_doh_clean
                     logging.debug(f"✅ Set DOH from Excel for sovereign lineage: '{name}' -> '{excel_doh_clean}'")
-
-                # ...existing code...
-                    tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
-                    tag['lineage'] = effective_lineage.lower()
-                            # If both Excel and database DOH are missing/invalid, set a default placeholder
-                            tag['DOH'] = 'MISSING'
-                            tag['DOH Compliant (Yes/No)'] = 'MISSING'
-                            logging.debug(f"⚠️ DOH missing for '{name}', set to 'MISSING'")
                 
                 # CRITICAL FIX: Set DOH field from database if available
                 # Only set DOH if Excel doesn't already have a value (Excel is source of truth)
@@ -7552,15 +7532,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     logging.info(f"✅ FINAL: '{name}' -> canonical_lineage='{tag.get('canonical_lineage')}', effective_lineage='{effective_lineage}', strain_canonical='{strain_canonical_value}' (user's strains sheet)")
                 
                 aligned_count += 1
-            else:
-                # Old format (backward compatibility)
-                db_lineage = lineage_info
-                        else:
-                            # If both Excel and database DOH are missing/invalid, set a default placeholder
-                            tag['DOH'] = tag.get('DOH', 'MISSING')
-                            tag['DOH Compliant (Yes/No)'] = tag.get('DOH Compliant (Yes/No)', 'MISSING')
-                            if tag['DOH'] == 'MISSING':
-                                logging.debug(f"⚠️ DOH missing for '{name}', set to 'MISSING'")
                 
                 # CRITICAL FIX: NEVER use MIXED - skip it entirely
                 if db_lineage and str(db_lineage).strip().upper() == 'MIXED':
@@ -10169,8 +10140,26 @@ def process_database_product_for_api(db_product):
         processed_product['currentLineage'] = lineage_value
 
     return processed_product
-@app.route('/api/available-tags', methods=['GET'])
-def get_available_tags():
+def register_available_tags_route(app):
+    @app.route('/api/available-tags', methods=['GET'])
+    def api_available_tags():
+        """Serve available tags from persistent cache for fast UI refresh."""
+        store_name = session.get('selected_store') or 'default'
+        cached_tags = load_available_tags_cache(store_name)
+        if cached_tags:
+            return jsonify({'success': True, 'tags': cached_tags})
+        # If no cache, recompute and save
+        try:
+            processor = get_excel_processor()
+            tags = processor.get_available_tags(filters=None)
+            safe_tags = make_json_safe(tags)
+            save_available_tags_cache(store_name, safe_tags)
+            return jsonify({'success': True, 'tags': safe_tags})
+        except Exception as e:
+            logging.error(f"Error generating available tags: {e}")
+            return jsonify({'success': False, 'error': str(e)})
+
+# ...existing code...
     store_name = None
     cache_store_name = 'global'
     try:
