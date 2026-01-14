@@ -343,7 +343,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         representative['Product Name*'] = group_display_name
         representative['ProductName'] = group_display_name
         # Also update DescAndWeight - use group name only (no individual product details)
-        representative['DescAndWeight'] = group_display_name
+        joint_ratio = representative.get('JointRatio', '')
+        if joint_ratio:
+            representative['DescAndWeight'] = f"{group_display_name} {joint_ratio}"
+        else:
+            representative['DescAndWeight'] = group_display_name
         
         # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
         # Check if this is an infused preroll group and set Product Type* accordingly
