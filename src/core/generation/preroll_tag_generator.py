@@ -429,17 +429,18 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 else:
                     doh_display = doh_str
 
-            item = {
-                'product_name': record.get('Product Name*', record.get('ProductName', '')),
-                'description': record.get('Description', ''),
-                'price': record.get('Price', ''),
-                'weight': record.get('CombinedWeight', record.get('WeightUnits', '')),
-                'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
-                'brand': record.get('Product Brand', record.get('ProductBrand', '')),
-                'strain': record.get('Product Strain', ''),
-                'lineage': record.get('Lineage', ''),
-                'doh': doh_display,
-            }
+                item = {
+                    'product_name': record.get('Product Name*', record.get('ProductName', '')),
+                    'description': record.get('Description', ''),
+                    'price': record.get('Price', ''),
+                    'weight': record.get('CombinedWeight', record.get('WeightUnits', '')),
+                    'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
+                    'brand': record.get('Product Brand', record.get('ProductBrand', '')),
+                    'strain': record.get('Product Strain', ''),
+                    'lineage': record.get('Lineage', ''),
+                    'joint_ratio': record.get('JointRatio', ''),
+                    'doh': doh_display,
+                }
             group_items.append(item)
         logging.info(f"PREROLL GROUP: Storing {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_id: {original_group_id}, vendor: {vendor})")
         
