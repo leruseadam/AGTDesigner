@@ -2724,7 +2724,7 @@ class ProductDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date, sovereign_lineage
+                SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date, sovereign_lineage, doh_status, high_cbd, high_thc
                 FROM strains 
                 WHERE normalized_name = ?
             ''', (normalized_name,))
@@ -2733,6 +2733,9 @@ class ProductDatabase:
                 strain_id = result[0]
                 sovereign_lineage = result[7]
                 canonical_lineage = result[2]
+                doh_status = result[8] if len(result) > 8 else None
+                high_cbd = result[9] if len(result) > 9 else 0
+                high_thc = result[10] if len(result) > 10 else 0
                 # Use sovereign_lineage if set, else mode, else canonical
                 display_lineage = None
                 if sovereign_lineage and sovereign_lineage.strip():
@@ -2761,7 +2764,10 @@ class ProductDatabase:
                     'first_seen_date': result[5],
                     'last_seen_date': result[6],
                     'sovereign_lineage': sovereign_lineage,
-                    'display_lineage': display_lineage
+                    'display_lineage': display_lineage,
+                    'doh_status': doh_status,
+                    'high_cbd': high_cbd,
+                    'high_thc': high_thc
                 }
                 self._set_cache(cache_key, strain_info, ttl=300)
                 return strain_info
