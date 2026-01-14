@@ -1,3 +1,22 @@
+// Utility: Map full lineage names to abbreviations
+function abbreviateLineage(lineage) {
+    const map = {
+        'SATIVA': 'S',
+        'INDICA': 'I',
+        'HYBRID': 'H',
+        'CBD': 'CBD',
+        'IH': 'IH',
+        'SH': 'SH',
+        'HYBRID/INDICA': 'IH',
+        'HYBRID/SATIVA': 'SH',
+        'MIXED': 'THC',
+        'PARA': 'PARA',
+        'CBD_BLEND': 'CBD',
+    };
+    if (!lineage) return '';
+    const key = lineage.toString().trim().toUpperCase();
+    return map[key] || key;
+}
 // Detect Windows platform for optimizations
 const isWindows = navigator.platform.toLowerCase().includes('win') ||
                  navigator.userAgent.toLowerCase().includes('windows');
@@ -1378,7 +1397,7 @@ const TagManager = {
             }
             
             // ⚡ AUTO CACHE VERSIONING: Increment on data structure changes
-            const CACHE_VERSION = 3; // Increment when tag structure changes
+            const CACHE_VERSION = 4; // Increment when tag structure changes (v4: Added DOH and Brand fields)
 
             // CRITICAL FIX: Clear old cache entries FIRST to make space
             // Also clear cache from different platform (Chrome sync can share cache between Mac/Windows)
@@ -1411,10 +1430,14 @@ const TagManager = {
             // OPTIMIZATION: Store only essential fields to reduce cache size
             // This reduces cache from ~14MB to ~2-3MB for 5000 tags
             // CRITICAL FIX: Preserve vendor data in cache to prevent "Unknown Vendor" cycling
+            // CRITICAL FIX: Also preserve DOH and Brand fields for instant filter population
             const optimizedTags = tags.map(tag => {
                 // Keep only essential fields needed for display and filtering
                 // CRITICAL: Preserve vendor in multiple formats to ensure it's found during extraction
                 const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || tag['ProductVendor'] || '';
+                // CRITICAL: Preserve DOH and Brand fields for instant filter population
+                const doh = tag['DOH'] || tag['doh'] || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || '';
+                const brand = tag['Product Brand'] || tag['ProductBrand'] || tag['productBrand'] || tag['Brand'] || tag['brand'] || '';
                 return {
                     'Product Name*': tag['Product Name*'],
                     'Vendor*': tag['Vendor*'] || vendor, // Preserve vendor
@@ -1423,15 +1446,20 @@ const TagManager = {
                     'ProductVendor': tag['ProductVendor'] || vendor, // Preserve ProductVendor
                     vendor: vendor, // Also store as lowercase for extraction
                     'Brand*': tag['Brand*'],
+                    'Product Brand': brand || tag['Product Brand'] || '', // CRITICAL: Preserve Product Brand
+                    'ProductBrand': brand || tag['ProductBrand'] || '', // CRITICAL: Preserve ProductBrand
+                    'productBrand': brand || tag['productBrand'] || '', // CRITICAL: Preserve productBrand
                     'Product Type*': tag['Product Type*'],
                     'Weight*': tag['Weight*'],
                     'Price*': tag['Price*'],
-                    // CRITICAL: Always preserve sovereign_lineage (highest priority - user-edited lineage)
-                    sovereign_lineage: tag.sovereign_lineage,
                     'Lineage*': tag['Lineage*'] || tag.Lineage || tag.canonical_lineage || tag.currentLineage,
                     canonical_lineage: tag.canonical_lineage || tag.currentLineage,
                     currentLineage: tag.currentLineage || tag.canonical_lineage,
                     Lineage: tag.Lineage || tag.canonical_lineage || tag.currentLineage,
+                    'DOH': doh || tag['DOH'] || '', // CRITICAL: Preserve DOH
+                    'doh': doh || tag['doh'] || '', // CRITICAL: Preserve doh
+                    'DOH Compliant (Yes/No)': doh || tag['DOH Compliant (Yes/No)'] || '', // CRITICAL: Preserve DOH Compliant (Yes/No)
+                    'DOH Compliant': doh || tag['DOH Compliant'] || '', // CRITICAL: Preserve DOH Compliant
                     // Keep source for JSON matched tags
                     Source: tag.Source,
                     // Keep SKU if present (used for matching)
@@ -1542,7 +1570,7 @@ const TagManager = {
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
         
         // CRITICAL: After lineage updates, still use cache for instant loading but refresh in background
-        // This ensures instant UI while fresh sovereign_lineage is fetched from database
+        // This ensures instant UI while fresh canonical_lineage is fetched from database
         const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
         const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
 
@@ -1561,15 +1589,15 @@ const TagManager = {
             // Cache found - use it for instant load (works for both Excel and database mode)
             console.log(`✅ Found ${cachedTags.length} cached tags - using for instant load`);
             
-            // PERFORMANCE: Check if cache needs background refresh (old format without sovereign_lineage)
-            // Still use cache for instant display - background refresh will update with sovereign_lineage
+            // PERFORMANCE: Check if cache needs background refresh (old format)
+            // Still use cache for instant display - background refresh will update with database lineage
             const needsBackgroundRefresh = cachedTags._needsBackgroundRefresh || false;
             if (needsBackgroundRefresh) {
-                console.log('⚡ Using old cache for instant display - will refresh in background for sovereign_lineage');
+                console.log('⚡ Using old cache for instant display - will refresh in background for canonical_lineage');
             }
             
             // PERFORMANCE: Optimize normalization - batch process for faster execution
-            // CRITICAL FIX: Preserve vendor data and sovereign_lineage when loading from cache
+            // CRITICAL FIX: Preserve vendor data and user-edited lineage when loading from cache
             // This ensures vendor is available when tags are organized, and user-edited lineage is preserved
             // Use efficient batch processing instead of forEach for better performance
             const tagCount = cachedTags.length;
@@ -1594,37 +1622,6 @@ const TagManager = {
                     if (!tag.price) tag.price = price;
                 }
                 
-                // CRITICAL: Preserve and prioritize sovereign_lineage (user-edited lineage - highest priority)
-                // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage
-                const sovereignRaw = tag.sovereign_lineage;
-                if (sovereignRaw) {
-                    const sovereignStr = String(sovereignRaw).trim();
-                    const sovereignUpper = sovereignStr.toUpperCase();
-                    if (sovereignStr && sovereignUpper !== 'NONE') {
-                        // Set sovereign_lineage as the primary lineage (highest priority)
-                        tag.sovereign_lineage = sovereignUpper;
-                        tag.canonical_lineage = sovereignUpper;
-                        tag.currentLineage = sovereignUpper;
-                        tag.Lineage = sovereignUpper;
-                        tag.lineage = sovereignUpper.toLowerCase();
-                        tag['Lineage*'] = sovereignUpper;
-                    }
-                }
-                
-                if (!tag.sovereign_lineage && (tag.canonical_lineage || tag.currentLineage)) {
-                    // No sovereign_lineage in cache - use canonical/current from database
-                    // Will be enriched with sovereign_lineage from database when fresh tags arrive
-                    const dbLineage = String(tag.canonical_lineage || tag.currentLineage).trim().toUpperCase();
-                    tag.canonical_lineage = dbLineage;
-                    tag.currentLineage = dbLineage;
-                    tag.Lineage = dbLineage;
-                    tag.lineage = dbLineage.toLowerCase();
-                    tag['Lineage*'] = dbLineage;
-                    // Clear any stale sovereign_lineage if it exists but is invalid
-                    if (tag.sovereign_lineage && (String(tag.sovereign_lineage).trim() === '' || String(tag.sovereign_lineage).trim().toUpperCase() === 'NONE')) {
-                        delete tag.sovereign_lineage;
-                    }
-                }
             }
             // Use the same rendering logic as below
             verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
@@ -1644,8 +1641,26 @@ const TagManager = {
 
             const availableContainer = document.getElementById('availableTags');
             if (availableContainer) {
+                // CRITICAL FIX: Check if tags need enrichment (missing DOH/Brand fields)
+                const sampleTag = cachedTags[0];
+                const needsEnrichment = !sampleTag || 
+                    (!sampleTag['Product Brand'] && !sampleTag['ProductBrand'] && !sampleTag['productBrand']) ||
+                    (!sampleTag['DOH'] && !sampleTag['doh'] && !sampleTag['DOH Compliant (Yes/No)'] && !sampleTag['DOH Compliant']);
+                
                 this._updateAvailableTags(cachedTags, null);
                 verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+                
+                // CRITICAL FIX: If tags need enrichment, fetch enriched tags in background
+                if (needsEnrichment) {
+                    console.log('🔄 Cached tags missing DOH/Brand - fetching enriched tags in background...');
+                    setTimeout(() => {
+                        // Use forceReload=true to bypass cache and get enriched tags from backend
+                        this.fetchAndUpdateAvailableTags(true).catch(err => {
+                            console.warn('⚠️ Background enrichment failed (non-critical):', err);
+                        });
+                    }, 500); // Small delay to let UI render first
+                }
+                
                 // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
                 // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
                 const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
@@ -1665,8 +1680,26 @@ const TagManager = {
                 }, 50);
             } else {
                 const renderCachedTags = () => {
+                    // CRITICAL FIX: Check if tags need enrichment (missing DOH/Brand fields)
+                    const sampleTag = cachedTags[0];
+                    const needsEnrichment = !sampleTag || 
+                        (!sampleTag['Product Brand'] && !sampleTag['ProductBrand'] && !sampleTag['productBrand']) ||
+                        (!sampleTag['DOH'] && !sampleTag['doh'] && !sampleTag['DOH Compliant (Yes/No)'] && !sampleTag['DOH Compliant']);
+                    
                     this._updateAvailableTags(cachedTags, null);
                     verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
+                    
+                    // CRITICAL FIX: If tags need enrichment, fetch enriched tags in background
+                    if (needsEnrichment) {
+                        console.log('🔄 Cached tags missing DOH/Brand - fetching enriched tags in background...');
+                        setTimeout(() => {
+                            // Use forceReload=true to bypass cache and get enriched tags from backend
+                            this.fetchAndUpdateAvailableTags(true).catch(err => {
+                                console.warn('⚠️ Background enrichment failed (non-critical):', err);
+                            });
+                        }, 500); // Small delay to let UI render first
+                    }
+                    
                     // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
                     // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
                     const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
@@ -1693,16 +1726,16 @@ const TagManager = {
             }
             
             // PERFORMANCE: Trigger background refresh if cache is old format OR if lineage was recently updated (non-blocking)
-            // This will update cache with sovereign_lineage from database without blocking UI
+            // This will update cache with database lineage without blocking UI
             if (needsBackgroundRefresh || hasRecentLineageUpdate) {
                 const refreshReason = needsBackgroundRefresh ? 'old cache format' : 'recent lineage update';
                 console.log(`🔄 Triggering background refresh to update cache (reason: ${refreshReason})...`);
                 // Don't await - let it run in background without blocking
-                // Use forceReload=true to bypass cache and get fresh data with sovereign_lineage
+                // Use forceReload=true to bypass cache and get fresh data
                 setTimeout(() => {
-                    // Background refresh - fetch fresh data to update cache with sovereign_lineage
+                    // Background refresh - fetch fresh data to update cache
                     this.fetchAndUpdateAvailableTags(true).catch(err => {
-                        console.warn('Background refresh for sovereign_lineage failed (non-critical):', err);
+                        console.warn('Background refresh for database lineage failed (non-critical):', err);
                     });
                 }, 500); // Small delay to let UI render first, then refresh in background
             }
@@ -1868,12 +1901,11 @@ const TagManager = {
                     : null;
 
                 if (tag) {
-                    // Get updated lineage
-                    const lineage = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED')
-                        .toString().trim().toUpperCase();
-
+                    // Get updated lineage and abbreviate for display
+                    let lineageValue = tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED';
+                    const lineageAbbr = abbreviateLineage(lineageValue);
                     // Update data-lineage attribute (CSS will handle color change)
-                    tagItem.setAttribute('data-lineage', lineage);
+                    tagItem.setAttribute('data-lineage', lineageAbbr);
                 }
             });
 
@@ -1933,7 +1965,12 @@ const TagManager = {
                 
                 // CRITICAL FIX: Ensure all lineage fields are present for color generation
                 // The backend expects canonical_lineage, currentLineage, or Lineage fields
-                const lineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                // CRITICAL: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
+                let lineageValue = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                if (lineageValue && lineageValue.toString().toUpperCase().trim() === 'SOVEREIGN') {
+                    lineageValue = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                }
+                const lineage = lineageValue;
                 if (!tag.canonical_lineage) tag.canonical_lineage = lineage;
                 if (!tag.currentLineage) tag.currentLineage = lineage;
                 if (!tag.Lineage) tag.Lineage = lineage;
@@ -2195,7 +2232,27 @@ const TagManager = {
             if (tag.Lineage) lineages.add(tag.Lineage);
             if (tag.WeightUnits || tag.CombinedWeight) weights.add(tag.WeightUnits || tag.CombinedWeight);
             if (tag.ProductStrain || tag['Product Strain']) strains.add(tag.ProductStrain || tag['Product Strain']);
-            if (tag.DOH || tag['DOH Compliant (Yes/No)']) doh.add(tag.DOH || tag['DOH Compliant (Yes/No)']);
+            // DOH - CRITICAL FIX: Check all possible DOH field variations and normalize values
+            const tagDoh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || '';
+            if (tagDoh && tagDoh.trim()) {
+                const dohTrimmed = tagDoh.trim().toUpperCase();
+                // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE
+                let normalizedDoh = dohTrimmed;
+                if (dohTrimmed === 'YES' || dohTrimmed === 'Y') {
+                    normalizedDoh = 'DOH';
+                } else if (dohTrimmed === 'NO' || dohTrimmed === 'N' || dohTrimmed === 'NONE') {
+                    normalizedDoh = 'NONE';
+                } else if (dohTrimmed.includes('DOH') || dohTrimmed === 'COMPLIANT') {
+                    normalizedDoh = 'DOH';
+                }
+                // Add normalized value (including NONE so users can filter for non-DOH products)
+                if (normalizedDoh) {
+                    doh.add(normalizedDoh);
+                }
+            } else {
+                // If no DOH value, add NONE so users can filter for products without DOH status
+                doh.add('NONE');
+            }
             if (tag.Ratio) highCbd.add(tag.Ratio);
         });
 
@@ -2282,10 +2339,14 @@ const TagManager = {
             // Get values for this filter type
             const fieldValues = filters[filterType] || [];
             
-            // DEBUG: Log brand filter specifically
+            // DEBUG: Log brand and DOH filters specifically
             if (filterType === 'brand') {
                 console.log(`🔍 Updating brand filter with ${fieldValues.length} values:`, fieldValues.slice(0, 10));
                 console.log(`🔍 Brand filter element exists:`, !!filterElement);
+            }
+            if (filterType === 'doh') {
+                console.log(`🔍 Updating DOH filter with ${fieldValues.length} values:`, fieldValues.slice(0, 10));
+                console.log(`🔍 DOH filter element exists:`, !!filterElement);
             }
             
             const values = new Set();
@@ -2295,12 +2356,19 @@ const TagManager = {
                 }
             });
             
-            // DEBUG: Log if brand filter ends up empty
+            // DEBUG: Log if brand or DOH filter ends up empty
             if (filterType === 'brand') {
                 if (values.size === 0) {
                     console.warn('⚠️ Brand filter has no values after processing! Field values:', fieldValues);
                 } else {
                     console.log(`✅ Brand filter will have ${values.size} options after processing`);
+                }
+            }
+            if (filterType === 'doh') {
+                if (values.size === 0) {
+                    console.warn('⚠️ DOH filter has no values after processing! Field values:', fieldValues);
+                } else {
+                    console.log(`✅ DOH filter will have ${values.size} options after processing`);
                 }
             }
             
@@ -2382,12 +2450,20 @@ const TagManager = {
             filterElement.innerHTML = '';
             filterElement.appendChild(fragment);
             
-            // DEBUG: Verify brand filter was populated
+            // DEBUG: Verify brand and DOH filters were populated
             if (filterType === 'brand') {
                 const optionCount = filterElement.options.length;
                 console.log(`✅ Brand filter dropdown now has ${optionCount} options (including "All")`);
                 if (optionCount <= 1) {
                     console.error('❌ Brand filter dropdown is empty or only has "All" option!');
+                    console.error('   Expected values:', sortedValues.slice(0, 20));
+                }
+            }
+            if (filterType === 'doh') {
+                const optionCount = filterElement.options.length;
+                console.log(`✅ DOH filter dropdown now has ${optionCount} options (including "All")`);
+                if (optionCount <= 1) {
+                    console.error('❌ DOH filter dropdown is empty or only has "All" option!');
                     console.error('   Expected values:', sortedValues.slice(0, 20));
                 }
             }
@@ -2519,7 +2595,48 @@ const TagManager = {
                 return;
             }
 
-            console.log('⚡⚡⚡ Building filter options from', tags.length, 'cached tags');
+            console.log('⚡⚡⚡ Building filter options from', tags.length, 'tags');
+            
+            // CRITICAL FIX: Log sample tag structure to diagnose brand extraction issues
+            if (tags.length > 0) {
+                const sampleTag = tags[0];
+                const brandFields = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('brand'));
+                const dohFields = Object.keys(sampleTag).filter(k => k.toLowerCase().includes('doh'));
+                console.log('🔍 Sample tag brand fields:', brandFields);
+                console.log('🔍 Sample tag DOH fields:', dohFields);
+                if (brandFields.length > 0) {
+                    brandFields.forEach(field => {
+                        const value = sampleTag[field];
+                        console.log(`   - ${field}: "${value}" (type: ${typeof value})`);
+                    });
+                } else {
+                    console.warn('⚠️ No brand fields found in sample tag! Available keys:', Object.keys(sampleTag).slice(0, 20));
+                }
+                if (dohFields.length > 0) {
+                    dohFields.forEach(field => {
+                        const value = sampleTag[field];
+                        console.log(`   - ${field}: "${value}" (type: ${typeof value})`);
+                    });
+                } else {
+                    console.warn('⚠️ No DOH fields found in sample tag! Available keys:', Object.keys(sampleTag).slice(0, 20));
+                }
+                
+                // Check first 5 tags for brand/DOH values
+                let brandsFound = 0;
+                let dohsFound = 0;
+                for (let i = 0; i < Math.min(5, tags.length); i++) {
+                    const tag = tags[i];
+                    const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
+                    const doh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || '';
+                    if (brand && String(brand).trim() && String(brand).trim().toLowerCase() !== 'none' && String(brand).trim().toLowerCase() !== 'null') {
+                        brandsFound++;
+                    }
+                    if (doh && String(doh).trim() && String(doh).trim().toUpperCase() !== 'NONE' && String(doh).trim().toUpperCase() !== 'NO') {
+                        dohsFound++;
+                    }
+                }
+                console.log(`📊 First 5 tags: ${brandsFound} have brands, ${dohsFound} have DOH values`);
+            }
             
             // Extract unique values for each filter
             const filterOptions = {
@@ -2560,14 +2677,23 @@ const TagManager = {
                 // Check in order of most likely to least likely
                 let brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || tag['brand'] || '';
                 
+                // Normalize brand value - handle None, null, undefined, empty strings
+                if (brand === null || brand === undefined || brand === 'None' || brand === 'null' || brand === 'undefined') {
+                    brand = '';
+                }
+                brand = String(brand || '').trim();
+                
                 // If still empty, check all keys that might contain brand
-                if (!brand || !brand.trim()) {
+                if (!brand) {
                     const brandKeys = Object.keys(tag).filter(k => k.toLowerCase().includes('brand'));
                     for (const key of brandKeys) {
                         const value = tag[key];
                         if (value && typeof value === 'string' && value.trim()) {
-                            brand = value;
-                            break;
+                            const normalizedValue = String(value).trim();
+                            if (normalizedValue && normalizedValue.toLowerCase() !== 'none' && normalizedValue.toLowerCase() !== 'null' && normalizedValue.toLowerCase() !== 'undefined') {
+                                brand = normalizedValue;
+                                break;
+                            }
                         }
                     }
                 }
@@ -2590,7 +2716,8 @@ const TagManager = {
                 if (brand && brand.trim() && brand.trim().length > 0) {
                     const brandTrimmed = brand.trim();
                     // Only exclude if it's explicitly empty or just whitespace
-                    if (brandTrimmed.toLowerCase() !== 'unknown' && brandTrimmed.toLowerCase() !== 'n/a' && brandTrimmed.toLowerCase() !== 'none') {
+                    const brandLower = brandTrimmed.toLowerCase();
+                    if (brandLower !== 'unknown' && brandLower !== 'n/a' && brandLower !== 'none' && brandLower !== 'null' && brandLower !== 'undefined' && brandLower !== '') {
                         filterOptions.brand.add(brandTrimmed);
                     } else if (filterOptions.brand.size === 0) {
                         // If no brands found yet, include even "unknown" to show something
@@ -2647,9 +2774,31 @@ const TagManager = {
                     filterOptions.price.add('No Price');
                 }
                 
-                // DOH
-                const doh = tag.DOH || tag['DOH Compliant (Yes/No)'] || '';
-                if (doh && doh.trim()) filterOptions.doh.add(doh.trim());
+                // DOH - CRITICAL FIX: Check all possible DOH field variations and normalize values
+                let doh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || tag['DOH*'] || '';
+                
+                // Normalize DOH value - handle None, null, undefined, empty strings
+                if (doh === null || doh === undefined || doh === 'None' || doh === 'null' || doh === 'undefined') {
+                    doh = '';
+                }
+                doh = String(doh || '').trim();
+                
+                if (doh) {
+                    const dohTrimmed = doh.trim().toUpperCase();
+                    // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE
+                    let normalizedDoh = dohTrimmed;
+                    if (dohTrimmed === 'YES' || dohTrimmed === 'Y') {
+                        normalizedDoh = 'DOH';
+                    } else if (dohTrimmed === 'NO' || dohTrimmed === 'N' || dohTrimmed === 'NONE') {
+                        normalizedDoh = 'NONE';
+                    } else if (dohTrimmed.includes('DOH') || dohTrimmed === 'COMPLIANT') {
+                        normalizedDoh = 'DOH';
+                    }
+                    // Only add non-empty, non-NONE values
+                    if (normalizedDoh && normalizedDoh !== 'NONE' && normalizedDoh !== 'NULL' && normalizedDoh !== 'UNDEFINED') {
+                        filterOptions.doh.add(normalizedDoh);
+                    }
+                }
                 
                 // High CBD (check product type)
                 if (productType && productType.toLowerCase().includes('high cbd')) {
@@ -2702,10 +2851,20 @@ const TagManager = {
             
             // DEBUG: Log first few brands to verify they're being extracted
             if (filterOptionsArrays.brand.length > 0) {
-                console.log('🔍 First 10 brands found:', filterOptionsArrays.brand.slice(0, 10));
+                console.log('✅ Brand filter: Found', filterOptionsArrays.brand.length, 'brands:', filterOptionsArrays.brand.slice(0, 10));
             } else {
                 console.warn('⚠️ No brands found in tags! Checking sample tag structure...');
                 if (tags.length > 0) {
+                    // Check multiple tags for brands
+                    let brandsInTags = [];
+                    for (let i = 0; i < Math.min(10, tags.length); i++) {
+                        const tag = tags[i];
+                        const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
+                        if (brand && String(brand).trim()) {
+                            brandsInTags.push({ index: i, name: tag['Product Name*'], brand: String(brand).trim() });
+                        }
+                    }
+                    console.warn('⚠️ Brands in first 10 tags:', brandsInTags);
                     const sampleTag = tags[0];
                     console.log('Sample tag keys:', Object.keys(sampleTag));
                     console.log('Sample tag brand fields:', {
@@ -2714,6 +2873,32 @@ const TagManager = {
                         'productBrand': sampleTag.productBrand,
                         'Brand': sampleTag.Brand,
                         'brand': sampleTag.brand
+                    });
+                }
+            }
+            
+            // DEBUG: Log DOH values found
+            if (filterOptionsArrays.doh.length > 0) {
+                console.log('✅ DOH filter: Found', filterOptionsArrays.doh.length, 'DOH values:', filterOptionsArrays.doh.slice(0, 10));
+            } else {
+                console.warn('⚠️ No DOH values found in tags! Checking sample tag structure...');
+                if (tags.length > 0) {
+                    // Check multiple tags for DOH
+                    let dohsInTags = [];
+                    for (let i = 0; i < Math.min(10, tags.length); i++) {
+                        const tag = tags[i];
+                        const doh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || '';
+                        if (doh && String(doh).trim() && String(doh).trim().toUpperCase() !== 'NONE' && String(doh).trim().toUpperCase() !== 'NO') {
+                            dohsInTags.push({ index: i, name: tag['Product Name*'], doh: String(doh).trim() });
+                        }
+                    }
+                    console.warn('⚠️ DOH values in first 10 tags:', dohsInTags);
+                    const sampleTag = tags[0];
+                    console.log('Sample tag DOH fields:', {
+                        'DOH': sampleTag.DOH,
+                        'doh': sampleTag.doh,
+                        'DOH Compliant (Yes/No)': sampleTag['DOH Compliant (Yes/No)'],
+                        'DOH Compliant': sampleTag['DOH Compliant']
                     });
                 }
             }
@@ -2739,13 +2924,60 @@ const TagManager = {
 
             // Update filters immediately
             console.log('⚡⚡⚡ Calling updateFilters with built options...');
+            console.log('   Brand options:', filterOptionsArrays.brand.length, 'brands:', filterOptionsArrays.brand.slice(0, 10));
             verboseLog('⚡⚡⚡ Calling updateFilters with built options...');
             this.updateFilters(filterOptionsArrays, true);
             console.log('⚡⚡⚡ updateFilters completed');
+            
+            // CRITICAL FIX: Verify brand filter was populated after update
+            setTimeout(() => {
+                const brandFilterElement = document.getElementById('brandFilter');
+                if (brandFilterElement) {
+                    const optionCount = brandFilterElement.options.length;
+                    if (optionCount <= 1 && filterOptionsArrays.brand.length > 0) {
+                        console.error('❌ Brand filter not populated! Expected', filterOptionsArrays.brand.length, 'options but got', optionCount);
+                        console.error('   First 10 brands:', filterOptionsArrays.brand.slice(0, 10));
+                        // Retry populating brand filter
+                        this.updateFilters(filterOptionsArrays, true);
+                    } else if (optionCount > 1) {
+                        console.log('✅ Brand filter populated successfully with', optionCount, 'options');
+                    }
+                }
+            }, 100);
             verboseLog('⚡⚡⚡ updateFilters completed');
 
             // CRITICAL FIX: Reset flag after completion
             this._isBuildingFilters = false;
+            
+            // CRITICAL FIX: Verify brand and DOH filters were populated, retry if needed
+            setTimeout(() => {
+                const brandFilterElement = document.getElementById('brandFilter');
+                const dohFilterElement = document.getElementById('dohFilter');
+                
+                if (brandFilterElement && filterOptionsArrays.brand.length > 0) {
+                    const optionCount = brandFilterElement.options.length;
+                    if (optionCount <= 1) {
+                        console.warn('⚠️ Brand filter empty after buildFilterOptionsFromTags! Retrying...');
+                        console.warn('   Expected brands:', filterOptionsArrays.brand.length, 'First 10:', filterOptionsArrays.brand.slice(0, 10));
+                        // Force rebuild filters
+                        if (!this._isBuildingFilters) {
+                            this.updateFilters(filterOptionsArrays, true);
+                        }
+                    }
+                }
+                
+                if (dohFilterElement && filterOptionsArrays.doh.length > 0) {
+                    const optionCount = dohFilterElement.options.length;
+                    if (optionCount <= 1) {
+                        console.warn('⚠️ DOH filter empty after buildFilterOptionsFromTags! Retrying...');
+                        console.warn('   Expected DOH values:', filterOptionsArrays.doh.length, 'First 10:', filterOptionsArrays.doh.slice(0, 10));
+                        // Force rebuild filters
+                        if (!this._isBuildingFilters) {
+                            this.updateFilters(filterOptionsArrays, true);
+                        }
+                    }
+                }
+            }, 200);
 
         } catch (error) {
             console.warn('Failed to build filter options from tags:', error);
@@ -2837,6 +3069,7 @@ const TagManager = {
                 productType: document.getElementById('productTypeFilter')?.value || '',
                 lineage: document.getElementById('lineageFilter')?.value || '',
                 weight: document.getElementById('weightFilter')?.value || '',
+                price: document.getElementById('priceFilter')?.value || '',
                 doh: document.getElementById('dohFilter')?.value || '',
                 highCbd: document.getElementById('highCbdFilter')?.value || ''
             };
@@ -2884,8 +3117,8 @@ const TagManager = {
                 
                 // Check lineage filter - only apply if not empty and not "All"
                 if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                    // CRITICAL: Prioritize manual edits (sovereign_lineage), then use DOCX output lineage
-                    const tagLineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                    // Use canonical_lineage, currentLineage, or Lineage in priority order
+                    const tagLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                     if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) {
                         return false;
                     }
@@ -2919,6 +3152,35 @@ const TagManager = {
                     ].some(weight => weight === filterWeight);
                     
                     if (!weightMatches) {
+                        return false;
+                    }
+                }
+                
+                // Check price filter - only apply if not empty and not "All"
+                if (currentFilters.price && currentFilters.price.trim() !== '' && currentFilters.price.toLowerCase() !== 'all') {
+                    // Extract price from tag
+                    const rawPrice = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag.price || 
+                                    tag['Product Price'] || tag['ProductPrice'] || tag['Unit Price'] || tag['UnitPrice'] || 
+                                    tag['Retail Price'] || tag['RetailPrice'] || '';
+                    
+                    let tagPriceFormatted = 'No Price';
+                    if (rawPrice) {
+                        const priceStr = rawPrice.toString().trim();
+                        if (priceStr && priceStr !== '' && priceStr !== 'nan' && priceStr.toLowerCase() !== 'none') {
+                            // Try to extract numeric price value (handles $10, 10.00, $10.50, etc.)
+                            const priceMatch = priceStr.match(/[\d.]+/);
+                            if (priceMatch) {
+                                const priceNum = parseFloat(priceMatch[0]);
+                                if (!isNaN(priceNum) && priceNum >= 0) {
+                                    // Format price: omit .00 for whole numbers, show 2 decimals for non-whole numbers
+                                    tagPriceFormatted = priceNum % 1 === 0 ? `$${Math.round(priceNum)}` : `$${priceNum.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Compare formatted price with filter
+                    if (tagPriceFormatted !== currentFilters.price) {
                         return false;
                     }
                 }
@@ -3008,8 +3270,8 @@ const TagManager = {
                 }
                 
                 // Always add lineage options (show all lineages)
-                // CRITICAL: Prioritize manual edits (sovereign_lineage), then use DOCX output lineage
-                const rawLineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                // Use canonical_lineage, currentLineage, or Lineage in priority order
+                const rawLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (rawLineage) {
                     availableOptions.lineage.add(rawLineage);
                 }
@@ -3101,7 +3363,7 @@ const TagManager = {
                 if (normalizedTagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) return false;
             }
             if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                // CRITICAL: Prioritize manual edits (sovereign_lineage), then use DOCX output lineage
+                // CRITICAL: Prioritize manual edits, then use DOCX output lineage
                 const tagLineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) return false;
             }
@@ -3355,7 +3617,11 @@ const TagManager = {
                     window._brandFilterDebugCount++;
                 }
                 
-                if (tagBrand.toLowerCase() !== brandFilter.toLowerCase()) {
+                // CRITICAL FIX: Normalize both values for comparison (trim whitespace, handle case)
+                const normalizedTagBrand = tagBrand.toLowerCase().trim();
+                const normalizedBrandFilter = brandFilter.toLowerCase().trim();
+                
+                if (normalizedTagBrand !== normalizedBrandFilter) {
                     return false;
                 }
             }
@@ -3380,7 +3646,7 @@ const TagManager = {
             
             // Check lineage filter - only apply if not empty and not "All"
             if (lineageFilter && lineageFilter.trim() !== '' && lineageFilter.toLowerCase() !== 'all') {
-                // CRITICAL: Prioritize manual edits (sovereign_lineage), then use DOCX output lineage
+                // CRITICAL: Prioritize manual edits, then use DOCX output lineage
                 const tagLineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
                 if (tagLineage.toLowerCase() !== lineageFilter.toLowerCase()) {
                     return false;
@@ -3452,20 +3718,35 @@ const TagManager = {
             
             // Check DOH filter - only apply if not empty and not "All"
             if (dohFilter && dohFilter.trim() !== '' && dohFilter.toLowerCase() !== 'all') {
-                const tagDoh = (tag.DOH || tag.doh || '').toString().trim().toUpperCase();
+                // CRITICAL FIX: Check all possible DOH field names (same as badge rendering)
+                const tagDoh = (tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '').toString().trim().toUpperCase();
                 const filterDoh = dohFilter.toString().trim().toUpperCase();
                 
                 // Normalize DOH values for comparison
-                // Map common variations: "Yes" -> "DOH", "No" -> "NONE"
+                // Map common variations: "Yes"/"Y" -> "DOH", "No"/"N" -> "NONE"
                 let normalizedTagDoh = tagDoh;
-                if (tagDoh === 'YES') {
+                if (tagDoh === 'YES' || tagDoh === 'Y') {
                     normalizedTagDoh = 'DOH';
-                } else if (tagDoh === 'NO') {
+                } else if (tagDoh === 'NO' || tagDoh === 'N' || tagDoh === 'NONE') {
                     normalizedTagDoh = 'NONE';
                 }
                 
+                // Normalize filter value too
+                let normalizedFilterDoh = filterDoh;
+                if (filterDoh === 'YES' || filterDoh === 'Y') {
+                    normalizedFilterDoh = 'DOH';
+                } else if (filterDoh === 'NO' || filterDoh === 'N' || filterDoh === 'NONE') {
+                    normalizedFilterDoh = 'NONE';
+                }
+                
                 // Check if filter matches (exact match or normalized match)
-                if (normalizedTagDoh !== filterDoh && tagDoh !== filterDoh) {
+                // Also handle case where filter is "DOH" but tag has "YES" or vice versa
+                const matches = normalizedTagDoh === normalizedFilterDoh || 
+                               tagDoh === filterDoh ||
+                               normalizedTagDoh === filterDoh ||
+                               tagDoh === normalizedFilterDoh;
+                
+                if (!matches) {
                     return false;
                 }
             }
@@ -5297,6 +5578,18 @@ const TagManager = {
                 
                 // Hide loading splash only after tags actually appear in DOM
                 this._waitForTagsToAppear();
+                
+                // CRITICAL FIX: Refresh DOH badges after tags are rendered
+                // Use multiple timeouts to ensure badges appear even if DOH enrichment is delayed
+                setTimeout(() => {
+                    this.refreshAllDohBadges();
+                }, 100); // Immediate refresh
+                setTimeout(() => {
+                    this.refreshAllDohBadges();
+                }, 300); // Second refresh
+                setTimeout(() => {
+                    this.refreshAllDohBadges();
+                }, 600); // Third refresh
             });
         });
         
@@ -5374,6 +5667,21 @@ const TagManager = {
         // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
         // Tags need to appear immediately after upload, not on next frame
         this._performUpdateAvailableTags(originalTags, filteredTags);
+        
+        // CRITICAL FIX: Refresh DOH badges after filters are applied
+        // This ensures badges appear when filters trigger re-rendering
+        // Use requestAnimationFrame to ensure DOM is fully updated before refreshing badges
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                this.refreshAllDohBadges();
+            }, 50);
+            setTimeout(() => {
+                this.refreshAllDohBadges();
+            }, 200);
+            setTimeout(() => {
+                this.refreshAllDohBadges();
+            }, 500);
+        });
     },
     
     _performUpdateAvailableTags(originalTags, filteredTags = null) {
@@ -5619,12 +5927,69 @@ const TagManager = {
         
         // PERFORMANCE: Build filters immediately from loaded tags (instant population)
         // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
-        if (tags && tags.length > 0 && !this._filtersBuiltFromTags) {
+        // CRITICAL FIX: Always rebuild if filters are empty, regardless of _filtersBuiltFromTags flag
+        const brandFilter = document.getElementById('brandFilter');
+        const dohFilter = document.getElementById('dohFilter');
+        const brandFilterEmpty = brandFilter && brandFilter.options.length <= 1;
+        const dohFilterEmpty = dohFilter && dohFilter.options.length <= 1;
+        const filtersEmpty = brandFilterEmpty || dohFilterEmpty;
+        
+        // CRITICAL FIX: Always rebuild filters if they're empty, even if flag says they were built
+        // This ensures filters populate automatically without manual intervention
+        if (tags && tags.length > 0 && (!this._filtersBuiltFromTags || filtersEmpty)) {
             const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
                 ? this.state.originalTags 
                 : tags;
+            
+            if (filtersEmpty) {
+                console.log('🔧 Filter(s) empty, rebuilding filters from', tagsForFilters.length, 'tags...');
+                if (brandFilterEmpty) console.log('   - Brand filter is empty');
+                if (dohFilterEmpty) console.log('   - DOH filter is empty');
+            } else if (!this._filtersBuiltFromTags) {
+                console.log('🔧 Building filters for first time from', tagsForFilters.length, 'tags...');
+            }
+            
             this.buildFilterOptionsFromTags(tagsForFilters);
-            this._filtersBuiltFromTags = true; // Prevent duplicate builds
+            this._filtersBuiltFromTags = true; // Mark as built, but will rebuild if empty
+            
+            // CRITICAL FIX: Refresh all DOH badges after tags are loaded/enriched
+            // This ensures badges appear even if DOH values were enriched after initial tag creation
+            // Use requestAnimationFrame to ensure DOM is fully updated before refreshing badges
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    this.refreshAllDohBadges();
+                }, 100); // First refresh - small delay to allow DOH enrichment to complete
+                setTimeout(() => {
+                    this.refreshAllDohBadges();
+                }, 300); // Second refresh - catch any late-enriched tags
+                setTimeout(() => {
+                    this.refreshAllDohBadges();
+                }, 600); // Third refresh - final catch-all
+            });
+            
+            // CRITICAL FIX: Verify brand and DOH filters were populated after rebuild
+            if (filtersEmpty) {
+                setTimeout(() => {
+                    const brandFilterAfter = document.getElementById('brandFilter');
+                    const dohFilterAfter = document.getElementById('dohFilter');
+                    
+                    if (brandFilterEmpty && brandFilterAfter && brandFilterAfter.options.length <= 1) {
+                        console.warn('⚠️ Brand filter still empty after rebuild! Retrying...');
+                        // Reset flag to allow retry
+                        this._filtersBuiltFromTags = false;
+                        this.buildFilterOptionsFromTags(tagsForFilters);
+                        this._filtersBuiltFromTags = true;
+                    }
+                    
+                    if (dohFilterEmpty && dohFilterAfter && dohFilterAfter.options.length <= 1) {
+                        console.warn('⚠️ DOH filter still empty after rebuild! Retrying...');
+                        // Reset flag to allow retry
+                        this._filtersBuiltFromTags = false;
+                        this.buildFilterOptionsFromTags(tagsForFilters);
+                        this._filtersBuiltFromTags = true;
+                    }
+                }, 300);
+            }
         }
         
         // PERFORMANCE: Skip loading spinner entirely to prevent flickering
@@ -5679,6 +6044,51 @@ const TagManager = {
         // This preserves the original data for when filters are reset to "All"
         if (filteredTags === null) {
             this.state.originalTags = [...tagsWithDbLineage];
+            
+            // CRITICAL FIX: Always rebuild filters when originalTags is updated with new data
+            // This ensures filters are populated automatically when tags load
+            if (tagsWithDbLineage && tagsWithDbLineage.length > 0) {
+                // Check if filters need rebuilding (empty or not built yet)
+                const brandFilter = document.getElementById('brandFilter');
+                const dohFilter = document.getElementById('dohFilter');
+                const brandFilterEmpty = brandFilter && brandFilter.options.length <= 1;
+                const dohFilterEmpty = dohFilter && dohFilter.options.length <= 1;
+                const filtersNeedRebuild = !this._filtersBuiltFromTags || brandFilterEmpty || dohFilterEmpty;
+                
+                if (filtersNeedRebuild) {
+                    console.log('🔧 Rebuilding filters automatically - originalTags updated with', tagsWithDbLineage.length, 'tags');
+                    if (brandFilterEmpty) console.log('   - Brand filter is empty');
+                    if (dohFilterEmpty) console.log('   - DOH filter is empty');
+                    
+                    // Rebuild filters from the new originalTags
+                    this.buildFilterOptionsFromTags(tagsWithDbLineage);
+                    this._filtersBuiltFromTags = true;
+                    
+                    // Verify filters were populated
+                    setTimeout(() => {
+                        const brandFilterAfter = document.getElementById('brandFilter');
+                        const dohFilterAfter = document.getElementById('dohFilter');
+                        
+                        if (brandFilterAfter) {
+                            const optionCount = brandFilterAfter.options.length;
+                            if (optionCount > 1) {
+                                console.log('✅ Brand filter auto-populated with', optionCount, 'options');
+                            } else if (brandFilterEmpty) {
+                                console.warn('⚠️ Brand filter still empty after auto-rebuild');
+                            }
+                        }
+                        
+                        if (dohFilterAfter) {
+                            const optionCount = dohFilterAfter.options.length;
+                            if (optionCount > 1) {
+                                console.log('✅ DOH filter auto-populated with', optionCount, 'options');
+                            } else if (dohFilterEmpty) {
+                                console.warn('⚠️ DOH filter still empty after auto-rebuild');
+                            }
+                        }
+                    }, 200);
+                }
+            }
         }
         
         // Always update the current tags for display
@@ -7108,29 +7518,14 @@ const TagManager = {
         
         // Set data-lineage attribute for CSS coloring on both row and tagElement
         // CRITICAL FIX: Prioritize manual edits (sovereign_lineage), then use DOCX output lineage
-        // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-        // Manual edits set tag.sovereign_lineage, which takes highest priority
-        // If no manual edit, use currentLineage (matches DOCX COALESCE result)
+        // Backend uses: COALESCE(s.canonical_lineage, p."Lineage")
+        // Use currentLineage, then canonical_lineage, then Excel Lineage
         let lineage;
-        // Priority 1: sovereign_lineage (manual user edits OR preexisting from database - highest priority)
-        // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
-        if (tag.sovereign_lineage) {
-            const sovereignRaw = String(tag.sovereign_lineage).trim();
-            // Use if not empty - trust backend validation
-            if (sovereignRaw) {
-                lineage = tag.sovereign_lineage;
-            }
-        }
-        // Priority 2: currentLineage (matches DOCX COALESCE result - what DOCX will output)
-        if (!lineage && tag.currentLineage) {
+        if (tag.currentLineage) {
             lineage = tag.currentLineage;
-        }
-        // Priority 3: canonical_lineage (strain canonical fallback)
-        if (!lineage && tag.canonical_lineage) {
+        } else if (tag.canonical_lineage) {
             lineage = tag.canonical_lineage;
-        }
-        // Priority 4: Excel Lineage (final fallback)
-        if (!lineage) {
+        } else {
             lineage = tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
             if (lineage && lineage !== 'MIXED') {
                 console.warn(`⚠️ TagManager: Tag "${displayName}" missing database lineage, using Excel Lineage: "${lineage}"`);
@@ -7145,6 +7540,7 @@ const TagManager = {
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
         const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
+        const isParaphernaliaType = (productTypeCheck || '').toString().toLowerCase() === 'paraphernalia';
         if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
             lineage = 'HYBRID';
         }
@@ -7368,20 +7764,79 @@ const TagManager = {
         // Price display removed from individual tag items - kept in dropdown header only
         
         // Add DOH and High CBD/THC images if applicable
-        // CRITICAL FIX: Check both DOH field variations for all tags
-        let dohValue;
-        if (isJsonMatched) {
-            // For JSON matched tags, use the DOH field from the matched database data
-            dohValue = (tag['DOH Compliant (Yes/No)'] || tag.DOH || '').toString().toUpperCase();
-        } else {
-            // For regular tags, check both DOH field variations
-            dohValue = (tag['DOH Compliant (Yes/No)'] || tag.DOH || '').toString().toUpperCase();
+        // CRITICAL FIX: Check ALL possible DOH field variations for all tags
+        let dohValue = '';
+        // Check all possible DOH field names (same as backend and other parts of code)
+        // CRITICAL: Check in order of priority - DOH Compliant (Yes/No) first, then DOH, then doh, etc.
+        // Also check for any field that might contain DOH info
+        // IMPORTANT: Check both direct property access and bracket notation for maximum compatibility
+        const rawDoh = tag['DOH Compliant (Yes/No)'] || 
+                       tag['DOH Compliant (Yes/No)*'] ||
+                       tag.DOH || 
+                       tag['DOH'] ||
+                       tag['DOH*'] ||
+                       tag.doh || 
+                       tag['doh'] ||
+                       tag['DOH Compliant'] || 
+                       tag['DOH Compliant*'] ||
+                       '';
+        
+        // CRITICAL DEBUG: Log ALL tag keys to see what fields are actually present
+        if (!window._dohDebugCount) window._dohDebugCount = 0;
+        if (window._dohDebugCount < 5) {
+            const allTagKeys = Object.keys(tag);
+            const dohRelatedKeys = allTagKeys.filter(k => k.toLowerCase().includes('doh'));
+            console.log(`🔍 DOH DEBUG [${window._dohDebugCount}]: "${cleanedName}"`, {
+                rawDoh: rawDoh,
+                allDohKeys: dohRelatedKeys,
+                dohKeyValues: dohRelatedKeys.reduce((acc, k) => { acc[k] = tag[k]; return acc; }, {}),
+                allTagKeys: allTagKeys.slice(0, 30) // First 30 keys
+            });
+            window._dohDebugCount++;
         }
+        
+        // Normalize DOH value - handle None, null, undefined, empty strings
+        // CRITICAL: Ensure we always have a string value, even if empty
+        if (rawDoh !== null && rawDoh !== undefined && rawDoh !== '') {
+            const dohStr = String(rawDoh).trim();
+            // Only uppercase if we have a non-empty string
+            if (dohStr.length > 0 && 
+                dohStr.toLowerCase() !== 'none' && 
+                dohStr.toLowerCase() !== 'null' && 
+                dohStr.toLowerCase() !== 'undefined' && 
+                dohStr.toLowerCase() !== 'nan' &&
+                dohStr.toLowerCase() !== 'no' &&
+                dohStr.toLowerCase() !== 'n') {
+                dohValue = dohStr.toUpperCase();
+            }
+        }
+        
+        // DEBUG: Log all DOH-related fields to diagnose missing data
         const productTypeForImages = (tag['Product Type*'] || '').toString().toLowerCase();
+        
+        // CRITICAL DEBUG: Always log DOH fields for first few tags to diagnose badge issues
+        const allDohFields = {
+            'DOH': tag.DOH,
+            'DOH Compliant (Yes/No)': tag['DOH Compliant (Yes/No)'],
+            'doh': tag.doh,
+            'DOH Compliant': tag['DOH Compliant'],
+            'DOH*': tag['DOH*']
+        };
+        
+        // Only log DOH field checks if verbose logging is enabled (to reduce console spam)
+        if (typeof verboseLog === 'function') {
+            const hasAnyDoh = Object.values(allDohFields).some(v => v && String(v).trim() && String(v).trim().toLowerCase() !== 'none' && String(v).trim().toLowerCase() !== 'null');
+            if (!hasAnyDoh || !dohValue || dohValue === '') {
+                verboseLog(`⚠️ No DOH fields found for "${cleanedName}" - all DOH fields:`, allDohFields);
+            }
+            verboseLog(`🏷️ DOH Badge Check for "${cleanedName}": rawDoh="${rawDoh}", dohValue="${dohValue}"`);
+        }
         
         // Create image container for dynamic updates
         const imageContainer = document.createElement('span');
         imageContainer.className = 'doh-image-container';
+        imageContainer.style.display = 'inline-block'; // CRITICAL: Ensure container is visible
+        imageContainer.style.verticalAlign = 'middle'; // CRITICAL: Align with text
         
         // Function to update images based on DOH status with performance optimization
         const updateDohImage = (status) => {
@@ -7399,8 +7854,13 @@ const TagManager = {
                 highCbdImg.alt = 'High CBD';
                 highCbdImg.title = 'High CBD Product';
                 highCbdImg.loading = 'lazy'; // Native lazy loading
-                highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                 imageContainer.appendChild(highCbdImg);
+                // CRITICAL DEBUG: Always log badge creation
+                if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                    console.log(`✅ Added High CBD badge for "${cleanedName}" - container children: ${imageContainer.children.length}`);
+                }
+                console.log(`✅ Added High CBD badge for "${cleanedName}"`);
             } else if (status === 'THC') {
                 // Add High THC image with optimized loading
                 const highThcImg = document.createElement('img');
@@ -7408,8 +7868,13 @@ const TagManager = {
                 highThcImg.alt = 'High THC';
                 highThcImg.title = 'High THC Product';
                 highThcImg.loading = 'lazy';
-                highThcImg.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle';
+                highThcImg.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                 imageContainer.appendChild(highThcImg);
+                // CRITICAL DEBUG: Always log badge creation
+                if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                    console.log(`✅ Added High THC badge for "${cleanedName}" - container children: ${imageContainer.children.length}`);
+                }
+                console.log(`✅ Added High THC badge for "${cleanedName}"`);
             } else if (status === 'DOH') {
                 // Add regular DOH image with optimized loading
                 const dohImg = document.createElement('img');
@@ -7417,8 +7882,38 @@ const TagManager = {
                 dohImg.alt = 'DOH Compliant';
                 dohImg.title = 'DOH Compliant Product';
                 dohImg.loading = 'lazy';
-                dohImg.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle';
+                // CRITICAL: Ensure image is visible and properly sized
+                dohImg.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
+                dohImg.onerror = function() {
+                    console.error(`❌ Failed to load DOH image for "${cleanedName}" - checking if file exists at /static/img/DOH.png`);
+                    // Try alternative path
+                    this.src = '/static/img/DOH.png';
+                };
+                dohImg.onload = function() {
+                    // CRITICAL DEBUG: Always log badge load for first few tags
+                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                        console.log(`✅ DOH badge loaded successfully for "${cleanedName}" - image dimensions: ${this.naturalWidth}x${this.naturalHeight}, container children: ${imageContainer.children.length}`);
+                    }
+                    // Only log in verbose mode to reduce console spam and improve performance
+                    if (typeof verboseLog === 'function') {
+                        verboseLog(`✅ DOH badge loaded successfully for "${cleanedName}" - image dimensions: ${this.naturalWidth}x${this.naturalHeight}`);
+                    }
+                };
                 imageContainer.appendChild(dohImg);
+                // CRITICAL: Ensure container is visible after adding image
+                imageContainer.style.display = 'inline-block';
+                imageContainer.style.visibility = 'visible';
+                imageContainer.style.opacity = '1';
+                imageContainer.style.width = 'auto';
+                imageContainer.style.height = 'auto';
+                // CRITICAL DEBUG: Always log badge creation for first few tags
+                if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                    console.log(`✅ Added DOH badge for "${cleanedName}" (status: ${status}) - container children: ${imageContainer.children.length}, container display: ${imageContainer.style.display}, container parent: ${imageContainer.parentElement ? 'exists' : 'null'}`);
+                }
+                // Only log in verbose mode to reduce console spam and improve performance
+                if (typeof verboseLog === 'function') {
+                    verboseLog(`✅ Added DOH badge for "${cleanedName}" (status: ${status}) - container now has ${imageContainer.children.length} child(ren)`);
+                }
             }
             // NONE shows no image
             
@@ -7451,30 +7946,251 @@ const TagManager = {
             highCbdImg.alt = 'High CBD';
             highCbdImg.title = 'High CBD Product';
             highCbdImg.loading = 'lazy';
-            highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+            highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle;display:inline-block;';
             imageContainer.appendChild(highCbdImg);
+            console.log(`✅ Added High CBD badge for High CBD product "${cleanedName}"`);
             // Don't call updateDohImage for High CBD products - skip DOH logic entirely
         } else {
             // For non-High CBD products, use normal DOH logic
-            // Check explicit DOH field first
-            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
-                initialDohStatus = 'DOH';
-            } else if (dohValue === 'THC') {
-                initialDohStatus = 'THC';
-            } else if (dohValue === 'CBD') {
-                initialDohStatus = 'CBD';
-            } else if (dohValue === 'NO' || dohValue === 'NONE') {
-                initialDohStatus = 'NONE';
-            } 
-            // Then check product type for High THC indicators
-            else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
-                initialDohStatus = 'THC';
+            // CRITICAL FIX: Normalize DOH value first, then check
+            // dohValue is already uppercase from line 7680, but ensure it's a string
+            const dohValueUpper = dohValue && dohValue.length > 0 ? String(dohValue).trim().toUpperCase() : '';
+            let normalizedDohValue = dohValueUpper;
+            
+            // CRITICAL DEBUG: Log DOH normalization for first few tags
+            if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                console.log(`🔍 DOH Normalization [${window._dohDebugCount}]: "${cleanedName}"`, {
+                    rawDoh: rawDoh,
+                    dohValue: dohValue,
+                    dohValueUpper: dohValueUpper,
+                    allDohFields: allDohFields
+                });
             }
             
+            // CRITICAL: Check for DOH/YES/Y/COMPLIANT variations FIRST (before checking empty)
+            if (dohValueUpper && dohValueUpper.length > 0) {
+                // More comprehensive matching - check for DOH in any form
+                if (dohValueUpper === 'YES' || dohValueUpper === 'Y' || 
+                    dohValueUpper.includes('DOH') || dohValueUpper === 'COMPLIANT' ||
+                    dohValueUpper.startsWith('DOH') || dohValueUpper.endsWith('DOH')) {
+                    normalizedDohValue = 'DOH';
+                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                        console.log(`✅ DOH Normalized to DOH for "${cleanedName}": "${dohValueUpper}" -> "DOH"`);
+                    }
+                } else if (dohValueUpper === 'THC') {
+                    normalizedDohValue = 'THC';
+                } else if (dohValueUpper === 'CBD') {
+                    normalizedDohValue = 'CBD';
+                } else if (dohValueUpper === 'NO' || dohValueUpper === 'N' || dohValueUpper === 'NONE') {
+                    normalizedDohValue = 'NONE';
+                } else {
+                    // Unknown value - log it for debugging
+                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                        console.log(`⚠️ Unknown DOH value for "${cleanedName}": "${dohValueUpper}" - defaulting to NONE`);
+                    }
+                    normalizedDohValue = 'NONE';
+                }
+            } else {
+                // Empty or undefined - check product type for High THC indicators as fallback
+                if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
+                    normalizedDohValue = 'THC';
+                } else {
+                    normalizedDohValue = 'NONE';
+                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                        console.log(`⚠️ Empty DOH value for "${cleanedName}" - defaulting to NONE`);
+                    }
+                }
+            }
+            
+            // CRITICAL FIX: Set initialDohStatus based on normalized value
+            if (normalizedDohValue === 'DOH') {
+                initialDohStatus = 'DOH';
+            } else if (normalizedDohValue === 'THC') {
+                initialDohStatus = 'THC';
+            } else if (normalizedDohValue === 'CBD') {
+                initialDohStatus = 'CBD';
+            } else {
+                initialDohStatus = 'NONE';
+            }
+            
+            // CRITICAL DEBUG: Log initial DOH status for first few tags
+            if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                console.log(`🔍 Initial DOH Status [${window._dohDebugCount}]: "${cleanedName}"`, {
+                    normalizedDohValue: normalizedDohValue,
+                    initialDohStatus: initialDohStatus,
+                    willShowBadge: initialDohStatus !== 'NONE'
+                });
+            }
+            
+            // CRITICAL FIX: Store updateDohImage function on tag element so refreshAllDohBadges can use it
+            tagElement._updateDohImage = updateDohImage;
+            
+            // CRITICAL FIX: Always call updateDohImage immediately for initial render
+            // This ensures badges appear right away if DOH values are available
             updateDohImage(initialDohStatus);
+            
+            // CRITICAL FIX: Also use setTimeout to re-check DOH values in case they're enriched asynchronously
+            // Use multiple timeouts to catch badges that might be added later
+            setTimeout(() => {
+                // Re-read DOH value in case it was enriched after tag creation
+                // CRITICAL: Use same comprehensive field checking as initial read
+                const currentRawDoh = tag['DOH Compliant (Yes/No)'] || 
+                                     tag['DOH Compliant (Yes/No)*'] ||
+                                     tag.DOH || 
+                                     tag['DOH'] ||
+                                     tag['DOH*'] ||
+                                     tag.doh || 
+                                     tag['doh'] ||
+                                     tag['DOH Compliant'] || 
+                                     tag['DOH Compliant*'] ||
+                                     '';
+                let currentDohValue = '';
+                if (currentRawDoh !== null && currentRawDoh !== undefined && currentRawDoh !== '') {
+                    const dohStr = String(currentRawDoh).trim();
+                    if (dohStr.length > 0 && 
+                        dohStr.toLowerCase() !== 'none' && 
+                        dohStr.toLowerCase() !== 'null' && 
+                        dohStr.toLowerCase() !== 'undefined' && 
+                        dohStr.toLowerCase() !== 'nan' &&
+                        dohStr.toLowerCase() !== 'no' &&
+                        dohStr.toLowerCase() !== 'n') {
+                        currentDohValue = dohStr.toUpperCase();
+                    }
+                }
+                
+                // Re-normalize DOH value with same comprehensive logic
+                const currentDohUpper = currentDohValue && currentDohValue.length > 0 ? String(currentDohValue).trim().toUpperCase() : '';
+                let currentNormalizedDoh = currentDohUpper;
+                if (currentDohUpper && currentDohUpper.length > 0) {
+                    if (currentDohUpper === 'YES' || currentDohUpper === 'Y' || 
+                        currentDohUpper.includes('DOH') || currentDohUpper === 'COMPLIANT' ||
+                        currentDohUpper.startsWith('DOH') || currentDohUpper.endsWith('DOH')) {
+                        currentNormalizedDoh = 'DOH';
+                    } else if (currentDohUpper === 'THC') {
+                        currentNormalizedDoh = 'THC';
+                    } else if (currentDohUpper === 'CBD') {
+                        currentNormalizedDoh = 'CBD';
+                    } else {
+                        currentNormalizedDoh = 'NONE';
+                    }
+                } else {
+                    currentNormalizedDoh = 'NONE';
+                }
+                
+                // CRITICAL DEBUG: Log DOH re-check for first few tags
+                if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                    console.log(`🔍 DOH Re-check [${window._dohDebugCount}]: "${cleanedName}"`, {
+                        currentRawDoh: currentRawDoh,
+                        currentDohValue: currentDohValue,
+                        currentNormalizedDoh: currentNormalizedDoh,
+                        initialDohStatus: initialDohStatus,
+                        willUpdate: currentNormalizedDoh !== initialDohStatus && currentNormalizedDoh !== 'NONE'
+                    });
+                }
+                
+                // CRITICAL FIX: Update badge if DOH value changed OR if initial status was NONE but now we have a value
+                if (currentNormalizedDoh !== initialDohStatus) {
+                    if (currentNormalizedDoh !== 'NONE' || initialDohStatus === 'NONE') {
+                        updateDohImage(currentNormalizedDoh);
+                        if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                            console.log(`✅ Updated DOH badge for "${cleanedName}": ${initialDohStatus} -> ${currentNormalizedDoh}`);
+                        }
+                    }
+                }
+            }, 100); // First check - small delay to allow DOH enrichment to complete
+            
+            // Additional check after longer delay to catch late-enriched tags
+            setTimeout(() => {
+                const currentRawDoh = tag['DOH Compliant (Yes/No)'] || 
+                                     tag['DOH Compliant (Yes/No)*'] ||
+                                     tag.DOH || 
+                                     tag['DOH'] ||
+                                     tag['DOH*'] ||
+                                     tag.doh || 
+                                     tag['doh'] ||
+                                     tag['DOH Compliant'] || 
+                                     tag['DOH Compliant*'] ||
+                                     '';
+                if (currentRawDoh && String(currentRawDoh).trim() && 
+                    String(currentRawDoh).trim().toUpperCase() !== 'NONE' &&
+                    String(currentRawDoh).trim().toUpperCase() !== 'NO' &&
+                    String(currentRawDoh).trim().toUpperCase() !== 'N') {
+                    const dohStr = String(currentRawDoh).trim().toUpperCase();
+                    let normalizedDoh = 'NONE';
+                    if (dohStr === 'YES' || dohStr === 'Y' || dohStr.includes('DOH') || dohStr === 'COMPLIANT') {
+                        normalizedDoh = 'DOH';
+                    } else if (dohStr === 'THC') {
+                        normalizedDoh = 'THC';
+                    } else if (dohStr === 'CBD') {
+                        normalizedDoh = 'CBD';
+                    }
+                    
+                    // Only update if we have a valid DOH status and badge isn't already showing
+                    if (normalizedDoh !== 'NONE' && imageContainer.children.length === 0) {
+                        updateDohImage(normalizedDoh);
+                        console.log(`✅ Late DOH enrichment: Added badge for "${cleanedName}": ${normalizedDoh}`);
+                    }
+                }
+            }, 500); // Second check - longer delay for late-enriched tags
+            
+            // CRITICAL DEBUG: Always log DOH status for first few tags to diagnose badge issues
+            if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                console.log(`🔍 DOH Status [${window._dohDebugCount}]: "${cleanedName}"`, {
+                    dohValue: dohValue,
+                    dohValueUpper: dohValueUpper,
+                    normalized: normalizedDohValue,
+                    initialDohStatus: initialDohStatus,
+                    imageContainerChildren: imageContainer.children.length
+                });
+            }
+            
+            // DEBUG: Only log DOH status if verbose logging is enabled (to reduce console spam)
+            if (typeof verboseLog === 'function') {
+                verboseLog(`🔍 DOH Status Check for "${cleanedName}": dohValue="${dohValue}", dohValueUpper="${dohValueUpper}", normalized="${normalizedDohValue}", initialDohStatus="${initialDohStatus}"`);
+                if (initialDohStatus === 'DOH' || initialDohStatus === 'THC' || initialDohStatus === 'CBD') {
+                    verboseLog(`✅ DOH badge SHOULD appear for "${cleanedName}" (status: ${initialDohStatus})`);
+                }
+            }
         }
         
+        // CRITICAL FIX: Always append imageContainer, even if empty (for dynamic updates)
+        // Ensure container is visible before appending
+        imageContainer.style.display = 'inline-block';
+        imageContainer.style.visibility = 'visible';
+        imageContainer.style.opacity = '1';
         tagInfo.appendChild(imageContainer);
+        
+        // CRITICAL DEBUG: Log container append for first few tags
+        if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+            console.log(`📦 Appended DOH container for "${cleanedName}" - container children: ${imageContainer.children.length}, container in DOM: ${imageContainer.parentElement ? 'yes' : 'no'}, tagInfo children: ${tagInfo.children.length}, initialDohStatus: ${initialDohStatus}`);
+        }
+        
+        // CRITICAL FIX: Store updateDohImage function and imageContainer on tagElement for access from dropdown handler
+        tagElement._updateDohImage = updateDohImage;
+        tagElement._dohImageContainer = imageContainer;
+        
+        // DEBUG: Verify image container was added (only log if badge should appear)
+        if (initialDohStatus === 'DOH' || initialDohStatus === 'CBD' || initialDohStatus === 'THC') {
+            // Verify immediately - no setTimeout needed since container is already appended
+            if (imageContainer.children.length > 0) {
+                // Badge was added successfully - always log for first few tags
+                if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                    console.log(`✅ DOH badge added for "${cleanedName}" - ${imageContainer.children.length} image(s)`);
+                }
+                // Only log in verbose mode to reduce console spam
+                if (typeof verboseLog === 'function') {
+                    verboseLog(`✅ DOH badge added for "${cleanedName}" - ${imageContainer.children.length} image(s)`);
+                }
+            } else {
+                // This shouldn't happen, but log if it does
+                console.warn(`⚠️ DOH badge container is empty for "${cleanedName}" despite status ${initialDohStatus}`);
+            }
+        } else {
+            // CRITICAL DEBUG: Log when badge should NOT appear
+            if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                console.log(`❌ DOH badge NOT shown for "${cleanedName}" - initialDohStatus: ${initialDohStatus}, dohValue: ${dohValue}`);
+            }
+        }
         
         // Add JSON match indicator if this tag came from JSON matching or educated guessing
         if (isJsonMatched) {
@@ -7544,71 +8260,68 @@ const TagManager = {
         `;
         document.head.appendChild(style);
         // Add lineage options (no product-type filtering)
-        const allLineageOptions = [
-            { value: 'SATIVA', label: 'S' },
-            { value: 'INDICA', label: 'I' },
-            { value: 'HYBRID', label: 'H' },
-            { value: 'HYBRID/INDICA', label: 'H/I' },
-            { value: 'HYBRID/SATIVA', label: 'H/S' },
-            { value: 'CBD', label: 'CBD' },
-            { value: 'PARA', label: 'P' },
-            { value: 'MIXED', label: 'THC' }
+        // Define lineage options globally for use in all UI components
+        const lineageOptions = [
+            'SATIVA',
+            'INDICA',
+            'HYBRID',
+            'HYBRID/SATIVA',
+            'HYBRID/INDICA',
+            'CBD',
+            'CBD_BLEND',
+            'MIXED',
+            'PARA',
+            'PARAPHERNALIA'
         ];
+        // Make available globally for legacy code
+        window.allLineageOptions = lineageOptions;
         
         // CRITICAL: Calculate normalized lineage BEFORE creating options, so option selection uses database lineage
         // Set the dropdown value - handle mappings for display
-        // CRITICAL: ALWAYS prefer database lineage (canonical_lineage/currentLineage) over Excel Lineage
-        let normalizedLineage = (lineage || '').toString().toUpperCase().trim();
+        // CRITICAL: Use EXACT same priority as DOCX generation:
+        // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+        // This matches template_processor.py and app.py lineage alignment
         
-        // CRITICAL FIX: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
-        // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-        // sovereign_lineage can be from current session edits OR preexisting saved values
-        // If no sovereign_lineage, use currentLineage (matches DOCX COALESCE result)
-        let tagDbLineage = '';
-        // Priority 1: sovereign_lineage (manual edits OR preexisting from database - highest priority)
-        // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
-        if (tag.sovereign_lineage) {
-            const sovereignRaw = String(tag.sovereign_lineage).trim();
-            // Use if not empty - trust backend validation
-            if (sovereignRaw) {
-                tagDbLineage = sovereignRaw.toUpperCase().trim();
+        // CRITICAL FIX: Start with database lineage, NOT Excel lineage
+        // Priority: sovereign_lineage > currentLineage > canonical_lineage > Lineage (Excel)
+        // Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
+        let normalizedLineage = '';
+        for (const lineageField of ['sovereign_lineage', 'currentLineage', 'canonical_lineage', 'Lineage']) {
+            const candidate = tag[lineageField];
+            if (candidate) {
+                const lineageStr = candidate.toString().toUpperCase().trim();
+                if (lineageStr && lineageStr !== 'SOVEREIGN' && lineageStr !== 'NONE') {
+                    normalizedLineage = lineageStr;
+                    break;
+                }
             }
-        }
-        // Priority 2: currentLineage (matches DOCX COALESCE result)
-        if (!tagDbLineage && tag.currentLineage) {
-            tagDbLineage = tag.currentLineage.toString().toUpperCase().trim();
-        }
-        // Priority 3: canonical_lineage (strain canonical fallback)
-        if (!tagDbLineage && tag.canonical_lineage) {
-            tagDbLineage = tag.canonical_lineage.toString().toUpperCase().trim();
-        }
-        // Priority 4: Excel Lineage (final fallback)
-        if (!tagDbLineage && tag.Lineage) {
-            tagDbLineage = tag.Lineage.toString().toUpperCase().trim();
         }
         
-        if (tagDbLineage) {
-            // Database lineage exists - use it exclusively, ignore Excel Lineage completely
-            if (tagDbLineage !== normalizedLineage) {
-                const source = tag.sovereign_lineage ? 'sovereign_lineage' : (tag.canonical_lineage ? 'canonical_lineage' : 'currentLineage');
-                console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.${source})`);
-            }
-            normalizedLineage = tagDbLineage;  // Force database lineage (same priority as docx generation)
-        } else {
-            // No database lineage - log warning for debugging
-            if (isForSelectedTags && normalizedLineage && normalizedLineage !== 'MIXED') {
-                console.warn(`⚠️ Selected tag "${displayName}" has no database lineage (canonical_lineage/currentLineage), using: ${normalizedLineage}`);
-                console.warn(`⚠️ Tag object lineage fields:`, {
-                    canonical_lineage: tag.canonical_lineage || 'MISSING',
-                    currentLineage: tag.currentLineage || 'MISSING',
-                    Lineage: tag.Lineage || 'MISSING',
-                    lineage: tag.lineage || 'MISSING'
-                });
-            }
+        // Fallback to Excel lineage if no database lineage found
+        if (!normalizedLineage) {
+            normalizedLineage = (lineage || '').toString().toUpperCase().trim();
+        }
+        
+        // CRITICAL FIX: Validate database lineage for classic types - MIXED is invalid for classic products
+        // If database lineage is MIXED for a classic type, convert to HYBRID
+        if (isClassicType && normalizedLineage === 'MIXED') {
+            console.log(`🔄 FIXING invalid MIXED lineage for classic type "${displayName}": MIXED → HYBRID`);
+            normalizedLineage = 'HYBRID';
+        }
+        
+        // Log if we're using Excel lineage instead of database lineage (for debugging)
+        const hasDbLineage = tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage;
+        if (!hasDbLineage && normalizedLineage && normalizedLineage !== 'MIXED') {
+            console.warn(`⚠️ Tag "${displayName}" has no database lineage, using Excel Lineage: ${normalizedLineage}`);
         }
         
         // Show all lineage options for every product type (no restrictions)
-        let uniqueLineages = allLineageOptions;
+        let uniqueLineages = window.allLineageOptions || lineageOptions;
+        
+        // Convert string array to object array if needed
+        if (uniqueLineages.length > 0 && typeof uniqueLineages[0] === 'string') {
+            uniqueLineages = uniqueLineages.map(opt => ({ value: opt, label: opt }));
+        }
         
         // Helper function to determine if a lineage should map to MIXED
         const shouldMapToMixed = (lineageValue) => {
@@ -7619,16 +8332,22 @@ const TagManager = {
         // NOW create options using normalizedLineage (database lineage) for selection
         uniqueLineages.forEach(option => {
             const optionElement = document.createElement('option');
-            optionElement.value = option.value;
-            optionElement.textContent = option.label;
+            const optionValue = typeof option === 'string' ? option : option.value;
+            const optionLabel = typeof option === 'string' ? option : option.label;
+            optionElement.value = optionValue;
+            // Use abbreviation for display text
+            const displayName = window.ABBREVIATED_LINEAGE && window.ABBREVIATED_LINEAGE[optionValue] 
+                ? window.ABBREVIATED_LINEAGE[optionValue] 
+                : optionLabel;
+            optionElement.textContent = displayName;
             
             // CRITICAL: Use normalizedLineage (database lineage) for option selection, not original lineage
             let shouldSelect = false;
-            if (normalizedLineage === option.value) {
+            if (normalizedLineage === optionValue) {
                 shouldSelect = true;
-            } else if (option.value === 'CBD' && (normalizedLineage === 'CBD' || normalizedLineage === 'CBD_BLEND')) {
+            } else if (optionValue === 'CBD' && (normalizedLineage === 'CBD' || normalizedLineage === 'CBD_BLEND')) {
                 shouldSelect = true;
-            } else if (option.value === 'MIXED' && shouldMapToMixed(normalizedLineage)) {
+            } else if (optionValue === 'MIXED' && shouldMapToMixed(normalizedLineage)) {
                 shouldSelect = true;
             }
             
@@ -7647,7 +8366,10 @@ const TagManager = {
             } else {
                 lineageSelect.value = 'MIXED';
             }
-        } else if (normalizedLineage && uniqueLineages.some(opt => opt.value === normalizedLineage)) {
+        } else if (normalizedLineage && uniqueLineages.some(opt => {
+            const optVal = typeof opt === 'string' ? opt : opt.value;
+            return optVal === normalizedLineage;
+        })) {
             lineageSelect.value = normalizedLineage;
         } else {
             // CRITICAL FIX: Smart fallback based on product type and lineage
@@ -7679,7 +8401,7 @@ const TagManager = {
                 'resolved lineage (used)': normalizedLineage,
                 'dropdown value set to': lineageSelect.value
             });
-            // Check if database lineage (sovereign/canonical) differs from Excel
+            // Check if database lineage differs from Excel
             const dbLin = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase();
             if (dbLin && tag.Lineage) {
                 const excelLin = (tag.Lineage || '').toString().toUpperCase();
@@ -7846,7 +8568,12 @@ const TagManager = {
             let backendDohStatus = (newDohStatus === 'NONE') ? 'No' : newDohStatus;
             
             // Immediate UI feedback - update image first for responsiveness
-            if (typeof updateDohImage === 'function') {
+            // CRITICAL FIX: Get updateDohImage from tagElement (stored during creation)
+            const tagElement = dohSelect.closest('.tag-row, .tag-item');
+            if (tagElement && typeof tagElement._updateDohImage === 'function') {
+                tagElement._updateDohImage(newDohStatus);
+            } else if (typeof updateDohImage === 'function') {
+                // Fallback to closure variable if available
                 updateDohImage(newDohStatus);
             }
             
@@ -7893,7 +8620,12 @@ const TagManager = {
                     
                 } else {
                     // Revert image on failure
-                    updateDohImage(prevValue);
+                    const tagElement = dohSelect.closest('.tag-row, .tag-item');
+                    if (tagElement && typeof tagElement._updateDohImage === 'function') {
+                        tagElement._updateDohImage(prevValue);
+                    } else if (typeof updateDohImage === 'function') {
+                        updateDohImage(prevValue);
+                    }
                     throw new Error(data.message || 'Failed to update DOH status');
                 }
                 
@@ -7903,8 +8635,13 @@ const TagManager = {
                 console.error(`Failed to update DOH status:`, error);
                 // On failure, revert to previous value
                 dohSelect.value = prevValue;
-                // Revert image
-                updateDohImage(prevValue);
+                // Revert image - CRITICAL FIX: Get updateDohImage from tagElement
+                const tagElement = dohSelect.closest('.tag-row, .tag-item');
+                if (tagElement && typeof tagElement._updateDohImage === 'function') {
+                    tagElement._updateDohImage(prevValue);
+                } else if (typeof updateDohImage === 'function') {
+                    updateDohImage(prevValue);
+                }
                 alert(`Failed to update DOH status: ` + error.message);
                 // Remove saving option
                 if (savingOption.parentNode) {
@@ -8205,7 +8942,7 @@ const TagManager = {
             originalTag.Lineage = newLineage;
             originalTag.currentLineage = newLineage;
             originalTag.canonical_lineage = newLineage;
-            originalTag.sovereign_lineage = newLineage; // CRITICAL: Set sovereign_lineage for UI display
+            originalTag.sovereign_lineage = newLineage; // CRITICAL: Set user-edited lineage for UI display
         }
         const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
         if (currentTag) {
@@ -8213,7 +8950,7 @@ const TagManager = {
             currentTag.Lineage = newLineage;
             currentTag.currentLineage = newLineage;
             currentTag.canonical_lineage = newLineage;
-            currentTag.sovereign_lineage = newLineage; // CRITICAL: Set sovereign_lineage for UI display
+            currentTag.sovereign_lineage = newLineage; // CRITICAL: Set user-edited lineage for UI display
 
             // CRITICAL FIX: Update _tagLookupMap immediately for getSelectedTagObjects()
             // This ensures tag objects retrieved for generation have the latest lineage
@@ -8287,7 +9024,7 @@ const TagManager = {
                 // This preserves the user's change and prevents refresh from pulling old data
                 // Save updated tags to cache immediately so refresh doesn't overwrite
                 if (this.state.tags && this.state.tags.length > 0) {
-                    // CRITICAL: Verify the tag has sovereign_lineage before saving
+                    // CRITICAL: Verify the tag has user-edited lineage before saving
                     const updatedTag = this.state.tags.find(t => t['Product Name*'] === tagName);
                     if (updatedTag) {
                         console.log(`💾 Saving ${this.state.tags.length} tags to cache with updated lineage for "${tagName}":`, {
@@ -8309,7 +9046,7 @@ const TagManager = {
                 // CRITICAL FIX: DON'T refresh tags immediately - UI is already updated
                 // The refresh was causing old lineages to be pulled back
                 // Instead, just update cache and let the UI state persist
-                // Background refresh will happen naturally when needed, but won't overwrite sovereign_lineage
+                // Background refresh will happen naturally when needed, but won't overwrite user edits
                 console.log('⏭️ Skipping immediate refresh - UI already updated, cache saved with new lineage');
             }
 
@@ -8323,7 +9060,7 @@ const TagManager = {
                 originalTag.Lineage = verifiedLineage;
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
-                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set sovereign_lineage for UI display
+                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set user-edited lineage for UI display
                 verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
@@ -8351,9 +9088,9 @@ const TagManager = {
                 originalTag.Lineage = verifiedLineage;
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
-                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set sovereign_lineage to preserve user edit
+                originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set user-edited lineage to preserve user edit
                 originalTag['Lineage*'] = verifiedLineage;
-                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage} (sovereign_lineage set)`);
+                verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
             // NEW: Instantly update all similar (same vendor + strain) across lists
@@ -8584,6 +9321,218 @@ const TagManager = {
         }
     },
 
+    refreshAllDohBadges() {
+        // CRITICAL FIX: Refresh all DOH badges for all visible tags
+        // This ensures badges appear even if DOH values were enriched after initial tag creation
+        const availableItems = document.querySelectorAll('#availableTags .tag-item');
+        let refreshedCount = 0;
+        
+        availableItems.forEach(el => {
+            const checkbox = el.querySelector('.tag-checkbox');
+            const tagName = el.getAttribute('data-tag-name') || (checkbox ? checkbox.value : null);
+            if (!tagName) return;
+            
+            // Find the tag in state
+            const tag = this.state.tags.find(t => t['Product Name*'] === tagName) || 
+                       this.state.originalTags.find(t => t['Product Name*'] === tagName);
+            if (!tag) return;
+            
+            // Get current DOH value from tag - use same comprehensive checking as createTagElement
+            const rawDoh = tag['DOH Compliant (Yes/No)'] || 
+                          tag['DOH Compliant (Yes/No)*'] ||
+                          tag.DOH || 
+                          tag['DOH'] ||
+                          tag['DOH*'] ||
+                          tag.doh || 
+                          tag['doh'] ||
+                          tag['DOH Compliant'] || 
+                          tag['DOH Compliant*'] ||
+                          '';
+            let dohValue = '';
+            if (rawDoh !== null && rawDoh !== undefined && rawDoh !== '') {
+                const dohStr = String(rawDoh).trim();
+                if (dohStr.length > 0 && 
+                    dohStr.toLowerCase() !== 'none' && 
+                    dohStr.toLowerCase() !== 'null' && 
+                    dohStr.toLowerCase() !== 'undefined' && 
+                    dohStr.toLowerCase() !== 'nan' &&
+                    dohStr.toLowerCase() !== 'no' &&
+                    dohStr.toLowerCase() !== 'n') {
+                    dohValue = dohStr.toUpperCase();
+                }
+            }
+            
+            // Normalize DOH value - use same comprehensive logic as createTagElement
+            const dohValueUpper = dohValue && dohValue.length > 0 ? String(dohValue).trim().toUpperCase() : '';
+            let normalizedDoh = 'NONE';
+            if (dohValueUpper && dohValueUpper.length > 0) {
+                if (dohValueUpper === 'YES' || dohValueUpper === 'Y' || 
+                    dohValueUpper.includes('DOH') || dohValueUpper === 'COMPLIANT' ||
+                    dohValueUpper.startsWith('DOH') || dohValueUpper.endsWith('DOH')) {
+                    normalizedDoh = 'DOH';
+                } else if (dohValueUpper === 'THC') {
+                    normalizedDoh = 'THC';
+                } else if (dohValueUpper === 'CBD') {
+                    normalizedDoh = 'CBD';
+                }
+            }
+            
+            // DEBUG: Log DOH refresh for first few tags
+            if (!window._dohRefreshDebugCount) window._dohRefreshDebugCount = 0;
+            if (window._dohRefreshDebugCount < 5) {
+                console.log(`🔍 DOH Refresh [${window._dohRefreshDebugCount}]: "${tagName}"`, {
+                    rawDoh: rawDoh,
+                    dohValue: dohValue,
+                    dohValueUpper: dohValueUpper,
+                    normalizedDoh: normalizedDoh,
+                    tagFound: !!tag,
+                    elementFound: !!el
+                });
+                window._dohRefreshDebugCount++;
+            }
+            
+            // Check if product type indicates High CBD
+            const productType = (tag['Product Type*'] || tag.productType || tag.Type || '').toString().toLowerCase();
+            const isHighCbdProduct = productType.startsWith('high cbd') || 
+                                    productType.includes('doh high cbd') ||
+                                    productType.includes('high cbd edible');
+            
+            // Determine final status
+            let finalStatus = normalizedDoh;
+            if (isHighCbdProduct && normalizedDoh !== 'THC') {
+                finalStatus = 'CBD'; // High CBD products always show CBD badge
+            }
+            
+            // Update badge using stored function or by finding container
+            // CRITICAL: Try multiple ways to find the tag element
+            let tagElement = el.closest('.tag-row, .tag-item');
+            if (!tagElement) {
+                // Try finding parent tag-item
+                tagElement = el.closest('.tag-item');
+            }
+            if (!tagElement) {
+                // Try finding by data-tag-name
+                const tagNameAttr = el.getAttribute('data-tag-name') || tagName;
+                if (tagNameAttr) {
+                    tagElement = document.querySelector(`[data-tag-name="${CSS.escape(tagNameAttr)}"]`);
+                }
+            }
+            
+            // CRITICAL FIX: Only update badges if we have a valid DOH status (not NONE)
+            if (finalStatus === 'NONE') {
+                // No badge needed - skip
+                return;
+            }
+            
+            if (tagElement && typeof tagElement._updateDohImage === 'function') {
+                tagElement._updateDohImage(finalStatus);
+                refreshedCount++;
+                if (window._dohRefreshDebugCount !== undefined && window._dohRefreshDebugCount < 5) {
+                    console.log(`✅ Used stored updateDohImage function for "${tagName}" (status: ${finalStatus})`);
+                }
+            } else {
+                // Fallback: find image container and update manually
+                // CRITICAL: Check multiple possible locations for image container
+                let imageContainer = el.querySelector('.doh-image-container');
+                if (!imageContainer) {
+                    // Try finding in tag-info div
+                    const tagInfo = el.querySelector('.tag-info');
+                    if (tagInfo) {
+                        imageContainer = tagInfo.querySelector('.doh-image-container');
+                    }
+                }
+                if (!imageContainer) {
+                    // Try finding in tag-name div
+                    const tagNameDiv = el.querySelector('.tag-name');
+                    if (tagNameDiv) {
+                        imageContainer = tagNameDiv.querySelector('.doh-image-container');
+                    }
+                }
+                if (!imageContainer) {
+                    // Last resort: create container if it doesn't exist
+                    const tagInfo = el.querySelector('.tag-info');
+                    if (tagInfo) {
+                        imageContainer = document.createElement('span');
+                        imageContainer.className = 'doh-image-container';
+                        imageContainer.style.display = 'inline-block';
+                        imageContainer.style.visibility = 'visible';
+                        imageContainer.style.opacity = '1';
+                        imageContainer.style.verticalAlign = 'middle';
+                        tagInfo.appendChild(imageContainer);
+                        console.log(`🔧 Created missing DOH container for "${tagName}"`);
+                    }
+                }
+                
+                if (imageContainer) {
+                    // Clear existing images
+                    while (imageContainer.firstChild) {
+                        imageContainer.removeChild(imageContainer.firstChild);
+                    }
+                    
+                    // Add appropriate image
+                    if (finalStatus === 'CBD') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/HighCBD.png';
+                        img.alt = 'High CBD';
+                        img.title = 'High CBD Product';
+                        img.loading = 'lazy';
+                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
+                        imageContainer.appendChild(img);
+                        refreshedCount++;
+                        if (window._dohRefreshDebugCount !== undefined && window._dohRefreshDebugCount < 5) {
+                            console.log(`✅ Added CBD badge for "${tagName}"`);
+                        }
+                    } else if (finalStatus === 'THC') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/HighTHC.png';
+                        img.alt = 'High THC';
+                        img.title = 'High THC Product';
+                        img.loading = 'lazy';
+                        img.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
+                        imageContainer.appendChild(img);
+                        refreshedCount++;
+                        if (window._dohRefreshDebugCount !== undefined && window._dohRefreshDebugCount < 5) {
+                            console.log(`✅ Added THC badge for "${tagName}"`);
+                        }
+                    } else if (finalStatus === 'DOH') {
+                        const img = document.createElement('img');
+                        img.src = '/static/img/DOH.png';
+                        img.alt = 'DOH Compliant';
+                        img.title = 'DOH Compliant Product';
+                        img.loading = 'lazy';
+                        img.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
+                        img.onload = function() {
+                            if (window._dohRefreshDebugCount !== undefined && window._dohRefreshDebugCount < 5) {
+                                console.log(`✅ DOH badge image loaded for "${tagName}"`);
+                            }
+                        };
+                        img.onerror = function() {
+                            console.error(`❌ Failed to load DOH image for "${tagName}"`);
+                        };
+                        imageContainer.appendChild(img);
+                        refreshedCount++;
+                        if (window._dohRefreshDebugCount !== undefined && window._dohRefreshDebugCount < 5) {
+                            console.log(`✅ Added DOH badge for "${tagName}" (status: ${finalStatus})`);
+                        }
+                    }
+                    
+                    // Ensure container is visible
+                    imageContainer.style.display = 'inline-block';
+                    imageContainer.style.visibility = 'visible';
+                    imageContainer.style.opacity = '1';
+                } else {
+                    if (window._dohRefreshDebugCount !== undefined && window._dohRefreshDebugCount < 5) {
+                        console.warn(`⚠️ No image container found for "${tagName}" - cannot add DOH badge`);
+                    }
+                }
+            }
+        });
+        
+        if (refreshedCount > 0 && typeof verboseLog === 'function') {
+            verboseLog(`✅ Refreshed ${refreshedCount} DOH badges`);
+        }
+    },
+
     updateDohInAllDisplays(tagName, newDohStatus) {
         // CRITICAL: Normalize NONE to No for state storage
         const normalizedDoh = newDohStatus === 'NONE' ? 'No' : newDohStatus;
@@ -8620,6 +9569,11 @@ const TagManager = {
                 // Update the DOH image
                 const imageContainer = el.querySelector('.doh-image-container');
                 if (imageContainer) {
+                    // CRITICAL FIX: Ensure container is visible
+                    imageContainer.style.display = 'inline-block';
+                    imageContainer.style.visibility = 'visible';
+                    imageContainer.style.opacity = '1';
+                    
                     // Clear existing images
                     while (imageContainer.firstChild) {
                         imageContainer.removeChild(imageContainer.firstChild);
@@ -8631,24 +9585,29 @@ const TagManager = {
                         img.src = '/static/img/HighCBD.png';
                         img.alt = 'High CBD';
                         img.title = 'High CBD Product';
-                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                         imageContainer.appendChild(img);
                     } else if (newDohStatus === 'THC') {
                         const img = document.createElement('img');
                         img.src = '/static/img/HighTHC.png';
                         img.alt = 'High THC';
                         img.title = 'High THC Product';
-                        img.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                         imageContainer.appendChild(img);
                     } else if (newDohStatus === 'DOH') {
                         const img = document.createElement('img');
                         img.src = '/static/img/DOH.png';
                         img.alt = 'DOH Compliant';
                         img.title = 'DOH Compliant Product';
-                        img.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                         imageContainer.appendChild(img);
                     }
-                    // NONE shows no image
+                    // NONE shows no image - but ensure container is still visible for future updates
+                    if (newDohStatus === 'NONE' || !newDohStatus) {
+                        imageContainer.style.display = 'inline-block';
+                        imageContainer.style.visibility = 'visible';
+                        imageContainer.style.opacity = '1';
+                    }
                 }
             }
         });
@@ -8668,6 +9627,11 @@ const TagManager = {
                 // Update the DOH image
                 const imageContainer = el.querySelector('.doh-image-container');
                 if (imageContainer) {
+                    // CRITICAL FIX: Ensure container is visible
+                    imageContainer.style.display = 'inline-block';
+                    imageContainer.style.visibility = 'visible';
+                    imageContainer.style.opacity = '1';
+                    
                     // Clear existing images
                     while (imageContainer.firstChild) {
                         imageContainer.removeChild(imageContainer.firstChild);
@@ -8679,24 +9643,29 @@ const TagManager = {
                         img.src = '/static/img/HighCBD.png';
                         img.alt = 'High CBD';
                         img.title = 'High CBD Product';
-                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                         imageContainer.appendChild(img);
                     } else if (newDohStatus === 'THC') {
                         const img = document.createElement('img');
                         img.src = '/static/img/HighTHC.png';
                         img.alt = 'High THC';
                         img.title = 'High THC Product';
-                        img.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:28px;width:28px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                         imageContainer.appendChild(img);
                     } else if (newDohStatus === 'DOH') {
                         const img = document.createElement('img');
                         img.src = '/static/img/DOH.png';
                         img.alt = 'DOH Compliant';
                         img.title = 'DOH Compliant Product';
-                        img.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle';
+                        img.style.cssText = 'height:36px;width:36px;object-fit:contain;margin-left:6px;vertical-align:middle;display:inline-block !important;visibility:visible !important;opacity:1 !important;';
                         imageContainer.appendChild(img);
                     }
-                    // NONE shows no image
+                    // NONE shows no image - but ensure container is still visible for future updates
+                    if (newDohStatus === 'NONE' || !newDohStatus) {
+                        imageContainer.style.display = 'inline-block';
+                        imageContainer.style.visibility = 'visible';
+                        imageContainer.style.opacity = '1';
+                    }
                 }
             }
         });
@@ -11264,16 +12233,38 @@ const TagManager = {
                 verboseLog(`📊 ${tagsWithDbLineage}/${tags.length} tags have database lineage fields`);
             }
             
-            // CRITICAL FIX: Auto-refresh filters after tags are successfully loaded
-            // This ensures filters are populated when data becomes available
+            // CRITICAL FIX: Build filters IMMEDIATELY from loaded tags (don't wait for server)
+            // This ensures filters are populated right away, not waiting for page load
             if (tags.length > 0) {
-                verboseLog('Tags loaded successfully, refreshing filters...');
-                // Use a small delay to ensure Excel processor is ready
-                setTimeout(() => {
-                    this.fetchAndPopulateFilters(0).catch(error => {
-                        console.warn('Auto-refresh filters after tag load failed (non-critical):', error);
-                    });
-                }, 500);
+                verboseLog('Tags loaded successfully, building filters immediately...');
+                // Build filters directly from loaded tags - no need to fetch from server again
+                const buildFiltersNow = () => {
+                    const brandFilter = document.getElementById('brandFilter');
+                    const dohFilter = document.getElementById('dohFilter');
+                    
+                    if (!brandFilter || !dohFilter) {
+                        // Filter elements not ready yet - retry after short delay
+                        setTimeout(buildFiltersNow, 50);
+                        return;
+                    }
+                    
+                    const filtersEmpty = (brandFilter.options.length <= 1) || 
+                                       (dohFilter.options.length <= 1);
+                    
+                    // Always build if filters are empty OR if this is the first time this session
+                    if (!this._filtersBuiltThisSession || filtersEmpty) {
+                        console.log(`🔧 Building filters IMMEDIATELY from loaded tags (first time: ${!this._filtersBuiltThisSession}, filters empty: ${filtersEmpty})`);
+                        const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
+                            ? this.state.originalTags 
+                            : tags;
+                        this.buildFilterOptionsFromTags(tagsForFilters);
+                        this._filtersBuiltThisSession = true;
+                        console.log(`✅ Filters populated IMMEDIATELY with ${tagsForFilters.length} tags`);
+                    }
+                };
+                
+                // Start building filters immediately
+                buildFiltersNow();
             }
             
             // CRITICAL: Clear safety timeout since we successfully loaded tags
@@ -11303,17 +12294,62 @@ const TagManager = {
             this._backgroundProcessingRetries = 0; // reset after successful load
 
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
-            // CRITICAL FIX: Only build if filters haven't been built yet to prevent duplicate rebuilds
-            // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
-            if (tags && tags.length > 0 && !this._filtersBuiltThisSession) {
-                console.log('🔧 Building filters from fetched tags (first time this session)');
-                const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
-                    ? this.state.originalTags 
-                    : tags;
-                this.buildFilterOptionsFromTags(tagsForFilters);
-                this._filtersBuiltThisSession = true;
-            } else if (this._filtersBuiltThisSession) {
-                console.log('⏭️ Skipping filter rebuild - already built this session');
+            // CRITICAL FIX: Always build filters when tags are loaded from server to ensure they're populated immediately
+            // Use retry logic to ensure filters are built even if DOM elements aren't ready yet
+            if (tags && tags.length > 0) {
+                let filterBuildAttempts = 0;
+                const maxFilterBuildAttempts = 20; // Try for up to 1 second (20 * 50ms)
+                
+                const buildFiltersWithRetry = () => {
+                    filterBuildAttempts++;
+                    const brandFilter = document.getElementById('brandFilter');
+                    const dohFilter = document.getElementById('dohFilter');
+                    
+                    // If filter elements don't exist yet, retry
+                    if ((!brandFilter || !dohFilter) && filterBuildAttempts < maxFilterBuildAttempts) {
+                        console.log(`⏳ Filter elements not ready yet (attempt ${filterBuildAttempts}/${maxFilterBuildAttempts}), retrying in 50ms...`);
+                        setTimeout(buildFiltersWithRetry, 50);
+                        return;
+                    }
+                    
+                    if (!brandFilter || !dohFilter) {
+                        console.error('❌ Filter elements not found after', maxFilterBuildAttempts, 'attempts - filters may not populate');
+                        // Still try to build - buildFilterOptionsFromTags will handle gracefully
+                    }
+                    
+                    const filtersEmpty = (!brandFilter || brandFilter.options.length <= 1) || 
+                                       (!dohFilter || dohFilter.options.length <= 1);
+                    
+                    // Always build if filters are empty OR if this is the first time this session
+                    if (!this._filtersBuiltThisSession || filtersEmpty) {
+                        console.log(`🔧 Building filters from fetched tags (attempt ${filterBuildAttempts}, first time: ${!this._filtersBuiltThisSession}, filters empty: ${filtersEmpty})`);
+                        const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
+                            ? this.state.originalTags 
+                            : tags;
+                        this.buildFilterOptionsFromTags(tagsForFilters);
+                        this._filtersBuiltThisSession = true;
+                        console.log(`✅ Filters populated immediately with ${tagsForFilters.length} tags`);
+                        
+                        // CRITICAL: Verify filters were actually populated after a short delay
+                        setTimeout(() => {
+                            const brandFilterAfter = document.getElementById('brandFilter');
+                            const dohFilterAfter = document.getElementById('dohFilter');
+                            if (brandFilterAfter && brandFilterAfter.options.length <= 1 && tagsForFilters.length > 0) {
+                                console.warn('⚠️ Brand filter still empty after build, retrying...');
+                                this.buildFilterOptionsFromTags(tagsForFilters);
+                            }
+                            if (dohFilterAfter && dohFilterAfter.options.length <= 1 && tagsForFilters.length > 0) {
+                                console.warn('⚠️ DOH filter still empty after build, retrying...');
+                                this.buildFilterOptionsFromTags(tagsForFilters);
+                            }
+                        }, 200);
+                    } else {
+                        console.log('⏭️ Skipping filter rebuild - already built and filters populated');
+                    }
+                };
+                
+                // Start building filters immediately
+                buildFiltersWithRetry();
             }
             
             // CRITICAL: If lineage was aligned from database, ensure tags are fully re-rendered to show database lineage
@@ -11324,14 +12360,14 @@ const TagManager = {
                 console.log(`✅ Lineage alignment detected (source: ${responseData.source}), re-rendering UI with database lineage`);
             }
             
-            // CRITICAL FIX: Preserve vendor data and sovereign_lineage from CACHED tags when fresh tags arrive
+            // CRITICAL FIX: Preserve vendor data and user-edited lineage from CACHED tags when fresh tags arrive
             // This prevents "Unknown Vendor" from appearing and preserves user-edited lineage
             // Store reference to cached tags before any modifications
             const originalCachedTags = cacheUsedForDisplay && cachedTags ? [...cachedTags] : null;
             const tagsToCompareAgainst = originalCachedTags || 
                                          (this.state.tags && this.state.tags.length > 0 ? this.state.tags : null);
             if (tagsToCompareAgainst) {
-                // Create maps of cached/existing tags by product name for vendor and sovereign_lineage lookup
+                 // Create maps of cached/existing tags by product name for vendor and user-edited lineage lookup
                 const existingTagsMap = new Map();
                 const existingSovereignLineageMap = new Map();
                 tagsToCompareAgainst.forEach(existingTag => {
@@ -11343,7 +12379,7 @@ const TagManager = {
                         if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
                             existingTagsMap.set(productName, vendor);
                         }
-                        // Store sovereign_lineage (user-edited lineage - highest priority)
+                         // Store user-edited lineage (highest priority)
                         // Only store if it's valid (not empty, not 'NONE')
                         if (existingTag.sovereign_lineage && 
                             existingTag.sovereign_lineage.toString().trim() !== '' && 
@@ -11353,7 +12389,7 @@ const TagManager = {
                     }
                 });
                 
-                // Preserve vendor data and sovereign_lineage in fresh tags
+                 // Preserve vendor data and user-edited lineage in fresh tags
                 // Use for loop instead of forEach to allow early continue
                 for (let i = 0; i < tags.length; i++) {
                     const tag = tags[i];
@@ -11393,11 +12429,11 @@ const TagManager = {
                         }
                     }
                     
-                    // CRITICAL: Existing cached sovereign_lineage ALWAYS takes precedence over fresh data
-                    // This prevents lineage from flipping when background refresh runs
-                    // User's cached sovereign_lineage (from previous edits) is the source of truth
-                    if (existingSovereignLineageMap.has(productName)) {
-                        // Existing tag has sovereign_lineage - ALWAYS preserve it (user's edits)
+                     // CRITICAL: Existing cached user-edited lineage ALWAYS takes precedence over fresh data
+                     // This prevents lineage from flipping when background refresh runs
+                     // User's cached edits are the source of truth
+                     if (existingSovereignLineageMap.has(productName)) {
+                         // Existing tag has user-edited lineage - ALWAYS preserve it (user's edits)
                         const sovereignLineage = existingSovereignLineageMap.get(productName);
                         tag.sovereign_lineage = sovereignLineage;
                         // Also set other lineage fields to sovereign for consistency
@@ -11406,14 +12442,14 @@ const TagManager = {
                         tag.Lineage = sovereignLineage;
                         tag.lineage = sovereignLineage.toLowerCase();
                         tag['Lineage*'] = sovereignLineage;
-                        console.log(`✅ Preserved cached sovereign_lineage for "${productName}": ${sovereignLineage} (preventing flip)`);
+                         console.log(`✅ Preserved cached user-edited lineage for "${productName}": ${sovereignLineage} (preventing flip)`);
                     } else {
                         // No existing sovereign_lineage - use fresh data from backend
                         const freshHasSovereign = tag.sovereign_lineage && 
                                                  tag.sovereign_lineage.toString().trim() !== '' && 
                                                  tag.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE';
-                        if (freshHasSovereign) {
-                            // Fresh tag has sovereign_lineage from database - use it
+                         if (freshHasSovereign) {
+                             // Fresh tag has user-edited lineage from database - use it
                             const sovereignLineage = tag.sovereign_lineage.toString().trim().toUpperCase();
                             tag.sovereign_lineage = sovereignLineage;
                             tag.canonical_lineage = sovereignLineage;
@@ -11421,32 +12457,32 @@ const TagManager = {
                             tag.Lineage = sovereignLineage;
                             tag.lineage = sovereignLineage.toLowerCase();
                             tag['Lineage*'] = sovereignLineage;
-                            console.log(`✅ Using fresh sovereign_lineage from backend for "${productName}": ${sovereignLineage}`);
+                             console.log(`✅ Using fresh user-edited lineage from backend for "${productName}": ${sovereignLineage}`);
                         }
                     }
                 }
             }
             
             // PERFORMANCE FIX: Only update UI if we didn't already show cached tags OR if lineage actually changed
-            // CRITICAL: Never update UI if cache was used AND cached tags have sovereign_lineage
+             // CRITICAL: Never update UI if cache was used AND cached tags have user-edited lineage
             // This prevents lineage from flipping back and forth
             let shouldUpdateUI = !cacheUsedForDisplay || tags.length !== (originalCachedTags?.length || 0);
             
-            // CRITICAL: Check if we should update UI - never update if cached tags have sovereign_lineage
-            if (cacheUsedForDisplay && originalCachedTags && tags.length === originalCachedTags.length) {
-                // Check if any cached tag has sovereign_lineage - if so, don't update UI (preserve user edits)
-                const hasCachedSovereignLineage = originalCachedTags.some(t => 
-                    t.sovereign_lineage && 
-                    t.sovereign_lineage.toString().trim() !== '' && 
-                    t.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE'
-                );
-                
-                if (hasCachedSovereignLineage) {
-                    // Cached tags have sovereign_lineage - don't update UI, preserve user's edits
-                    shouldUpdateUI = false;
-                    console.log('✅ Skipping UI update - cached tags have sovereign_lineage (preserving user edits)');
-                } else {
-                    // No sovereign_lineage in cache - check if fresh tags have new lineage data
+             // CRITICAL: Check if we should update UI - never update if cached tags have user-edited lineage
+             if (cacheUsedForDisplay && originalCachedTags && tags.length === originalCachedTags.length) {
+                 // Check if any cached tag has user-edited lineage - if so, don't update UI (preserve user edits)
+                 const hasCachedSovereignLineage = originalCachedTags.some(t => 
+                     t.sovereign_lineage && 
+                     t.sovereign_lineage.toString().trim() !== '' && 
+                     t.sovereign_lineage.toString().trim().toUpperCase() !== 'NONE'
+                 );
+                 
+                 if (hasCachedSovereignLineage) {
+                     // Cached tags have user-edited lineage - don't update UI, preserve user's edits
+                     shouldUpdateUI = false;
+                     console.log('✅ Skipping UI update - cached tags have user-edited lineage (preserving user edits)');
+                 } else {
+                     // No user-edited lineage in cache - check if fresh tags have new lineage data
                     let lineageChanged = false;
                     for (let i = 0; i < tags.length; i++) {
                         const freshTag = tags[i];
@@ -11476,6 +12512,25 @@ const TagManager = {
                 this.state.tags = [...tags];
                 this.state.originalTags = [...tags];
                 console.log(`✅ Background refresh complete: ${tags.length} tags (UI unchanged - preserving cached lineage)`);
+                
+                // CRITICAL FIX: ALWAYS rebuild filters when originalTags is updated (even in background refresh)
+                // This ensures filters are populated even if tags were enriched with brand/DOH after initial load
+                if (tags && tags.length > 0) {
+                    const brandFilter = document.getElementById('brandFilter');
+                    const dohFilter = document.getElementById('dohFilter');
+                    const brandFilterEmpty = brandFilter && brandFilter.options.length <= 1;
+                    const dohFilterEmpty = dohFilter && dohFilter.options.length <= 1;
+                    
+                    // CRITICAL: Always rebuild if filters are empty, OR if this is a background refresh (tags may have been enriched)
+                    if (brandFilterEmpty || dohFilterEmpty) {
+                        console.log('🔧 Rebuilding filters after background refresh - filters are empty');
+                        this.buildFilterOptionsFromTags(tags);
+                    } else {
+                        // Even if filters aren't empty, rebuild to ensure they have latest enriched data
+                        console.log('🔧 Rebuilding filters after background refresh - ensuring filters have latest enriched data');
+                        this.buildFilterOptionsFromTags(tags);
+                    }
+                }
                 
                 // CRITICAL FIX: Still wait for tags to appear even if cache was used
                 if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
@@ -11636,6 +12691,14 @@ const TagManager = {
             // Update the UI with new tags
             this._updateAvailableTags(tags);
             this._restoreAvailableScrollPosition(savedScroll);
+            
+            // CRITICAL FIX: ALWAYS rebuild filters when tags are received from API
+            // This ensures filters are populated with brand/DOH data even if tags were enriched
+            if (tags && tags.length > 0 && this.state.originalTags && this.state.originalTags.length > 0) {
+                console.log('🔧 Rebuilding filters after API response - ensuring filters have latest data');
+                // Use originalTags (which should have enriched data) for filter building
+                this.buildFilterOptionsFromTags(this.state.originalTags);
+            }
             
             // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
             // This keeps the loading icon visible until Excel is fully loaded and tags are in the DOM
@@ -11877,7 +12940,7 @@ const TagManager = {
     _normalizeLineageFields(tag) {
         try {
             // CRITICAL: Use EXACT same lineage priority as docx generation
-            // Priority: sovereign_lineage > canonical_lineage/currentLineage > Lineage (Excel)
+             // Priority: user-edited lineage > canonical_lineage/currentLineage > Lineage (Excel)
             // Only use Excel lineage if product is brand new (not in database)
             let lin;
             let fromDatabase = false;
@@ -11978,6 +13041,15 @@ const TagManager = {
             this._cachedFilterOptions = null;
             this._cachedFilterOptionsHash = null;
             this._cachedFilterOptionsTagsLength = null;
+            
+            // CRITICAL FIX: Always rebuild filters when originalTags is set with new tags
+            if (tags && tags.length > 0) {
+                console.log('🔧 Rebuilding filters automatically - originalTags set with', tags.length, 'tags');
+                // Reset flag to allow rebuilding
+                this._filtersBuiltFromTags = false;
+                this.buildFilterOptionsFromTags(tags);
+                this._filtersBuiltFromTags = true;
+            }
             
             // CRITICAL FIX: Preserve selected tags during upload without validation
             const currentSelectedTags = [...this.state.persistentSelectedTags];
@@ -17039,6 +18111,7 @@ const TagManager = {
             'productTypeFilter': 'productType',
             'lineageFilter': 'lineage',
             'weightFilter': 'weight',
+            'priceFilter': 'price',
             'dohFilter': 'doh',
             'highCbdFilter': 'highCbd'
         };
@@ -17053,6 +18126,7 @@ const TagManager = {
             { id: 'productTypeFilter', label: 'Type' },
             { id: 'lineageFilter', label: 'Lineage' },
             { id: 'weightFilter', label: 'Weight' },
+            { id: 'priceFilter', label: 'Price' },
             { id: 'dohFilter', label: 'DOH' },
             { id: 'highCbdFilter', label: 'High CBD' }
         ];
@@ -17156,7 +18230,7 @@ const TagManager = {
             // Instead, do the filter clearing directly
             
             // Clear all filter dropdowns (don't trigger events yet to avoid multiple applyFilters calls)
-            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
+            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
             
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
@@ -18036,17 +19110,20 @@ TagManager.updateSelectedTags([]);
 verboseLog('Original tags:', TagManager.state.originalTags);
 
 // Lineage abbreviation mapping (matching Python version)
-const ABBREVIATED_LINEAGE = {
+// Attach to window for global access
+window.ABBREVIATED_LINEAGE = {
     "SATIVA": "S",
     "INDICA": "I", 
     "HYBRID": "H",
     "HYBRID/SATIVA": "H/S",
-    "HYBRID/INDICA": "I",
+    "HYBRID/INDICA": "H/I",
     "CBD": "CBD",
     "CBD_BLEND": "CBD",
     "MIXED": "THC",
-    "PARA": "P"
+    "PARA": "P",
+    "PARAPHERNALIA": "P"
 };
+const ABBREVIATED_LINEAGE = window.ABBREVIATED_LINEAGE; // Keep for backward compatibility
 
 // When populating the lineage filter dropdown, use abbreviated lineage names
 function populateLineageFilterOptions(options) {
@@ -19215,6 +20292,109 @@ window.clearStuckUploadUI = function() {
     } else {
         console.error('TagManager not available');
     }
+};
+
+// Global function to manually rebuild filters (can be called from browser console)
+window.rebuildFilters = function() {
+    if (typeof TagManager === 'undefined') {
+        console.error('❌ TagManager not available');
+        return;
+    }
+    
+    console.log('🔧 Manually rebuilding filters...');
+    
+    // Get tags from state
+    const tags = TagManager.state.originalTags || TagManager.state.tags || [];
+    
+    if (!tags || tags.length === 0) {
+        console.warn('⚠️ No tags available to build filters from');
+        console.log('   Checking for cached tags...');
+        
+        // Try to get tags from cache
+        try {
+            const cacheKey = 'agt_available_tags_cache';
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                const cachedData = JSON.parse(cached);
+                const cachedTags = cachedData.tags || [];
+                if (cachedTags.length > 0) {
+                    console.log(`   Found ${cachedTags.length} cached tags, using those...`);
+                    TagManager.buildFilterOptionsFromTags(cachedTags);
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error('   Error reading cache:', e);
+        }
+        
+        console.error('❌ No tags found in state or cache. Please upload a file or wait for tags to load.');
+        return;
+    }
+    
+    console.log(`   Found ${tags.length} tags, rebuilding filters...`);
+    
+    // Check if brands exist in tags
+    const sampleBrands = [];
+    const sampleDoh = [];
+    for (let i = 0; i < Math.min(10, tags.length); i++) {
+        const tag = tags[i];
+        const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
+        if (brand && brand.trim()) {
+            sampleBrands.push(brand.trim());
+        }
+        const doh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || '';
+        if (doh && doh.trim()) {
+            sampleDoh.push(doh.trim());
+        }
+    }
+    
+    if (sampleBrands.length === 0) {
+        console.warn('⚠️ No brands found in sample tags!');
+        console.log('   Sample tag keys:', tags[0] ? Object.keys(tags[0]).filter(k => k.toLowerCase().includes('brand')) : 'no tags');
+    } else {
+        console.log(`   Found ${sampleBrands.length} brands in sample:`, sampleBrands.slice(0, 5));
+    }
+    
+    if (sampleDoh.length === 0) {
+        console.warn('⚠️ No DOH values found in sample tags!');
+        console.log('   Sample tag DOH fields:', tags[0] ? {
+            'DOH': tags[0].DOH,
+            'doh': tags[0].doh,
+            'DOH Compliant (Yes/No)': tags[0]['DOH Compliant (Yes/No)'],
+            'DOH Compliant': tags[0]['DOH Compliant']
+        } : 'no tags');
+    } else {
+        console.log(`   Found ${sampleDoh.length} DOH values in sample:`, sampleDoh.slice(0, 5));
+    }
+    
+    // Rebuild filters
+    TagManager.buildFilterOptionsFromTags(tags);
+    
+    // Verify after a delay
+    setTimeout(() => {
+        const brandFilter = document.getElementById('brandFilter');
+        const dohFilter = document.getElementById('dohFilter');
+        
+        if (brandFilter) {
+            const optionCount = brandFilter.options.length;
+            console.log(`✅ Brand filter now has ${optionCount} options`);
+            if (optionCount > 1) {
+                console.log('   Options:', Array.from(brandFilter.options).slice(0, 10).map(o => o.value));
+            } else {
+                console.error('❌ Brand filter still empty!');
+            }
+        }
+        
+        if (dohFilter) {
+            const optionCount = dohFilter.options.length;
+            console.log(`✅ DOH filter now has ${optionCount} options`);
+            if (optionCount > 1) {
+                console.log('   Options:', Array.from(dohFilter.options).slice(0, 10).map(o => o.value));
+            } else {
+                console.error('❌ DOH filter still empty!');
+            }
+        }
+    }, 500);
 };
 
 // Global function to check upload status

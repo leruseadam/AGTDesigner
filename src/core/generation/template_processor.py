@@ -1384,19 +1384,17 @@ class TemplateProcessor:
                                 if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_vendor_cache[pname] = str(vendor).strip()
                             
-                            # Load lineage data (sovereign_lineage, Lineage, canonical_lineage)
+                            # Load lineage data (Lineage, canonical_lineage)
                             batch_lineage_query = f'''
-                                SELECT "Product Name*", sovereign_lineage, "Lineage", canonical_lineage
+                                SELECT "Product Name*", "Lineage", canonical_lineage
                                 FROM products
                                 WHERE "Product Name*" IN ({placeholders})
                             '''
                             cursor.execute(batch_lineage_query, product_names)
                             for row_result in cursor.fetchall():
-                                pname, sov_lineage, lineage, canon_lineage = row_result
-                                # Priority: sovereign_lineage > Lineage > canonical_lineage
-                                if sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(sov_lineage).strip()
-                                elif lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                                pname, lineage, canon_lineage = row_result
+                                # Priority: Lineage > canonical_lineage
+                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_lineage_cache[pname] = str(lineage).strip()
                                 elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_lineage_cache[pname] = str(canon_lineage).strip()
@@ -1419,19 +1417,17 @@ class TemplateProcessor:
                             if strain_names:
                                 strain_placeholders = ','.join(['?'] * len(strain_names))
                                 batch_strain_query = f'''
-                                    SELECT strain_name, display_lineage, sovereign_lineage, canonical_lineage
+                                    SELECT strain_name, display_lineage, canonical_lineage
                                     FROM strains
                                     WHERE strain_name IN ({strain_placeholders})
                                 '''
                                 cursor.execute(batch_strain_query, list(strain_names))
                                 for row_result in cursor.fetchall():
-                                    strain_name, display_lineage, sov_lineage, canon_lineage = row_result
+                                    strain_name, display_lineage, canon_lineage = row_result
                                     strain_info = {}
-                                    # Priority: display_lineage > sovereign_lineage > canonical_lineage
+                                    # Priority: display_lineage > canonical_lineage
                                     if display_lineage and str(display_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                         strain_info['display_lineage'] = str(display_lineage).strip()
-                                    elif sov_lineage and str(sov_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['sovereign_lineage'] = str(sov_lineage).strip()
                                     elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                         strain_info['canonical_lineage'] = str(canon_lineage).strip()
                                     if strain_info:
@@ -1887,6 +1883,7 @@ class TemplateProcessor:
         if any(_contains_cbd_signal(candidate) for candidate in cbd_signal_candidates):
             has_cbd_blend_strain = True
         else:
+            # re is already imported at module level
             ratio_pattern = re.compile(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b')
             ratio_sources = [
                 record.get('ProductName') or record.get('Product Name*'),
@@ -1933,10 +1930,19 @@ class TemplateProcessor:
             # Only query database if record lineage is missing
             db_lineage = None
             # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-            record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-            if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+            # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
+            record_lineage = None
+            for lineage_field in ['sovereign_lineage', 'canonical_lineage', 'Lineage', 'lineage']:
+                candidate = record.get(lineage_field)
+                if candidate and str(candidate).strip() not in ['', 'None', 'nan']:
+                    lineage_str = str(candidate).strip().upper()
+                    if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
+                        record_lineage = lineage_str
+                        break
+            
+            if record_lineage:
                 # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
-                db_lineage = str(record_lineage).strip()
+                db_lineage = record_lineage
                 if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
                     self.logger.info(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
             elif product_name:
@@ -1959,13 +1965,16 @@ class TemplateProcessor:
                         ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
                         result = cursor.fetchone()
                         # Priority: sovereign_lineage > Lineage > canonical_lineage
-                        if result and result[0]:
-                            db_lineage = str(result[0]).strip()
-                            self.logger.info(f"🔒 DOCX: Using sovereign_lineage '{db_lineage}' for '{product_name}'")
-                        elif result and result[1]:
-                            db_lineage = str(result[1]).strip()
-                        elif result and result[2]:
-                            db_lineage = str(result[2]).strip()
+                        # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
+                        if result:
+                            # Check each field in priority order, rejecting "SOVEREIGN"
+                            for idx, field_name in [(0, 'sovereign_lineage'), (1, 'Lineage'), (2, 'canonical_lineage')]:
+                                if result[idx]:
+                                    lineage_str = str(result[idx]).strip().upper()
+                                    if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
+                                        db_lineage = lineage_str
+                                        self.logger.info(f"🔒 DOCX: Using {field_name} '{db_lineage}' for '{product_name}'")
+                                        break
                     except Exception as db_err:
                         self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
                         # Fallback to get_product_lineage if direct query fails
@@ -1977,12 +1986,18 @@ class TemplateProcessor:
                         if product_strain:
                             strain_info = product_db.get_strain_info(product_strain)
                             if strain_info:
-                                db_lineage = (
-                                    strain_info.get('display_lineage') or
-                                    strain_info.get('sovereign_lineage') or
-                                    strain_info.get('canonical_lineage') or
-                                    None
-                                )
+                                # Get strain lineage, rejecting "SOVEREIGN" as invalid
+                                strain_display = strain_info.get('display_lineage')
+                                strain_sovereign = strain_info.get('sovereign_lineage')
+                                strain_canonical = strain_info.get('canonical_lineage')
+                                
+                                # Filter out "SOVEREIGN" - it's a field name, not a lineage value
+                                valid_lineages = []
+                                for lin in [strain_display, strain_sovereign, strain_canonical]:
+                                    if lin and str(lin).strip().upper() != 'SOVEREIGN':
+                                        valid_lineages.append(str(lin).strip())
+                                
+                                db_lineage = valid_lineages[0] if valid_lineages else None
                     
                     # CRITICAL: Always use database lineage if available, never Excel
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
@@ -2082,16 +2097,45 @@ class TemplateProcessor:
         label_context['ProductType'] = product_type
         label_context['Product Type*'] = product_type.title()  # Store as title case for consistency
         
+        # CRITICAL FIX: Process JointRatio FIRST for pre-rolls, before any other weight processing
+        # This ensures WeightUnits is set to JointRatio before DescAndWeight construction
+        # IMPORTANT: Clear any existing WeightUnits from record for pre-rolls to prevent using total weight
         if product_type in ['pre-roll', 'infused pre-roll']:
+            # CRITICAL FIX: Always clear WeightUnits for pre-rolls - we'll set it to JointRatio below
+            # This prevents using total weight (like "5g") instead of joint ratio (like "- 1g x 5 Pack")
+            if 'WeightUnits' in label_context:
+                existing_weight = label_context.get('WeightUnits', '')
+                # Clear WeightUnits if it doesn't contain joint ratio pattern (no "x" or "Pack")
+                # This ensures we always use JointRatio, not total weight
+                if existing_weight:
+                    weight_str = str(existing_weight).lower()
+                    has_joint_ratio_pattern = 'x' in weight_str or 'pack' in weight_str
+                    if not has_joint_ratio_pattern:
+                        self.logger.info(f"🔧 PRE-ROLL: Clearing total weight WeightUnits '{existing_weight}' - will use JointRatio instead")
+                        label_context['WeightUnits'] = ''
+                    else:
+                        self.logger.info(f"🔧 PRE-ROLL: WeightUnits '{existing_weight}' already looks like JointRatio, keeping it")
             # For pre-roll products, use JointRatio as the weight
-            joint_ratio = (record.get('JointRatio') or 
+            # CRITICAL FIX: Check BOTH record and label_context for JointRatio (label_context is a copy of record)
+            joint_ratio = (label_context.get('JointRatio') or 
+                          record.get('JointRatio') or 
+                          label_context.get('Joint Ratio') or
                           record.get('Joint Ratio') or 
                           '')
             
-            # CRITICAL FIX: If JointRatio is missing from record, try to get it from database directly
-            if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+            # CRITICAL FIX: Log all JointRatio sources for debugging
+            self.logger.info(f"🔍 JOINTRATIO DEBUG: Product '{record.get('ProductName', 'N/A')}'")
+            self.logger.info(f"   label_context.get('JointRatio'): {repr(label_context.get('JointRatio'))}")
+            self.logger.info(f"   record.get('JointRatio'): {repr(record.get('JointRatio'))}")
+            self.logger.info(f"   label_context.get('Joint Ratio'): {repr(label_context.get('Joint Ratio'))}")
+            self.logger.info(f"   record.get('Joint Ratio'): {repr(record.get('Joint Ratio'))}")
+            self.logger.info(f"   Final joint_ratio: {repr(joint_ratio)}")
+            
+            # CRITICAL FIX: If JointRatio is missing from record, try multiple sources
+            if not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 product_name = record.get('ProductName') or record.get('Product Name*', '')
                 if product_name:
+                    # Try database cache first
                     try:
                         # Use pre-loaded cache instead of individual query
                         if joint_ratio_cache and product_name:
@@ -2102,8 +2146,39 @@ class TemplateProcessor:
                                 self.logger.debug(f"No JointRatio in cache for '{product_name}'")
                     except Exception as e:
                         self.logger.warning(f"⚠️ Could not retrieve JointRatio from cache: {e}")
+                    
+                    # CRITICAL FIX: If still missing, extract from product name
+                    if not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+                        # re is already imported at module level
+                        product_name_str = str(product_name)
+                        
+                        # Pattern 1: "weight x count Pack" (e.g., "0.5g x 2 Pack", ".75g x 5 Pack")
+                        pattern1 = r'(\d*\.?\d+g)\s*x\s*(\d+)\s*Pack'
+                        match1 = re.search(pattern1, product_name_str, re.IGNORECASE)
+                        if match1:
+                            weight = match1.group(1)
+                            count = match1.group(2)
+                            joint_ratio = f"{weight} x {count} Pack"
+                            self.logger.info(f"✅ Extracted JointRatio '{joint_ratio}' from product name '{product_name}' (pattern 1)")
+                        else:
+                            # Pattern 2: "weight x count" (e.g., "0.5g x 2", ".75g x 5")
+                            pattern2 = r'(\d*\.?\d+g)\s*x\s*(\d+)'
+                            match2 = re.search(pattern2, product_name_str, re.IGNORECASE)
+                            if match2:
+                                weight = match2.group(1)
+                                count = match2.group(2)
+                                joint_ratio = f"{weight} x {count}"
+                                self.logger.info(f"✅ Extracted JointRatio '{joint_ratio}' from product name '{product_name}' (pattern 2)")
+                            else:
+                                # Pattern 3: Just weight (e.g., "1g", "0.5g", ".75g")
+                                pattern3 = r'(\d*\.?\d+g)'
+                                match3 = re.search(pattern3, product_name_str, re.IGNORECASE)
+                                if match3:
+                                    weight = match3.group(1)
+                                    joint_ratio = weight
+                                    self.logger.info(f"✅ Extracted JointRatio '{joint_ratio}' from product name '{product_name}' (pattern 3)")
             
-            self.logger.info(f"📦 PRE-ROLL: Product '{record.get('ProductName', 'N/A')}', JointRatio: '{joint_ratio}'")
+            self.logger.info(f"📦 PRE-ROLL: Product '{record.get('ProductName', 'N/A')}', Final JointRatio: '{joint_ratio}'")
             
             # Use JointRatio or default for all weight fields
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
@@ -2124,6 +2199,9 @@ class TemplateProcessor:
                 label_context['weightWithUnits'] = formatted_default
                 label_context['JointRatio'] = formatted_default
                 self.logger.warning(f"⚠️ Using default JointRatio as weight: '{formatted_default}' for {product_type}")
+            
+            # CRITICAL FIX: WeightUnits is already set to JointRatio above - skip non-pre-roll WeightUnits construction
+            # This ensures WeightUnits for pre-rolls uses JointRatio, not total weight
         else:
             # For non-pre-roll products, construct WeightUnits from available fields
             weight_units = (
@@ -2234,19 +2312,48 @@ class TemplateProcessor:
         # For non-preroll or preroll without group, use normal DescAndWeight logic
         # Check if we already set DescAndWeight for preroll group (skip if so)
         if not (self.template_type == 'preroll' and record.get('_group_id') and label_context.get('DescAndWeight')):
-            if 'DescAndWeight' in label_context and label_context['DescAndWeight']:
-                # DescAndWeight is already set correctly in the record, use it as-is
+            # CRITICAL FIX: For pre-rolls, always reconstruct DescAndWeight using JointRatio
+            # Don't use existing DescAndWeight from record - it might have total weight instead of joint ratio
+            if 'DescAndWeight' in label_context and label_context['DescAndWeight'] and product_type not in ['pre-roll', 'infused pre-roll']:
+                # DescAndWeight is already set correctly in the record, use it as-is (only for non-pre-roll products)
                 desc_and_weight = label_context['DescAndWeight']
                 if not is_already_wrapped(desc_and_weight, 'DESC'):
                     label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
                 # Skip the rest of DescAndWeight processing since it's already set
+                self.logger.info(f"🔍 Using existing DescAndWeight from record: '{desc_and_weight}' (product_type: {product_type})")
             else:
+                # For pre-rolls, always reconstruct DescAndWeight to ensure JointRatio is used
+                if product_type in ['pre-roll', 'infused pre-roll']:
+                    self.logger.info(f"🔍 PRE-ROLL: Reconstructing DescAndWeight to ensure JointRatio is used (ignoring existing DescAndWeight from record)")
                 # Fallback: construct DescAndWeight from Description and WeightUnits
                 desc = label_context.get('Description', '') or ''
-                weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
+                
+                # CRITICAL FIX: For pre-rolls, clean Description to remove ALL weight patterns before adding JointRatio
+                # This prevents showing both total weight (5g) and joint ratio (1g x 5 Pack)
+                if product_type in ['pre-roll', 'infused pre-roll']:
+                    # Remove ALL weight patterns from Description - both total weight and joint ratio
+                    # The Description might contain "Product Name - 5g - 1g x 5 Pack" or similar
+                    original_desc = desc
+                    # Pattern 1: Remove joint ratio patterns FIRST (e.g., " - 1g x 5 Pack", " - 0.5g x 2 Pack")
+                    # This handles patterns like " - 1g x 5 Pack" or " - 0.5g x 2 Pack"
+                    desc = re.sub(r'\s*-\s*\d+\.?\d*\s*g\s*x\s*\d+\s*Pack\s*', '', desc, flags=re.IGNORECASE)
+                    # Pattern 2: Remove total weight patterns (e.g., " - 5g", " - 1g")
+                    # This handles patterns like " - 5g" or " - 1g"
+                    desc = re.sub(r'\s*-\s*\d+\.?\d*\s*g\s*', '', desc, flags=re.IGNORECASE)
+                    # Pattern 3: Remove any remaining " - " at the end
+                    desc = re.sub(r'\s*-\s*$', '', desc)
+                    desc = desc.strip()
+                    self.logger.info(f"🔍 PRE-ROLL: Cleaned Description from '{original_desc}' to '{desc}'")
+                    
+                    # For pre-rolls, use JointRatio first, then WeightUnits as fallback
+                    weight = (label_context.get('JointRatio', '') or label_context.get('WeightUnits', '') or '').replace('\u202F', '')
+                    if weight:
+                        self.logger.info(f"🔍 PRE-ROLL DescAndWeight: Using JointRatio/WeightUnits '{weight}' for product '{record.get('ProductName', 'N/A')}'")
+                else:
+                    weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
                 
                 # DEBUG: Log the values being processed
-                self.logger.info(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}'")
+                self.logger.info(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}', ProductType: '{product_type}'")
                 
                 # Ultra-fast string operations
                 if desc.endswith('- '):
@@ -2268,11 +2375,7 @@ class TemplateProcessor:
                     record.get('Product Name*', '')
                 )
                 
-                if self.template_type == 'double':
-                    primary_text = (product_name_display or desc or '').strip()
-                    self.logger.info(f"🔍 DOUBLE TEMPLATE DESC: Using primary text '{primary_text}'")
-                    label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
-                elif self.template_type == 'preroll':
+                if self.template_type == 'preroll':
                     # PREROLL TEMPLATE: Use group display name with JointRatio-derived weight
                     # Check if we already set DescAndWeight for grouped preroll (above)
                     if not (record.get('_group_id') and label_context.get('DescAndWeight')):
@@ -2308,38 +2411,85 @@ class TemplateProcessor:
                     else:
                         self.logger.info(f"🔍 PREROLL TEMPLATE DESC: Already set to group name, skipping reconstruction")
                 else:
-                    # Check if WeightUnits already contains the complete weight+units
-                    weight_units = record.get("WeightUnits", "")
-                    if weight_units and weight_units.strip():
-                        # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
-                        clean_weight = weight_units.strip()
-                        
-                        # CRITICAL FIX: Clean weight duplication patterns directly in template processor
-                        # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
-                        decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
-                        match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
-                        if match1:
-                            clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                    # CRITICAL FIX: For pre-rolls, use the weight variable we already extracted from JointRatio above (line 2323)
+                    # This ensures we use JointRatio (like "1g x 5 Pack"), not total weight (like "5g")
+                    if product_type in ['pre-roll', 'infused pre-roll']:
+                        # Use the weight variable we already extracted and cleaned above
+                        if weight and weight.strip():
+                            clean_weight = weight.strip()
+                            self.logger.info(f"🔍 PRE-ROLL: Using JointRatio-derived weight '{clean_weight}' for DescAndWeight (from weight variable)")
                         else:
-                            # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
-                            integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
-                            match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
-                            if match2:
-                                clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                            # Fallback to WeightUnits/JointRatio from label_context if weight variable is empty
+                            weight_units = label_context.get("WeightUnits", "") or label_context.get("JointRatio", "")
+                            clean_weight = weight_units.strip() if weight_units else ''
+                            # Remove "- " prefix if present (format_joint_ratio_pack adds it)
+                            if clean_weight.startswith('- '):
+                                clean_weight = clean_weight[2:].strip()
+                            self.logger.info(f"🔍 PRE-ROLL WeightUnits fallback: Using '{clean_weight}' for DescAndWeight")
+                    else:
+                        # For non-pre-roll products, get WeightUnits from label_context or record
+                        weight_units = label_context.get("WeightUnits", "") or record.get("WeightUnits", "")
+                        
+                        # Check if WeightUnits already contains the complete weight+units
+                        if weight_units and weight_units.strip():
+                            # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
+                            clean_weight = weight_units.strip()
+                            
+                            # CRITICAL FIX: Clean weight duplication patterns directly in template processor
+                            # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
+                            decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
+                            match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
+                            if match1:
+                                clean_weight = f"{match1.group(1)}{match1.group(2)}"
+                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                             else:
-                                # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
-                                mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
-                                match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
-                                if match3:
-                                    clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                                # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
+                                integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
+                                match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
+                                if match2:
+                                    clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
+                                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                                else:
+                                    # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
+                                    mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
+                                    match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
+                                    if match3:
+                                        clean_weight = f"{match3.group(1)}{match3.group(2)}"
+                                        self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                        else:
+                            clean_weight = ''
+                    
+                    # Construct DescAndWeight if we have clean_weight
+                    if clean_weight:
+                        # CRITICAL FIX: For non-pre-roll products, clean weight duplication patterns
+                        # For pre-rolls, clean_weight already has JointRatio format (like "1g x 5 Pack"), skip duplication cleaning
+                        if product_type not in ['pre-roll', 'infused pre-roll']:
+                            # CRITICAL FIX: Clean weight duplication patterns directly in template processor
+                            # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
+                            decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
+                            match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
+                            if match1:
+                                clean_weight = f"{match1.group(1)}{match1.group(2)}"
+                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                            else:
+                                # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
+                                integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
+                                match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
+                                if match2:
+                                    clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
+                                    self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
+                                else:
+                                    # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
+                                    mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
+                                    match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
+                                    if match3:
+                                        clean_weight = f"{match3.group(1)}{match3.group(2)}"
+                                        self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         
                         # Keep weight on the same line as description with non-breaking space
                         # Use consistent space-hyphen-space pattern for all templates
                         desc_and_weight = f"{desc} - {clean_weight}"
-                        self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
+                        self.logger.info(f"🔍 DESCANDWEIGHT CONSTRUCTION: desc='{desc}', clean_weight='{clean_weight}' -> '{desc_and_weight}'")
                     else:
                         # Fallback to constructing from Weight* + Units
                         weight_value = record.get("Weight*", "")
@@ -2544,10 +2694,19 @@ class TemplateProcessor:
                 self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking cache...")
                 db_lineage = None
                 # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-                record_lineage = record.get('sovereign_lineage') or record.get('canonical_lineage') or record.get('Lineage') or record.get('lineage')
-                if record_lineage and str(record_lineage).strip() not in ['', 'None', 'nan']:
+                # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
+                record_lineage = None
+                for lineage_field in ['sovereign_lineage', 'canonical_lineage', 'Lineage', 'lineage']:
+                    candidate = record.get(lineage_field)
+                    if candidate and str(candidate).strip() not in ['', 'None', 'nan']:
+                        lineage_str = str(candidate).strip().upper()
+                        if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
+                            record_lineage = lineage_str
+                            break
+                
+                if record_lineage:
                     # Use record lineage (already set correctly by enrichment)
-                    db_lineage = str(record_lineage).strip()
+                    db_lineage = record_lineage
                     if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
                         self.logger.info(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
                 elif product_name and product_lineage_cache:
@@ -2570,7 +2729,10 @@ class TemplateProcessor:
                             strain_info.get('canonical_lineage')
                         )
                         if preferred:
-                            lineage_val = str(preferred).strip().upper()
+                            preferred_str = str(preferred).strip().upper()
+                            # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
+                            if preferred_str != 'SOVEREIGN':
+                                lineage_val = preferred_str
                             self.logger.info(f"✅ Using cached strain lineage: '{lineage_val}' for strain '{product_strain}'")
                 
                 if not lineage_val:
@@ -2728,8 +2890,14 @@ class TemplateProcessor:
                         self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
+            # CRITICAL FIX: For vertical templates, classic types should NOT display ProductStrain
+            # Lineage already shows the strain information, so ProductStrain would be redundant
             product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
-            if product_strain_value:
+            if self.template_type == 'vertical':
+                # Vertical templates: Classic types don't need ProductStrain (Lineage shows strain info)
+                label_context['ProductStrain'] = ""
+                self.logger.debug(f"VERTICAL CLASSIC FIX: Cleared ProductStrain for classic type '{product_type}' (Lineage already shows strain)")
+            elif product_strain_value:
                 if self.template_type == 'mini':
                     label_context['ProductStrain'] = str(product_strain_value).strip()
                 else:
@@ -2852,30 +3020,13 @@ class TemplateProcessor:
 
                     self.logger.info(f"🔍 VERTICAL BRAND DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
 
-                    lineage_for_color_source = (
-                        label_context.get('Lineage') or
-                        record.get('Lineage') or
-                        ''
-                    )
-                    if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
-                        lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
-                    lineage_for_color = str(lineage_for_color_source).strip().upper()
-
-                    if not lineage_for_color:
-                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
-
-                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
-
-                    # Use lineage hint for color logic while leaving actual brand in ProductBrand field
-                    label_context['Lineage'] = lineage_hint_token
-
-                    # Populate ProductBrand with hint + brand markers for display (single source of truth)
-                    label_context['ProductBrand'] = (
-                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
-                    )
+                    # CRITICAL FIX: For vertical template, match horizontal template behavior
+                    # Set Lineage to brand (for display), color comes from ProductStrain via is_product_strain_cbd
+                    label_context['Lineage'] = final_brand_text
+                    label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
 
-                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set ProductBrand to '{final_brand_text}' with lineage hint '{lineage_for_color}'")
+                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' (color from ProductStrain)")
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -2995,11 +3146,14 @@ class TemplateProcessor:
                     if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
                         lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
                     lineage_for_color = str(lineage_for_color_source).strip().upper()
-                    
-                    if not lineage_for_color:
+
+                    # CRITICAL FIX: Validate that lineage_for_color is a valid lineage, not a brand name
+                    # For non-classic types, the Lineage field may contain brand info, not actual lineage
+                    valid_lineages = {'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD BLEND', 'CBD_BLEND', 'MIXED'}
+                    if not lineage_for_color or lineage_for_color not in valid_lineages:
                         # Fall back to CBD lineage when we have CBD signal, otherwise treat as MIXED (blue)
                         lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
-                    
+
                     lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
                     lineage_content = (
                         f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
@@ -3024,19 +3178,19 @@ class TemplateProcessor:
                     clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
-                    
+
                     # CRITICAL FIX: Remove any remaining $ symbols that might be marker remnants
                     # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
                     clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
-                    
+
                     clean_brand_text = clean_brand_text.strip()
-                    
+
                     if clean_brand_text:
                         label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
                     else:
                         # Fallback to original brand text if cleaning removed everything
                         label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
-                    
+
                     # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
@@ -3063,17 +3217,11 @@ class TemplateProcessor:
                 self.logger.debug(f"Set Lineage/ProductBrand to '{product_brand}' and ProductStrain to '{product_strain}' for non-classic type '{product_type}'")
             else:
                 # No brand available for non-classic type
-                if self.template_type == 'vertical':
-                    # For vertical template, still set empty values but don't prevent data population
-                    label_context['Lineage'] = ""
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-                    self.logger.debug(f"VERTICAL BRAND FIX: Set empty brand values for vertical template (no brand available)")
-                else:
-                    label_context['Lineage'] = ""
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-                self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
+                # Color will be determined by ProductStrain content (CBD/Mixed) in apply_lineage_colors
+                label_context['Lineage'] = ""
+                label_context['ProductBrand'] = ""
+                label_context['ProductBrand_Center'] = ""
+                self.logger.debug(f"No brand for non-classic type '{product_type}' - color from ProductStrain")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
             # CRITICAL FIX: For vertical template, use marker-based formatting for proper font sizing
@@ -3152,9 +3300,12 @@ class TemplateProcessor:
         # Fast strain handling - always show the actual strain value from Excel
         # But don't override if ProductStrain was already set for nonclassic types
         # CRITICAL FIX: Don't override ProductStrain if we already processed non-classic types
+        # CRITICAL FIX: For vertical templates, ensure ProductStrain is always set if available
+        # CRITICAL FIX: For vertical templates with non-classic types, ProductStrain is already set above - don't override
         should_process_strain = (
             'ProductStrain' not in label_context or 
-            (not label_context['ProductStrain'] and not self._is_non_classic_type(product_type))
+            (not label_context['ProductStrain'] and not self._is_non_classic_type(product_type)) or
+            (self.template_type == 'vertical' and not label_context.get('ProductStrain') and not self._is_non_classic_type(product_type))
         )
         
         if should_process_strain:
@@ -3169,13 +3320,16 @@ class TemplateProcessor:
             
             if product_strain:
                 # All templates use wrapped format for consistent processing by manual_docx_replace()
+                # CRITICAL FIX: For vertical templates, ensure ProductStrain is always wrapped with markers
                 label_context['ProductStrain'] = wrap_with_marker(product_strain, 'PRODUCTSTRAIN')
                 self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to '{label_context['ProductStrain']}' for {self.template_type} template (OVERRIDE)")
             else:
-                label_context['ProductStrain'] = ''
-                self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to empty (no strain from record) (OVERRIDE)")
+                # Only set to empty if we're not preserving an existing value
+                if 'ProductStrain' not in label_context or not label_context.get('ProductStrain'):
+                    label_context['ProductStrain'] = ''
+                    self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to empty (no strain from record) (OVERRIDE)")
         else:
-            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Skipping strain override - ProductStrain already set to '{label_context['ProductStrain']}' for non-classic type")
+            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Skipping strain override - ProductStrain already set to '{label_context.get('ProductStrain', 'NOT_SET')}'")
 
         # Double template should never display ProductStrain text (prevent 12pt strain labels)
         if self.template_type == 'double':
@@ -3889,11 +4043,13 @@ class TemplateProcessor:
             # CRITICAL FIX: Ensure DOH images have proper vertical margins to prevent cutoff
             self._ensure_doh_logo_vertical_margins(doc)
             
-            # CRITICAL FIX: Final marker cleanup to ensure ALL markers are stripped
-            self._final_marker_cleanup(doc)
-            
             # FINAL ENFORCEMENT: Absolutely ensure DOH images are centered - this overrides all other positioning
             self._final_doh_positioning_enforcement(doc)
+            
+            # CRITICAL FIX: Final marker cleanup to ensure ALL markers are stripped
+            # NOTE: This must happen AFTER all font sizing is complete (which happens in _post_process_template_specific)
+            # ProductStrain markers need to be processed for font sizing before being removed
+            self._final_marker_cleanup(doc)
             
             # PREROLL TEMPLATE: Center QR codes
             if self.template_type == 'preroll':
@@ -4712,6 +4868,14 @@ class TemplateProcessor:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
+                            # CRITICAL FIX: Check for ProductStrain markers first before processing individual runs
+                            full_text = "".join(run.text for run in paragraph.runs)
+                            if 'PRODUCTSTRAIN_START' in full_text and 'PRODUCTSTRAIN_END' in full_text:
+                                # Process ProductStrain markers using the marker processing system
+                                self._process_paragraph_for_markers_template_specific(paragraph, ['PRODUCTSTRAIN'])
+                                continue
+                            
+                            # Process other text normally
                             for run in paragraph.runs:
                                 run_text = run.text or ''
                                 if not run_text.strip():
@@ -5058,13 +5222,16 @@ class TemplateProcessor:
         if self._detect_and_process_combined_lineage_vendor(paragraph):
             return
         
-        # Check if any markers are present (optimized - no debug logging)
+        # Check if any markers are present
         found_markers = []
         for marker_name in markers:
             start_marker = f'{marker_name}_START'
             end_marker = f'{marker_name}_END'
             if start_marker in full_text and end_marker in full_text:
                 found_markers.append(marker_name)
+                # CRITICAL DEBUG: Log ProductStrain marker detection for vertical templates
+                if marker_name == 'PRODUCTSTRAIN':
+                    self.logger.info(f"✅ PRODUCTSTRAIN MARKER DETECTED: Found ProductStrain markers in {self.template_type} template paragraph: '{full_text[:150]}...'")
         
         if found_markers:
             # Process all markers and build the final content
@@ -5086,6 +5253,10 @@ class TemplateProcessor:
                     
                     # Get font size for this marker
                     font_size = self._get_template_specific_font_size(content, marker_name)
+                    
+                    # CRITICAL DEBUG: Log ProductStrain font sizing
+                    if marker_name == 'PRODUCTSTRAIN':
+                        self.logger.info(f"✅ PRODUCTSTRAIN FONT SIZING: Content='{content}', FontSize={font_size.pt if hasattr(font_size, 'pt') else font_size}pt, Template={self.template_type}")
                     
                     processed_content[marker_name] = {
                         'content': content,
@@ -5135,6 +5306,9 @@ class TemplateProcessor:
                 
                 run.font.size = marker_data['font_size']
                 set_run_font_size(run, marker_data['font_size'])
+                # CRITICAL DEBUG: Log ProductStrain processing
+                if marker_name == 'PRODUCTSTRAIN':
+                    self.logger.info(f"✅ PRODUCTSTRAIN PROCESSED: Added ProductStrain run with content='{display_content}', font_size={marker_data['font_size'].pt if hasattr(marker_data['font_size'], 'pt') else marker_data['font_size']}pt")
                 self.logger.debug(f"Added marker '{marker_name}': '{display_content}' -> {marker_data['font_size'].pt}pt")
                 
                 lines = display_content.splitlines()

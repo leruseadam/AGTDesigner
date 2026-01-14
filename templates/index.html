@@ -131,17 +131,14 @@
 
           // CRITICAL FIX: Mark store as confirmed to prevent modal reappearing after uploads
           window.storeConfirmed = true;
+          window.STORE_MODAL_BLOCKING = false; // Clear blocking flag immediately
 
           // Persist context so the modal stays hidden after reload
           sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
           sessionStorage.setItem('store_just_selected', 'true');
           sessionStorage.setItem('selected_store', storeValue);
 
-          // Make sure any blocking flag is cleared before the reload kicks in
-          if (window.STORE_MODAL_BLOCKING) {
-            console.log('✅ Clearing STORE_MODAL_BLOCKING flag');
-            window.STORE_MODAL_BLOCKING = false;
-          }
+          // CRITICAL FIX: Prevent checkStoreRequired from running again
           window.checkingStoreRequired = false;
           
           // CRITICAL FIX: Don't wait for TagManager - reload immediately
@@ -633,6 +630,15 @@
       // Frontend simply trusts the backend's /api/check-store-required response
       // No frontend caching - always check with backend to get accurate IP-based store status
 
+      // CRITICAL FIX: Prevent multiple calls if store is already confirmed
+      if (window.storeConfirmed === true && sessionStorage.getItem('store_just_selected') === 'true') {
+        console.log('✅ Store already confirmed - skipping checkStoreRequired');
+        if (typeof onStoreConfirmed === 'function') {
+          setTimeout(onStoreConfirmed, 100);
+        }
+        return;
+      }
+
       // Prevent multiple simultaneous calls
       if (window.checkingStoreRequired) {
         console.log('⚠️ checkStoreRequired already in progress, skipping...');
@@ -747,9 +753,14 @@
             
             // CRITICAL FIX: Mark store as confirmed to prevent re-checking after uploads or reloads
             window.storeConfirmed = true;
+            window.STORE_MODAL_BLOCKING = false; // Clear blocking flag immediately
             // Also persist in sessionStorage to survive page reloads
             sessionStorage.setItem('store_just_selected', 'true');
             sessionStorage.setItem('selected_store', data.store);
+            sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
+            
+            // CRITICAL FIX: Prevent checkStoreRequired from running again
+            window.checkingStoreRequired = false;
             
             updateCurrentStoreDisplay(data.store);
             updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
@@ -840,6 +851,13 @@
             }, 300);
           } else {
             // NO STORE - Show modal
+            // CRITICAL FIX: Check if modal is already visible to prevent duplicate modals
+            if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block')) {
+              console.log('⚠️ Modal already visible - skipping duplicate show');
+              window.checkingStoreRequired = false;
+              return;
+            }
+            
             console.log('⚠️ NO STORE - Showing modal');
             console.log('⚠️ Store check details:', {
               success: data.success,
@@ -4959,6 +4977,7 @@
     #productTypeFilter,
     #lineageFilter,
     #weightFilter,
+    #priceFilter,
     #dohFilter,
     #highCbdFilter,
     #templateSelect {
@@ -5012,6 +5031,8 @@
     #lineageFilter:active,
     #weightFilter:focus,
     #weightFilter:active,
+    #priceFilter:focus,
+    #priceFilter:active,
     #dohFilter:focus,
     #dohFilter:active,
     #highCbdFilter:focus,
@@ -5029,6 +5050,7 @@
     #productTypeFilter:hover,
     #lineageFilter:hover,
     #weightFilter:hover,
+    #priceFilter:hover,
     #dohFilter:hover,
     #highCbdFilter:hover,
     #templateSelect:hover {
@@ -6226,16 +6248,37 @@
 
           window.STORE_MODAL_BLOCKING = true;
 
+          let attemptCount = 0;
+          const MAX_ATTEMPTS = 50; // 10 seconds max (50 * 200ms)
+          
           const attemptShow = () => {
-            // CRITICAL: Wait for loading splash to be hidden before showing modal
-            const loadingSplash = document.getElementById('appLoadingSplash');
+            attemptCount++;
+            
+            // CRITICAL FIX: Prevent infinite loop - timeout after max attempts
+            if (attemptCount > MAX_ATTEMPTS) {
+              console.warn('⚠️ Loading splash check timeout - showing modal anyway');
+              // Force hide loading splash if it exists
+              const loadingSplash = document.getElementById('appLoadingSplash');
+              if (loadingSplash) {
+                loadingSplash.style.display = 'none';
+                loadingSplash.classList.add('fade-out');
+              }
+              // Continue to show modal
+            }
+            
+            // Check for loading splash (try multiple possible IDs)
+            const loadingSplash = document.getElementById('appLoadingSplash') || 
+                                 document.getElementById('loadingOverlay') ||
+                                 document.querySelector('#loadingOverlay');
+            
             if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
               // Loading splash is still visible, wait a bit longer
-              console.log('⏳ Waiting for loading splash to hide before showing store modal...');
+              console.log(`⏳ Waiting for loading splash to hide before showing store modal... (attempt ${attemptCount}/${MAX_ATTEMPTS})`);
               setTimeout(attemptShow, 200);
               return;
             }
             
+            // Loading splash is hidden or doesn't exist - proceed to show modal
             if (typeof window.showStoreSelectionModal === 'function') {
               window.showStoreSelectionModal();
             } else {
@@ -9778,16 +9821,28 @@
                     </div>
                   </div>
                   <div class="col-md-6">
-                    <h6 class="text-success">� Database Match (100% DB Data):</h6>
+                    <h6 class="text-success">✅ Database Match (100% DB Data):</h6>
                     ${match.best_match ? `
                       <div class="bg-success bg-opacity-10 p-3 rounded">
                         <strong>${match.best_match['Product Name*'] || match.best_match['ProductName'] || 'Enhanced Match'}</strong>
                         <div class="mt-2">
                           <small class="text-muted">
-                            <strong>Price:</strong> $${match.best_match['Price'] || '25.00'}<br>
-                            <strong>Brand:</strong> ${match.best_match['Product Brand'] || 'CERES'}<br>
-                            <strong>Type:</strong> ${match.best_match['Product Type*'] || 'Edible (Solid)'}<br>
-                            <strong>Weight:</strong> ${match.best_match['Weight*'] || '1'}${match.best_match['Units'] || 'g'}<br>
+                            <strong>Price:</strong> ${match.best_match['Price*'] || match.best_match['Price'] || '$25.00'}<br>
+                            <strong>Brand:</strong> ${match.best_match['Product Brand'] || match.best_match['ProductBrand'] || 'N/A'}<br>
+                            <strong>Type:</strong> ${match.best_match['Product Type*'] || match.best_match['ProductType'] || 'N/A'}<br>
+                            <strong>Weight:</strong> ${(() => {
+                              // Use WeightWithUnits or WeightUnits if available (already formatted)
+                              if (match.best_match['WeightWithUnits']) return match.best_match['WeightWithUnits'];
+                              if (match.best_match['WeightUnits']) return match.best_match['WeightUnits'];
+                              // Otherwise format Weight* + Units properly (avoid doubling)
+                              const weight = match.best_match['Weight*'] || '';
+                              const units = match.best_match['Units'] || '';
+                              if (!weight) return 'N/A';
+                              // If weight already includes units (e.g., "3.5g"), don't add units again
+                              if (weight.match(/[a-zA-Z]+$/)) return weight;
+                              // Otherwise append units
+                              return weight + units;
+                            })()}<br>
                             <strong>Source:</strong> ${match.source || 'Database Priority (100% DB)'}<br>
                             <strong>Confidence:</strong> ${match.match_confidence || (match.best_score ? (typeof match.best_score === 'number' ? `${(match.best_score * 100).toFixed(1)}%` : match.best_score) : 'N/A')}
                           </small>
@@ -12689,6 +12744,7 @@
     console.log('Function verification:');
     console.log('openDatabaseAnalytics available:', typeof window.openDatabaseAnalytics);
     console.log('openLineageEditor available:', typeof window.openLineageEditor);
+  } // CRITICAL FIX: Close missing brace
   </script>
   
   <!-- Lineage Editor Modals -->

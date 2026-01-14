@@ -1356,11 +1356,11 @@ class ExcelProcessor:
             for strain_name in strain_names:
                 try:
                     strain_info = product_db.get_strain_info(strain_name)
-                    if strain_info and strain_info.get('sovereign_lineage'):
+                    if strain_info and strain_info.get('canonical_lineage'):
                         # Update lineage in the dataframe for this strain
                         strain_mask = self.df['Product Strain'] == strain_name
                         if strain_mask.any():
-                            db_lineage = strain_info['sovereign_lineage']
+                            db_lineage = strain_info['canonical_lineage']
                             
                             # CRITICAL FIX: Be more conservative with edible lineage assignments
                             # Don't override edible lineage assignments with database values unless they're explicitly high-CBD
@@ -1400,7 +1400,7 @@ class ExcelProcessor:
                                     self.df.loc[idx, 'Lineage'] = db_lineage
                                     lineage_updates += 1
                                     
-                            self.logger.debug(f"[ProductDB] Loaded lineage for '{strain_name}': {strain_info['sovereign_lineage']}")
+                            self.logger.debug(f"[ProductDB] Loaded lineage for '{strain_name}': {strain_info['canonical_lineage']}")
                 except Exception as e:
                     self.logger.warning(f"[ProductDB] Failed to load lineage for strain '{strain_name}': {e}")
             
@@ -3590,8 +3590,36 @@ class ExcelProcessor:
                 'Quantity*': safe_get_value(quantity),
                 'Quantity Received*': safe_get_value(quantity),
                 'quantity': safe_get_value(quantity),
-                'DOH': safe_get_value(row.get('DOH', '')) or safe_get_value(row.get('DOH Compliant (Yes/No)', '')),  # Add DOH field for UI display
-                'DOH Compliant (Yes/No)': safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or safe_get_value(row.get('DOH', '')),  # Add alternative DOH field
+                # CRITICAL: Read DOH from Excel - check ALL possible column name variations
+                # Excel might have DOH in different column names, so check them all
+                'DOH': (
+                    safe_get_value(row.get('DOH', '')) or 
+                    safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or
+                    safe_get_value(row.get('DOH Compliant', '')) or
+                    safe_get_value(row.get('DOH*', '')) or
+                    safe_get_value(row.get('doh', ''))
+                ),  # Add DOH field for UI display
+                'DOH Compliant (Yes/No)': (
+                    safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or
+                    safe_get_value(row.get('DOH', '')) or
+                    safe_get_value(row.get('DOH Compliant', '')) or
+                    safe_get_value(row.get('DOH*', '')) or
+                    safe_get_value(row.get('doh', ''))
+                ),  # Add alternative DOH field
+                'DOH Compliant': (
+                    safe_get_value(row.get('DOH Compliant', '')) or
+                    safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or
+                    safe_get_value(row.get('DOH', '')) or
+                    safe_get_value(row.get('DOH*', '')) or
+                    safe_get_value(row.get('doh', ''))
+                ),  # Add variant without parentheses
+                'doh': (
+                    (safe_get_value(row.get('DOH', '')) or 
+                     safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or
+                     safe_get_value(row.get('DOH Compliant', '')) or
+                     safe_get_value(row.get('DOH*', '')) or
+                     safe_get_value(row.get('doh', ''))).lower()
+                ) if (safe_get_value(row.get('DOH', '')) or safe_get_value(row.get('DOH Compliant (Yes/No)', '')) or safe_get_value(row.get('DOH Compliant', '')) or safe_get_value(row.get('DOH*', '')) or safe_get_value(row.get('doh', ''))) else '',  # Add lowercase variant
                 'Price*': price_value,  # CRITICAL: Add Price* field (primary price field used by UI)
                 'Price': price_value,  # Add Price field for backward compatibility
                 'THC': ai_value,  # Add THC value
@@ -4463,12 +4491,60 @@ class ExcelProcessor:
                     if not product_type:
                         product_type = "flower"
                     
+                    # CRITICAL FIX: Extract JointRatio BEFORE building processed record so we can use it for WeightUnits
+                    joint_ratio = record.get('JointRatio', '') or record.get('Joint Ratio', '')
+                    # Handle NaN values properly
+                    if pd.isna(joint_ratio) or str(joint_ratio).strip().lower() in ['nan', 'none', 'null', '']:
+                        joint_ratio = ''
+                    
+                    # CRITICAL FIX: If JointRatio is missing for pre-roll products, extract it from product name
+                    if (not joint_ratio or joint_ratio.strip() == '') and product_type in {"pre-roll", "infused pre-roll"}:
+                        # Extract joint ratio from product name using the same logic as ExcelProcessor.load_file
+                        import re
+                        product_name_str = str(product_name)
+                        
+                        # Pattern 1: "weight x count Pack" (e.g., "0.5g x 2 Pack", ".75g x 5 Pack")
+                        pattern1 = r'(\d*\.?\d+g)\s*x\s*(\d+)\s*Pack'
+                        match1 = re.search(pattern1, product_name_str, re.IGNORECASE)
+                        if match1:
+                            weight = match1.group(1)
+                            count = match1.group(2)
+                            joint_ratio = f"{weight} x {count} Pack"
+                        else:
+                            # Pattern 2: "weight x count" (e.g., "0.5g x 2", ".75g x 5")
+                            pattern2 = r'(\d*\.?\d+g)\s*x\s*(\d+)'
+                            match2 = re.search(pattern2, product_name_str, re.IGNORECASE)
+                            if match2:
+                                weight = match2.group(1)
+                                count = match2.group(2)
+                                joint_ratio = f"{weight} x {count}"
+                            else:
+                                # Pattern 3: Just weight (e.g., "1g", "0.5g", ".75g")
+                                pattern3 = r'(\d*\.?\d+g)'
+                                match3 = re.search(pattern3, product_name_str, re.IGNORECASE)
+                                if match3:
+                                    weight = match3.group(1)
+                                    joint_ratio = weight
+                        
+                        if joint_ratio:
+                            logger.info(f"✅ Extracted JointRatio '{joint_ratio}' from product name '{product_name}'")
+                    
                     # Build the processed record with raw values (no markers)
+                    # CRITICAL FIX: For pre-rolls, don't set WeightUnits to total weight if JointRatio is missing
+                    # Let template processor handle JointRatio extraction/calculation
+                    if product_type in {"pre-roll", "infused pre-roll"}:
+                        # For pre-rolls, WeightUnits should be JointRatio (set by template processor) or empty
+                        # Don't use total weight here - template processor will handle it
+                        weight_units_value = joint_ratio if joint_ratio else ''
+                    else:
+                        # For non-pre-rolls, use formatted weight units
+                        weight_units_value = self._format_weight_units(record, excel_priority=True)
+                    
                     processed = {
                         'ProductName': product_name,  # Keep this for compatibility
                         product_name_col: product_name,  # Also store with original column name
                         'Description': description,
-                        'WeightUnits': record.get('JointRatio', '') if product_type in {"pre-roll", "infused pre-roll"} else self._format_weight_units(record, excel_priority=True),
+                        'WeightUnits': weight_units_value,
                         'ProductBrand': product_brand,
                         'Price': str(record.get('Price*', '')).strip() if record.get('Price*') and str(record.get('Price*', '')).strip() else (str(record.get('Price', '')).strip() if record.get('Price') and str(record.get('Price', '')).strip() else ''),  # NO DEFAULT PRICE
                         'Lineage': str(final_lineage) if str(final_lineage) else "",
@@ -4487,14 +4563,23 @@ class ExcelProcessor:
                         'AK': ak_value,  # CBDA value for CBD
                         'Vendor': vendor,  # Add vendor information
                     }
+                    # CRITICAL FIX: Ensure JointRatio is included in processed record (already extracted above before building processed dict)
                     # Ensure leading space before hyphen is a non-breaking space to prevent Word from stripping it
-                    joint_ratio = record.get('JointRatio', '')
-                    # Handle NaN values properly
-                    if pd.isna(joint_ratio) or joint_ratio == 'nan' or joint_ratio == 'NaN':
-                        joint_ratio = ''
-                    elif joint_ratio.startswith(' -'):
+                    if joint_ratio and joint_ratio.startswith(' -'):
                         joint_ratio = ' -\u00A0' + joint_ratio[2:]
-                    processed['JointRatio'] = joint_ratio
+                    
+                    # CRITICAL FIX: Always include JointRatio in processed record, even if empty
+                    processed['JointRatio'] = joint_ratio if joint_ratio else ''
+                    
+                    # CRITICAL FIX: For pre-rolls, ensure WeightUnits uses JointRatio (already set above in processed dict, but verify)
+                    if product_type in {"pre-roll", "infused pre-roll"}:
+                        if joint_ratio:
+                            # Update WeightUnits to use JointRatio if it wasn't already set correctly
+                            if processed.get('WeightUnits') != joint_ratio:
+                                processed['WeightUnits'] = joint_ratio
+                            logger.debug(f"✅ Using JointRatio '{joint_ratio}' for WeightUnits on pre-roll '{product_name}'")
+                        else:
+                            logger.warning(f"⚠️ No JointRatio found for pre-roll '{product_name}' - WeightUnits will use formatted weight")
                     
                     logger.info(f"Rendered label for record: {product_name if product_name else '[NO NAME]'}")
                     logger.debug(f"Processed record DOH value: {processed['DOH']}")
@@ -7992,7 +8077,35 @@ class ExcelProcessor:
                 'Quantity*': quantity,
                 'Quantity Received*': quantity,
                 'quantity': quantity,
-                'DOH': get_val('DOH'),
+                # CRITICAL: Read DOH from Excel - check ALL possible column name variations
+                'DOH': (
+                    get_val('DOH') or 
+                    get_val('DOH Compliant (Yes/No)') or
+                    get_val('DOH Compliant') or
+                    get_val('DOH*') or
+                    get_val('doh')
+                ),
+                'DOH Compliant (Yes/No)': (
+                    get_val('DOH Compliant (Yes/No)') or
+                    get_val('DOH') or
+                    get_val('DOH Compliant') or
+                    get_val('DOH*') or
+                    get_val('doh')
+                ),
+                'DOH Compliant': (
+                    get_val('DOH Compliant') or
+                    get_val('DOH Compliant (Yes/No)') or
+                    get_val('DOH') or
+                    get_val('DOH*') or
+                    get_val('doh')
+                ),
+                'doh': (
+                    (get_val('DOH') or 
+                     get_val('DOH Compliant (Yes/No)') or
+                     get_val('DOH Compliant') or
+                     get_val('DOH*') or
+                     get_val('doh')).lower()
+                ) if (get_val('DOH') or get_val('DOH Compliant (Yes/No)') or get_val('DOH Compliant') or get_val('DOH*') or get_val('doh')) else '',
                 'JointRatio': get_val('JointRatio'),  # Add JointRatio for pre-roll products
                 'Price*': price_value,  # CRITICAL: Add Price* field (primary price field used by UI)
                 'Price': price_value,  # Add Price field for backward compatibility

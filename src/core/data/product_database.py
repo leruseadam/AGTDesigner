@@ -1218,22 +1218,14 @@ class ProductDatabase:
             return None
 
     def update_all_canonical_lineages_to_mode(self):
-        """Update all strains' canonical_lineage to the mode lineage from the products table.
-        CRITICAL: Skips strains with sovereign_lineage (manual edits) to preserve user changes."""
+        """Update all strains' canonical_lineage to the mode lineage from the products table."""
         self.init_database()
         conn = self._get_connection()
         cursor = conn.cursor()
-        # Get all strains WITHOUT sovereign lineage (don't overwrite manual edits)
-        cursor.execute('SELECT id, strain_name, canonical_lineage, sovereign_lineage FROM strains')
+        cursor.execute('SELECT id, strain_name, canonical_lineage FROM strains')
         strains = cursor.fetchall()
         updated = 0
-        skipped = 0
-        for strain_id, strain_name, canonical_lineage, sovereign_lineage in strains:
-            # CRITICAL: Skip strains with sovereign lineage (manual edits)
-            if sovereign_lineage:
-                skipped += 1
-                logger.debug(f"Skipping '{strain_name}' - has sovereign lineage '{sovereign_lineage}'")
-                continue
+        for strain_id, strain_name, canonical_lineage in strains:
             mode_lineage = self.get_mode_lineage(strain_id)
             if mode_lineage and mode_lineage != canonical_lineage:
                 cursor.execute('''
@@ -1242,12 +1234,12 @@ class ProductDatabase:
                 logger.info(f"Updated canonical_lineage for '{strain_name}' to '{mode_lineage}' (was '{canonical_lineage}')")
                 updated += 1
         conn.commit()
-        logger.info(f"Canonical lineage update complete. {updated} strains updated, {skipped} skipped (sovereign lineage protected).")
+        logger.info(f"Canonical lineage update complete. {updated} strains updated.")
 
     @timed_operation("add_or_update_strain")
     @retry_on_lock(max_retries=3, delay=0.5)
     def add_or_update_strain(self, strain_name: str, lineage: str = None, sovereign: bool = False) -> int:
-        """Add a new strain or update existing strain information. If sovereign is True, set sovereign_lineage."""
+        """Add a new strain or update existing strain information."""
         try:
             self.init_database()  # Ensure DB is initialized
             normalized_name = self._normalize_strain_name(strain_name)
@@ -1268,67 +1260,35 @@ class ProductDatabase:
                 
                 # Check if strain exists
                 cursor.execute('''
-                    SELECT id, canonical_lineage, total_occurrences, lineage_confidence, sovereign_lineage
+                    SELECT id, canonical_lineage, total_occurrences, lineage_confidence
                     FROM strains 
                     WHERE normalized_name = ?
                 ''', (normalized_name,))
                 existing = cursor.fetchone()
-                
                 if existing:
-                    strain_id, existing_lineage, occurrences, confidence, existing_sovereign = existing
+                    strain_id, existing_lineage, occurrences, confidence = existing
                     new_occurrences = occurrences + 1
-                    
-                    # Manual overrides (sovereign=True) should ALWAYS update canonical + sovereign lineage
-                    sovereign_override = bool(sovereign and lineage)
-                    
-                    if existing_sovereign and not sovereign_override:
-                        logger.info(f"🔒 SOVEREIGN PROTECTION: Strain '{strain_name}' has sovereign lineage '{existing_sovereign}' - ignoring Excel lineage update")
-                        # Just update occurrence count, don't touch lineage
+                    if lineage and lineage != existing_lineage:
+                        cursor.execute('''
+                            INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', (strain_id, existing_lineage, lineage, current_date, 'New data upload'))
+                        cursor.execute('''
+                            UPDATE strains 
+                            SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
+                            WHERE id = ?
+                        ''', (lineage, new_occurrences, current_date, current_date, strain_id))
+                        try:
+                            from .database_notifier import notify_lineage_update
+                            notify_lineage_update(strain_name, existing_lineage, lineage)
+                        except Exception as notify_error:
+                            logger.warning(f"Failed to notify lineage update: {notify_error}")
+                    else:
                         cursor.execute('''
                             UPDATE strains 
                             SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
                             WHERE id = ?
                         ''', (new_occurrences, current_date, current_date, strain_id))
-                    else:
-                        # Either no sovereign lineage yet, or we're intentionally overriding it
-                        if lineage and lineage != existing_lineage:
-                            cursor.execute('''
-                                INSERT INTO lineage_history (strain_id, old_lineage, new_lineage, change_date, change_reason)
-                                VALUES (?, ?, ?, ?, ?)
-                            ''', (strain_id, existing_lineage, lineage, current_date, 'Manual lineage update' if sovereign_override else 'New data upload'))
-                            cursor.execute('''
-                                UPDATE strains 
-                                SET canonical_lineage = ?, total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                                WHERE id = ?
-                            ''', (lineage, new_occurrences, current_date, current_date, strain_id))
-                            
-                            # Notify all sessions of the lineage update (non-blocking)
-                            try:
-                                from .database_notifier import notify_lineage_update
-                                notify_lineage_update(strain_name, existing_lineage, lineage)
-                            except Exception as notify_error:
-                                logger.warning(f"Failed to notify lineage update: {notify_error}")
-                        else:
-                            cursor.execute('''
-                                UPDATE strains 
-                                SET total_occurrences = ?, last_seen_date = ?, updated_at = ?
-                                WHERE id = ?
-                            ''', (new_occurrences, current_date, current_date, strain_id))
-                    
-                    # Sovereign lineage update (always applies if sovereign=True)
-                    if sovereign and lineage:
-                        cursor.execute('''
-                            UPDATE strains SET sovereign_lineage = ?, canonical_lineage = COALESCE(?, canonical_lineage), updated_at = ?
-                            WHERE id = ?
-                        ''', (lineage, lineage, current_date, strain_id))
-                        
-                        # Notify all sessions of the sovereign lineage update (non-blocking)
-                        try:
-                            from .database_notifier import notify_sovereign_lineage_set
-                            notify_sovereign_lineage_set(strain_name, lineage)
-                        except Exception as notify_error:
-                            logger.warning(f"Failed to notify sovereign lineage update: {notify_error}")
-                        
                     conn.commit()
                     cache_key = self._get_cache_key("strain_info", normalized_name)
                     with self._cache_lock:
@@ -1337,27 +1297,22 @@ class ProductDatabase:
                     return strain_id
                 else:
                     cursor.execute('''
-                        INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, created_at, updated_at, sovereign_lineage)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (strain_name, normalized_name, lineage, current_date, current_date, current_date, current_date, lineage if sovereign else None))
+                        INSERT INTO strains (strain_name, normalized_name, canonical_lineage, first_seen_date, last_seen_date, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (strain_name, normalized_name, lineage, current_date, current_date, current_date, current_date))
                     strain_id = cursor.lastrowid
                     conn.commit()
-                    
-                    # Notify all sessions of the new strain (non-blocking)
                     try:
                         from .database_notifier import notify_strain_add
                         notify_strain_add(strain_name, {
                             'lineage': lineage,
-                            'sovereign': sovereign,
                             'strain_id': strain_id
                         })
                     except Exception as notify_error:
                         logger.warning(f"Failed to notify strain add: {notify_error}")
-                    
                     if DEBUG_ENABLED:
                         logger.debug(f"Added new strain '{strain_name}' with lineage '{lineage}'")
                     return strain_id
-                    
         except Exception as e:
             logger.error(f"Error adding/updating strain '{strain_name}': {e}")
             raise
@@ -2724,34 +2679,22 @@ class ProductDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date, sovereign_lineage
+                SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date
                 FROM strains 
                 WHERE normalized_name = ?
             ''', (normalized_name,))
             result = cursor.fetchone()
             if result:
                 strain_id = result[0]
-                sovereign_lineage = result[7]
                 canonical_lineage = result[2]
-                # Use sovereign_lineage if set, else mode, else canonical
-                display_lineage = None
-                if sovereign_lineage and sovereign_lineage.strip():
-                    display_lineage = sovereign_lineage
-                else:
-                    mode_lineage = self.get_mode_lineage(strain_id)
-                    if mode_lineage:
-                        display_lineage = mode_lineage
-                    else:
-                        display_lineage = canonical_lineage
-                
+                mode_lineage = self.get_mode_lineage(strain_id)
+                display_lineage = mode_lineage if mode_lineage else canonical_lineage
                 # CRITICAL FIX: Override lineage for known sativa hybrids if database has just "HYBRID"
                 if is_known_sativa_hybrid and display_lineage and str(display_lineage).strip().upper() == 'HYBRID':
                     logger.info(f"🌿 SATIVA HYBRID OVERRIDE: '{strain_name}' - Overriding 'HYBRID' to 'HYBRID/SATIVA'")
                     display_lineage = 'HYBRID/SATIVA'
-                    # Also update canonical_lineage for consistency
                     if not canonical_lineage or str(canonical_lineage).strip().upper() == 'HYBRID':
                         canonical_lineage = 'HYBRID/SATIVA'
-                
                 strain_info = {
                     'id': result[0],
                     'strain_name': result[1],
@@ -2760,12 +2703,10 @@ class ProductDatabase:
                     'lineage_confidence': result[4],
                     'first_seen_date': result[5],
                     'last_seen_date': result[6],
-                    'sovereign_lineage': sovereign_lineage,
                     'display_lineage': display_lineage
                 }
                 self._set_cache(cache_key, strain_info, ttl=300)
                 return strain_info
-            # If strain not in database but is a known sativa hybrid, return default info
             elif is_known_sativa_hybrid:
                 logger.info(f"🌿 SATIVA HYBRID DEFAULT: '{strain_name}' - Not in database, using default 'HYBRID/SATIVA'")
                 return {
@@ -2776,7 +2717,6 @@ class ProductDatabase:
                     'lineage_confidence': 0.0,
                     'first_seen_date': '',
                     'last_seen_date': '',
-                    'sovereign_lineage': None,
                     'display_lineage': 'HYBRID/SATIVA'
                 }
             return None

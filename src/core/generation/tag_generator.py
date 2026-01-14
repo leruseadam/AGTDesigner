@@ -924,19 +924,18 @@ def process_chunk(args):
                     strain_list = list(strain_names)
                     placeholders = ','.join(['?'] * len(strain_list))
                     batch_strain_query = f'''
-                        SELECT strain_name, display_lineage, sovereign_lineage, canonical_lineage
+                        SELECT strain_name, display_lineage, canonical_lineage
                         FROM strains
                         WHERE strain_name IN ({placeholders})
                     '''
                     cur.execute(batch_strain_query, strain_list)
                     for row_result in cur.fetchall():
                         sname = row_result[0]
-                        preferred = row_result[1] or row_result[2] or row_result[3]
+                        preferred = row_result[1] or row_result[2]
                         if preferred:
                             strain_info_cache[sname] = {
                                 'display_lineage': row_result[1],
-                                'sovereign_lineage': row_result[2],
-                                'canonical_lineage': row_result[3]
+                                'canonical_lineage': row_result[2]
                             }
                 except Exception as batch_strain_err:
                     logger.warning(f"Batch strain info query failed: {batch_strain_err}")
@@ -1166,60 +1165,33 @@ def process_chunk(args):
             # OPTIMIZATION: Use pre-loaded cache instead of individual queries
             if is_classic_type:
                 try:
-                    # FIRST: Check for product-level lineage (preserves user changes to specific products)
                     product_name = row.get('Product Name*', '') or row.get('ProductName', '')
                     excel_lineage = str(row.get("Lineage", "")).strip()
+                    lineage_val = None
+                    # 1. Product-level lineage from database
                     if product_name:
-                        # Use cached product lineage (loaded in batch before loop)
                         db_product_lineage = product_lineage_cache.get(product_name)
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
-                        elif product_strain:
-                            # FALLBACK: Check strain-level lineage from cache
-                            strain_info = strain_info_cache.get(product_strain)
-                            if strain_info:
-                                preferred = (
-                                    strain_info.get('display_lineage') or
-                                    strain_info.get('sovereign_lineage') or
-                                    strain_info.get('canonical_lineage')
-                                )
-                                if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
-                                    lineage_val = str(preferred).strip().upper()
-                                    logger.info(f"✅ DOCX LINEAGE: Using strain-level lineage '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
-                                else:
-                                    # No strain lineage found - use default for classic types
-                                    lineage_val = 'HYBRID'  # Default for classic types
-                                    logger.warning(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name}' (strain: '{product_strain}'), using default '{lineage_val}'")
-                            else:
-                                # No strain info found - use default for classic types
-                                lineage_val = 'HYBRID'  # Default for classic types
-                                logger.warning(f"⚠️ DOCX LINEAGE: No strain info found for '{product_strain}', using default '{lineage_val}' for '{product_name}'")
-                        else:
-                            # No strain - use default for classic types
-                            lineage_val = 'HYBRID'  # Default for classic types
-                            logger.warning(f"⚠️ DOCX LINEAGE: No product-level lineage found for '{product_name}' and no strain, using default '{lineage_val}'")
-                    else:
-                        # No product name, try strain-level only from cache
-                        if product_strain:
-                            strain_info = strain_info_cache.get(product_strain)
-                            if strain_info:
-                                preferred = (
-                                    strain_info.get('display_lineage') or
-                                    strain_info.get('sovereign_lineage') or
-                                    strain_info.get('canonical_lineage')
-                                )
-                                if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
-                                    lineage_val = str(preferred).upper()
-                                else:
-                                    lineage_val = 'HYBRID'  # Default for classic types
-                            else:
-                                lineage_val = 'HYBRID'  # Default for classic types
-                        else:
-                            lineage_val = 'HYBRID'  # Default for classic types
+                    # 2. Fallback: strain-level canonical_lineage ONLY
+                    if (not lineage_val or lineage_val in ['MIXED', 'THC', '', None]) and product_strain:
+                        strain_info = strain_info_cache.get(product_strain)
+                        if strain_info:
+                            canonical = strain_info.get('canonical_lineage')
+                            if canonical and str(canonical).strip() not in ['', 'None', 'nan']:
+                                lineage_val = str(canonical).strip().upper()
+                                logger.info(f"✅ DOCX LINEAGE: Using strain canonical_lineage '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
+                    # 3. Final fallback: HYBRID
+                    if not lineage_val or lineage_val in ['MIXED', 'THC', '', None]:
+                        lineage_val = 'HYBRID'
+                        logger.warning(f"⚠️ DOCX LINEAGE: No valid lineage found for '{product_name}' (strain: '{product_strain}'), using default '{lineage_val}'")
+                    # 4. Enforce: never allow MIXED or THC for classic types
+                    if lineage_val in ['MIXED', 'THC', '', None]:
+                        lineage_val = 'HYBRID'
+                        logger.warning(f"⚠️ DOCX LINEAGE: Invalid lineage '{lineage_val}' for classic type '{product_name}', forcing to 'HYBRID'")
                 except Exception as e:
-                    # Use default for classic types if database lookup fails
-                    lineage_val = 'HYBRID'  # Default for classic types
+                    lineage_val = 'HYBRID'
                     logger.warning(f"⚠️ DOCX LINEAGE ERROR: Database lookup failed for '{product_name}', using default '{lineage_val}' - Error: {e}")
             else:
                 # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 

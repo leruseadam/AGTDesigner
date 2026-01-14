@@ -3328,6 +3328,9 @@ def upload_file():
                                 if hasattr(processor, '_skip_enrichment'):
                                     processor._skip_enrichment = False
 
+                                # CRITICAL FIX: Enforce non-classic lineage rules BEFORE serialization
+                                tags = _enforce_nonclassic_lineage_rules(tags)
+                                
                                 # Make JSON safe and cache
                                 safe_tags = make_json_safe(tags)
 
@@ -3563,6 +3566,9 @@ def upload_file():
                                 if hasattr(processor, '_skip_enrichment'):
                                     processor._skip_enrichment = False
 
+                                # CRITICAL FIX: Enforce non-classic lineage rules BEFORE serialization
+                                tags = _enforce_nonclassic_lineage_rules(tags)
+                                
                                 safe_tags = make_json_safe(tags)
 
                                 # CRITICAL FIX: Use file-path-only cache key so frontend can access it
@@ -4088,6 +4094,8 @@ def upload_file_simple_pythonanywhere():
 
                 try:
                     tags = processor.get_available_tags(filters=None)
+                    # CRITICAL FIX: Enforce non-classic lineage rules BEFORE serialization
+                    tags = _enforce_nonclassic_lineage_rules(tags)
                     safe_tags = make_json_safe(tags)
                     cache_key = get_session_cache_key(f'available_tags_{temp_path}')
                     cache.set(cache_key, safe_tags, timeout=300)
@@ -6414,17 +6422,19 @@ def check_store_required():
         logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
         logging.info(f"SESSION DEBUG: force_modal={force_modal}")
         
-        # CRITICAL FIX: Always require modal unless store was just selected with proper flags
-        # This ensures modal shows for all existing sessions that don't have the new flags
+        # CRITICAL FIX: Use store if it exists in session (more lenient check)
+        # If store exists, use it unless explicitly expired or from different server instance
         store_just_selected = session.get('store_just_selected', False)
         current_store = None
         
-        # Only use session store if BOTH conditions are met:
-        # 1. store_just_selected flag is True (explicit selection)
-        # 2. Has a valid recent timestamp (within last 6 hours - matches session lifetime)
-        if session_store and store_just_selected:
+        # Use session store if it exists and:
+        # 1. Has valid flags (store_just_selected + timestamp), OR
+        # 2. Store exists and session is permanent (persisted across restarts)
+        if session_store:
             store_timestamp = session.get('store_selected_timestamp')
-            if store_timestamp:
+            
+            # If we have both flags, validate timestamp
+            if store_just_selected and store_timestamp:
                 try:
                     from datetime import datetime, timedelta
                     timestamp = datetime.fromisoformat(store_timestamp)
@@ -6442,28 +6452,34 @@ def check_store_required():
                         session.pop('store_server_id', None)
                         session.modified = True
                 except Exception as e:
-                    # If timestamp parsing fails, treat as stale
-                    logging.info(f"Store timestamp invalid ({e}), requiring new selection")
-                    session.pop('selected_store', None)
-                    session.pop('store_selected_timestamp', None)
-                    session.pop('store_just_selected', None)
-                    session.pop('store_server_id', None)
+                    # If timestamp parsing fails but store exists, use it anyway (session persistence)
+                    from datetime import datetime
+                    logging.info(f"Store timestamp invalid ({e}), but store exists - using it")
+                    current_store = session_store
+                    # Set flags to ensure persistence
+                    session['store_just_selected'] = True
+                    session['store_selected_timestamp'] = datetime.now().isoformat()
                     session.modified = True
-            else:
-                # No timestamp - treat as stale
-                logging.info(f"Store in session has no timestamp, requiring new selection")
-                session.pop('selected_store', None)
-                session.pop('store_just_selected', None)
-                session.pop('store_server_id', None)
+            elif session.permanent:
+                # Session is permanent and store exists - use it (persisted session)
+                logging.info(f"Store found in permanent session (persisted): {session_store}")
+                current_store = session_store
+                # Ensure flags are set for future checks
+                if not store_just_selected:
+                    session['store_just_selected'] = True
+                if not store_timestamp:
+                    from datetime import datetime
+                    session['store_selected_timestamp'] = datetime.now().isoformat()
                 session.modified = True
-        elif session_store:
-            # Store exists but missing required flags - clear it to force modal
-            logging.info(f"Store in session missing required flags (store_just_selected={store_just_selected}), clearing to force modal")
-            session.pop('selected_store', None)
-            session.pop('store_selected_timestamp', None)
-            session.pop('store_just_selected', None)
-            session.pop('store_server_id', None)
-            session.modified = True
+            else:
+                # Store exists but no flags and not permanent - might be stale, but use it anyway
+                logging.info(f"Store exists in session without flags - using it (lenient check)")
+                current_store = session_store
+                # Set flags to ensure persistence
+                session['store_just_selected'] = True
+                from datetime import datetime
+                session['store_selected_timestamp'] = datetime.now().isoformat()
+                session.modified = True
         
         # Log the low-level selection flag for debugging but do not gate on it
         has_selection = has_store_selection()
@@ -7223,6 +7239,83 @@ def _normalize_weight_fields(record):
     
     return record
 
+def _enforce_nonclassic_lineage_rules(tags):
+    """
+    CRITICAL: Enforce that non-classic types can ONLY have MIXED or CBD lineage.
+    This prevents non-classic products from showing incorrect lineages like SATIVA, INDICA, etc.
+    Non-classic types are determined from Product Strain: CBD if Product Strain contains CBD terms, otherwise MIXED.
+    """
+    from src.core.constants import CLASSIC_TYPES
+    
+    fixed_count = 0
+    for tag in tags:
+        if not isinstance(tag, dict):
+            continue
+        
+        product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower().strip()
+        if not product_type:
+            continue
+        
+        # Check if this is a classic type
+        is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
+        
+        # Skip classic types - they can have any valid classic lineage
+        if is_classic:
+            continue
+        
+        # For non-classic types, enforce MIXED or CBD only
+        product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
+        
+        # Determine correct lineage from Product Strain
+        if product_strain:
+            strain_upper = product_strain.upper()
+            # Check for CBD indicators in Product Strain
+            has_cbd = any(indicator in strain_upper for indicator in ['CBD', 'HIGH CBD', 'CBG', 'CBN', 'CBC'])
+            correct_lineage = 'CBD' if has_cbd else 'MIXED'
+        else:
+            # No Product Strain - default to MIXED
+            correct_lineage = 'MIXED'
+        
+        # Get current lineage values
+        current_lineage = tag.get('Lineage') or tag.get('currentLineage') or tag.get('canonical_lineage') or ''
+        current_lineage_upper = str(current_lineage).strip().upper()
+        
+        # Only fix if current lineage is not MIXED or CBD
+        valid_nonclassic_lineages = ['MIXED', 'CBD', 'CBD_BLEND', 'THC']  # THC is treated as MIXED
+        if current_lineage_upper not in valid_nonclassic_lineages:
+            # Force to correct lineage based on Product Strain
+            tag['Lineage'] = correct_lineage
+            tag['Lineage*'] = correct_lineage
+            tag['currentLineage'] = correct_lineage
+            tag['canonical_lineage'] = correct_lineage
+            tag['lineage'] = correct_lineage.lower()
+            
+            product_name = tag.get('Product Name*', 'unknown')
+            logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}'")
+            fixed_count += 1
+        elif current_lineage_upper == 'THC':
+            # THC is an abbreviation for MIXED - normalize it
+            tag['Lineage'] = 'MIXED'
+            tag['Lineage*'] = 'MIXED'
+            tag['currentLineage'] = 'MIXED'
+            tag['canonical_lineage'] = 'MIXED'
+            tag['lineage'] = 'mixed'
+            fixed_count += 1
+        elif current_lineage_upper == 'CBD_BLEND':
+            # Normalize CBD_BLEND to CBD
+            tag['Lineage'] = 'CBD'
+            tag['Lineage*'] = 'CBD'
+            tag['currentLineage'] = 'CBD'
+            tag['canonical_lineage'] = 'CBD'
+            tag['lineage'] = 'cbd'
+            fixed_count += 1
+    
+    if fixed_count > 0:
+        logging.info(f"✅ NON-CLASSIC LINEAGE ENFORCEMENT: Fixed {fixed_count} non-classic products to have only MIXED or CBD lineage")
+    
+    return tags
+
+
 def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False, force_overwrite: bool = True):
     """
     Ensure tags shown in the UI use the latest lineage from the database.
@@ -7262,12 +7355,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
         # EXACT same query as docx generation - but also return individual fields to preserve priority
+        # CRITICAL FIX: Also select Product Brand and DOH to enrich tags with brand and DOH data
             cursor.execute(f'''
                 SELECT p."Product Name*", 
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
                        p.sovereign_lineage as product_sovereign,
                        s.sovereign_lineage as strain_sovereign,
-                       s.canonical_lineage as strain_canonical
+                       s.canonical_lineage as strain_canonical,
+                       p."Product Brand" as product_brand,
+                       p."DOH" as doh,
+                       p."DOH Compliant (Yes/No)" as doh_compliant
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
@@ -7279,6 +7376,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 product_sovereign_raw = row[2]
                 strain_sovereign_raw = row[3]
                 strain_canonical_raw = row[4]
+                product_brand_raw = row[5] if len(row) > 5 else None  # CRITICAL FIX: Get Product Brand from database
+                doh_raw = row[6] if len(row) > 6 else None  # CRITICAL FIX: Get DOH from database
+                doh_compliant_raw = row[7] if len(row) > 7 else None  # CRITICAL FIX: Get DOH Compliant from database
 
                 def _clean_lineage(val):
                     if val is None:
@@ -7287,23 +7387,53 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
                         return None
                     return txt
+                
+                def _clean_brand(val):
+                    """Clean brand value - preserve original case, just strip whitespace."""
+                    if val is None:
+                        return None
+                    txt = str(val).strip()
+                    if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                        return None
+                    return txt
+                
+                def _clean_doh(val):
+                    """Clean DOH value - normalize to YES/NO/DOH format."""
+                    if val is None:
+                        return None
+                    txt = str(val).strip().upper()
+                    if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                        return None
+                    # Normalize common variations
+                    if txt in ['YES', 'Y', 'DOH', 'COMPLIANT']:
+                        return 'DOH'
+                    elif txt in ['NO', 'N']:
+                        return 'NO'
+                    return txt
 
                 db_lineage = _clean_lineage(db_lineage_raw)
                 product_sovereign = _clean_lineage(product_sovereign_raw)
                 strain_sovereign = _clean_lineage(strain_sovereign_raw)
                 strain_canonical = _clean_lineage(strain_canonical_raw)
+                product_brand = _clean_brand(product_brand_raw)  # CRITICAL FIX: Clean brand value
+                doh_value = _clean_doh(doh_raw) or _clean_doh(doh_compliant_raw)  # CRITICAL FIX: Clean DOH value (prefer DOH field, fallback to DOH Compliant)
 
                 if db_name and db_lineage:
                     lineage_clean = db_lineage
                     # Store lineage with source info for proper field assignment
                     # CRITICAL: product_sovereign/strain_sovereign/strain_canonical are already cleaned and uppercased by _clean_lineage
                     # They are either a clean uppercase string or None - do NOT call str() again
+                    # CRITICAL: If strain_canonical is None but db_lineage exists, db_lineage might be from product.Lineage
+                    # For canonical_lineage, prefer strain_canonical, but if missing, use db_lineage (which includes strain.canonical_lineage in COALESCE)
                     lineage_info = {
                         'lineage': lineage_clean,
                         'has_sovereign': bool(product_sovereign or strain_sovereign),
                         'product_sovereign': product_sovereign,  # Already cleaned - don't call str() again
                         'strain_sovereign': strain_sovereign,    # Already cleaned - don't call str() again
-                        'strain_canonical': strain_canonical     # Already cleaned - don't call str() again
+                        'strain_canonical': strain_canonical,    # Already cleaned - don't call str() again
+                        'db_lineage': db_lineage,  # Store db_lineage for fallback when strain_canonical is None
+                        'product_brand': product_brand,  # CRITICAL FIX: Store Product Brand for enrichment
+                        'doh': doh_value  # CRITICAL FIX: Store DOH for enrichment
                     }
                     # Map by original name (exact match like docx generation)
                     lineage_map[db_name] = lineage_info
@@ -7312,11 +7442,93 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     lineage_map[normalized] = lineage_info
                     lineage_map[db_name.lower().strip()] = lineage_info
         
+        # CRITICAL FIX: Initialize doh_brand_map for enrichment even without lineage matches
+        doh_brand_map = {}
+        
+        # Build doh_brand_map from all database results (even those without lineage)
+        # This ensures we can enrich tags even if they don't match in lineage_map
+        try:
+            product_names_for_doh_brand = [tag.get('Product Name*') for tag in aligned_tags if tag.get('Product Name*')]
+            if product_names_for_doh_brand:
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                chunk_size = 400
+                for chunk_start in range(0, len(product_names_for_doh_brand), chunk_size):
+                    chunk = product_names_for_doh_brand[chunk_start:chunk_start + chunk_size]
+                    placeholders = ','.join(['?' for _ in chunk])
+                    cursor.execute(f'''
+                        SELECT "Product Name*", 
+                               "Product Brand",
+                               COALESCE("DOH", "DOH Compliant (Yes/No)") as doh_value,
+                               "DOH",
+                               "DOH Compliant (Yes/No)"
+                        FROM products
+                        WHERE "Product Name*" IN ({placeholders})
+                    ''', chunk)
+                    for row in cursor.fetchall():
+                        db_name = row[0]
+                        db_brand = row[1]
+                        db_doh_coalesced = row[2]
+                        db_doh_raw = row[3]
+                        db_doh_compliant_raw = row[4]
+                        
+                        # Clean DOH value (same logic as _clean_doh)
+                        db_doh_clean = None
+                        doh_final = db_doh_coalesced or db_doh_raw or db_doh_compliant_raw
+                        if doh_final:
+                            doh_str = str(doh_final).strip().upper()
+                            if doh_str and doh_str not in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N', '0', '0.0']:
+                                if doh_str in ['YES', 'Y', 'DOH', 'COMPLIANT']:
+                                    db_doh_clean = 'DOH'
+                                elif doh_str not in ['NO', 'N']:
+                                    db_doh_clean = doh_str
+                        
+                        # Clean brand value
+                        db_brand_clean = None
+                        if db_brand:
+                            brand_str = str(db_brand).strip()
+                            if brand_str and brand_str.lower() not in ['none', 'null', 'nan', 'product brand', '']:
+                                db_brand_clean = brand_str
+                        
+                        if db_name:
+                            doh_brand_map[db_name] = {'product_brand': db_brand_clean, 'doh': db_doh_clean}
+                            normalized = product_db._normalize_product_name(db_name)
+                            doh_brand_map[normalized] = {'product_brand': db_brand_clean, 'doh': db_doh_clean}
+                            doh_brand_map[db_name.lower().strip()] = {'product_brand': db_brand_clean, 'doh': db_doh_clean}
+        except Exception as e:
+            logging.warning(f"Failed to build doh_brand_map: {e}")
+        
         if not lineage_map:
-            return aligned_tags
+            # Even if no lineage_map, we can still enrich DOH/Brand
+            pass
         
         # Apply lineage to tags
         aligned_count = 0
+        # Import CLASSIC_TYPES for validation
+        from src.core.constants import CLASSIC_TYPES
+        
+        # CRITICAL FIX: Initialize DOH/Brand fields on ALL tags FIRST (before any matching)
+        # This ensures fields exist even if tag doesn't match in lineage_map
+        for tag in aligned_tags:
+            if not isinstance(tag, dict):
+                continue
+            # ALWAYS initialize DOH/Brand fields (even if empty) so frontend can check them
+            if 'DOH' not in tag:
+                tag['DOH'] = ''
+            if 'DOH Compliant (Yes/No)' not in tag:
+                tag['DOH Compliant (Yes/No)'] = ''
+            if 'doh' not in tag:
+                tag['doh'] = ''
+            if 'DOH Compliant' not in tag:
+                tag['DOH Compliant'] = ''
+            if 'Product Brand' not in tag:
+                tag['Product Brand'] = ''
+            if 'ProductBrand' not in tag:
+                tag['ProductBrand'] = ''
+            if 'productBrand' not in tag:
+                tag['productBrand'] = ''
+        
+        # Now process tags for lineage and enrichment
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
@@ -7325,38 +7537,268 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 continue
             # Try exact match first (like docx generation), then normalized, then lowercase
             lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
+            
+            # CRITICAL FIX: If lineage_info is missing or strain_canonical is None, try looking up strain by name
+            # This matches DOCX generation which also looks up strains by name (template_processor.py line 1984-1987)
+            if not lineage_info or (isinstance(lineage_info, dict) and not lineage_info.get('strain_canonical')):
+                # Try to get canonical_lineage from strain by Product Strain name (check multiple field name variations)
+                product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
+                if product_strain:
+                    try:
+                        strain_info = product_db.get_strain_info(product_strain)
+                        if strain_info:
+                            canonical_from_strain = strain_info.get('canonical_lineage') or strain_info.get('display_lineage')
+                            if canonical_from_strain:
+                                # Create or update lineage_info with strain canonical_lineage
+                                if not lineage_info:
+                                    lineage_info = {
+                                        'lineage': canonical_from_strain,
+                                        'has_sovereign': False,
+                                        'product_sovereign': None,
+                                        'strain_sovereign': strain_info.get('sovereign_lineage'),
+                                        'strain_canonical': canonical_from_strain,
+                                        'db_lineage': canonical_from_strain
+                                    }
+                                    logging.info(f"✅ STRAIN LOOKUP: Found canonical_lineage '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
+                                else:
+                                    # Update existing lineage_info with strain canonical_lineage
+                                    old_canonical = lineage_info.get('strain_canonical')
+                                    lineage_info['strain_canonical'] = canonical_from_strain
+                                    # Update db_lineage if it's currently MIXED and we have a better value
+                                    if not lineage_info.get('db_lineage') or (lineage_info.get('db_lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED'):
+                                        lineage_info['db_lineage'] = canonical_from_strain
+                                    # Also update lineage if it was MIXED
+                                    if lineage_info.get('lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED':
+                                        lineage_info['lineage'] = canonical_from_strain
+                                    if old_canonical != canonical_from_strain:
+                                        logging.info(f"✅ STRAIN LOOKUP: Updated canonical_lineage from '{old_canonical}' to '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
+                            else:
+                                logging.debug(f"⚠️ STRAIN LOOKUP: Strain '{product_strain}' found but no canonical_lineage for product '{name}'")
+                        else:
+                            logging.debug(f"⚠️ STRAIN LOOKUP: Strain '{product_strain}' not found in database for product '{name}'")
+                    except Exception as e:
+                        logging.warning(f"❌ STRAIN LOOKUP: Could not lookup strain '{product_strain}' for product '{name}': {e}")
+            
+            # Check if this is a classic product type
+            product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower().strip()
+            is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
+            
+            # CRITICAL FIX: For non-classic types, ALWAYS set lineage from Product Strain (override database)
+            # Non-classic types should be either MIXED (THC) or CBD based on Product Strain
+            if not is_classic:
+                product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
+                if product_strain:
+                    # Check if Product Strain contains CBD-related terms
+                    strain_upper = product_strain.upper()
+                    # Check for CBD indicators in Product Strain
+                    has_cbd = any(indicator in strain_upper for indicator in ['CBD', 'HIGH CBD', 'CBG', 'CBN', 'CBC'])
+                    
+                    if has_cbd:
+                        # Set to CBD for non-classic types with CBD in Product Strain
+                        lineage_info = {
+                            'lineage': 'CBD',
+                            'has_sovereign': False,
+                            'product_sovereign': None,
+                            'strain_sovereign': None,
+                            'strain_canonical': None,
+                            'db_lineage': 'CBD'
+                        }
+                        logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to CBD based on Product Strain '{product_strain}' (overriding database)")
+                    else:
+                        # Default to MIXED (THC) for non-classic types without CBD
+                        lineage_info = {
+                            'lineage': 'MIXED',
+                            'has_sovereign': False,
+                            'product_sovereign': None,
+                            'strain_sovereign': None,
+                            'strain_canonical': None,
+                            'db_lineage': 'MIXED'
+                        }
+                        logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to MIXED (THC) based on Product Strain '{product_strain}' (overriding database)")
+                else:
+                    # No Product Strain - default to MIXED for non-classic types
+                    lineage_info = {
+                        'lineage': 'MIXED',
+                        'has_sovereign': False,
+                        'product_sovereign': None,
+                        'strain_sovereign': None,
+                        'strain_canonical': None,
+                        'db_lineage': 'MIXED'
+                    }
+                    logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to MIXED (THC) - no Product Strain")
+            
+            # CRITICAL FIX: Don't skip tags without lineage_info - they still need DOH/Brand enrichment
+            # Only skip if we have no way to enrich them
             if not lineage_info:
+                # Try to enrich DOH/Brand even without lineage_info
+                if 'doh_brand_map' in locals():
+                    doh_brand_info = doh_brand_map.get(name) or doh_brand_map.get(product_db._normalize_product_name(name)) or doh_brand_map.get(str(name).lower().strip())
+                    if doh_brand_info:
+                        db_doh = doh_brand_info.get('doh')
+                        db_brand = doh_brand_info.get('product_brand')
+                        
+                        if db_doh:
+                            tag['DOH'] = db_doh
+                            tag['DOH Compliant (Yes/No)'] = db_doh
+                            tag['doh'] = db_doh.lower() if db_doh else ''
+                            tag['DOH Compliant'] = db_doh
+                        
+                        if db_brand:
+                            tag['Product Brand'] = db_brand
+                            tag['ProductBrand'] = db_brand
+                            tag['productBrand'] = db_brand
                 continue
+            
+            # Helper function to validate lineage for classic types
+            def _validate_lineage_for_classic(lineage_val, field_name):
+                """Convert MIXED to HYBRID for classic types."""
+                if not lineage_val:
+                    return lineage_val
+                lineage_str = str(lineage_val).strip().upper()
+                if is_classic and lineage_str == 'MIXED':
+                    logging.info(f"🔄 FIXING invalid MIXED {field_name} for classic type '{name}': MIXED → HYBRID")
+                    return 'HYBRID'
+                return lineage_str
             
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
-                db_lineage = lineage_info['lineage']  # This is already COALESCEd (sovereign > canonical > Lineage)
-                # CRITICAL: Prioritize sovereign_lineage - use it as effective lineage if it exists
-                effective_lineage = db_lineage  # Default to COALESCEd result
+                # CRITICAL: Use EXACT same priority as DOCX generation:
+                # COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                # This matches template_processor.py line 7267
+                db_lineage = lineage_info.get('db_lineage') or lineage_info['lineage']  # This is already COALESCEd (sovereign > canonical > Lineage)
+                
+                # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
+                if db_lineage and str(db_lineage).strip().upper() == 'SOVEREIGN':
+                    # Fall back to next priority if SOVEREIGN found
+                    db_lineage = lineage_info['strain_canonical'] or lineage_info.get('product_lineage')
+                
+                # CRITICAL: Set effective_lineage using EXACT same logic as DOCX generation
+                # Priority: product_sovereign > strain_sovereign > strain_canonical > product.Lineage
+                effective_lineage = db_lineage  # Default to COALESCEd result (already correct priority)
 
                 # CRITICAL FIX: ONLY set sovereign_lineage when present; do not emit 'NONE' or None
                 if lineage_info['product_sovereign']:
-                    tag['sovereign_lineage'] = lineage_info['product_sovereign']
-                    effective_lineage = lineage_info['product_sovereign']
+                    validated_sovereign = _validate_lineage_for_classic(lineage_info['product_sovereign'], 'sovereign_lineage')
+                    tag['sovereign_lineage'] = validated_sovereign
+                    effective_lineage = validated_sovereign
                 elif lineage_info['strain_sovereign']:
-                    tag['sovereign_lineage'] = lineage_info['strain_sovereign']
-                    effective_lineage = lineage_info['strain_sovereign']
+                    validated_sovereign = _validate_lineage_for_classic(lineage_info['strain_sovereign'], 'strain_sovereign')
+                    tag['sovereign_lineage'] = validated_sovereign
+                    effective_lineage = validated_sovereign
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
-                # CRITICAL FIX: Always use strain canonical_lineage from strains table as the base
-                # Priority: product_sovereign > strain_sovereign > strain_canonical > product.Lineage
-                # The strains table canonical_lineage should always be available and used
-                if lineage_info['strain_canonical']:
-                    # Always set canonical_lineage from strains table (this is the "strains sheet" data)
-                    tag['canonical_lineage'] = lineage_info['strain_canonical']
+                # CRITICAL FIX: Set canonical_lineage to match DOCX generation logic
+                # DOCX uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                # BUT canonical_lineage field should ONLY come from strains table, NEVER from p."Lineage"
+                # p."Lineage" is Excel data which can be MIXED - canonical_lineage is the canonical value from strains
+                # CRITICAL: canonical_lineage should ONLY use strain_canonical (from strains table), never db_lineage (which includes p."Lineage")
+                canonical_to_use = None
+                
+                # Priority 1: Use strain_canonical if available (from JOIN or fallback lookup)
+                # This is the ONLY valid source for canonical_lineage - it comes from the strains table
+                if lineage_info.get('strain_canonical'):
+                    canonical_to_use = lineage_info['strain_canonical']
+                # Priority 2: If no strain_canonical, try to get it from strain lookup (already done above, but check again)
+                elif not lineage_info.get('strain_canonical'):
+                    # Fallback lookup should have already run, but if strain_canonical is still None,
+                    # we can't use db_lineage because it might be MIXED from p."Lineage"
+                    # For classic products, default to HYBRID if no canonical_lineage found
+                    if is_classic:
+                        canonical_to_use = 'HYBRID'  # Default for classic products without canonical_lineage
+                        logging.warning(f"⚠️ No canonical_lineage found for classic product '{name}', defaulting to HYBRID")
+                    else:
+                        # For non-classic products, MIXED is valid
+                        canonical_to_use = lineage_info.get('db_lineage') or db_lineage or 'MIXED'
+                
+                if canonical_to_use:
+                    tag['canonical_lineage'] = _validate_lineage_for_classic(canonical_to_use, 'canonical_lineage')
                 else:
-                    # Fallback if no strain canonical_lineage exists
-                    tag['canonical_lineage'] = effective_lineage
+                    # Last resort: use effective_lineage (shouldn't happen)
+                    tag['canonical_lineage'] = _validate_lineage_for_classic(effective_lineage, 'canonical_lineage')
+                
+                # CRITICAL: currentLineage MUST match what DOCX generation uses (effective_lineage)
+                # CRITICAL: Validate currentLineage - MIXED is invalid for classic types
+                effective_lineage = _validate_lineage_for_classic(effective_lineage, 'currentLineage')
                 tag['currentLineage'] = effective_lineage
                 # CRITICAL: Always set Lineage* and other fields using effective_lineage (prioritizes sovereign)
                 tag['Lineage'] = effective_lineage
                 tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
                 tag['lineage'] = effective_lineage.lower()
+                
+                # CRITICAL FIX: Enrich tag with Product Brand from database if missing
+                # ALWAYS enrich if database has brand, even if tag has empty string
+                if isinstance(lineage_info, dict) and lineage_info.get('product_brand'):
+                    db_brand = lineage_info.get('product_brand')
+                    # Check all possible brand field variations
+                    current_brand = tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or ''
+                    # Normalize current_brand for comparison
+                    current_brand_clean = str(current_brand).strip() if current_brand else ''
+                    # Enrich if brand is missing, empty, or invalid (None, NULL, nan, etc.)
+                    if not current_brand_clean or current_brand_clean.lower() in ['none', 'null', 'nan', 'undefined', '']:
+                        tag['Product Brand'] = db_brand
+                        tag['ProductBrand'] = db_brand
+                        tag['productBrand'] = db_brand  # Also set lowercase variant
+                        logging.debug(f"✅ Enriched tag '{name}' with Product Brand '{db_brand}' from database (was: '{current_brand_clean}')")
+                
+                # CRITICAL FIX: Enrich tag with DOH from database if missing
+                # Always ensure DOH fields exist on tag (even if empty) so frontend can check them
+                current_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)') or tag.get('doh') or tag.get('DOH Compliant') or ''
+                
+                if isinstance(lineage_info, dict) and lineage_info.get('doh'):
+                    db_doh = lineage_info.get('doh')
+                    # Normalize current_doh for comparison
+                    current_doh_clean = str(current_doh).strip().upper() if current_doh else ''
+                    # Enrich if DOH is missing, empty, or invalid (NO, NONE, NULL, etc.)
+                    if not current_doh_clean or current_doh_clean in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N', 'UNDEFINED']:
+                        tag['DOH'] = db_doh
+                        tag['DOH Compliant (Yes/No)'] = db_doh
+                        tag['doh'] = db_doh.lower() if db_doh else ''
+                        tag['DOH Compliant'] = db_doh  # Also set variant without parentheses
+                        logging.info(f"✅ Enriched tag '{name}' with DOH '{db_doh}' from database (was: '{current_doh_clean}')")
+                    else:
+                        logging.debug(f"⏭️ Tag '{name}' already has DOH '{current_doh_clean}', skipping enrichment")
+                else:
+                    # CRITICAL FIX: Try to get DOH/Brand from doh_brand_map even if lineage_info doesn't have it
+                    # This ensures tags without lineage matches still get DOH/Brand enrichment
+                    doh_brand_info = doh_brand_map.get(name) or doh_brand_map.get(product_db._normalize_product_name(name)) or doh_brand_map.get(str(name).lower().strip())
+                    if doh_brand_info:
+                        db_doh = doh_brand_info.get('doh')
+                        db_brand = doh_brand_info.get('product_brand')
+                        
+                        if db_doh:
+                            current_doh_clean = str(tag.get('DOH') or '').strip().upper()
+                            if not current_doh_clean or current_doh_clean in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N', 'UNDEFINED']:
+                                tag['DOH'] = db_doh
+                                tag['DOH Compliant (Yes/No)'] = db_doh
+                                tag['doh'] = db_doh.lower() if db_doh else ''
+                                tag['DOH Compliant'] = db_doh
+                                logging.info(f"✅ Enriched tag '{name}' with DOH '{db_doh}' from doh_brand_map")
+                        
+                        if db_brand:
+                            current_brand_clean = str(tag.get('Product Brand') or '').strip()
+                            if not current_brand_clean or current_brand_clean.lower() in ['none', 'null', 'nan', 'undefined', '']:
+                                tag['Product Brand'] = db_brand
+                                tag['ProductBrand'] = db_brand
+                                tag['productBrand'] = db_brand
+                                logging.info(f"✅ Enriched tag '{name}' with Brand '{db_brand}' from doh_brand_map")
+                    else:
+                        # Log when DOH is not found in lineage_info or doh_brand_map
+                        if isinstance(lineage_info, dict):
+                            logging.debug(f"⚠️ No DOH found in lineage_info for '{name}' - lineage_info keys: {list(lineage_info.keys())}")
+                        else:
+                            logging.debug(f"⚠️ No lineage_info dict for '{name}' - cannot enrich DOH")
+                    
+                    # Ensure DOH fields exist even if database doesn't have a value
+                    # Set to empty string (not None) so frontend can check for them
+                    if 'DOH' not in tag or not tag.get('DOH'):
+                        tag['DOH'] = ''
+                    if 'DOH Compliant (Yes/No)' not in tag or not tag.get('DOH Compliant (Yes/No)'):
+                        tag['DOH Compliant (Yes/No)'] = ''
+                    if 'doh' not in tag or not tag.get('doh'):
+                        tag['doh'] = ''
+                    if 'DOH Compliant' not in tag or not tag.get('DOH Compliant'):
+                        tag['DOH Compliant'] = ''
+                
                 aligned_count += 1
             else:
                 # Old format (backward compatibility)
@@ -7367,6 +7809,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     tag['lineage'] = db_lineage.lower()
                     tag['canonical_lineage'] = db_lineage
                     tag['currentLineage'] = db_lineage
+                    
+                    # CRITICAL FIX: Try to get Product Brand from database for old format tags too
+                    # Note: Old format doesn't have product_brand in lineage_info, so we'd need to query separately
+                    # For now, skip brand enrichment for old format (should be rare)
+                    
                     aligned_count += 1
         
         if aligned_count > 0:
@@ -7572,6 +8019,7 @@ def clear_generation_cache():
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
     try:
+        import re  # CRITICAL FIX: Import re locally to avoid scoping issues
         import time
         _start_time = time.time()
         logging.info("=== GENERATE LABELS ACTION START ===")
@@ -9956,6 +10404,8 @@ def get_available_tags():
                         cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
                 except Exception as align_err:
                     logging.warning(f"Could not align tags in memory fallback: {align_err}")
+                # CRITICAL FIX: Enforce non-classic lineage rules on cached tags
+                cached_tags = _enforce_nonclassic_lineage_rules(cached_tags)
                 safe_cached_tags = make_json_safe(cached_tags)
                 return jsonify({
                     'tags': safe_cached_tags,
@@ -9996,6 +10446,8 @@ def get_available_tags():
                             cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_rl, skip_if_aligned=False, force_overwrite=True)
                     except Exception as align_err:
                         logging.warning(f"Could not align tags in rate-limit fallback: {align_err}")
+                    # CRITICAL FIX: Enforce non-classic lineage rules on cached tags
+                    cached_tags = _enforce_nonclassic_lineage_rules(cached_tags)
                     safe_cached_tags = make_json_safe(cached_tags)
                     return jsonify({
                         'tags': safe_cached_tags,
@@ -10206,6 +10658,221 @@ def get_available_tags():
                 except Exception as align_err:
                     logging.warning(f"Could not align cached tags after lineage update: {align_err}")
             
+            # CRITICAL FIX: Enrich cached tags with DOH and Brand data (cached tags may be missing these fields)
+            # This ensures DOH badges and filters work even when tags come from cache
+            # OPTIMIZED: Check if enrichment is needed before querying database
+            try:
+                product_db = get_product_database(store_name)
+                if not product_db:
+                    logging.debug(f"CACHE PATH: Cannot enrich - product_db is None for store '{store_name}'")
+                elif not cached_tags:
+                    logging.debug(f"CACHE PATH: Cannot enrich - cached_tags is empty")
+                else:
+                    # OPTIMIZATION: Quick check if tags already have DOH/Brand - skip if most tags already have them
+                    tags_needing_enrichment = []
+                    for tag in cached_tags:
+                        product_name = tag.get('Product Name*')
+                        if not product_name:
+                            continue
+                        # Check if DOH or Brand is missing
+                        has_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)') or tag.get('doh')
+                        has_brand = tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand')
+                        if not has_doh or not has_brand:
+                            tags_needing_enrichment.append(product_name)
+                    
+                    # OPTIMIZATION: Skip database query if all tags already have DOH/Brand
+                    if not tags_needing_enrichment:
+                        logging.debug(f"⚡ CACHE PATH: All {len(cached_tags)} tags already have DOH/Brand - skipping enrichment")
+                    else:
+                        product_names = tags_needing_enrichment if len(tags_needing_enrichment) < len(cached_tags) * 0.5 else [tag.get('Product Name*') for tag in cached_tags if tag.get('Product Name*')]
+                        
+                        if not product_names:
+                            logging.debug(f"CACHE PATH: Cannot enrich - no product names found")
+                        else:
+                            # OPTIMIZATION: Cache DOH/Brand map to avoid repeated database queries
+                            import hashlib
+                            product_names_sorted = sorted(set(product_names))
+                            names_hash = hashlib.md5('|'.join(product_names_sorted).encode()).hexdigest()
+                            doh_brand_cache_key = f"doh_brand_map_{store_name}_{names_hash}"
+                            cached_doh_brand_map = cache.get(doh_brand_cache_key)
+                            
+                            if cached_doh_brand_map:
+                                logging.debug(f"⚡ CACHE ENRICHMENT: Using cached DOH/Brand map for {len(product_names)} products")
+                                doh_map = cached_doh_brand_map.get('doh_map', {})
+                                brand_map = cached_doh_brand_map.get('brand_map', {})
+                            else:
+                                logging.debug(f"🔄 CACHE PATH: Querying DOH/Brand for {len(product_names)} products...")
+                                
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+                                
+                                excel_lower_map = {name.lower().strip(): name for name in product_names}
+                                chunk_size = 400
+                                doh_map = {}
+                                brand_map = {}
+                                
+                                # Query DOH and Brand in one pass
+                                for chunk_start in range(0, len(product_names), chunk_size):
+                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                    chunk_lower = [name.lower() for name in chunk]
+                                    placeholders = ','.join(['?' for _ in chunk_lower])
+                                    
+                                    # Query both DOH and Brand - check both DOH columns
+                                    cursor.execute(f'''
+                                        SELECT "Product Name*", 
+                                               COALESCE("DOH", "DOH Compliant (Yes/No)") as doh_value,
+                                               "DOH Compliant (Yes/No)",
+                                               "DOH",
+                                               "Product Brand"
+                                        FROM products
+                                        WHERE LOWER("Product Name*") IN ({placeholders})
+                                    ''', chunk_lower)
+                                    results = cursor.fetchall()
+                                    
+                                    for row in results:
+                                        db_name = row[0]
+                                        db_doh_coalesced = row[1]  # COALESCE result
+                                        db_doh_compliant = row[2]  # DOH Compliant (Yes/No)
+                                        db_doh = row[3]  # DOH column
+                                        db_brand = row[4]
+                                        
+                                        # Use COALESCE result first, fallback to individual columns
+                                        db_doh_final = db_doh_coalesced or db_doh_compliant or db_doh
+                                        if db_doh_final and str(db_doh_final).strip():
+                                            clean_doh_raw = str(db_doh_final).strip().upper()
+                                            # Normalize YES/Y/COMPLIANT to DOH (same as _clean_doh)
+                                            if clean_doh_raw in ['YES', 'Y', 'COMPLIANT']:
+                                                clean_doh = 'DOH'
+                                            elif clean_doh_raw in ['NO', 'N', 'NONE', 'NULL', 'NAN', '']:
+                                                clean_doh = None  # Don't add to map if it's NO/NONE
+                                            else:
+                                                clean_doh = clean_doh_raw
+                                            
+                                            # Only add to map if we have a valid DOH value
+                                            if clean_doh and clean_doh not in ['NO', 'N', 'NONE', 'NULL', 'NAN']:
+                                                doh_map[db_name] = clean_doh
+                                                excel_key = db_name.lower().strip()
+                                                if excel_key in excel_lower_map:
+                                                    doh_map[excel_lower_map[excel_key]] = clean_doh
+                                        
+                                        if db_brand and str(db_brand).strip() and str(db_brand).strip() != 'Product Brand':
+                                            clean_brand = str(db_brand).strip()
+                                            brand_map[db_name] = clean_brand
+                                            excel_key = db_name.lower().strip()
+                                            if excel_key in excel_lower_map:
+                                                brand_map[excel_lower_map[excel_key]] = clean_brand
+                                
+                                # OPTIMIZATION: Cache the DOH/Brand map for 1 hour to avoid repeated queries
+                                cache.set(doh_brand_cache_key, {'doh_map': doh_map, 'brand_map': brand_map}, timeout=3600)
+                                logging.debug(f"⚡ CACHE ENRICHMENT: Built and cached doh_map ({len(doh_map)} entries), brand_map ({len(brand_map)} entries)")
+                        
+                            # OPTIMIZATION: Apply enrichment only to tags that need it
+                            enriched_doh_count = 0
+                            enriched_brand_count = 0
+                            excel_lower_map = {name.lower().strip(): name for name in product_names}
+                            
+                            for tag in cached_tags:
+                                product_name = tag.get('Product Name*')
+                                if not product_name:
+                                    continue
+                                
+                                # OPTIMIZATION: Quick check - skip if tag already has both DOH and Brand
+                                has_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)') or tag.get('doh')
+                                has_brand = tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand')
+                                
+                                # DOH enrichment
+                                if not has_doh:
+                                    excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)') or tag.get('doh') or tag.get('DOH Compliant')
+                                    excel_doh_clean = ''
+                                    if excel_doh is not None and excel_doh != '':
+                                        try:
+                                            excel_doh_str = str(excel_doh).strip().upper()
+                                            if excel_doh_str and excel_doh_str not in ['NONE', 'NULL', 'NAN', 'NO', 'N', 'UNDEFINED']:
+                                                excel_doh_clean = excel_doh_str
+                                        except (AttributeError, TypeError):
+                                            pass
+                                    
+                                    if not excel_doh_clean or excel_doh_clean in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N', 'UNDEFINED']:
+                                        # Try exact match first
+                                        if product_name in doh_map:
+                                            db_doh_value = doh_map[product_name]
+                                            tag['DOH'] = db_doh_value
+                                            tag['DOH Compliant (Yes/No)'] = db_doh_value
+                                            tag['doh'] = db_doh_value.lower() if db_doh_value else ''
+                                            tag['DOH Compliant'] = db_doh_value
+                                            enriched_doh_count += 1
+                                        else:
+                                            # Try lowercase match
+                                            product_name_lower = product_name.lower().strip()
+                                            if product_name_lower in excel_lower_map:
+                                                original_name = excel_lower_map[product_name_lower]
+                                                if original_name in doh_map:
+                                                    db_doh_value = doh_map[original_name]
+                                                    tag['DOH'] = db_doh_value
+                                                    tag['DOH Compliant (Yes/No)'] = db_doh_value
+                                                    tag['doh'] = db_doh_value.lower() if db_doh_value else ''
+                                                    tag['DOH Compliant'] = db_doh_value
+                                                    enriched_doh_count += 1
+                                
+                                # Brand enrichment
+                                if not has_brand:
+                                    excel_brand = tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand')
+                                    excel_brand_clean = ''
+                                    if excel_brand is not None and excel_brand != '':
+                                        try:
+                                            excel_brand_str = str(excel_brand).strip()
+                                            if excel_brand_str and excel_brand_str.lower() not in ['none', 'null', 'nan', 'undefined', 'product brand', '']:
+                                                excel_brand_clean = excel_brand_str
+                                        except (AttributeError, TypeError):
+                                            pass
+                                    
+                                    if not excel_brand_clean:
+                                        if product_name in brand_map:
+                                            tag['Product Brand'] = brand_map[product_name]
+                                            tag['ProductBrand'] = brand_map[product_name]
+                                            tag['productBrand'] = brand_map[product_name]
+                                            enriched_brand_count += 1
+                                
+                                # OPTIMIZATION: Ensure fields exist in single pass
+                                if 'DOH' not in tag: tag['DOH'] = ''
+                                if 'DOH Compliant (Yes/No)' not in tag: tag['DOH Compliant (Yes/No)'] = ''
+                                if 'doh' not in tag: tag['doh'] = ''
+                                if 'DOH Compliant' not in tag: tag['DOH Compliant'] = ''
+                                if 'Product Brand' not in tag: tag['Product Brand'] = ''
+                                if 'ProductBrand' not in tag: tag['ProductBrand'] = ''
+                                if 'productBrand' not in tag: tag['productBrand'] = ''
+                            
+                            if enriched_doh_count > 0 or enriched_brand_count > 0:
+                                logging.debug(f"⚡ CACHE ENRICHMENT: Enriched {enriched_doh_count} DOH, {enriched_brand_count} Brand values")
+            except Exception as cache_enrich_err:
+                logging.warning(f"Failed to enrich cached tags with DOH/Brand: {cache_enrich_err}")
+                import traceback
+                logging.warning(traceback.format_exc())
+            
+            # CRITICAL FIX: Enforce non-classic lineage rules on cached tags
+            cached_tags = _enforce_nonclassic_lineage_rules(cached_tags)
+            
+            # CRITICAL FIX: Final safety check - ensure ALL tags have DOH/Brand fields before returning
+            # This is the last chance to guarantee fields exist for frontend
+            for tag in cached_tags:
+                if not isinstance(tag, dict):
+                    continue
+                # ALWAYS ensure fields exist (even if empty) - frontend requires these fields
+                if 'DOH' not in tag:
+                    tag['DOH'] = ''
+                if 'DOH Compliant (Yes/No)' not in tag:
+                    tag['DOH Compliant (Yes/No)'] = ''
+                if 'doh' not in tag:
+                    tag['doh'] = ''
+                if 'DOH Compliant' not in tag:
+                    tag['DOH Compliant'] = ''
+                if 'Product Brand' not in tag:
+                    tag['Product Brand'] = ''
+                if 'ProductBrand' not in tag:
+                    tag['ProductBrand'] = ''
+                if 'productBrand' not in tag:
+                    tag['productBrand'] = ''
+            
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
             return jsonify({
@@ -10251,6 +10918,170 @@ def get_available_tags():
                     logging.warning(f"Could not align cached tags after lineage update: {align_err}")
             else:
                 logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
+            
+            # CRITICAL FIX: Enrich cached tags with DOH and Brand data (same as fast_load path)
+            try:
+                product_db = get_product_database(store_name)
+                if product_db and cached_tags:
+                    product_names = [tag.get('Product Name*') for tag in cached_tags if tag.get('Product Name*')]
+                    if product_names:
+                        # OPTIMIZATION: Cache DOH/Brand map to avoid repeated database queries
+                        import hashlib
+                        product_names_sorted = sorted(set(product_names))
+                        names_hash = hashlib.md5('|'.join(product_names_sorted).encode()).hexdigest()
+                        doh_brand_cache_key = f"doh_brand_map_{store_name}_{names_hash}"
+                        cached_doh_brand_map = cache.get(doh_brand_cache_key)
+                        
+                        if cached_doh_brand_map:
+                            logging.debug(f"⚡ CACHE ENRICHMENT (SLOW): Using cached DOH/Brand map for {len(product_names)} products")
+                            doh_map = cached_doh_brand_map.get('doh_map', {})
+                            brand_map = cached_doh_brand_map.get('brand_map', {})
+                        else:
+                            logging.debug(f"🔄 CACHE PATH (SLOW): Querying DOH/Brand for {len(product_names)} products...")
+                            
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            
+                            excel_lower_map = {name.lower().strip(): name for name in product_names}
+                            chunk_size = 400
+                            doh_map = {}
+                            brand_map = {}
+                            
+                            # Query DOH and Brand in one pass
+                            for chunk_start in range(0, len(product_names), chunk_size):
+                                chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                chunk_lower = [name.lower() for name in chunk]
+                                placeholders = ','.join(['?' for _ in chunk_lower])
+                                
+                                cursor.execute(f'''
+                                    SELECT "Product Name*", 
+                                           COALESCE("DOH", "DOH Compliant (Yes/No)") as doh_value,
+                                           "DOH Compliant (Yes/No)",
+                                           "DOH",
+                                           "Product Brand"
+                                    FROM products
+                                    WHERE LOWER("Product Name*") IN ({placeholders})
+                                ''', chunk_lower)
+                                results = cursor.fetchall()
+                                
+                                for row in results:
+                                    db_name = row[0]
+                                    db_doh_coalesced = row[1]  # COALESCE result
+                                    db_doh_compliant = row[2]  # DOH Compliant (Yes/No)
+                                    db_doh = row[3]  # DOH column
+                                    db_brand = row[4]
+                                    
+                                    # Use COALESCE result first, fallback to individual columns
+                                    db_doh_final = db_doh_coalesced or db_doh_compliant or db_doh
+                                    if db_doh_final and str(db_doh_final).strip():
+                                        clean_doh_raw = str(db_doh_final).strip().upper()
+                                        # Normalize YES/Y/COMPLIANT to DOH (same as _clean_doh)
+                                        if clean_doh_raw in ['YES', 'Y', 'COMPLIANT']:
+                                            clean_doh = 'DOH'
+                                        elif clean_doh_raw in ['NO', 'N', 'NONE', 'NULL', 'NAN', '']:
+                                            clean_doh = None  # Don't add to map if it's NO/NONE
+                                        else:
+                                            clean_doh = clean_doh_raw
+                                        
+                                        # Only add to map if we have a valid DOH value
+                                        if clean_doh and clean_doh not in ['NO', 'N', 'NONE', 'NULL', 'NAN']:
+                                            doh_map[db_name] = clean_doh
+                                            excel_key = db_name.lower().strip()
+                                            if excel_key in excel_lower_map:
+                                                doh_map[excel_lower_map[excel_key]] = clean_doh
+                                            logging.debug(f"📦 CACHE ENRICHMENT: Found DOH '{clean_doh}' for '{db_name}'")
+                                    
+                                    if db_brand and str(db_brand).strip() and str(db_brand).strip() != 'Product Brand':
+                                        clean_brand = str(db_brand).strip()
+                                        brand_map[db_name] = clean_brand
+                                        excel_key = db_name.lower().strip()
+                                        if excel_key in excel_lower_map:
+                                            brand_map[excel_lower_map[excel_key]] = clean_brand
+                        
+                        # Apply DOH and Brand to cached tags (only if missing)
+                        enriched_doh_count = 0
+                        enriched_brand_count = 0
+                        for tag in cached_tags:
+                            product_name = tag.get('Product Name*')
+                            
+                            # DOH: Only enrich if tag doesn't have DOH
+                            excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
+                            excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
+                            if not excel_doh_clean or excel_doh_clean in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N']:
+                                # Try exact match first
+                                if product_name and product_name in doh_map:
+                                    db_doh_value = doh_map[product_name]
+                                    tag['DOH'] = db_doh_value
+                                    tag['DOH Compliant (Yes/No)'] = db_doh_value
+                                    tag['doh'] = db_doh_value.lower()
+                                    tag['DOH Compliant'] = db_doh_value
+                                    enriched_doh_count += 1
+                                    logging.debug(f"✅ CACHE ENRICHMENT: Enriched '{product_name}' with DOH '{db_doh_value}'")
+                                else:
+                                    # Try lowercase match
+                                    product_name_lower = product_name.lower().strip() if product_name else ''
+                                    if product_name_lower and product_name_lower in excel_lower_map:
+                                        original_name = excel_lower_map[product_name_lower]
+                                        if original_name in doh_map:
+                                            db_doh_value = doh_map[original_name]
+                                            tag['DOH'] = db_doh_value
+                                            tag['DOH Compliant (Yes/No)'] = db_doh_value
+                                            tag['doh'] = db_doh_value.lower()
+                                            tag['DOH Compliant'] = db_doh_value
+                                            enriched_doh_count += 1
+                                            logging.debug(f"✅ CACHE ENRICHMENT: Enriched '{product_name}' (via lowercase match) with DOH '{db_doh_value}'")
+                            else:
+                                # Ensure both fields exist even if Excel has value
+                                tag['DOH'] = str(excel_doh).strip()
+                                tag['DOH Compliant (Yes/No)'] = str(excel_doh).strip()
+                                tag['doh'] = str(excel_doh).strip().lower()
+                                tag['DOH Compliant'] = str(excel_doh).strip()
+                            
+                            # Brand: Only enrich if tag doesn't have Brand
+                            excel_brand = tag.get('Product Brand') or tag.get('ProductBrand')
+                            if not excel_brand or str(excel_brand).strip() == '':
+                                if product_name and product_name in brand_map:
+                                    tag['Product Brand'] = brand_map[product_name]
+                                    tag['ProductBrand'] = brand_map[product_name]
+                                    enriched_brand_count += 1
+                            
+                            # CRITICAL: Always ensure fields exist
+                            if 'DOH' not in tag:
+                                tag['DOH'] = ''
+                            if 'DOH Compliant (Yes/No)' not in tag:
+                                tag['DOH Compliant (Yes/No)'] = ''
+                            if 'Product Brand' not in tag:
+                                tag['Product Brand'] = ''
+                            if 'ProductBrand' not in tag:
+                                tag['ProductBrand'] = ''
+                        
+                        logging.info(f"✅ CACHE PATH (SLOW): Enriched {enriched_doh_count} DOH, {enriched_brand_count} Brand values")
+            except Exception as cache_enrich_err:
+                logging.warning(f"Failed to enrich cached tags with DOH/Brand: {cache_enrich_err}")
+            
+            # CRITICAL FIX: Enforce non-classic lineage rules on cached tags
+            cached_tags = _enforce_nonclassic_lineage_rules(cached_tags)
+            
+            # CRITICAL FIX: Final safety check - ensure ALL tags have DOH/Brand fields before returning
+            # This is the last chance to guarantee fields exist for frontend
+            for tag in cached_tags:
+                if not isinstance(tag, dict):
+                    continue
+                # ALWAYS ensure fields exist (even if empty) - frontend requires these fields
+                if 'DOH' not in tag:
+                    tag['DOH'] = ''
+                if 'DOH Compliant (Yes/No)' not in tag:
+                    tag['DOH Compliant (Yes/No)'] = ''
+                if 'doh' not in tag:
+                    tag['doh'] = ''
+                if 'DOH Compliant' not in tag:
+                    tag['DOH Compliant'] = ''
+                if 'Product Brand' not in tag:
+                    tag['Product Brand'] = ''
+                if 'ProductBrand' not in tag:
+                    tag['ProductBrand'] = ''
+                if 'productBrand' not in tag:
+                    tag['productBrand'] = ''
             
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
@@ -10360,18 +11191,19 @@ def get_available_tags():
                 elif has_lineage_updates:
                     logging.info(f"🔄 LINEAGE UPDATE DETECTED: Forcing database enrichment even with fast_load=1")
 
-                # CRITICAL: Strip Excel Lineage field - UI uses DATABASE LINEAGE ONLY
-                # Excel lineage is NEVER used - all lineage comes from database via:
-                # 1. Background refresh (fast_load=0) or
-                # 2. Explicit lineage alignment via _align_tags_with_db_lineage()
-                for tag in simple_tags:
-                    # Remove all Excel lineage fields to ensure database is the only source
-                    tag.pop('Lineage', None)
-                    tag.pop('lineage', None)
-                    tag.pop('Lineage*', None)
-                
+                # CRITICAL FIX: Only strip Excel lineage if we're going to enrich with database lineage
+                # If skipping enrichment (fast_load mode), keep Excel lineage as fallback
+                # This ensures tags always have lineage fields populated
                 if not skip_db_enrichment:
+                    # Strip Excel lineage only when we'll replace it with database lineage
+                    for tag in simple_tags:
+                        tag.pop('Lineage', None)
+                        tag.pop('lineage', None)
+                        tag.pop('Lineage*', None)
                     logging.info(f"🗑️ STRIPPED Excel Lineage from {len(simple_tags)} tags - will enrich with DATABASE lineage only")
+                else:
+                    # Fast load mode: Keep Excel lineage as fallback, but still try to enrich if possible
+                    logging.info(f"⚡ FAST LOAD: Keeping Excel lineage as fallback for {len(simple_tags)} tags")
 
                 # CRITICAL: Enrich with database lineage after stripping Excel lineage
                 # This populates currentLineage, canonical_lineage from database
@@ -10485,139 +11317,202 @@ def get_available_tags():
                             if enriched_count > 0:
                                 sample = [(t.get('Product Name*'), t.get('currentLineage')) for t in simple_tags[:3]]
                                 logging.info(f"📋 SIMPLE PATH: Sample enriched tags: {sample}")
-
-                            # CRITICAL FIX: Enrich tags with DOH data from database
-                            # This ensures DOH badges show up in preroll menus and other tag lists
-                            if product_names:
-                                try:
-                                    logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data...")
-
-                                    # Query DOH field from database for all products
-                                    conn = product_db._get_connection()
-                                    cursor = conn.cursor()
-
-                                    # Build lowercase lookup for O(1) matching (reuse from lineage enrichment)
-                                    excel_lower_map = {name.lower().strip(): name for name in product_names}
-
-                                    # SQLite has a parameter limit (typically 999) – chunk to avoid failures
-                                    chunk_size = 400
-                                    doh_map = {}
-                                    total_doh_results = 0
-                                    for chunk_start in range(0, len(product_names), chunk_size):
-                                        chunk = product_names[chunk_start:chunk_start + chunk_size]
-                                        chunk_lower = [name.lower() for name in chunk]
-                                        placeholders = ','.join(['?' for _ in chunk_lower])
-                                        # Query DOH field (can be 'DOH', 'THC', 'CBD', 'Yes', 'No', etc.)
-                                        cursor.execute(f'''
-                                            SELECT "Product Name*", "DOH Compliant (Yes/No)"
-                                            FROM products
-                                            WHERE LOWER("Product Name*") IN ({placeholders})
-                                        ''', chunk_lower)
-                                        results = cursor.fetchall()
-                                        total_doh_results += len(results)
-
-                                        # Build DOH map with O(1) lookups
-                                        for row in results:
-                                            db_name = row[0]
-                                            db_doh = row[1]
-
-                                            if db_doh and str(db_doh).strip():
-                                                clean_doh = str(db_doh).strip().upper()
-                                                doh_map[db_name] = clean_doh
-                                                # O(1) lookup instead of O(n) loop
-                                                excel_key = db_name.lower().strip()
-                                                if excel_key in excel_lower_map:
-                                                    doh_map[excel_lower_map[excel_key]] = clean_doh
-
-                                    logging.info(f"📦 SIMPLE PATH: Database returned DOH for {len(doh_map)} products")
-                                    if len(doh_map) > 0:
-                                        sample_doh = list(doh_map.items())[:2]
-                                        logging.info(f"📋 Sample DOH mappings: {sample_doh}")
-
-                                    # Apply DOH data to tags
-                                    # EXCEL PRIORITY: Only enrich from database if Excel doesn't already have a DOH value
-                                    # Excel is the source of truth since it's most up-to-date
-                                    doh_enriched_count = 0
-                                    doh_preserved_count = 0
-                                    for tag in simple_tags:
-                                        product_name = tag.get('Product Name*')
-                                        
-                                        # Check if Excel already has a DOH value (check both field names)
-                                        excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
-                                        excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
-                                        
-                                        # Only use database DOH if Excel doesn't have a value (or has empty/invalid value)
-                                        if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
-                                            # Excel doesn't have DOH - use database if available
-                                            if product_name and product_name in doh_map:
-                                                db_doh_clean = doh_map[product_name]
-                                                tag['DOH'] = db_doh_clean
-                                                tag['DOH Compliant (Yes/No)'] = db_doh_clean
-                                                doh_enriched_count += 1
-                                        else:
-                                            # Excel has a DOH value - ensure it's set in both fields (Excel is source of truth)
-                                            tag['DOH'] = excel_doh_clean
-                                            tag['DOH Compliant (Yes/No)'] = excel_doh_clean
-                                            doh_preserved_count += 1
-
-                                    logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH (preserved {doh_preserved_count} Excel DOH values)")
-                                except Exception as doh_enrich_err:
-                                    logging.info(f"Failed to enrich with database DOH data: {doh_enrich_err}")
-                                    import traceback
-                                    logging.warning(traceback.format_exc())
-                    except Exception as enrich_err:
-                        logging.warning(f"Failed to enrich with database lineage: {enrich_err}")
+                    except Exception as lineage_enrich_err:
+                        logging.warning(f"Lineage enrichment failed: {lineage_enrich_err}")
                         import traceback
                         logging.warning(traceback.format_exc())
-                else:
-                    # skip_db_enrichment=True: Use cached tags for instant refresh
-                    logging.info(f"⚡ FAST REFRESH: Returning {len(simple_tags)} tags without database queries")
 
-            # CRITICAL FIX: Align tags with database lineage to add sovereign_lineage
-            # This ensures manual lineage edits are visible in the UI
-            # PERFORMANCE: Skip alignment if fast_load=1 and cache exists
-            if not skip_db_enrichment:
+                # CRITICAL FIX: DOH enrichment ALWAYS runs, even in fast_load mode
+                # This ensures DOH badges appear even when database enrichment is skipped for performance
+                # DOH enrichment is lightweight and necessary for UI badges
                 try:
-                    if store_name and simple_tags:
-                        logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage...")
-                        simple_tags = _align_tags_with_db_lineage(simple_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                        logging.info(f"✅ SIMPLE PATH: Tags aligned with database lineage")
-                except Exception as align_err:
-                    logging.warning(f"Failed to align simple tags with database: {align_err}")
-            else:
-                logging.info(f"⚡ FAST REFRESH: Skipping database alignment (using cached lineage)")
+                    product_db = get_product_database(store_name)
+                    if product_db and simple_tags:
+                        # CRITICAL FIX: Enrich tags with DOH data from database
+                        # This ensures DOH badges show up in preroll menus and other tag lists
+                        product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
+                        if product_names:
+                            try:
+                                logging.info(f"🔄 SIMPLE PATH: Enriching {len(simple_tags)} tags with database DOH data (always runs, even in fast_load)...")
 
-                safe_simple_tags = make_json_safe(simple_tags)
-                elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} tags (with database lineage)")
+                                # Query DOH field from database for all products
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
 
-                # CRITICAL PERFORMANCE FIX: ALWAYS cache the processed tags to avoid reloading Excel (10+ seconds) on every request
-                # This is the main fix for the 5-minute tag loading timeout in production
-                # Cache even with fast_load=1 so subsequent requests are instant
-                try:
-                    cache.set(cache_key, safe_simple_tags, timeout=3600)  # Cache for 1 hour
-                    logging.info(f"💾 SIMPLE PATH: Cached {len(safe_simple_tags)} tags with key: {cache_key[:50]}... (fast_load={fast_load})")
-                except Exception as cache_set_err:
-                    logging.warning(f"Failed to cache tags: {cache_set_err}")
+                                # Build lowercase lookup for O(1) matching (reuse from lineage enrichment)
+                                excel_lower_map = {name.lower().strip(): name for name in product_names}
 
-                # CRITICAL FIX: Wrap response in try-catch to handle OSError: write error
-                # This can happen if response is too large or client disconnects
-                try:
-                    response = jsonify({
-                        'tags': safe_simple_tags,
-                        'total_count': len(safe_simple_tags),
-                        'source': 'excel-simple'
-                    })
-                    # Log response size for debugging
-                    import sys
-                    response_size = sys.getsizeof(str(response.get_json()))
-                    logging.info(f"📊 Response size: {response_size / 1024 / 1024:.2f}MB for {len(safe_simple_tags)} tags")
-                    return response
-                except OSError as write_err:
-                    logging.error(f"❌ OSError writing response: {write_err}")
-                    logging.error(f"Response was {len(safe_simple_tags)} tags, may be too large")
-                    # Try to return a smaller error response
-                    return jsonify({'error': 'Response too large or connection error', 'tag_count': len(safe_simple_tags)}), 500
+                                # SQLite has a parameter limit (typically 999) – chunk to avoid failures
+                                chunk_size = 400
+                                doh_map = {}
+                                total_doh_results = 0
+                                for chunk_start in range(0, len(product_names), chunk_size):
+                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
+                                    chunk_lower = [name.lower() for name in chunk]
+                                    placeholders = ','.join(['?' for _ in chunk_lower])
+                                    # Query DOH field (can be 'DOH', 'THC', 'CBD', 'Yes', 'No', etc.)
+                                    cursor.execute(f'''
+                                        SELECT "Product Name*", "DOH Compliant (Yes/No)"
+                                        FROM products
+                                        WHERE LOWER("Product Name*") IN ({placeholders})
+                                    ''', chunk_lower)
+                                    results = cursor.fetchall()
+                                    total_doh_results += len(results)
+
+                                    # Build DOH map with O(1) lookups
+                                    for row in results:
+                                        db_name = row[0]
+                                        db_doh = row[1]
+
+                                        if db_doh and str(db_doh).strip():
+                                            clean_doh = str(db_doh).strip().upper()
+                                            doh_map[db_name] = clean_doh
+                                            # O(1) lookup instead of O(n) loop
+                                            excel_key = db_name.lower().strip()
+                                            if excel_key in excel_lower_map:
+                                                doh_map[excel_lower_map[excel_key]] = clean_doh
+
+                                logging.info(f"📦 SIMPLE PATH: Database returned DOH for {len(doh_map)} products")
+                                if len(doh_map) > 0:
+                                    sample_doh = list(doh_map.items())[:2]
+                                    logging.info(f"📋 Sample DOH mappings: {sample_doh}")
+
+                                # Apply DOH data to tags
+                                # CRITICAL: Excel is ALWAYS the source of truth for DOH - only use database if Excel is completely empty
+                                # DOH should come from Excel anyway, so we only enrich from database if Excel has NO value at all
+                                doh_enriched_count = 0
+                                doh_preserved_count = 0
+                                for tag in simple_tags:
+                                    product_name = tag.get('Product Name*')
+                                    
+                                    # Check if Excel already has a DOH value (check both field names)
+                                    excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
+                                    excel_doh_clean = str(excel_doh).strip() if excel_doh else ''
+                                    
+                                    # CRITICAL FIX: Only use database DOH if Excel is COMPLETELY empty (not even "NO" or "N")
+                                    # Excel is the source of truth - if Excel has ANY value (even "NO"), use Excel
+                                    if not excel_doh_clean or excel_doh_clean == '':
+                                        # Excel is completely empty - use database if available
+                                        if product_name and product_name in doh_map:
+                                            db_doh_clean = doh_map[product_name]
+                                            tag['DOH'] = db_doh_clean
+                                            tag['DOH Compliant (Yes/No)'] = db_doh_clean
+                                            doh_enriched_count += 1
+                                            logging.debug(f"✅ DOH ENRICHMENT: Set '{product_name}' DOH to '{db_doh_clean}' from database (Excel was empty)")
+                                    else:
+                                        # Excel has a DOH value (even if it's "NO" or "N") - Excel is source of truth
+                                        # Preserve Excel value exactly as-is (don't normalize to uppercase)
+                                        tag['DOH'] = excel_doh_clean
+                                        tag['DOH Compliant (Yes/No)'] = excel_doh_clean
+                                        doh_preserved_count += 1
+                                        logging.debug(f"✅ DOH PRESERVED: Kept '{product_name}' DOH as '{excel_doh_clean}' from Excel (source of truth)")
+                                    
+                                    # CRITICAL FIX: Always ensure DOH fields exist, even if empty
+                                    # This ensures frontend can always check for DOH values
+                                    if 'DOH' not in tag:
+                                        tag['DOH'] = ''
+                                    if 'DOH Compliant (Yes/No)' not in tag:
+                                        tag['DOH Compliant (Yes/No)'] = ''
+
+                                logging.info(f"✅ SIMPLE PATH: Enriched {doh_enriched_count}/{len(simple_tags)} tags with database DOH (preserved {doh_preserved_count} Excel DOH values)")
+                                # DEBUG: Log sample tags to verify DOH fields are present
+                                if simple_tags:
+                                    sample_tag = simple_tags[0]
+                                    sample_doh = sample_tag.get('DOH') or sample_tag.get('DOH Compliant (Yes/No)') or 'NONE'
+                                    logging.info(f"🔍 Sample tag DOH check: '{sample_tag.get('Product Name*', 'unknown')}' has DOH='{sample_tag.get('DOH', 'MISSING')}', DOH Compliant='{sample_tag.get('DOH Compliant (Yes/No)', 'MISSING')}'")
+                            except Exception as doh_enrich_err:
+                                logging.warning(f"⚠️ Failed to enrich with database DOH data: {doh_enrich_err}")
+                                import traceback
+                                logging.warning(traceback.format_exc())
+                                # CRITICAL FIX: Even if enrichment fails, ensure DOH fields exist
+                                for tag in simple_tags:
+                                    if 'DOH' not in tag:
+                                        tag['DOH'] = ''
+                                    if 'DOH Compliant (Yes/No)' not in tag:
+                                        tag['DOH Compliant (Yes/No)'] = ''
+                                logging.info(f"✅ CRITICAL FIX: Ensured DOH fields exist for all {len(simple_tags)} tags even after enrichment failure")
+                        else:
+                            # CRITICAL FIX: Even if product_names is empty, ensure DOH fields exist
+                            logging.warning(f"⚠️ SIMPLE PATH: No product_names available for DOH enrichment, but ensuring DOH fields exist")
+                            for tag in simple_tags:
+                                if 'DOH' not in tag:
+                                    tag['DOH'] = ''
+                                if 'DOH Compliant (Yes/No)' not in tag:
+                                    tag['DOH Compliant (Yes/No)'] = ''
+                except Exception as enrich_err:
+                    logging.warning(f"Failed to enrich with database DOH data: {enrich_err}")
+                    import traceback
+                    logging.warning(traceback.format_exc())
+                    # CRITICAL FIX: Even if enrichment fails completely, ensure DOH fields exist
+                    for tag in simple_tags:
+                        if 'DOH' not in tag:
+                            tag['DOH'] = ''
+                        if 'DOH Compliant (Yes/No)' not in tag:
+                            tag['DOH Compliant (Yes/No)'] = ''
+                    logging.info(f"✅ CRITICAL FIX: Ensured DOH fields exist for all {len(simple_tags)} tags after enrichment exception")
+
+            # CRITICAL FIX: Always align tags with database lineage to ensure lineage fields are populated
+            # Even in fast_load mode, we need lineage fields for the UI to display dropdowns
+            # PERFORMANCE: Use lightweight alignment that doesn't require full database queries
+            try:
+                if store_name and simple_tags:
+                    # CRITICAL: Always align to ensure lineage fields exist, even in fast_load mode
+                    # This ensures UI can display lineage dropdowns even when enrichment was skipped
+                    logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage (fast_load={fast_load})...")
+                    simple_tags = _align_tags_with_db_lineage(simple_tags, store_name, skip_if_aligned=skip_db_enrichment, force_overwrite=not skip_db_enrichment)
+                    logging.info(f"✅ SIMPLE PATH: Tags aligned with database lineage")
+            except Exception as align_err:
+                logging.warning(f"Failed to align simple tags with database: {align_err}")
+                # CRITICAL FIX: If alignment fails, ensure tags have at least Excel lineage or default
+                # This prevents empty lineage fields that break UI dropdowns
+                for tag in simple_tags:
+                    if not tag.get('Lineage') and not tag.get('currentLineage') and not tag.get('canonical_lineage'):
+                        # No lineage at all - set default based on product type
+                        product_type = tag.get('Product Type*', '').lower()
+                        from src.core.constants import CLASSIC_TYPES
+                        is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
+                        default_lineage = 'HYBRID' if is_classic else 'MIXED'
+                        tag['Lineage'] = default_lineage
+                        tag['currentLineage'] = default_lineage
+                        tag['canonical_lineage'] = default_lineage
+                        tag['lineage'] = default_lineage.lower()
+                        logging.warning(f"⚠️ Set default lineage '{default_lineage}' for tag '{tag.get('Product Name*', 'unknown')}' after alignment failure")
+
+            # CRITICAL FIX: Enforce non-classic lineage rules BEFORE serialization
+            # This ensures non-classic types can ONLY have MIXED or CBD lineage, never SATIVA/INDICA/etc.
+            simple_tags = _enforce_nonclassic_lineage_rules(simple_tags)
+            
+            safe_simple_tags = make_json_safe(simple_tags)
+            elapsed = (time.time() - start_time) * 1000
+            logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} tags (with database lineage)")
+
+            # CRITICAL PERFORMANCE FIX: ALWAYS cache the processed tags to avoid reloading Excel (10+ seconds) on every request
+            # This is the main fix for the 5-minute tag loading timeout in production
+            # Cache even with fast_load=1 so subsequent requests are instant
+            try:
+                cache.set(cache_key, safe_simple_tags, timeout=3600)  # Cache for 1 hour
+                logging.info(f"💾 SIMPLE PATH: Cached {len(safe_simple_tags)} tags with key: {cache_key[:50]}... (fast_load={fast_load})")
+            except Exception as cache_set_err:
+                logging.warning(f"Failed to cache tags: {cache_set_err}")
+
+            # CRITICAL FIX: Wrap response in try-catch to handle OSError: write error
+            # This can happen if response is too large or client disconnects
+            try:
+                response = jsonify({
+                    'tags': safe_simple_tags,
+                    'total_count': len(safe_simple_tags),
+                    'source': 'excel-simple'
+                })
+                # Log response size for debugging
+                import sys
+                response_size = sys.getsizeof(str(response.get_json()))
+                logging.info(f"📊 Response size: {response_size / 1024 / 1024:.2f}MB for {len(safe_simple_tags)} tags")
+                return response
+            except OSError as write_err:
+                logging.error(f"❌ OSError writing response: {write_err}")
+                logging.error(f"Response was {len(safe_simple_tags)} tags, may be too large")
+                # Try to return a smaller error response
+                return jsonify({'error': 'Response too large or connection error', 'tag_count': len(safe_simple_tags)}), 500
         except Exception as simple_err:
             logging.error(f"❌ SIMPLE PATH failed: {simple_err}")
             import traceback
@@ -13537,6 +14432,7 @@ def batch_update_lineage():
 def update_doh():
     """Update DOH status for a specific product."""
     try:
+        import re  # CRITICAL FIX: Import re locally to avoid scoping issues
         data = request.get_json()
         logging.info(f"🔍 DOH API RECEIVED: Full request data: {data}")
 
@@ -20603,6 +21499,7 @@ def vendor_strain_browser():
     counts and grouping when convenient.
     """
     try:
+        from src.core.constants import CLASSIC_TYPES
         excel_processor = get_excel_processor()
         if not excel_processor or excel_processor.df is None or excel_processor.df.empty:
             return jsonify({'error': 'No data available'}), 404
@@ -20686,10 +21583,19 @@ def vendor_strain_browser():
             vendors = ', '.join(group['Vendor/Supplier*'].unique())
             brands = ', '.join(group['Product Brand'].unique()) if 'Product Brand' in group.columns else 'N/A'
             
+            # Check if products using this strain are classic types - if so, default to HYBRID instead of MIXED
+            has_classic_products = False
+            if 'Product Type*' in group.columns:
+                product_types = group['Product Type*'].str.strip().str.lower()
+                has_classic_products = product_types.isin([ct.lower() for ct in CLASSIC_TYPES]).any()
+            
+            # Default lineage based on product type: HYBRID for classic, MIXED for non-classic
+            default_lineage = 'HYBRID' if has_classic_products else 'MIXED'
+            
             strains_data.append({
                 'strain_name': str(strain_name).strip(),
-                'current_lineage': str(current_lineage or '').strip() or 'MIXED',
-                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
+                'current_lineage': str(current_lineage or '').strip() or default_lineage,
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or default_lineage,
                 'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'vendor_count': int(vendor_count),
@@ -20736,11 +21642,20 @@ def vendor_strain_browser():
             brand_count = group['Product Brand'].nunique() if 'Product Brand' in group.columns else 0
             brands = ', '.join(group['Product Brand'].unique()) if 'Product Brand' in group.columns else 'N/A'
             
+            # Check if products using this strain are classic types - if so, default to HYBRID instead of MIXED
+            has_classic_products = False
+            if 'Product Type*' in group.columns:
+                product_types = group['Product Type*'].str.strip().str.lower()
+                has_classic_products = product_types.isin([ct.lower() for ct in CLASSIC_TYPES]).any()
+            
+            # Default lineage based on product type: HYBRID for classic, MIXED for non-classic
+            default_lineage = 'HYBRID' if has_classic_products else 'MIXED'
+            
             vendor_strains_data.append({
                 'vendor': vendor,
                 'strain_name': str(strain_name).strip(),
-                'current_lineage': str(current_lineage or '').strip() or 'MIXED',
-                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or 'MIXED',
+                'current_lineage': str(current_lineage or '').strip() or default_lineage,
+                'canonical_lineage': str(db_canonical_lineage or current_lineage or '').strip() or default_lineage,
                 'sovereign_lineage': (db_sovereign_lineage if db_sovereign_lineage not in [None, ''] else None),
                 'product_count': int(product_count),
                 'brand_count': int(brand_count),

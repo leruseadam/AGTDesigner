@@ -22,7 +22,8 @@ if (typeof window.ABBREVIATED_LINEAGE === 'undefined') {
         "CBD": "CBD",
         "CBD_BLEND": "CBD",
         "MIXED": "THC",
-        "PARA": "P"
+        "PARA": "P",
+        "PARAPHERNALIA": "P"
     };
 }
 // Use window.ABBREVIATED_LINEAGE directly to avoid const redeclaration
@@ -113,19 +114,8 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
-  // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-  // sovereign_lineage can be from current session edits OR preexisting saved values
-  // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
-  let rawLineage = '';
-  if (tag.sovereign_lineage) {
-    const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty - trust backend validation
-    if (sovereignRaw) {
-      rawLineage = tag.sovereign_lineage;
-    }
-  }
-  if (!rawLineage) rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // Use canonical_lineage, currentLineage, or Lineage in priority order
+  let rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -142,7 +132,26 @@ function createTagRow(tag) {
   if (!lineage) {
     lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
-    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
+    // CRITICAL FIX: Extract DOH status and normalize it consistently (same as TagsTable.createTagRow)
+    const rawDohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '';
+    const dohStatusNormalized = rawDohStatus.toString().trim().toUpperCase();
+    
+    // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE, empty -> NONE
+    let dohStatus = 'NONE';
+    if (dohStatusNormalized === 'YES' || dohStatusNormalized === 'Y') {
+      dohStatus = 'DOH';
+    } else if (dohStatusNormalized === 'DOH' || dohStatusNormalized.includes('DOH') || dohStatusNormalized === 'COMPLIANT') {
+      dohStatus = 'DOH';
+    } else if (dohStatusNormalized === 'CBD') {
+      dohStatus = 'CBD';
+    } else if (dohStatusNormalized === 'THC') {
+      dohStatus = 'THC';
+    } else if (dohStatusNormalized === 'NO' || dohStatusNormalized === 'N' || dohStatusNormalized === 'NONE' || !dohStatusNormalized) {
+      dohStatus = 'NONE';
+    } else {
+      // Keep original value if it's something else
+      dohStatus = dohStatusNormalized;
+    }
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;
@@ -184,9 +193,33 @@ function createTagRow(tag) {
         }
     }
 
+    // Add DOH badge HTML (same logic as TagsTable.createTagRow)
+    const productTypeForBadge = (tag['Product Type*'] || tag.Type || '').toLowerCase().trim();
+    const isHighCbdProductForBadge = productTypeForBadge.startsWith('high cbd') || 
+                                     productTypeForBadge.includes('doh high cbd') ||
+                                     productTypeForBadge.includes('high cbd edible') ||
+                                     productTypeForBadge.includes('high cbd liquid') ||
+                                     productTypeForBadge.includes('high cbd solid') ||
+                                     productTypeForBadge.includes('high cbd topical');
+    
+    let dohImageHtml = '';
+    if (isHighCbdProductForBadge) {
+      dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
+    } else if (dohStatus === 'DOH') {
+      if (tagName.toLowerCase().includes('high thc')) {
+        dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
+      } else {
+        dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
+      }
+    } else if (dohStatus === 'CBD') {
+      dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
+    } else if (dohStatus === 'THC') {
+      dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
+    }
+
     return `
         <tr class="tag-row" data-tag-name="${tagName}" data-lineage="${lineage}" data-doh="${dohStatus}">
-            <td class="align-middle tag-name-cell">${tagName}</td>
+            <td class="align-middle tag-name-cell">${tagName}${dohImageHtml}</td>
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
@@ -209,7 +242,13 @@ function createTagRow(tag) {
                             
                             // Compare normalized values directly - use converted lineage for classic types
                             const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
-                            const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
+                            // Get abbreviation with fallback - handle both PARA and PARAPHERNALIA
+                            let displayName = lin;
+                            if (window.ABBREVIATED_LINEAGE) {
+                              displayName = window.ABBREVIATED_LINEAGE[lin] || 
+                                           window.ABBREVIATED_LINEAGE[lin.toUpperCase()] || 
+                                           lin;
+                            }
                             return `<option value="${lin}" ${selected}>${displayName}</option>`;
                           }).join('');
                         })()}
@@ -294,19 +333,8 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
-  // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-  // sovereign_lineage can be from current session edits OR preexisting saved values
-  // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
-  let rawLineage = '';
-  if (tag.sovereign_lineage) {
-    const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty - trust backend validation
-    if (sovereignRaw) {
-      rawLineage = tag.sovereign_lineage;
-    }
-  }
-  if (!rawLineage) rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // Use canonical_lineage, currentLineage, or Lineage in priority order
+  let rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -324,8 +352,28 @@ class TagsTable {
     lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
   
-    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
-    console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
+    // CRITICAL FIX: Extract DOH status and normalize it consistently
+    const rawDohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '';
+    const dohStatusNormalized = rawDohStatus.toString().trim().toUpperCase();
+    
+    // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE, empty -> NONE
+    let dohStatus = 'NONE';
+    if (dohStatusNormalized === 'YES' || dohStatusNormalized === 'Y') {
+      dohStatus = 'DOH';
+    } else if (dohStatusNormalized === 'DOH' || dohStatusNormalized.includes('DOH') || dohStatusNormalized === 'COMPLIANT') {
+      dohStatus = 'DOH';
+    } else if (dohStatusNormalized === 'CBD') {
+      dohStatus = 'CBD';
+    } else if (dohStatusNormalized === 'THC') {
+      dohStatus = 'THC';
+    } else if (dohStatusNormalized === 'NO' || dohStatusNormalized === 'N' || dohStatusNormalized === 'NONE' || !dohStatusNormalized) {
+      dohStatus = 'NONE';
+    } else {
+      // Keep original value if it's something else (like CBD, THC, etc.)
+      dohStatus = dohStatusNormalized;
+    }
+    
+    console.log('🏷️ DOH Status for tag:', tag['Product Name*'] || tag.ProductName, 'rawDohStatus=', rawDohStatus, 'normalized=', dohStatus); // Debug log
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;
@@ -443,7 +491,13 @@ class TagsTable {
       // Both values are already normalized - direct comparison
       const linNormalized = window.normalizeLineageValue(lin);
       const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
-      const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
+      // Get abbreviation with fallback - handle both PARA and PARAPHERNALIA
+      let displayName = lin;
+      if (window.ABBREVIATED_LINEAGE) {
+        displayName = window.ABBREVIATED_LINEAGE[lin] || 
+                     window.ABBREVIATED_LINEAGE[lin.toUpperCase()] || 
+                     lin;
+      }
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
 
@@ -459,7 +513,7 @@ class TagsTable {
     console.log('Creating DOH dropdown for tag:', tagName, 'DOH Status:', dohStatus);
 
     // Add DOH and High CBD images if applicable
-    const dohValue = (tag.DOH || '').toString().toUpperCase();
+    // CRITICAL FIX: Use the normalized dohStatus that was already extracted above
     const productTypeLower = productType.toLowerCase().trim();
     // More robust High CBD check - handle variations in product type format
     const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
@@ -470,24 +524,26 @@ class TagsTable {
                              productTypeLower.includes('high cbd topical');
     let dohImageHtml = '';
     
+    // Debug: Log DOH badge check for troubleshooting
+    console.log(`🏷️ DOH Badge Check for "${tagName}": dohStatus="${dohStatus}", rawDohStatus="${rawDohStatus}", isHighCbdProduct=${isHighCbdProduct}`);
+    
     // CRITICAL FIX: High CBD products should ONLY show High CBD badge (not DOH badge)
     // This check must happen FIRST, before any DOH status checks
     if (isHighCbdProduct) {
       // High CBD products get only the High CBD badge, regardless of DOH status
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-    } else if (dohValue === 'YES') {
+    } else if (dohStatus === 'DOH') {
+      // DOH compliant products - show DOH badge (unless it's High THC)
       if (tagName.toLowerCase().includes('high thc')) {
         dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
       } else {
         dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
       }
-    } else if (dohValue === 'CBD') {
+    } else if (dohStatus === 'CBD') {
       // DOH status is CBD - show High CBD badge (only for non-High CBD product types)
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-    } else if (dohValue === 'THC') {
+    } else if (dohStatus === 'THC') {
       dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-    } else if (dohValue === 'DOH') {
-      dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
     }
 
     return `
@@ -710,7 +766,13 @@ class TagsTable {
       // Both values are already normalized - direct comparison
       const linNormalized = window.normalizeLineageValue(lin);
       const selected = (normalizedLineage === linNormalized) ? 'selected' : '';
-      const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
+      // Get abbreviation with fallback - handle both PARA and PARAPHERNALIA
+      let displayName = lin;
+      if (window.ABBREVIATED_LINEAGE) {
+        displayName = window.ABBREVIATED_LINEAGE[lin] || 
+                     window.ABBREVIATED_LINEAGE[lin.toUpperCase()] || 
+                     lin;
+      }
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
     
@@ -1110,7 +1172,7 @@ class TagsTable {
             if (productData) {
               const dbLineage = productData.effective_lineage || 
                                productData.database_values?.products_table?.Lineage ||
-                               productData.database_values?.strains_table?.sovereign_lineage ||
+                               productData.database_values?.strains_table?.canonical_lineage || 
                                productData.database_values?.strains_table?.canonical_lineage;
               
               if (dbLineage) {
@@ -1294,7 +1356,13 @@ class TagsTable {
     uniqueLineages.forEach(lin => {
       const option = document.createElement('option');
       option.value = lin;
-      const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
+      // Get abbreviation with fallback - handle both PARA and PARAPHERNALIA
+      let displayName = lin;
+      if (window.ABBREVIATED_LINEAGE) {
+        displayName = window.ABBREVIATED_LINEAGE[lin] || 
+                     window.ABBREVIATED_LINEAGE[lin.toUpperCase()] || 
+                     lin;
+      }
       option.textContent = displayName;
       if ((currentLineage === lin) || (lin === 'CBD' && currentLineage === 'CBD_BLEND')) {
         option.selected = true;

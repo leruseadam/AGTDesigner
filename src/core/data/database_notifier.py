@@ -113,27 +113,6 @@ class DatabaseNotifier:
         except Exception as e:
             logger.error(f"Error notifying strain add: {e}")
     
-    def notify_sovereign_lineage_set(self, strain_name: str, sovereign_lineage: str, 
-                                   user_id: Optional[str] = None) -> None:
-        """Notify all sessions of a sovereign lineage being set."""
-        try:
-            record_database_change(
-                change_type='sovereign_lineage_set',
-                entity_id=strain_name,
-                entity_type='strain',
-                user_id=user_id,
-                details={
-                    'sovereign_lineage': sovereign_lineage,
-                    'strain_name': strain_name
-                }
-            )
-            
-            self._notify_with_timeout('sovereign_lineage_set', strain_name, sovereign_lineage)
-            
-            logger.info(f"Notified all sessions of sovereign lineage set: {strain_name} -> {sovereign_lineage}")
-            
-        except Exception as e:
-            logger.error(f"Error notifying sovereign lineage set: {e}")
     
     def notify_database_refresh(self, reason: str, user_id: Optional[str] = None) -> None:
         """Notify all sessions that the database has been refreshed."""
@@ -178,10 +157,6 @@ def notify_strain_add(strain_name: str, strain_data: Dict[str, Any],
     """Notify all sessions of a new strain being added."""
     get_database_notifier().notify_strain_add(strain_name, strain_data, user_id)
 
-def notify_sovereign_lineage_set(strain_name: str, sovereign_lineage: str, 
-                               user_id: Optional[str] = None) -> None:
-    """Notify all sessions of a sovereign lineage being set."""
-    get_database_notifier().notify_sovereign_lineage_set(strain_name, sovereign_lineage, user_id)
 
 def notify_database_refresh(reason: str, user_id: Optional[str] = None) -> None:
     """Notify all sessions that the database has been refreshed."""

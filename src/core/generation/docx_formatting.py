@@ -83,21 +83,52 @@ def apply_lineage_colors(doc):
                         temp_text = temp_text.replace(marker, "")
                     if lineage_hint_token:
                         temp_text = temp_text.replace(lineage_hint_token, "")
-                    
-                    # If after removing markers, the cell is empty, treat it as blank
+
+                    # If after removing markers, the cell is empty, check if we have a hint token for color
                     if not temp_text.strip():
-                        # Set white background for marker-only cells
+                        # CRITICAL FIX: If we have a lineage hint, apply color even for marker-only cells
+                        if lineage_hint_value:
+                            hint_upper = lineage_hint_value.upper().strip()
+                            hint_key = hint_upper.replace(" ", "_")
+                            color_candidate = (
+                                COLORS.get(hint_upper) or
+                                COLORS.get(hint_key) or
+                                COLORS.get('CBD') if 'CBD' in hint_upper else None
+                            )
+                            if color_candidate:
+                                tc = cell._tc
+                                tcPr = tc.get_or_add_tcPr()
+                                for old_shd in tcPr.findall(qn('w:shd')):
+                                    tcPr.remove(old_shd)
+                                shd = OxmlElement('w:shd')
+                                shd.set(qn('w:fill'), color_candidate)
+                                shd.set(qn('w:val'), 'clear')
+                                shd.set(qn('w:color'), 'auto')
+                                tcPr.append(shd)
+                                for paragraph in cell.paragraphs:
+                                    for run in paragraph.runs:
+                                        existing_font_size = run.font.size
+                                        run.font.color.rgb = RGBColor(255, 255, 255)
+                                        run.font.bold = True
+                                        run.font.name = "Arial"
+                                        if existing_font_size is not None:
+                                            run.font.size = existing_font_size
+                                logger.info(f"LINEAGE COLOR (hint-only cell): Applied {hint_upper} color #{color_candidate}")
+                                colors_applied += 1
+                                continue
+
+                        # No hint token - set white background for marker-only cells
                         tc = cell._tc
                         tcPr = tc.find(qn('w:tcPr'))
                         if tcPr is None:
                             tcPr = OxmlElement('w:tcPr')
                             tc.insert(0, tcPr)
-                        
+
                         # Remove any existing background color
                         shd = tcPr.find(qn('w:shd'))
                         if shd is not None:
                             tcPr.remove(shd)
-                        
+
                         # Add white background
                         shd = OxmlElement('w:shd')
                         shd.set(qn('w:val'), 'clear')
@@ -135,14 +166,26 @@ def apply_lineage_colors(doc):
                     text = text.strip()
                     
                     # Check if this is a classic type by looking for classic lineage indicators
-                    # Classic types have actual lineage (SATIVA, INDICA, HYBRID, CBD) in their content
-                    is_classic_type = any(lineage in text for lineage in ["SATIVA", "INDICA", "HYBRID", "CBD"])
-                    
-                    # Apply lineage coloring logic based on clean text
+                    # Classic types have actual lineage (SATIVA, INDICA, HYBRID) in their Lineage field
+                    # Non-classic types use ProductStrain for color (CBD=yellow, else MIXED=blue)
+                    is_classic_type = any(lineage in text for lineage in ["SATIVA", "INDICA", "HYBRID"])
+
+                    # Apply lineage coloring logic
                     color_hex = None
                     lineage_matched = None
-                    
-                    if "PARAPHERNALIA" in text:
+
+                    # CRITICAL FIX: For non-classic types, use ProductStrain to determine color
+                    # Non-classic types should ONLY get CBD (yellow) or MIXED (blue)
+                    if not is_classic_type and (is_product_strain_cbd or "CBD" not in text):
+                        # This is a non-classic type - use CBD or MIXED color based on ProductStrain
+                        if is_product_strain_cbd:
+                            color_hex = COLORS['CBD']
+                            lineage_matched = "CBD (non-classic, from ProductStrain)"
+                        else:
+                            color_hex = COLORS['MIXED']
+                            lineage_matched = "MIXED (non-classic)"
+                        logger.info(f"Non-classic type color: {lineage_matched}")
+                    elif "PARAPHERNALIA" in text:
                         color_hex = COLORS['PARA']
                         lineage_matched = "PARAPHERNALIA"
                     elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
@@ -160,57 +203,20 @@ def apply_lineage_colors(doc):
                     elif "HYBRID" in text:
                         color_hex = COLORS['HYBRID']
                         lineage_matched = "HYBRID"
-                    elif lineage_hint_value:
-                        # CRITICAL FIX: Check lineage hint FIRST before checking text content
-                        # This ensures CBD products get the correct color even when hint token is removed
-                        hint_upper = lineage_hint_value.upper().strip()
-                        hint_key = hint_upper.replace(" ", "_")
-                        # Try multiple key variations to match COLORS dictionary
-                        color_candidate = (
-                            COLORS.get(hint_upper) or 
-                            COLORS.get(hint_key) or 
-                            COLORS.get(lineage_hint_value) or
-                            COLORS.get('CBD') if 'CBD' in hint_upper else None
-                        )
-                        if color_candidate:
-                            color_hex = color_candidate
-                            lineage_matched = f"{lineage_hint_value} (hint)"
-                            logger.debug(f"Applied color from lineage hint: '{lineage_hint_value}' -> '{hint_key}' -> color '{color_hex}'")
-                    elif not is_classic_type and is_product_strain_cbd:
-                        # CRITICAL FIX: Check for CBD in ProductStrain for nonclassic types BEFORE checking text
-                        # This ensures CBD edible drinks and other CBD nonclassic types get yellow color
+                    elif "CBD" in text or "CBD_BLEND" in text or "CBD BLEND" in text:
+                        # Classic type with CBD lineage
                         color_hex = COLORS['CBD']
-                        lineage_matched = "CBD (non-classic, ProductStrain)"
-                        logger.debug(f"Applied CBD color for nonclassic type with CBD ProductStrain")
-                    elif "CBD" in text or "CBD_BLEND" in text:
-                        # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD
-                        if is_classic_type or is_product_strain_cbd:
-                            color_hex = COLORS['CBD']
-                            lineage_matched = "CBD"
-                    elif "CBD BLEND" in text:
-                        # Apply CBD BLEND lineage colors if it's a classic type OR if ProductStrain is CBD
-                        if is_classic_type or is_product_strain_cbd:
-                            color_hex = COLORS['CBD_BLEND']
-                            lineage_matched = "CBD BLEND"
-                    elif "MIXED" in text:
-                        # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
-                        color_hex = COLORS['MIXED']  # Blue for Mixed
-                        lineage_matched = "MIXED"
-                    elif not is_classic_type and text.strip():
-                        # For non-classic types without specific strain, use blue color (MIXED)
-                        # BUT ONLY if there's actual content (not empty after marker removal)
-                        color_hex = COLORS['MIXED']
-                        lineage_matched = "MIXED (non-classic)"
-                    
+                        lineage_matched = "CBD"
+
                     # Log lineage color application
                     if color_hex:
-                        logger.info(f"LINEAGE COLOR: '{text}' -> {lineage_matched} -> #{color_hex}")
+                        logger.info(f"LINEAGE COLOR: '{text[:50]}...' -> {lineage_matched} -> #{color_hex}")
                         colors_applied += 1
                     else:
-                        logger.debug(f"NO LINEAGE MATCH: '{text}' (classic: {is_classic_type}, strain_cbd: {is_product_strain_cbd})")
-                    
+                        logger.debug(f"NO LINEAGE MATCH: '{text[:50]}' (classic: {is_classic_type}, strain_cbd: {is_product_strain_cbd})")
+
+                    # Apply color if we have one and there's actual content
                     if color_hex and text.strip():
-                        # Final safety check: only apply color if there's actual content
                         # Set cell background color
                         tc = cell._tc
                         tcPr = tc.get_or_add_tcPr()

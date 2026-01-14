@@ -28,10 +28,8 @@ def build_context(record, doc, template_type='vertical'):
     context['ratio_or_thc_cbd'] = record.get('Ratio_or_THC_CBD', '')
     
     # Lineage and DOH
-    # CRITICAL: Priority order - sovereign_lineage (manual edits) > canonical_lineage > Lineage
-    # This ensures manual lineage edits from Tag Manager always appear in output
+    # Priority order - canonical_lineage > currentLineage > Lineage
     context['lineage'] = (
-        record.get('sovereign_lineage') or 
         record.get('canonical_lineage') or 
         record.get('currentLineage') or 
         record.get('Lineage', '')
