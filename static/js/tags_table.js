@@ -120,8 +120,8 @@ function createTagRow(tag) {
   let rawLineage = '';
   if (tag.sovereign_lineage) {
     const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty - trust backend validation
-    if (sovereignRaw) {
+    // Use if not empty AND not 'NONE' (legacy placeholder value)
+    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
       rawLineage = tag.sovereign_lineage;
     }
   }
@@ -324,8 +324,8 @@ class TagsTable {
   let rawLineage = '';
   if (tag.sovereign_lineage) {
     const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty - trust backend validation
-    if (sovereignRaw) {
+    // Use if not empty AND not 'NONE' (legacy placeholder value)
+    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
       rawLineage = tag.sovereign_lineage;
     }
   }
@@ -654,6 +654,8 @@ class TagsTable {
       if (window.TagManager && window.TagManager.state) {
         const tag = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName);
         if (tag) {
+          // CRITICAL: Set sovereign_lineage FIRST - it has highest priority in createTagRow
+          tag.sovereign_lineage = newLineage;
           tag.currentLineage = newLineage;
           tag.canonical_lineage = newLineage;
           tag.Lineage = newLineage;
@@ -1188,17 +1190,19 @@ class TagsTable {
                     (t['Product Name*'] || t.ProductName) === tagName
                   );
                   if (originalTagIndex >= 0) {
+                    TagManager.state.originalTags[originalTagIndex].sovereign_lineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].Lineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].lineage = dbLineageClean.toLowerCase();
                     TagManager.state.originalTags[originalTagIndex].currentLineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].canonical_lineage = dbLineageClean;
                   }
-                  
+
                   // Update in current tags
-                  const currentTagIndex = TagManager.state.tags.findIndex(t => 
+                  const currentTagIndex = TagManager.state.tags.findIndex(t =>
                     (t['Product Name*'] || t.ProductName) === tagName
                   );
                   if (currentTagIndex >= 0) {
+                    TagManager.state.tags[currentTagIndex].sovereign_lineage = dbLineageClean;
                     TagManager.state.tags[currentTagIndex].Lineage = dbLineageClean;
                     TagManager.state.tags[currentTagIndex].lineage = dbLineageClean.toLowerCase();
                     TagManager.state.tags[currentTagIndex].currentLineage = dbLineageClean;
@@ -1415,14 +1419,16 @@ class TagsTable {
               // Update the tag's lineage in state directly
               const tagIndex = TagManager.state.originalTags.findIndex(t => (t['Product Name*'] || t.ProductName) === tagName);
               if (tagIndex >= 0) {
+                TagManager.state.originalTags[tagIndex].sovereign_lineage = newLineage;
                 TagManager.state.originalTags[tagIndex].Lineage = newLineage;
                 TagManager.state.originalTags[tagIndex].lineage = newLineage.toLowerCase();
                 TagManager.state.originalTags[tagIndex].currentLineage = newLineage;
                 TagManager.state.originalTags[tagIndex].canonical_lineage = newLineage;
               }
-              
+
               const currentTagIndex = TagManager.state.tags.findIndex(t => (t['Product Name*'] || t.ProductName) === tagName);
               if (currentTagIndex >= 0) {
+                TagManager.state.tags[currentTagIndex].sovereign_lineage = newLineage;
                 TagManager.state.tags[currentTagIndex].Lineage = newLineage;
                 TagManager.state.tags[currentTagIndex].lineage = newLineage.toLowerCase();
                 TagManager.state.tags[currentTagIndex].currentLineage = newLineage;

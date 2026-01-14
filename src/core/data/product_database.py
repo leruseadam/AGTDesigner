@@ -124,6 +124,29 @@ def _set_cached_fuzzy_match(product_name: str, result: Optional[Dict[str, Any]])
                 del _fuzzy_match_cache[key]
                 del _fuzzy_match_cache_timestamps[key]
 
+def clear_lineage_cache(product_name: Optional[str] = None):
+    """Clear lineage cache for a specific product or entire cache.
+
+    Args:
+        product_name: If provided, clears only that product's cached lineage.
+                      If None, clears the entire lineage cache.
+    """
+    global _lineage_cache, _lineage_cache_timestamps
+
+    with _lineage_cache_lock:
+        if product_name is None:
+            # Clear entire cache
+            _lineage_cache.clear()
+            _lineage_cache_timestamps.clear()
+            logger.info("Cleared entire lineage cache")
+        else:
+            # Clear specific product
+            cache_key = product_name.strip().lower()
+            if cache_key in _lineage_cache:
+                del _lineage_cache[cache_key]
+                del _lineage_cache_timestamps[cache_key]
+                logger.debug(f"Cleared lineage cache for: {product_name}")
+
 def timed_operation(operation_name):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
