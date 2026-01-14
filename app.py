@@ -7435,6 +7435,26 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
 
             lineage_info = lineage_map.get(name) or lineage_map.get(normalized_name) or lineage_map.get(lower_name)
 
+            # CRITICAL FIX: If no match by product name, try extracted strain name
+            # This allows "Blackberry Kush Infused Pre-Roll by 2727 - 1g" to match via strain "Blackberry Kush"
+            if not lineage_info and product_db and hasattr(product_db, '_extract_strain_from_product_name'):
+                try:
+                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                    extracted_strain = product_db._extract_strain_from_product_name(name, product_type)
+                    if extracted_strain:
+                        # Try strain name in various forms
+                        lineage_info = lineage_map.get(extracted_strain)
+                        if not lineage_info:
+                            lineage_info = lineage_map.get(extracted_strain.lower().strip())
+                        if not lineage_info and hasattr(product_db, '_normalize_strain_name'):
+                            normalized_strain = product_db._normalize_strain_name(extracted_strain)
+                            if normalized_strain:
+                                lineage_info = lineage_map.get(normalized_strain)
+                        if lineage_info:
+                            logging.debug(f"✅ Matched '{name}' via extracted strain '{extracted_strain}'")
+                except Exception as strain_lookup_err:
+                    logging.debug(f"Could not extract strain for lookup from '{name}': {strain_lookup_err}")
+
             if not lineage_info:
                 unmatched_count += 1
                 continue
@@ -7464,7 +7484,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         tag['DOH Compliant (Yes/No)'] = doh_value
 
                 # CRITICAL: Set sovereign_lineage - this is what frontend uses
-                if lineage and (force_overwrite or not tag.get('sovereign_lineage')):
+                # Also update if existing sovereign_lineage is 'NONE' or empty (invalid placeholder values)
+                existing_sovereign = tag.get('sovereign_lineage')
+                existing_is_invalid = not existing_sovereign or str(existing_sovereign).strip().upper() in ['', 'NONE', 'NULL', 'NAN']
+                if lineage and (force_overwrite or existing_is_invalid):
                     tag['sovereign_lineage'] = lineage
                     aligned_count += 1
                     source = 'strains table' if strain_canonical else 'Excel'
@@ -7473,7 +7496,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 # Old format: lineage_info is a string
                 lineage = str(lineage_info).strip().upper() if lineage_info else None
                 if lineage and lineage not in ['', 'NONE', 'NAN', 'NULL']:
-                    if force_overwrite or not tag.get('sovereign_lineage'):
+                    # Also update if existing sovereign_lineage is 'NONE' or empty (invalid placeholder values)
+                    existing_sovereign = tag.get('sovereign_lineage')
+                    existing_is_invalid = not existing_sovereign or str(existing_sovereign).strip().upper() in ['', 'NONE', 'NULL', 'NAN']
+                    if force_overwrite or existing_is_invalid:
                         tag['sovereign_lineage'] = lineage
                         aligned_count += 1
 

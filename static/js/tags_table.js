@@ -132,7 +132,7 @@ function createTagRow(tag) {
   
   // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
   // This ensures UI displays correct lineage even if database/Excel has wrong value
-  const productType = tag['Product Type*'] || tag.Type || '';
+  const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
   const isClassicType = productType && getUniqueLineages(productType).length === 6;
   if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
     lineage = 'HYBRID';
@@ -210,7 +210,7 @@ function createTagRow(tag) {
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
                             onchange="TagsTable.handleLineageChange(this, '${tagName}')">
                         ${(() => {
-                          const productType = tag['Product Type*'] || tag.Type || '';
+                          const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
                           const uniqueLineages = getUniqueLineages(productType);
                           
                           // CRITICAL FIX: Convert MIXED to appropriate value based on product type
@@ -245,7 +245,7 @@ function createTagRow(tag) {
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     ${(() => {
-                      const productType = tag['Product Type*'] || tag.Type || '';
+                      const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
                       const productTypeLower = productType.toLowerCase().trim();
                       // More robust High CBD check - handle variations in product type format
                       const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
@@ -338,7 +338,7 @@ class TagsTable {
   let lineage = String(rawLineage || '').trim().toUpperCase();
   
   // CRITICAL FIX: Only convert MIXED to HYBRID for classic types, and MIXED to THC for non-classic types
-  const productType = tag['Product Type*'] || tag.Type || '';
+  const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
   const isClassicType = (() => {
     const typeLower = (productType || '').toString().toLowerCase().trim();
     const CLASSIC_TYPES = [
@@ -382,7 +382,7 @@ class TagsTable {
     
     const brand = tag['Product Brand'] || tag.Brand || '';
     const vendor = tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || tag['Supplier'] || tag['Vendor*'] || tag['Supplier*'] || '';
-    const type = tag['Product Type*'] || tag.Type || '';
+    const type = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
     // Extract weight units from multiple possible sources
     let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
                            tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '').toString().trim();
@@ -580,10 +580,10 @@ class TagsTable {
               ${dropdownOptions}
             </select>
             ${(() => {
-              const productType = tag['Product Type*'] || tag.Type || '';
+              const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
               const productTypeLower = productType.toLowerCase().trim();
               // More robust High CBD check - handle variations in product type format
-              const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
+              const isHighCbdProduct = productTypeLower.startsWith('high cbd') ||
                                        productTypeLower.includes('doh high cbd') ||
                                        productTypeLower.includes('high cbd edible') ||
                                        productTypeLower.includes('high cbd liquid') ||
@@ -1144,40 +1144,12 @@ class TagsTable {
     // We update the state directly and then update the dropdowns, avoiding any full re-renders
     const updateLineageUI = async () => {
       try {
-        // CRITICAL FIX: Restore selected tags before checking update status
-        restoreSelectedTags();
-        
-        // CRITICAL FIX: Check if lineage update is still pending before updating
-        // If update is still processing, wait a bit longer
-        if (typeof TagManager !== 'undefined' && TagManager._lineageUpdateProcessing) {
-          console.log('Lineage update still processing, waiting longer before updating UI...');
-          setTimeout(updateLineageUI, 1000); // Wait another second
+        // CRITICAL: Force full page reload to guarantee UI reflects backend lineage after lineage change
+        if (window && typeof window.location !== 'undefined') {
+          console.log('🔄 Forcing full page reload after lineage change to ensure UI reflects backend lineage...');
+          window.location.reload();
           return;
         }
-        
-        // Also check if this specific tag's update is pending
-        if (typeof TagManager !== 'undefined' && TagManager._lineageUpdatePending && TagManager._lineageUpdatePending.has(tagName)) {
-          console.log(`Lineage update for "${tagName}" still pending, waiting longer before updating UI...`);
-          setTimeout(updateLineageUI, 1000); // Wait another second
-          return;
-        }
-        
-        // CRITICAL FIX: Just update the specific tag's lineage in state and UI
-        // Don't fetch all tags - that could trigger a refresh that clears selected tags
-        // Instead, query just this one tag's lineage from the database
-        try {
-          const lineageCheckResponse = await fetch('/api/debug-product-lineage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              product_names: [tagName]
-            })
-          });
-          
-          if (lineageCheckResponse.ok) {
-            const lineageData = await lineageCheckResponse.json();
-            const productData = (lineageData.results || lineageData.products || [])[0];
-            if (productData) {
               const dbLineage = productData.effective_lineage || 
                                productData.database_values?.products_table?.Lineage ||
                                productData.database_values?.strains_table?.sovereign_lineage ||
