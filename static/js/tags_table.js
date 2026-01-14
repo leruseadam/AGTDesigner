@@ -102,10 +102,10 @@ const getUniqueLineages = (productType = null) => {
     if (isClassicType) {
       // For classic types, only return valid classic lineages (no MIXED, no PARA)
       return VALID_CLASSIC_LINEAGES;
+    } else {
+      // For non-classic types, only return THC and CBD
+      return ['THC', 'CBD'];
     }
-    
-    // For non-classic types (edibles, tinctures, topicals, capsules, etc.), only return MIXED and CBD
-    return NONCLASSIC_LINEAGES;
   }
   
   // Default: return all lineages if no product type specified (for backwards compatibility)
