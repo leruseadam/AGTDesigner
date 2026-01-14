@@ -7483,101 +7483,84 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
 
             lineage_info = lineage_map.get(name) or lineage_map.get(normalized_name) or lineage_map.get(lower_name)
 
-            # ...existing code...
+            if not lineage_info:
+                unmatched_count += 1
+                continue
 
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
                 db_lineage = lineage_info.get('lineage')
+                product_sovereign = lineage_info.get('product_sovereign')
+                strain_sovereign = lineage_info.get('strain_sovereign')
+                strain_canonical = lineage_info.get('strain_canonical')
+                doh_value = lineage_info.get('doh')
 
-                # ...existing code for lineage priority...
+                # CRITICAL FIX: Determine the effective lineage to use FIRST
+                # Priority: product_sovereign > strain_sovereign > strain_canonical > db_lineage (COALESCE)
+                effective_lineage = None
+                sovereign_to_set = None
 
-                # Step 7: Always set DOH from database if available when sovereign lineage is used
-                # Always prefer Excel DOH if present and valid
+                if product_sovereign:
+                    effective_lineage = product_sovereign
+                    sovereign_to_set = product_sovereign
+                    logging.debug(f"✅ '{name}': Using product_sovereign '{product_sovereign}'")
+                elif strain_sovereign:
+                    effective_lineage = strain_sovereign
+                    sovereign_to_set = strain_sovereign
+                    logging.debug(f"✅ '{name}': Using strain_sovereign '{strain_sovereign}'")
+                elif strain_canonical:
+                    effective_lineage = strain_canonical
+                    logging.debug(f"✅ '{name}': Using strain_canonical '{strain_canonical}'")
+                elif db_lineage:
+                    effective_lineage = db_lineage
+                    logging.debug(f"✅ '{name}': Using db_lineage (COALESCE) '{db_lineage}'")
+
+                # CRITICAL FIX: NEVER use MIXED for classic types
+                if effective_lineage:
+                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
+                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+
+                    if is_classic and str(effective_lineage).strip().upper() == 'MIXED':
+                        logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
+                        effective_lineage = 'HYBRID'
+
+                # Set DOH from database if Excel doesn't have a value
                 excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
                 excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
-                doh_value = lineage_info.get('doh')
-                # Only use database DOH if Excel value is missing or invalid
                 if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
                     if doh_value:
                         tag['DOH'] = doh_value
                         tag['DOH Compliant (Yes/No)'] = doh_value
-                        logging.debug(f"✅ Set DOH from database for sovereign lineage: '{name}' -> '{doh_value}'")
-                    else:
-                        # If both Excel and database DOH are missing/invalid, set a default placeholder
-                        tag['DOH'] = 'MISSING'
-                        tag['DOH Compliant (Yes/No)'] = 'MISSING'
-                        logging.debug(f"⚠️ DOH missing for '{name}', set to 'MISSING'")
-                else:
-                    # Excel DOH is present and valid, keep it
-                    tag['DOH'] = excel_doh_clean
-                    tag['DOH Compliant (Yes/No)'] = excel_doh_clean
-                    logging.debug(f"✅ Set DOH from Excel for sovereign lineage: '{name}' -> '{excel_doh_clean}'")
-                
-                # CRITICAL FIX: Set DOH field from database if available
-                # Only set DOH if Excel doesn't already have a value (Excel is source of truth)
-                doh_value = lineage_info.get('doh')
-                if doh_value:
-                    # Check if Excel already has DOH value
-                    excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
-                    excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
-                    
-                    # Only use database DOH if Excel doesn't have a value
-                    if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
-                        tag['DOH'] = doh_value
-                        tag['DOH Compliant (Yes/No)'] = doh_value
                         logging.debug(f"✅ Set DOH from database: '{name}' -> '{doh_value}'")
-                
-                # CRITICAL: Log to verify user's lineage is being used
-                if strain_canonical_value:
-                    logging.info(f"✅ FINAL: '{name}' -> canonical_lineage='{tag.get('canonical_lineage')}', effective_lineage='{effective_lineage}', strain_canonical='{strain_canonical_value}' (user's strains sheet)")
-                
-                aligned_count += 1
-                
-                # CRITICAL FIX: NEVER use MIXED - skip it entirely
-                if db_lineage and str(db_lineage).strip().upper() == 'MIXED':
-                    logging.warning(f"🚫 SKIPPING MIXED db_lineage for '{name}' (old format) - will not set lineage")
-                    db_lineage = None
-                
-                # CRITICAL FIX: NEVER allow MIXED for classic types (double-check)
-                if db_lineage:
-                    product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower()
-                    CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                    is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                    
-                    if is_classic and str(db_lineage).strip().upper() == 'MIXED':
-                        logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
-                        db_lineage = 'HYBRID'
-                
-                # CRITICAL FIX: Determine the effective lineage to use
-                # Priority: product_sovereign > strain_sovereign > strain_canonical > db_lineage (COALESCE)
-                effective_lineage = db_lineage
-                sovereign_to_set = None
-                if isinstance(lineage_info, dict):
-                    product_sovereign = lineage_info.get('product_sovereign')
-                    strain_sovereign = lineage_info.get('strain_sovereign')
-                    strain_canonical = lineage_info.get('strain_canonical')
 
-                    if product_sovereign:
-                        effective_lineage = product_sovereign
-                        sovereign_to_set = product_sovereign
-                    elif strain_sovereign:
-                        effective_lineage = strain_sovereign
-                        sovereign_to_set = strain_sovereign
-                    elif strain_canonical:
-                        effective_lineage = strain_canonical
-                        # No sovereign_lineage to set if only strain_canonical exists
-
+                # CRITICAL: Apply effective lineage to tag
                 if effective_lineage and (force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage'))):
                     tag['Lineage'] = effective_lineage
-                    tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
+                    tag['Lineage*'] = effective_lineage
                     tag['lineage'] = effective_lineage.lower()
                     tag['canonical_lineage'] = effective_lineage
                     tag['currentLineage'] = effective_lineage
-                    # Set sovereign_lineage if we have one
                     if sovereign_to_set:
                         tag['sovereign_lineage'] = sovereign_to_set
                     aligned_count += 1
-        
+                    logging.info(f"✅ ALIGNED '{name}': lineage='{effective_lineage}', sovereign='{sovereign_to_set}'")
+                elif effective_lineage:
+                    # Tag already has lineage and we're not force overwriting - log for debug
+                    logging.debug(f"⏭️ SKIPPED '{name}': already has lineage (force_overwrite={force_overwrite})")
+            else:
+                # Old format: lineage_info is a string
+                effective_lineage = str(lineage_info).strip().upper() if lineage_info else None
+                if effective_lineage and effective_lineage not in ['', 'NONE', 'NAN', 'NULL']:
+                    if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                        tag['Lineage'] = effective_lineage
+                        tag['Lineage*'] = effective_lineage
+                        tag['lineage'] = effective_lineage.lower()
+                        tag['canonical_lineage'] = effective_lineage
+                        tag['currentLineage'] = effective_lineage
+                        aligned_count += 1
+                        logging.debug(f"✅ ALIGNED '{name}' (old format): lineage='{effective_lineage}'")
+
         if aligned_count > 0:
             logging.info(f"✅ Aligned {aligned_count}/{len(aligned_tags)} tags with database lineage (force_overwrite={force_overwrite})")
             if unmatched_count > 0:

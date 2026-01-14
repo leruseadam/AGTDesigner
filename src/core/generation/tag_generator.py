@@ -1137,18 +1137,14 @@ def process_chunk(args):
             
             print(f"DEBUG: Excel-first weight construction - Weight*: '{row.get('Weight*', '')}', Units: '{row.get('Units', '')}' -> '{weight_units}'")
             
-            # CRITICAL FIX: For pre-rolls, use JointRatio instead of WeightUnits if available
+            # CRITICAL FIX: For pre-rolls, always use JointRatio if available, fallback to weight if empty
             joint_ratio_value = row.get("JointRatio", "")
             if pd.isna(joint_ratio_value) or str(joint_ratio_value).lower() in ['nan', 'none', '', 'null']:
                 joint_ratio_value = ""
-            
-            # Check if this is a pre-roll product type
             is_preroll = product_type in ['pre-roll', 'infused pre-roll'] or 'pre-roll' in product_type.lower()
-            
-            # For pre-rolls with JointRatio, use it instead of WeightUnits
-            if is_preroll and joint_ratio_value:
-                display_weight = joint_ratio_value
-                print(f"DEBUG: Pre-roll product - using JointRatio '{joint_ratio_value}' instead of WeightUnits")
+            if is_preroll:
+                display_weight = joint_ratio_value if joint_ratio_value else weight_units
+                print(f"DEBUG: Pre-roll product - using JointRatio '{joint_ratio_value}' (fallback to WeightUnits '{weight_units}' if empty)")
             else:
                 display_weight = weight_units
             
