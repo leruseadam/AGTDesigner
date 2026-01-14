@@ -79,7 +79,7 @@ if (typeof window.normalizeLineageValue === 'undefined') {
 const getUniqueLineages = (productType = null) => {
   // Valid lineages for classic types (from VALID_CLASSIC_LINEAGES constant)
   const VALID_CLASSIC_LINEAGES = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD'];
-  const NONCLASSIC_LINEAGES = ['THC','CBD']; // Only THC and CBD for nonclassic types (MIXED = THC)
+  const NONCLASSIC_LINEAGES = ['CBD','MIXED']; // Only CBD and MIXED for nonclassic types (edibles, tinctures, topicals, etc.)
   const PARAPHERNALIA_LINEAGES = ['PARA']; // Only PARA for paraphernalia
   
   // If productType is provided, filter lineages based on type
@@ -102,10 +102,10 @@ const getUniqueLineages = (productType = null) => {
     if (isClassicType) {
       // For classic types, only return valid classic lineages (no MIXED, no PARA)
       return VALID_CLASSIC_LINEAGES;
-    } else {
-      // For non-classic types, only return THC and CBD
-      return ['THC', 'CBD'];
     }
+    
+    // For non-classic types (edibles, tinctures, topicals, capsules, etc.), only return MIXED and CBD
+    return NONCLASSIC_LINEAGES;
   }
   
   // Default: return all lineages if no product type specified (for backwards compatibility)
@@ -113,62 +113,46 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-    // Use output-matching priority: sovereign_lineage, then canonical_lineage, then currentLineage, then Lineage, then lineage
-    let lineage = '';
-    if (tag.sovereign_lineage && String(tag.sovereign_lineage).trim().toUpperCase() !== 'NONE') {
-      lineage = String(tag.sovereign_lineage).trim();
-    } else if (tag.canonical_lineage && String(tag.canonical_lineage).trim().toUpperCase() !== 'NONE') {
-      lineage = String(tag.canonical_lineage).trim();
-    } else if (tag.currentLineage && String(tag.currentLineage).trim().toUpperCase() !== 'NONE') {
-      lineage = String(tag.currentLineage).trim();
-    } else if (tag.Lineage && String(tag.Lineage).trim().toUpperCase() !== 'NONE') {
-      lineage = String(tag.Lineage).trim();
-    } else if (tag.lineage && String(tag.lineage).trim().toUpperCase() !== 'NONE') {
-      lineage = String(tag.lineage).trim();
+  // CRITICAL: Prioritize sovereign_lineage (manual edits OR preexisting from database), then use DOCX output lineage
+  // Backend uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+  // sovereign_lineage can be from current session edits OR preexisting saved values
+  // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
+  let rawLineage = '';
+  if (tag.sovereign_lineage) {
+    const sovereignRaw = String(tag.sovereign_lineage).trim();
+    // Use if not empty - trust backend validation
+    if (sovereignRaw) {
+      rawLineage = tag.sovereign_lineage;
     }
-    lineage = lineage.toUpperCase();
-  // Match backend/output: lineage = sovereign_lineage if present and valid, else canonical_lineage, else currentLineage, else Lineage, else lineage
-  let lineage = '';
-  if (tag.sovereign_lineage && String(tag.sovereign_lineage).trim().toUpperCase() !== 'NONE') {
-    lineage = String(tag.sovereign_lineage).trim();
-  } else if (tag.canonical_lineage && String(tag.canonical_lineage).trim().toUpperCase() !== 'NONE') {
-    lineage = String(tag.canonical_lineage).trim();
-  } else if (tag.currentLineage && String(tag.currentLineage).trim().toUpperCase() !== 'NONE') {
-    lineage = String(tag.currentLineage).trim();
-  } else if (tag.Lineage && String(tag.Lineage).trim().toUpperCase() !== 'NONE') {
-    lineage = String(tag.Lineage).trim();
-  } else if (tag.lineage && String(tag.lineage).trim().toUpperCase() !== 'NONE') {
-    lineage = String(tag.lineage).trim();
   }
-  lineage = lineage.toUpperCase();
-  // Match backend/output: classic types never show MIXED/THC, always HYBRID; non-classic types: MIXED/THC = THC, CBD/CBG/CBN = CBD
+  if (!rawLineage) rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  
+  // Normalize to uppercase, but keep the original value
+  let lineage = String(rawLineage || '').trim().toUpperCase();
+  
+  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+  // This ensures UI displays correct lineage even if database/Excel has wrong value
   const productType = tag['Product Type*'] || tag.Type || '';
   const isClassicType = productType && getUniqueLineages(productType).length === 6;
   if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
     lineage = 'HYBRID';
-  } else if (!isClassicType && lineage) {
-    const normalized = (typeof window.normalizeLineageValue !== 'undefined')
-      ? window.normalizeLineageValue(lineage)
-      : String(lineage).trim().toUpperCase();
-    const tagName = (tag['Product Name*'] || tag.ProductName || '').toLowerCase();
-    const isCbdProduct = normalized === 'CBD' || normalized === 'CBD_BLEND' ||
-                         tagName.includes('cbd') || tagName.includes('cbg') || tagName.includes('cbn');
-    if (isCbdProduct) {
-      lineage = 'CBD';
-    } else {
-      lineage = 'THC';
-    }
   }
+  
+  // Only convert if lineage is empty
   if (!lineage) {
-    lineage = isClassicType ? 'HYBRID' : 'THC';
+    lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
     const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
-    // Match backend/output: tagName = displayName if present, else Product Name*, else ProductName
-    let tagName = tag.displayName || tag['Product Name*'] || tag.ProductName || '';
-    // Match backend/output: brand = Product Brand if present, else brand
-    const brand = tag['Product Brand'] || tag.brand || tag.Brand || '';
+    let tagName;
+    if (tag.Source && (tag.Source.includes('JSON Match') || tag.Source.includes('Educated Guess'))) {
+        tagName = tag.displayName || tag['Product Name*'] || tag.ProductName || '';
+    } else {
+        tagName = tag['Product Name*'] || tag.ProductName || '';
+    }
+    
+    const brand = tag['Product Brand'] || tag.Brand || '';
     
     // Extract weight units from multiple possible sources
     let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
@@ -208,31 +192,23 @@ function createTagRow(tag) {
                     <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
                             onchange="TagsTable.handleLineageChange(this, '${tagName}')">
                         ${(() => {
-                          const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
+                          const productType = tag['Product Type*'] || tag.Type || '';
                           const uniqueLineages = getUniqueLineages(productType);
                           
-                          // CRITICAL FIX: Convert MIXED to appropriate value based on product type
+                          // CRITICAL FIX: Convert MIXED/THC to HYBRID for classic types before dropdown creation
                           let dropdownLineage = lineage;
                           const isClassicType = productType && getUniqueLineages(productType).length === 6;
                           if (isClassicType && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
                             dropdownLineage = 'HYBRID';
-                          } else if (!isClassicType && dropdownLineage === 'MIXED') {
-                            // For non-classic types, convert MIXED to THC
-                            dropdownLineage = 'THC';
                           }
-                          
-                          // CRITICAL FIX: Normalize dropdownLineage for comparison (must match normalization used for options)
-                          const dropdownLineageNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
-                            ? window.normalizeLineageValue(dropdownLineage)
-                            : String(dropdownLineage).trim().toUpperCase();
                           
                           return uniqueLineages.map(lin => {
                             const linNormalized = (typeof window.normalizeLineageValue !== 'undefined') 
                               ? window.normalizeLineageValue(lin)
                               : String(lin).trim().toUpperCase();
                             
-                            // Compare normalized values directly
-                            const selected = (dropdownLineageNormalized === linNormalized) ? 'selected' : '';
+                            // Compare normalized values directly - use converted lineage for classic types
+                            const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
                             const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
                             return `<option value="${lin}" ${selected}>${displayName}</option>`;
                           }).join('');
@@ -243,7 +219,7 @@ function createTagRow(tag) {
             <td class="align-middle">
                 <div class="d-flex align-items-center">
                     ${(() => {
-                      const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
+                      const productType = tag['Product Type*'] || tag.Type || '';
                       const productTypeLower = productType.toLowerCase().trim();
                       // More robust High CBD check - handle variations in product type format
                       const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
@@ -325,8 +301,8 @@ class TagsTable {
   let rawLineage = '';
   if (tag.sovereign_lineage) {
     const sovereignRaw = String(tag.sovereign_lineage).trim();
-    // Use if not empty AND not 'NONE' (legacy placeholder value)
-    if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+    // Use if not empty - trust backend validation
+    if (sovereignRaw) {
       rawLineage = tag.sovereign_lineage;
     }
   }
@@ -335,40 +311,21 @@ class TagsTable {
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
   
-  // CRITICAL FIX: Only convert MIXED to HYBRID for classic types, and MIXED to THC for non-classic types
-  const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
-  const isClassicType = (() => {
-    const typeLower = (productType || '').toString().toLowerCase().trim();
-    const CLASSIC_TYPES = [
-      'flower', 'bud', 'pre-roll', 'infused pre-roll', 'preroll',
-      'concentrate', 'solventless concentrate', 'live resin', 'rosin', 
-      'wax', 'shatter', 'hash', 'kief', 'butane extract', 'distillate', 
-      'rso', 'co2 extract', 'honey crystal', 'liquid diamond', 'caviar',
-      'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'
-    ];
-    return CLASSIC_TYPES.some(ct => typeLower.includes(ct) || typeLower === ct);
-  })();
-  if (isClassicType && lineage === 'MIXED') {
+  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
+  // This ensures UI displays correct lineage even if database/Excel has wrong value
+  const productType = tag['Product Type*'] || tag.Type || '';
+  const isClassicType = productType && getUniqueLineages(productType).length === 6;
+  if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
     lineage = 'HYBRID';
-  } else if (!isClassicType) {
-    // For non-classic types, only allow CBD or THC (MIXED = THC)
-    const normalized = (typeof window.normalizeLineageValue !== 'undefined')
-      ? window.normalizeLineageValue(lineage)
-      : String(lineage).trim().toUpperCase();
-    if (normalized === 'CBD') {
-      lineage = 'CBD';
-    } else {
-      lineage = 'THC';
-    }
-  }
-  // Only set default if lineage is completely missing
-  if (!lineage) {
-    lineage = isClassicType ? 'HYBRID' : 'THC';
   }
   
-    // CRITICAL FIX: Check all possible DOH field variations (uppercase and lowercase)
-    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || 'No';
-    console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus, '(from DOH:', tag.DOH, ', DOH Compliant:', tag['DOH Compliant (Yes/No)'], ', doh:', tag.doh, ')'); // Debug log
+  // Only set default if lineage is completely missing
+  if (!lineage) {
+    lineage = isClassicType ? 'HYBRID' : 'MIXED';
+  }
+  
+    const dohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || 'No';
+    console.log('DOH Status for tag:', tag['Product Name*'] || tag.ProductName, '=', dohStatus); // Debug log
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;
@@ -380,7 +337,7 @@ class TagsTable {
     
     const brand = tag['Product Brand'] || tag.Brand || '';
     const vendor = tag['Vendor'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || tag['Supplier'] || tag['Vendor*'] || tag['Supplier*'] || '';
-    const type = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
+    const type = tag['Product Type*'] || tag.Type || '';
     // Extract weight units from multiple possible sources
     let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
                            tag.CombinedWeight || tag['Weight*'] || tag.Weight || tag.weight || '').toString().trim();
@@ -473,28 +430,19 @@ class TagsTable {
     // Note: productType already declared above (line 233), reusing it here
     const uniqueLineages = getUniqueLineages(productType);
     
-    // CRITICAL FIX: Ensure lineage is converted from MIXED to HYBRID for classic types before dropdown creation
+    // CRITICAL FIX: Ensure lineage is converted from MIXED/THC to HYBRID for classic types before dropdown creation
     // This ensures the dropdown shows the correct selected value
     let dropdownLineage = lineage;
     const isClassicTypeForDropdown = productType && getUniqueLineages(productType).length === 6;
-    if (isClassicTypeForDropdown && dropdownLineage === 'MIXED') {
+    if (isClassicTypeForDropdown && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
       dropdownLineage = 'HYBRID';
       console.log(`🔄 TAGS_TABLE DROPDOWN FIX: Converting ${lineage} to HYBRID for classic type "${tagName}" (${productType})`);
     }
     
-    // CRITICAL FIX: For non-classic types, convert MIXED to THC for dropdown display
-    if (!isClassicTypeForDropdown && dropdownLineage === 'MIXED') {
-      dropdownLineage = 'THC';
-      console.log(`🔄 TAGS_TABLE NON-CLASSIC FIX: Converting MIXED to THC for non-classic type "${tagName}" (${productType})`);
-    }
-    
-    // CRITICAL FIX: Normalize dropdownLineage for comparison (must match normalization used for options)
-    const dropdownLineageNormalized = window.normalizeLineageValue(dropdownLineage);
-    
     const dropdownOptions = uniqueLineages.map(lin => {
-      // Both values are normalized for comparison
+      // Both values are already normalized - direct comparison
       const linNormalized = window.normalizeLineageValue(lin);
-      const selected = (dropdownLineageNormalized === linNormalized) ? 'selected' : '';
+      const selected = (dropdownLineage === linNormalized) ? 'selected' : '';
       const displayName = window.ABBREVIATED_LINEAGE[lin] || lin;
       return `<option value="${lin}" ${selected}>${displayName}</option>`;
     }).join('');
@@ -511,16 +459,7 @@ class TagsTable {
     console.log('Creating DOH dropdown for tag:', tagName, 'DOH Status:', dohStatus);
 
     // Add DOH and High CBD images if applicable
-    // CRITICAL FIX: Use dohStatus (which includes both DOH and 'DOH Compliant (Yes/No)') instead of just tag.DOH
-    // Normalize dohValue to handle all possible formats
-    const dohValueRaw = (dohStatus || '').toString().trim();
-    const dohValue = dohValueRaw.toUpperCase();
-    
-    // Debug logging to help diagnose missing badges
-    if (dohValue && dohValue !== 'NO' && dohValue !== 'NONE') {
-      console.log(`🔍 DOH Badge Check for "${tagName}": dohStatus="${dohStatus}", dohValue="${dohValue}"`);
-    }
-    
+    const dohValue = (tag.DOH || '').toString().toUpperCase();
     const productTypeLower = productType.toLowerCase().trim();
     // More robust High CBD check - handle variations in product type format
     const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
@@ -536,24 +475,19 @@ class TagsTable {
     if (isHighCbdProduct) {
       // High CBD products get only the High CBD badge, regardless of DOH status
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-    } else if (dohValue === 'YES' || dohValue === 'DOH' || dohValue === 'Y') {
-      // DOH compliant - show DOH badge (or High THC if product name contains "high thc")
+    } else if (dohValue === 'YES') {
       if (tagName.toLowerCase().includes('high thc')) {
         dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
       } else {
         dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
       }
-      console.log(`✅ DOH badge added for "${tagName}" (dohValue: ${dohValue})`);
     } else if (dohValue === 'CBD') {
       // DOH status is CBD - show High CBD badge (only for non-High CBD product types)
       dohImageHtml = '<img src="/static/img/HighCBD.png" alt="High CBD" title="High CBD Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-      console.log(`✅ High CBD badge added for "${tagName}" (dohValue: ${dohValue})`);
     } else if (dohValue === 'THC') {
       dohImageHtml = '<img src="/static/img/HighTHC.png" alt="High THC" title="High THC Product" style="height: 28px; width: 28px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
-      console.log(`✅ High THC badge added for "${tagName}" (dohValue: ${dohValue})`);
-    } else if (dohValue && dohValue !== 'NO' && dohValue !== 'NONE') {
-      // Unknown DOH value - log for debugging
-      console.warn(`⚠️ Unknown DOH value for "${tagName}": "${dohValue}" (raw: "${dohValueRaw}")`);
+    } else if (dohValue === 'DOH') {
+      dohImageHtml = '<img src="/static/img/DOH.png" alt="DOH Compliant" title="DOH Compliant Product" style="height: 36px; width: 36px; object-fit: contain; margin-left: 6px; vertical-align: middle;">';
     }
 
     return `
@@ -578,10 +512,10 @@ class TagsTable {
               ${dropdownOptions}
             </select>
             ${(() => {
-              const productType = tag['Product Type*'] || tag['Product Type'] || tag.productType || tag.ProductType || tag.Type || '';
+              const productType = tag['Product Type*'] || tag.Type || '';
               const productTypeLower = productType.toLowerCase().trim();
               // More robust High CBD check - handle variations in product type format
-              const isHighCbdProduct = productTypeLower.startsWith('high cbd') ||
+              const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
                                        productTypeLower.includes('doh high cbd') ||
                                        productTypeLower.includes('high cbd edible') ||
                                        productTypeLower.includes('high cbd liquid') ||
@@ -655,8 +589,6 @@ class TagsTable {
       if (window.TagManager && window.TagManager.state) {
         const tag = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName);
         if (tag) {
-          // CRITICAL: Set sovereign_lineage FIRST - it has highest priority in createTagRow
-          tag.sovereign_lineage = newLineage;
           tag.currentLineage = newLineage;
           tag.canonical_lineage = newLineage;
           tag.Lineage = newLineage;
@@ -1142,12 +1074,40 @@ class TagsTable {
     // We update the state directly and then update the dropdowns, avoiding any full re-renders
     const updateLineageUI = async () => {
       try {
-        // CRITICAL: Force full page reload to guarantee UI reflects backend lineage after lineage change
-        if (window && typeof window.location !== 'undefined') {
-          console.log('🔄 Forcing full page reload after lineage change to ensure UI reflects backend lineage...');
-          window.location.reload();
+        // CRITICAL FIX: Restore selected tags before checking update status
+        restoreSelectedTags();
+        
+        // CRITICAL FIX: Check if lineage update is still pending before updating
+        // If update is still processing, wait a bit longer
+        if (typeof TagManager !== 'undefined' && TagManager._lineageUpdateProcessing) {
+          console.log('Lineage update still processing, waiting longer before updating UI...');
+          setTimeout(updateLineageUI, 1000); // Wait another second
           return;
         }
+        
+        // Also check if this specific tag's update is pending
+        if (typeof TagManager !== 'undefined' && TagManager._lineageUpdatePending && TagManager._lineageUpdatePending.has(tagName)) {
+          console.log(`Lineage update for "${tagName}" still pending, waiting longer before updating UI...`);
+          setTimeout(updateLineageUI, 1000); // Wait another second
+          return;
+        }
+        
+        // CRITICAL FIX: Just update the specific tag's lineage in state and UI
+        // Don't fetch all tags - that could trigger a refresh that clears selected tags
+        // Instead, query just this one tag's lineage from the database
+        try {
+          const lineageCheckResponse = await fetch('/api/debug-product-lineage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product_names: [tagName]
+            })
+          });
+          
+          if (lineageCheckResponse.ok) {
+            const lineageData = await lineageCheckResponse.json();
+            const productData = (lineageData.results || lineageData.products || [])[0];
+            if (productData) {
               const dbLineage = productData.effective_lineage || 
                                productData.database_values?.products_table?.Lineage ||
                                productData.database_values?.strains_table?.sovereign_lineage ||
@@ -1163,19 +1123,17 @@ class TagsTable {
                     (t['Product Name*'] || t.ProductName) === tagName
                   );
                   if (originalTagIndex >= 0) {
-                    TagManager.state.originalTags[originalTagIndex].sovereign_lineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].Lineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].lineage = dbLineageClean.toLowerCase();
                     TagManager.state.originalTags[originalTagIndex].currentLineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].canonical_lineage = dbLineageClean;
                   }
-
+                  
                   // Update in current tags
-                  const currentTagIndex = TagManager.state.tags.findIndex(t =>
+                  const currentTagIndex = TagManager.state.tags.findIndex(t => 
                     (t['Product Name*'] || t.ProductName) === tagName
                   );
                   if (currentTagIndex >= 0) {
-                    TagManager.state.tags[currentTagIndex].sovereign_lineage = dbLineageClean;
                     TagManager.state.tags[currentTagIndex].Lineage = dbLineageClean;
                     TagManager.state.tags[currentTagIndex].lineage = dbLineageClean.toLowerCase();
                     TagManager.state.tags[currentTagIndex].currentLineage = dbLineageClean;
@@ -1392,16 +1350,14 @@ class TagsTable {
               // Update the tag's lineage in state directly
               const tagIndex = TagManager.state.originalTags.findIndex(t => (t['Product Name*'] || t.ProductName) === tagName);
               if (tagIndex >= 0) {
-                TagManager.state.originalTags[tagIndex].sovereign_lineage = newLineage;
                 TagManager.state.originalTags[tagIndex].Lineage = newLineage;
                 TagManager.state.originalTags[tagIndex].lineage = newLineage.toLowerCase();
                 TagManager.state.originalTags[tagIndex].currentLineage = newLineage;
                 TagManager.state.originalTags[tagIndex].canonical_lineage = newLineage;
               }
-
+              
               const currentTagIndex = TagManager.state.tags.findIndex(t => (t['Product Name*'] || t.ProductName) === tagName);
               if (currentTagIndex >= 0) {
-                TagManager.state.tags[currentTagIndex].sovereign_lineage = newLineage;
                 TagManager.state.tags[currentTagIndex].Lineage = newLineage;
                 TagManager.state.tags[currentTagIndex].lineage = newLineage.toLowerCase();
                 TagManager.state.tags[currentTagIndex].currentLineage = newLineage;

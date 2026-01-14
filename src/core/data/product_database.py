@@ -124,29 +124,6 @@ def _set_cached_fuzzy_match(product_name: str, result: Optional[Dict[str, Any]])
                 del _fuzzy_match_cache[key]
                 del _fuzzy_match_cache_timestamps[key]
 
-def clear_lineage_cache(product_name: Optional[str] = None):
-    """Clear lineage cache for a specific product or entire cache.
-
-    Args:
-        product_name: If provided, clears only that product's cached lineage.
-                      If None, clears the entire lineage cache.
-    """
-    global _lineage_cache, _lineage_cache_timestamps
-
-    with _lineage_cache_lock:
-        if product_name is None:
-            # Clear entire cache
-            _lineage_cache.clear()
-            _lineage_cache_timestamps.clear()
-            logger.info("Cleared entire lineage cache")
-        else:
-            # Clear specific product
-            cache_key = product_name.strip().lower()
-            if cache_key in _lineage_cache:
-                del _lineage_cache[cache_key]
-                del _lineage_cache_timestamps[cache_key]
-                logger.debug(f"Cleared lineage cache for: {product_name}")
-
 def timed_operation(operation_name):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
@@ -2747,7 +2724,7 @@ class ProductDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date, sovereign_lineage, doh_status, high_cbd, high_thc
+                SELECT id, strain_name, canonical_lineage, total_occurrences, lineage_confidence, first_seen_date, last_seen_date, sovereign_lineage
                 FROM strains 
                 WHERE normalized_name = ?
             ''', (normalized_name,))
@@ -2756,9 +2733,6 @@ class ProductDatabase:
                 strain_id = result[0]
                 sovereign_lineage = result[7]
                 canonical_lineage = result[2]
-                doh_status = result[8] if len(result) > 8 else None
-                high_cbd = result[9] if len(result) > 9 else 0
-                high_thc = result[10] if len(result) > 10 else 0
                 # Use sovereign_lineage if set, else mode, else canonical
                 display_lineage = None
                 if sovereign_lineage and sovereign_lineage.strip():
@@ -2787,10 +2761,7 @@ class ProductDatabase:
                     'first_seen_date': result[5],
                     'last_seen_date': result[6],
                     'sovereign_lineage': sovereign_lineage,
-                    'display_lineage': display_lineage,
-                    'doh_status': doh_status,
-                    'high_cbd': high_cbd,
-                    'high_thc': high_thc
+                    'display_lineage': display_lineage
                 }
                 self._set_cache(cache_key, strain_info, ttl=300)
                 return strain_info

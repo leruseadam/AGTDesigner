@@ -343,7 +343,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         representative['Product Name*'] = group_display_name
         representative['ProductName'] = group_display_name
         # Also update DescAndWeight - use group name only (no individual product details)
-        joint_ratio = representative.get('JointRatio', '')
         representative['DescAndWeight'] = group_display_name
         
         # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
@@ -430,19 +429,17 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 else:
                     doh_display = doh_str
 
-                item = {
-                    'product_name': record.get('Product Name*', record.get('ProductName', '')),
-                    'description': record.get('Description', ''),
-                    'price': record.get('Price', ''),
-                    # For preroll products, replace 'weight' with JointRatio in output
-                    'weight': record.get('JointRatio', record.get('CombinedWeight', record.get('WeightUnits', ''))),
-                    'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
-                    'brand': record.get('Product Brand', record.get('ProductBrand', '')),
-                    'strain': record.get('Product Strain', ''),
-                    'lineage': record.get('Lineage', ''),
-                    'joint_ratio': record.get('JointRatio', ''),
-                    'doh': doh_display,
-                }
+            item = {
+                'product_name': record.get('Product Name*', record.get('ProductName', '')),
+                'description': record.get('Description', ''),
+                'price': record.get('Price', ''),
+                'weight': record.get('CombinedWeight', record.get('WeightUnits', '')),
+                'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
+                'brand': record.get('Product Brand', record.get('ProductBrand', '')),
+                'strain': record.get('Product Strain', ''),
+                'lineage': record.get('Lineage', ''),
+                'doh': doh_display,
+            }
             group_items.append(item)
         logging.info(f"PREROLL GROUP: Storing {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_id: {original_group_id}, vendor: {vendor})")
         

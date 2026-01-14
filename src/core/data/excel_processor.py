@@ -401,24 +401,18 @@ def optimized_lineage_persistence(processor, df):
         for batch in strain_batches:
             # Get lineage information from database for this batch
             strain_lineage_map = {}
-            strain_doh_map = {}
             
             for strain_name in batch:
                 strain_info = product_db.get_strain_info(strain_name)
-                if strain_info:
-                    if strain_info.get('display_lineage'):
-                        db_lineage = strain_info['display_lineage']
-                        # Only use database lineage if it's valid for classic types
-                        # Explicitly reject MIXED lineage for classic types
-                        if db_lineage and db_lineage.upper() in valid_classic_lineages and db_lineage.upper() != 'MIXED':
-                            strain_lineage_map[strain_name] = db_lineage
-                        else:
-                            # Log invalid lineage for classic types
-                            processor.logger.warning(f"Invalid lineage '{db_lineage}' for classic strain '{strain_name}', skipping database update")
-                    
-                    # Get DOH status from strain if available
-                    if strain_info.get('doh_status'):
-                        strain_doh_map[strain_name] = strain_info['doh_status']
+                if strain_info and strain_info.get('display_lineage'):
+                    db_lineage = strain_info['display_lineage']
+                    # Only use database lineage if it's valid for classic types
+                    # Explicitly reject MIXED lineage for classic types
+                    if db_lineage and db_lineage.upper() in valid_classic_lineages and db_lineage.upper() != 'MIXED':
+                        strain_lineage_map[strain_name] = db_lineage
+                    else:
+                        # Log invalid lineage for classic types
+                        processor.logger.warning(f"Invalid lineage '{db_lineage}' for classic strain '{strain_name}', skipping database update")
             
             # Apply lineage updates vectorized
             if strain_lineage_map:
@@ -439,22 +433,6 @@ def optimized_lineage_persistence(processor, df):
                         updated_count = update_mask.sum()
                         if updated_count > 0:
                             processor.logger.debug(f"Updated {updated_count} products with strain '{strain_name}' to lineage '{db_lineage}' from database")
-            
-            # Apply DOH status updates from strain table (as fallback)
-            if strain_doh_map:
-                for strain_name, doh_status in strain_doh_map.items():
-                    strain_mask = df["Product Strain"] == strain_name
-                    # Only update if DOH field is empty
-                    doh_empty_mask = (df.loc[strain_mask, "DOH"].isna()) | \
-                                    (df.loc[strain_mask, "DOH"].astype(str).str.strip() == '') | \
-                                    (df.loc[strain_mask, "DOH"].astype(str).str.upper() == 'NONE')
-                    
-                    update_mask = strain_mask & doh_empty_mask
-                    if update_mask.any():
-                        df.loc[update_mask, "DOH"] = doh_status
-                        updated_count = update_mask.sum()
-                        if updated_count > 0:
-                            processor.logger.debug(f"Updated {updated_count} products with strain '{strain_name}' to DOH status '{doh_status}' from database")
         
         return df
         

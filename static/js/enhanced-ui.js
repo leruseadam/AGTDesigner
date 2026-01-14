@@ -459,11 +459,15 @@ async function handleFiles(files) {
                   // Clear force flag after successful load
                   TagManager._forceDatabaseLineage = false;
 
-                  // CRITICAL: Force full page reload to guarantee UI reflects latest backend lineage
-                  if (window && typeof window.location !== 'undefined') {
-                    console.log('🔄 Forcing full page reload to ensure UI reflects backend lineage...');
-                    window.location.reload();
-                    return;
+                  // CRITICAL FIX: Populate filters after tags are loaded
+                  console.log('🔄 Loading filters after successful tag refresh...');
+                  try {
+                    if (TagManager.fetchAndPopulateFilters) {
+                      await TagManager.fetchAndPopulateFilters();
+                      console.log('✅ Filters populated successfully');
+                    }
+                  } catch (filterErr) {
+                    console.error('⚠️ Filter population failed (non-critical):', filterErr);
                   }
                 })
                 .catch(err => {

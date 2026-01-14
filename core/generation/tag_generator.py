@@ -1194,11 +1194,13 @@ def process_chunk(args):
                     # FIRST: Check for product-level lineage (preserves user changes to specific products)
                     product_name = row.get('Product Name*', '') or row.get('ProductName', '')
                     excel_lineage = str(row.get("Lineage", "")).strip()
+                    found_lineage = False
                     if product_name:
                         # Use cached product lineage (loaded in batch before loop)
                         db_product_lineage = product_lineage_cache.get(product_name)
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
+                            found_lineage = True
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
                         elif product_strain:
                             # FALLBACK: Check strain-level lineage from cache
@@ -1211,22 +1213,27 @@ def process_chunk(args):
                                 )
                                 if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
                                     lineage_val = str(preferred).strip().upper()
+                                    found_lineage = True
                                     logger.info(f"✅ DOCX LINEAGE: Using strain-level lineage '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
                                 else:
                                     # No strain lineage found, fallback to Excel
                                     lineage_val = lineage_text.upper() if lineage_text else ""
                                     if lineage_val:
+                                        found_lineage = True
                                         logger.warning(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name}' (strain: '{product_strain}'), using Excel lineage '{lineage_val}'")
                                     else:
                                         logger.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name}' (strain: '{product_strain}'), Excel lineage also empty")
                             else:
                                 # No strain info found, fallback to Excel
                                 lineage_val = lineage_text.upper() if lineage_text else ""
+                                if lineage_val:
+                                    found_lineage = True
                                 logger.warning(f"⚠️ DOCX LINEAGE: No strain info found for '{product_strain}', using Excel lineage '{lineage_val}' for '{product_name}'")
                         else:
                             # No strain, fallback to Excel
                             lineage_val = lineage_text.upper() if lineage_text else ""
                             if lineage_val:
+                                found_lineage = True
                                 logger.warning(f"⚠️ DOCX LINEAGE: No product-level lineage found for '{product_name}' and no strain, using Excel lineage '{lineage_val}'")
                             else:
                                 logger.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name}' (no strain, Excel lineage also empty)")
@@ -1240,18 +1247,31 @@ def process_chunk(args):
                                     strain_info.get('sovereign_lineage') or
                                     strain_info.get('canonical_lineage')
                                 )
-                                if preferred:
+                                if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
                                     lineage_val = str(preferred).upper()
+                                    found_lineage = True
                                 else:
                                     lineage_val = lineage_text.upper() if lineage_text else ""
+                                    if lineage_val:
+                                        found_lineage = True
                             else:
                                 lineage_val = lineage_text.upper() if lineage_text else ""
+                                if lineage_val:
+                                    found_lineage = True
                         else:
                             lineage_val = lineage_text.upper() if lineage_text else ""
+                            if lineage_val:
+                                found_lineage = True
                 except Exception as e:
                     # Fallback to Excel lineage if database lookup fails
                     lineage_val = lineage_text.upper() if lineage_text else ""
+                    if lineage_val:
+                        found_lineage = True
                     logger.debug(f"⚠️ DOCX LINEAGE: Using Excel lineage '{lineage_val}' due to error: {e}")
+                # FINAL DEFAULT: If still no lineage, set to HYBRID for classic types
+                if not found_lineage or not lineage_val or lineage_val.lower() in ['', 'nan', 'none', 'null']:
+                    lineage_val = "HYBRID"
+                    logger.info(f"🔧 SET DEFAULT LINEAGE: Set HYBRID lineage for classic type '{product_name}' (missing lineage after all lookups)")
             else:
                 # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 
                 # use brand name for Lineage, not the raw Excel lineage value

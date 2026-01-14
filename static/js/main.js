@@ -493,25 +493,24 @@ async function openStrainLineageEditor() {
             </div>
             
             <div class="list-group" id="strainListContainer">
-                            ${strains.map(strain => `
-                                <button type="button" class="list-group-item list-group-item-action strain-item" 
-                                                data-strain-name="${strain.strain_name.toLowerCase()}"
-                                                onclick="selectStrainForEditing('${strain.strain_name.replace(/'/g, "\\'")}', '${strain.current_lineage}')">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <strong class="strain-name">${strain.strain_name}</strong>
-                                            <br>
-                                            <small class="text-muted">
-                                                Current: ${strain.current_lineage} | 
-                                                Products: ${strain.total_occurrences} | 
-                                                Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
-                                            </small>
-                                        </div>
-                                        <span class="badge bg-primary">${strain.current_lineage}</span>
-                                        ${strain.doh_status === 'DOH' ? `<span class="badge bg-success ms-2"><img src="/static/img/DOH.png" alt="DOH" style="height:16px;vertical-align:middle;margin-right:4px;">DOH</span>` : ''}
-                                    </div>
-                                </button>
-                            `).join('')}
+              ${strains.map(strain => `
+                <button type="button" class="list-group-item list-group-item-action strain-item" 
+                        data-strain-name="${strain.strain_name.toLowerCase()}"
+                        onclick="selectStrainForEditing('${strain.strain_name.replace(/'/g, "\\'")}', '${strain.current_lineage}')">
+                  <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                      <strong class="strain-name">${strain.strain_name}</strong>
+                      <br>
+                      <small class="text-muted">
+                        Current: ${strain.current_lineage} | 
+                        Products: ${strain.total_occurrences} | 
+                        Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
+                      </small>
+                    </div>
+                    <span class="badge bg-primary">${strain.current_lineage}</span>
+                  </div>
+                </button>
+              `).join('')}
             </div>
           </div>
           <div class="modal-footer">
@@ -1070,24 +1069,6 @@ const TagManager = {
     get SIMPLIFIED_RENDER_THRESHOLD() {
         return isWindows ? 300 : 900; // Much lower threshold on Windows (300 vs 500) for faster loading
     },
-    
-    // CRITICAL FIX: Restore recently updated lineages from localStorage on page load
-    // This ensures manual lineage edits persist across page reloads
-    _recentlyUpdatedLineages: (() => {
-        try {
-            const stored = localStorage.getItem('_recentlyUpdatedLineages');
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                const map = new Map(Object.entries(parsed));
-                console.log(`✅ Restored ${map.size} recently updated lineages from localStorage on page load`);
-                return map;
-            }
-        } catch (e) {
-            console.warn('Failed to restore recently updated lineages from localStorage:', e);
-        }
-        return new Map();
-    })(),
-    
     state: {
         selectedTags: new Set(),
         isClearing: false, // Flag to prevent multiple simultaneous clear operations
@@ -7162,7 +7143,7 @@ const TagManager = {
         // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
         // This ensures UI displays correct lineage even if database/Excel has wrong value
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        const classicTypes = ['flower', 'pre-roll', 'blunt', 'flavored blunt', 'joint', 'cone', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
         if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
             lineage = 'HYBRID';
@@ -7588,31 +7569,24 @@ const TagManager = {
         // ALWAYS use sovereign_lineage if it exists - backend validates it, frontend should trust it
         if (tag.sovereign_lineage) {
             const sovereignRaw = String(tag.sovereign_lineage).trim();
-            // Use if not empty AND not 'NONE' (legacy placeholder value)
-            if (sovereignRaw && sovereignRaw.toUpperCase() !== 'NONE') {
+            // Use if not empty - trust backend validation
+            if (sovereignRaw) {
                 tagDbLineage = sovereignRaw.toUpperCase().trim();
             }
         }
         // Priority 2: currentLineage (matches DOCX COALESCE result)
         if (!tagDbLineage && tag.currentLineage) {
-            const val = tag.currentLineage.toString().toUpperCase().trim();
-            if (val && val !== 'NONE') tagDbLineage = val;
+            tagDbLineage = tag.currentLineage.toString().toUpperCase().trim();
         }
         // Priority 3: canonical_lineage (strain canonical fallback)
         if (!tagDbLineage && tag.canonical_lineage) {
-            const val = tag.canonical_lineage.toString().toUpperCase().trim();
-            if (val && val !== 'NONE') tagDbLineage = val;
+            tagDbLineage = tag.canonical_lineage.toString().toUpperCase().trim();
         }
         // Priority 4: Excel Lineage (final fallback)
         if (!tagDbLineage && tag.Lineage) {
-            const val = tag.Lineage.toString().toUpperCase().trim();
-            if (val && val !== 'NONE') tagDbLineage = val;
+            tagDbLineage = tag.Lineage.toString().toUpperCase().trim();
         }
         
-        // CRITICAL: Determine if this is a paraphernalia product type (used in multiple places below)
-        const lowerType = (productTypeCheck || '').toString().toLowerCase();
-        const isParaType = lowerType === 'paraphernalia' || lowerType.includes('paraphernalia');
-
         if (tagDbLineage) {
             // Database lineage exists - use it exclusively, ignore Excel Lineage completely
             if (tagDbLineage !== normalizedLineage) {
@@ -7620,31 +7594,6 @@ const TagManager = {
                 console.log(`🔄 FORCING database lineage for ${displayName}: ${normalizedLineage} → ${tagDbLineage} (from tag.${source})`);
             }
             normalizedLineage = tagDbLineage;  // Force database lineage (same priority as docx generation)
-
-            // CRITICAL FIX: For NON-CLASSIC types, convert classic lineages to THC/CBD only
-            // Non-classic types (edibles, tinctures, etc.) should only show THC or CBD
-            if (!isClassicType && !isParaType) {
-                // Check if this is a CBD product by name (product name contains CBD/CBG/CBN)
-                const nameLower = (displayName || '').toLowerCase();
-                const isCbdProduct = normalizedLineage === 'CBD' ||
-                                     normalizedLineage === 'CBD_BLEND' ||
-                                     nameLower.includes('cbd') ||
-                                     nameLower.includes('cbg') ||
-                                     nameLower.includes('cbn');
-
-                if (isCbdProduct) {
-                    // CBD products should show CBD
-                    normalizedLineage = 'CBD';
-                    console.log(`🔄 NON-CLASSIC CBD: "${displayName}" → CBD`);
-                } else {
-                    // Everything else (SATIVA, INDICA, HYBRID, etc.) becomes THC for non-classic
-                    const classicLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
-                    if (classicLineages.includes(normalizedLineage)) {
-                        console.log(`🔄 NON-CLASSIC THC: "${displayName}" ${normalizedLineage} → MIXED`);
-                        normalizedLineage = 'MIXED';
-                    }
-                }
-            }
         } else {
             // No database lineage - log warning for debugging
             if (isForSelectedTags && normalizedLineage && normalizedLineage !== 'MIXED') {
@@ -7706,7 +7655,7 @@ const TagManager = {
                 // Classic types default to HYBRID
                 lineageSelect.value = 'HYBRID';
                 console.warn(`⚠️ Invalid lineage value "${normalizedLineage}" for classic type "${displayName}", defaulting to HYBRID`);
-            } else if (isParaType || normalizedLineage === 'PARA' || normalizedLineage === 'PARAPHERNALIA') {
+            } else if (isParaphernaliaType || normalizedLineage === 'PARA' || normalizedLineage === 'PARAPHERNALIA') {
                 // Paraphernalia items should always use PARA
                 lineageSelect.value = 'PARA';
             } else if (normalizedLineage === 'HYBRID' && !isClassicType) {
@@ -8381,7 +8330,6 @@ const TagManager = {
             // Update the tag in current tags list - update ALL lineage-related fields
             const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
             if (currentTag) {
-                currentTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set sovereign_lineage FIRST
                 currentTag.lineage = verifiedLineage;
                 currentTag.Lineage = verifiedLineage;
                 currentTag.currentLineage = verifiedLineage;
@@ -8566,20 +8514,7 @@ const TagManager = {
                 return; // Exit gracefully - don't throw
             } else {
                 console.error(`❌ Error updating lineage after ${requestDuration}ms:`, error);
-
-                // CRITICAL FIX: Remove from _recentlyUpdatedLineages on failure
-                // This prevents localStorage from overriding the correct database value
-                if (this._recentlyUpdatedLineages && this._recentlyUpdatedLineages.has(tagName)) {
-                    this._recentlyUpdatedLineages.delete(tagName);
-                    try {
-                        const obj = Object.fromEntries(this._recentlyUpdatedLineages);
-                        localStorage.setItem('_recentlyUpdatedLineages', JSON.stringify(obj));
-                        console.log(`🗑️ Removed failed lineage update from localStorage for "${tagName}"`);
-                    } catch (e) {
-                        console.warn('Failed to update localStorage after removing failed lineage:', e);
-                    }
-                }
-
+                
                 // CRITICAL FIX: Revert local state if update failed (but not for timeout)
                 // This prevents showing incorrect lineage in the UI
                 try {
@@ -8603,17 +8538,14 @@ const TagManager = {
                             const freshData = await freshTagsResponse.json();
                             const freshTag = freshData.tags?.find(t => t['Product Name*'] === tagName);
                             if (freshTag) {
-                                // Prioritize sovereign_lineage from fresh data
-                                const actualLineage = freshTag.sovereign_lineage || freshTag.Lineage || freshTag.lineage || freshTag.currentLineage || freshTag.canonical_lineage;
+                                const actualLineage = freshTag.Lineage || freshTag.lineage || freshTag.currentLineage || freshTag.canonical_lineage;
                                 if (originalTag) {
-                                    originalTag.sovereign_lineage = actualLineage;
                                     originalTag.lineage = actualLineage;
                                     originalTag.Lineage = actualLineage;
                                     originalTag.currentLineage = actualLineage;
                                     originalTag.canonical_lineage = actualLineage;
                                 }
                                 if (currentTag) {
-                                    currentTag.sovereign_lineage = actualLineage;
                                     currentTag.lineage = actualLineage;
                                     currentTag.Lineage = actualLineage;
                                     currentTag.currentLineage = actualLineage;
@@ -8811,16 +8743,12 @@ const TagManager = {
                 : null;
             
             if (stateTag) {
-                // CRITICAL: Set sovereign_lineage FIRST - it has highest priority
-                stateTag.sovereign_lineage = newLineage;
                 stateTag.lineage = newLineage;
                 stateTag.Lineage = newLineage;
                 stateTag.currentLineage = newLineage;
                 stateTag.canonical_lineage = newLineage;
             }
             if (originalTag) {
-                // CRITICAL: Set sovereign_lineage FIRST - it has highest priority
-                originalTag.sovereign_lineage = newLineage;
                 originalTag.lineage = newLineage;
                 originalTag.Lineage = newLineage;
                 originalTag.currentLineage = newLineage;
