@@ -7384,7 +7384,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                        s.sovereign_lineage as strain_sovereign,
                        s.canonical_lineage as strain_canonical,
                        p."Product Strain" as product_strain,
-                       p."DOH Compliant (Yes/No)" as doh
+                       COALESCE(p."DOH Compliant (Yes/No)", p."DOH") as doh
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
@@ -10774,7 +10774,7 @@ def register_available_tags_route(app):
                                         placeholders = ','.join(['?' for _ in chunk_lower])
                                         # Query DOH field (can be 'DOH', 'THC', 'CBD', 'Yes', 'No', etc.)
                                         cursor.execute(f'''
-                                            SELECT "Product Name*", "DOH Compliant (Yes/No)"
+                                            SELECT "Product Name*", COALESCE("DOH Compliant (Yes/No)", "DOH") as doh
                                             FROM products
                                             WHERE LOWER("Product Name*") IN ({placeholders})
                                         ''', chunk_lower)
