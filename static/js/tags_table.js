@@ -349,15 +349,14 @@ class TagsTable {
   })();
   if (isClassicType && lineage === 'MIXED') {
     lineage = 'HYBRID';
-  } else if (!isClassicType && lineage) {
+  } else if (!isClassicType) {
+    // For non-classic types, only allow CBD or THC (MIXED = THC)
     const normalized = (typeof window.normalizeLineageValue !== 'undefined')
       ? window.normalizeLineageValue(lineage)
       : String(lineage).trim().toUpperCase();
-    // Only allow CBD or THC for non-classic types (MIXED = THC)
     if (normalized === 'CBD') {
       lineage = 'CBD';
     } else {
-      // Everything else (SATIVA, INDICA, HYBRID, MIXED, etc.) becomes THC
       lineage = 'THC';
     }
   }
