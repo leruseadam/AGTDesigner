@@ -7548,20 +7548,34 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         logging.warning(f"🚫 CRITICAL: Prevented MIXED lineage for classic type '{name}' (type: '{product_type}') - changing to HYBRID")
                         db_lineage = 'HYBRID'
                 
-                if db_lineage and (force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage'))):
-                    tag['Lineage'] = db_lineage
-                    tag['Lineage*'] = db_lineage  # CRITICAL: Set Excel column name for UI
-                    tag['lineage'] = db_lineage.lower()
-                    tag['canonical_lineage'] = db_lineage
-                    tag['currentLineage'] = db_lineage
-                    # CRITICAL: Set sovereign_lineage from strains table if available
-                    if isinstance(lineage_info, dict):
-                        strain_sovereign = lineage_info.get('strain_sovereign')
-                        product_sovereign = lineage_info.get('product_sovereign')
-                        if product_sovereign:
-                            tag['sovereign_lineage'] = product_sovereign
-                        elif strain_sovereign:
-                            tag['sovereign_lineage'] = strain_sovereign
+                # CRITICAL FIX: Determine the effective lineage to use
+                # Priority: product_sovereign > strain_sovereign > strain_canonical > db_lineage (COALESCE)
+                effective_lineage = db_lineage
+                sovereign_to_set = None
+                if isinstance(lineage_info, dict):
+                    product_sovereign = lineage_info.get('product_sovereign')
+                    strain_sovereign = lineage_info.get('strain_sovereign')
+                    strain_canonical = lineage_info.get('strain_canonical')
+
+                    if product_sovereign:
+                        effective_lineage = product_sovereign
+                        sovereign_to_set = product_sovereign
+                    elif strain_sovereign:
+                        effective_lineage = strain_sovereign
+                        sovereign_to_set = strain_sovereign
+                    elif strain_canonical:
+                        effective_lineage = strain_canonical
+                        # No sovereign_lineage to set if only strain_canonical exists
+
+                if effective_lineage and (force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage'))):
+                    tag['Lineage'] = effective_lineage
+                    tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
+                    tag['lineage'] = effective_lineage.lower()
+                    tag['canonical_lineage'] = effective_lineage
+                    tag['currentLineage'] = effective_lineage
+                    # Set sovereign_lineage if we have one
+                    if sovereign_to_set:
+                        tag['sovereign_lineage'] = sovereign_to_set
                     aligned_count += 1
         
         if aligned_count > 0:
