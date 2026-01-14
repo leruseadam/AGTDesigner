@@ -493,24 +493,25 @@ async function openStrainLineageEditor() {
             </div>
             
             <div class="list-group" id="strainListContainer">
-              ${strains.map(strain => `
-                <button type="button" class="list-group-item list-group-item-action strain-item" 
-                        data-strain-name="${strain.strain_name.toLowerCase()}"
-                        onclick="selectStrainForEditing('${strain.strain_name.replace(/'/g, "\\'")}', '${strain.current_lineage}')">
-                  <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                      <strong class="strain-name">${strain.strain_name}</strong>
-                      <br>
-                      <small class="text-muted">
-                        Current: ${strain.current_lineage} | 
-                        Products: ${strain.total_occurrences} | 
-                        Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
-                      </small>
-                    </div>
-                    <span class="badge bg-primary">${strain.current_lineage}</span>
-                  </div>
-                </button>
-              `).join('')}
+                            ${strains.map(strain => `
+                                <button type="button" class="list-group-item list-group-item-action strain-item" 
+                                                data-strain-name="${strain.strain_name.toLowerCase()}"
+                                                onclick="selectStrainForEditing('${strain.strain_name.replace(/'/g, "\\'")}', '${strain.current_lineage}')">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <strong class="strain-name">${strain.strain_name}</strong>
+                                            <br>
+                                            <small class="text-muted">
+                                                Current: ${strain.current_lineage} | 
+                                                Products: ${strain.total_occurrences} | 
+                                                Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
+                                            </small>
+                                        </div>
+                                        <span class="badge bg-primary">${strain.current_lineage}</span>
+                                        ${strain.doh_status === 'DOH' ? `<span class="badge bg-success ms-2"><img src="/static/img/DOH.png" alt="DOH" style="height:16px;vertical-align:middle;margin-right:4px;">DOH</span>` : ''}
+                                    </div>
+                                </button>
+                            `).join('')}
             </div>
           </div>
           <div class="modal-footer">

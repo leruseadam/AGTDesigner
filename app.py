@@ -21331,7 +21331,18 @@ def vendor_strain_browser():
             brand_count = group['Product Brand'].nunique() if 'Product Brand' in group.columns else 0
             vendors = ', '.join(group['Vendor/Supplier*'].unique())
             brands = ', '.join(group['Product Brand'].unique()) if 'Product Brand' in group.columns else 'N/A'
-            
+
+            # Aggregate DOH status for this strain
+            doh_status = None
+            if 'DOH Compliant (Yes/No)' in group.columns:
+                doh_vals = group['DOH Compliant (Yes/No)'].dropna().astype(str).str.upper().unique()
+                if any(val in ['DOH', 'YES', 'THC', 'CBD'] for val in doh_vals):
+                    doh_status = 'DOH'
+            elif 'DOH' in group.columns:
+                doh_vals = group['DOH'].dropna().astype(str).str.upper().unique()
+                if any(val in ['DOH', 'YES', 'THC', 'CBD'] for val in doh_vals):
+                    doh_status = 'DOH'
+
             strains_data.append({
                 'strain_name': str(strain_name).strip(),
                 'current_lineage': str(current_lineage or '').strip() or 'MIXED',
@@ -21342,7 +21353,8 @@ def vendor_strain_browser():
                 'brand_count': int(brand_count),
                 'vendors': vendors,
                 'brands': brands,
-                'last_seen_date': None
+                'last_seen_date': None,
+                'doh_status': doh_status
             })
         
         # Sort strains by product count
@@ -21355,7 +21367,7 @@ def vendor_strain_browser():
         for (vendor, strain_name), group in vendor_strain_groups:
             if pd.isna(strain_name) or str(strain_name).strip() == '':
                 continue
-                
+
             # Resolve lineage from DB to ensure UI matches DOCX generation
             db_current_lineage = None
             db_canonical_lineage = None
@@ -21381,7 +21393,18 @@ def vendor_strain_browser():
             product_count = len(group)
             brand_count = group['Product Brand'].nunique() if 'Product Brand' in group.columns else 0
             brands = ', '.join(group['Product Brand'].unique()) if 'Product Brand' in group.columns else 'N/A'
-            
+
+            # Aggregate DOH status for this vendor-strain
+            doh_status = None
+            if 'DOH Compliant (Yes/No)' in group.columns:
+                doh_vals = group['DOH Compliant (Yes/No)'].dropna().astype(str).str.upper().unique()
+                if any(val in ['DOH', 'YES', 'THC', 'CBD'] for val in doh_vals):
+                    doh_status = 'DOH'
+            elif 'DOH' in group.columns:
+                doh_vals = group['DOH'].dropna().astype(str).str.upper().unique()
+                if any(val in ['DOH', 'YES', 'THC', 'CBD'] for val in doh_vals):
+                    doh_status = 'DOH'
+
             vendor_strains_data.append({
                 'vendor': vendor,
                 'strain_name': str(strain_name).strip(),
@@ -21391,7 +21414,8 @@ def vendor_strain_browser():
                 'product_count': int(product_count),
                 'brand_count': int(brand_count),
                 'brands': brands,
-                'last_updated': None
+                'last_updated': None,
+                'doh_status': doh_status
             })
         
         # Sort vendor-strains by product count
