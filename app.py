@@ -7442,8 +7442,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     lineage_map[normalized] = lineage_info
                     lineage_map[db_name.lower().strip()] = lineage_info
                     
-                    # Log what we found for debugging
-                    if strain_canonical:
+                    # Log what we found for debugging - ENHANCED to show DOH
+                    if doh_clean:
+                        logging.info(f"✅ Found lineage+DOH for '{db_name}': DOH={doh_clean}, strain_canonical={strain_canonical}, db_lineage={db_lineage}")
+                    elif strain_canonical:
                         logging.debug(f"✅ Found lineage for '{db_name}': strain_canonical={strain_canonical}, db_lineage={db_lineage}, sovereign={product_sovereign or strain_sovereign}, strain='{product_strain}'")
                     elif db_lineage:
                         logging.debug(f"✅ Found lineage for '{db_name}': db_lineage={db_lineage} (no strain_canonical), strain='{product_strain}'")
@@ -7645,6 +7647,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 # CRITICAL FIX: Set DOH field from database if available
                 # Only set DOH if Excel doesn't already have a value (Excel is source of truth)
                 doh_value = lineage_info.get('doh')
+                logging.debug(f"🔍 DOH ENRICHMENT CHECK: '{name}' -> doh_value from lineage_info: '{doh_value}'")
                 if doh_value:
                     # Check if Excel already has DOH value
                     excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
