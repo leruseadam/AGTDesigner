@@ -1,3 +1,20 @@
+@app.route('/api/available-tags', methods=['GET'])
+def api_available_tags():
+    """Serve available tags from persistent cache for fast UI refresh."""
+    store_name = session.get('selected_store') or 'default'
+    cached_tags = load_available_tags_cache(store_name)
+    if cached_tags:
+        return jsonify({'success': True, 'tags': cached_tags})
+    # If no cache, recompute and save
+    try:
+        processor = get_excel_processor()
+        tags = processor.get_available_tags(filters=None)
+        safe_tags = make_json_safe(tags)
+        save_available_tags_cache(store_name, safe_tags)
+        return jsonify({'success': True, 'tags': safe_tags})
+    except Exception as e:
+        logging.error(f"Error generating available tags: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 # AGT Label Maker - Consolidated Web Application
 # ============================================
 # This is the sole, consolidated web version of the AGT Label Maker application.
@@ -2663,15 +2680,15 @@ def generate_product_name_variants(raw_name):
         return variants
 
     def add_variant(value):
-        if not value:
-            return
-        cleaned = re.sub(r'\s+', ' ', value.strip().replace('\u2011', '-'))
-        if cleaned and cleaned not in variants:
-            variants.append(cleaned)
-
-    add_variant(name)
-
-    # Remove common "by Vendor" suffixes (optionally before a weight)
+                    if doh_value:
+                        tag['DOH'] = doh_value
+                        tag['DOH Compliant (Yes/No)'] = doh_value
+                        logging.debug(f"✅ Set DOH from database for sovereign lineage: '{name}' -> '{doh_value}'")
+                    else:
+                        # If both Excel and database DOH are missing/invalid, set a default placeholder
+                        tag['DOH'] = 'MISSING'
+                        tag['DOH Compliant (Yes/No)'] = 'MISSING'
+                        logging.debug(f"⚠️ DOH missing for '{name}', set to 'MISSING'")
     vendor_removed = re.sub(r'\s+by\s+[^-]+(?=(\s*-\s*\d|\s*$))', '', name, flags=re.IGNORECASE)
     vendor_removed = re.sub(r'\s+by\s+[^-]+$', '', vendor_removed, flags=re.IGNORECASE)
     add_variant(vendor_removed)
@@ -7492,15 +7509,29 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 # ...existing code for lineage priority...
 
                 # Step 7: Always set DOH from database if available when sovereign lineage is used
+                # Always prefer Excel DOH if present and valid
+                excel_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)')
+                excel_doh_clean = str(excel_doh).strip().upper() if excel_doh else ''
                 doh_value = lineage_info.get('doh')
-                if doh_value:
-                    tag['DOH'] = doh_value
-                    tag['DOH Compliant (Yes/No)'] = doh_value
-                    logging.debug(f"✅ Set DOH from database for sovereign lineage: '{name}' -> '{doh_value}'")
+                # Only use database DOH if Excel value is missing or invalid
+                if not excel_doh_clean or excel_doh_clean in ['', 'NAN', 'NONE', 'NULL']:
+                    if doh_value:
+                        tag['DOH'] = doh_value
+                        tag['DOH Compliant (Yes/No)'] = doh_value
+                        logging.debug(f"✅ Set DOH from database for sovereign lineage: '{name}' -> '{doh_value}'")
+                else:
+                    # Excel DOH is present and valid, keep it
+                    tag['DOH'] = excel_doh_clean
+                    tag['DOH Compliant (Yes/No)'] = excel_doh_clean
+                    logging.debug(f"✅ Set DOH from Excel for sovereign lineage: '{name}' -> '{excel_doh_clean}'")
 
                 # ...existing code...
                     tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
                     tag['lineage'] = effective_lineage.lower()
+                            # If both Excel and database DOH are missing/invalid, set a default placeholder
+                            tag['DOH'] = 'MISSING'
+                            tag['DOH Compliant (Yes/No)'] = 'MISSING'
+                            logging.debug(f"⚠️ DOH missing for '{name}', set to 'MISSING'")
                 
                 # CRITICAL FIX: Set DOH field from database if available
                 # Only set DOH if Excel doesn't already have a value (Excel is source of truth)
@@ -7524,6 +7555,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             else:
                 # Old format (backward compatibility)
                 db_lineage = lineage_info
+                        else:
+                            # If both Excel and database DOH are missing/invalid, set a default placeholder
+                            tag['DOH'] = tag.get('DOH', 'MISSING')
+                            tag['DOH Compliant (Yes/No)'] = tag.get('DOH Compliant (Yes/No)', 'MISSING')
+                            if tag['DOH'] == 'MISSING':
+                                logging.debug(f"⚠️ DOH missing for '{name}', set to 'MISSING'")
                 
                 # CRITICAL FIX: NEVER use MIXED - skip it entirely
                 if db_lineage and str(db_lineage).strip().upper() == 'MIXED':
