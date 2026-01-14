@@ -140,12 +140,15 @@ function createTagRow(tag) {
   
   // CRITICAL FIX: For NON-classic types, restrict lineage to THC/CBD only
   // If database/Excel provides SATIVA/INDICA/HYBRID/MIXED, coerce to THC in UI
+  // BUT: Check product name for CBD/CBG/CBN to identify CBD products
   if (!isClassicType && lineage) {
     const normalized = (typeof window.normalizeLineageValue !== 'undefined')
       ? window.normalizeLineageValue(lineage)
       : String(lineage).trim().toUpperCase();
-    // Only allow CBD or THC for non-classic types (MIXED = THC)
-    if (normalized === 'CBD') {
+    const tagName = (tag['Product Name*'] || tag.ProductName || '').toLowerCase();
+    const isCbdProduct = normalized === 'CBD' || normalized === 'CBD_BLEND' ||
+                         tagName.includes('cbd') || tagName.includes('cbg') || tagName.includes('cbn');
+    if (isCbdProduct) {
       lineage = 'CBD';
     } else {
       // Everything else (SATIVA, INDICA, HYBRID, MIXED, etc.) becomes THC

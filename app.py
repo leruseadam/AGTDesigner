@@ -7554,6 +7554,14 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     tag['lineage'] = db_lineage.lower()
                     tag['canonical_lineage'] = db_lineage
                     tag['currentLineage'] = db_lineage
+                    # CRITICAL: Set sovereign_lineage from strains table if available
+                    if isinstance(lineage_info, dict):
+                        strain_sovereign = lineage_info.get('strain_sovereign')
+                        product_sovereign = lineage_info.get('product_sovereign')
+                        if product_sovereign:
+                            tag['sovereign_lineage'] = product_sovereign
+                        elif strain_sovereign:
+                            tag['sovereign_lineage'] = strain_sovereign
                     aligned_count += 1
         
         if aligned_count > 0:

@@ -7595,15 +7595,18 @@ const TagManager = {
         }
         // Priority 2: currentLineage (matches DOCX COALESCE result)
         if (!tagDbLineage && tag.currentLineage) {
-            tagDbLineage = tag.currentLineage.toString().toUpperCase().trim();
+            const val = tag.currentLineage.toString().toUpperCase().trim();
+            if (val && val !== 'NONE') tagDbLineage = val;
         }
         // Priority 3: canonical_lineage (strain canonical fallback)
         if (!tagDbLineage && tag.canonical_lineage) {
-            tagDbLineage = tag.canonical_lineage.toString().toUpperCase().trim();
+            const val = tag.canonical_lineage.toString().toUpperCase().trim();
+            if (val && val !== 'NONE') tagDbLineage = val;
         }
         // Priority 4: Excel Lineage (final fallback)
         if (!tagDbLineage && tag.Lineage) {
-            tagDbLineage = tag.Lineage.toString().toUpperCase().trim();
+            const val = tag.Lineage.toString().toUpperCase().trim();
+            if (val && val !== 'NONE') tagDbLineage = val;
         }
         
         // CRITICAL: Determine if this is a paraphernalia product type (used in multiple places below)
@@ -7621,14 +7624,25 @@ const TagManager = {
             // CRITICAL FIX: For NON-CLASSIC types, convert classic lineages to THC/CBD only
             // Non-classic types (edibles, tinctures, etc.) should only show THC or CBD
             if (!isClassicType && !isParaType) {
-                const classicLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
-                if (classicLineages.includes(normalizedLineage)) {
-                    console.log(`🔄 NON-CLASSIC TYPE: Converting "${normalizedLineage}" to "MIXED" (THC) for "${displayName}"`);
-                    normalizedLineage = 'MIXED';
-                }
-                // CBD and CBD_BLEND stay as CBD
-                if (normalizedLineage === 'CBD_BLEND') {
+                // Check if this is a CBD product by name (product name contains CBD/CBG/CBN)
+                const nameLower = (displayName || '').toLowerCase();
+                const isCbdProduct = normalizedLineage === 'CBD' ||
+                                     normalizedLineage === 'CBD_BLEND' ||
+                                     nameLower.includes('cbd') ||
+                                     nameLower.includes('cbg') ||
+                                     nameLower.includes('cbn');
+
+                if (isCbdProduct) {
+                    // CBD products should show CBD
                     normalizedLineage = 'CBD';
+                    console.log(`🔄 NON-CLASSIC CBD: "${displayName}" → CBD`);
+                } else {
+                    // Everything else (SATIVA, INDICA, HYBRID, etc.) becomes THC for non-classic
+                    const classicLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
+                    if (classicLineages.includes(normalizedLineage)) {
+                        console.log(`🔄 NON-CLASSIC THC: "${displayName}" ${normalizedLineage} → MIXED`);
+                        normalizedLineage = 'MIXED';
+                    }
                 }
             }
         } else {
