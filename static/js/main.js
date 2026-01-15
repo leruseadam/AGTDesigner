@@ -4269,15 +4269,21 @@ const TagManager = {
             let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
                                    tag.CombinedWeight || tag.weightWithUnits || weight || '').toString().trim();
             
-            // CRITICAL FIX: If weightWithUnits doesn't have units, append default unit "g"
+            // CRITICAL FIX: Determine if this is a classic or non-classic product type for unit display
+            // Classic types use grams (g), non-classic types use ounces (oz)
+            const classicTypesForWeight = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
+            const isClassicTypeForWeight = classicTypesForWeight.includes(normalizedLower);
+            const defaultUnit = isClassicTypeForWeight ? 'g' : 'oz';
+
+            // CRITICAL FIX: If weightWithUnits doesn't have units, append appropriate unit based on product type
             if (weightWithUnits && !weightWithUnits.match(/[a-zA-Z]+/)) {
-                // Weight is just a number, add "g" unit
-                weightWithUnits = `${weightWithUnits}g`;
+                // Weight is just a number, add appropriate unit
+                weightWithUnits = `${weightWithUnits}${defaultUnit}`;
             } else if (!weightWithUnits && weight) {
-                // Fallback: if weightWithUnits is empty but weight exists, add "g" unit
-                weightWithUnits = `${weight}g`;
+                // Fallback: if weightWithUnits is empty but weight exists, add appropriate unit
+                weightWithUnits = `${weight}${defaultUnit}`;
             }
-            
+
             // CRITICAL FIX: Normalize weight to remove .0 decimals (e.g., "1.0g" -> "1g", "1.0G" -> "1g")
             // This ensures "1.0g" and "1g" are treated as the same weight group
             if (weightWithUnits) {
@@ -4285,9 +4291,12 @@ const TagManager = {
                 if (weightMatch) {
                     const weightValue = weightMatch[1];
                     let unit = weightMatch[2].toLowerCase(); // Normalize unit to lowercase
-                    // Standardize "grams" to "g"
+                    // Standardize "grams" to "g" for classic types, "oz" for non-classic types
                     if (unit === 'grams' || unit === 'gram') {
-                        unit = 'g';
+                        unit = isClassicTypeForWeight ? 'g' : 'oz';
+                    } else if (unit === 'g' && !isClassicTypeForWeight) {
+                        // Non-classic types should display oz, not g
+                        unit = 'oz';
                     }
                     const weightFloat = parseFloat(weightValue);
                     if (!isNaN(weightFloat)) {
@@ -7682,6 +7691,8 @@ const TagManager = {
                 // CBD family products display as CBD Blend lineage (yellow color)
                 // This takes priority over database MIXED value
                 displayLineage = 'CBD_BLEND';
+                // CRITICAL FIX: Also update tag.currentLineage so dropdown shows CBD instead of THC
+                tag.currentLineage = 'CBD_BLEND';
                 verboseLog(`🎨 NON-CLASSIC CBD DETECTED: "${displayName}" → CBD_BLEND (yellow) [strain=${hasCbdInStrain}, product=${hasCbdInProduct}]`);
             } else if (!isClassicLineage && hasValidDatabaseLineage && lineage === 'CBD_BLEND') {
                 // Use CBD_BLEND from database
@@ -7706,6 +7717,8 @@ const TagManager = {
             // This ensures products with CBD, CBG, CBN, or CBC in the title get yellow color regardless of database lineage
             if (hasCbdIndicator()) {
                 displayLineage = 'CBD_BLEND';
+                // CRITICAL FIX: Also update tag.currentLineage so dropdown shows CBD instead of THC
+                tag.currentLineage = 'CBD_BLEND';
                 verboseLog(`🎨 CLASSIC with CBD family indicator (CBD/CBG/CBN/CBC): "${displayName}" → CBD_BLEND (yellow)`);
             } else {
                 // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
@@ -12322,58 +12335,43 @@ const TagManager = {
             // CRITICAL FIX: Always build filters when tags are loaded from server to ensure they're populated immediately
             // Use retry logic to ensure filters are built even if DOM elements aren't ready yet
             if (tags && tags.length > 0) {
+                // Aggressively chunk tag rendering for slow PCs on refresh too
+                if (isWindows && tags.length > 200) {
+                    let i = 0;
+                    const chunkSize = 50;
+                    const renderChunk = () => {
+                        const end = Math.min(i + chunkSize, tags.length);
+                        this._updateAvailableTags(tags.slice(i, end), i === 0 ? null : true);
+                        i += chunkSize;
+                        if (i < tags.length) {
+                            setTimeout(renderChunk, 0); // Yield to UI thread
+                        } else {
+                            verboseLog(`✅ REFRESH LOAD: ${tags.length} tags rendered from refresh in chunks`);
+                        }
+                    };
+                    renderChunk();
+                } else {
+                    this._updateAvailableTags(tags, null);
+                }
+                // Build filters after rendering
                 let filterBuildAttempts = 0;
-                const maxFilterBuildAttempts = 20; // Try for up to 1 second (20 * 50ms)
-                
+                const maxFilterBuildAttempts = 20;
                 const buildFiltersWithRetry = () => {
                     filterBuildAttempts++;
                     const brandFilter = document.getElementById('brandFilter');
                     const dohFilter = document.getElementById('dohFilter');
-                    
-                    // If filter elements don't exist yet, retry
                     if ((!brandFilter || !dohFilter) && filterBuildAttempts < maxFilterBuildAttempts) {
-                        console.log(`⏳ Filter elements not ready yet (attempt ${filterBuildAttempts}/${maxFilterBuildAttempts}), retrying in 50ms...`);
                         setTimeout(buildFiltersWithRetry, 50);
                         return;
                     }
-                    
-                    if (!brandFilter || !dohFilter) {
-                        console.error('❌ Filter elements not found after', maxFilterBuildAttempts, 'attempts - filters may not populate');
-                        // Still try to build - buildFilterOptionsFromTags will handle gracefully
-                    }
-                    
-                    const filtersEmpty = (!brandFilter || brandFilter.options.length <= 1) || 
-                                       (!dohFilter || dohFilter.options.length <= 1);
-                    
-                    // Always build if filters are empty OR if this is the first time this session
+                    if (!brandFilter || !dohFilter) return;
+                    const filtersEmpty = (!brandFilter || brandFilter.options.length <= 1) || (!dohFilter || dohFilter.options.length <= 1);
                     if (!this._filtersBuiltThisSession || filtersEmpty) {
-                        console.log(`🔧 Building filters from fetched tags (attempt ${filterBuildAttempts}, first time: ${!this._filtersBuiltThisSession}, filters empty: ${filtersEmpty})`);
-                        const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
-                            ? this.state.originalTags 
-                            : tags;
+                        const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 ? this.state.originalTags : tags;
                         this.buildFilterOptionsFromTags(tagsForFilters);
                         this._filtersBuiltThisSession = true;
-                        console.log(`✅ Filters populated immediately with ${tagsForFilters.length} tags`);
-                        
-                        // CRITICAL: Verify filters were actually populated after a short delay
-                        setTimeout(() => {
-                            const brandFilterAfter = document.getElementById('brandFilter');
-                            const dohFilterAfter = document.getElementById('dohFilter');
-                            if (brandFilterAfter && brandFilterAfter.options.length <= 1 && tagsForFilters.length > 0) {
-                                console.warn('⚠️ Brand filter still empty after build, retrying...');
-                                this.buildFilterOptionsFromTags(tagsForFilters);
-                            }
-                            if (dohFilterAfter && dohFilterAfter.options.length <= 1 && tagsForFilters.length > 0) {
-                                console.warn('⚠️ DOH filter still empty after build, retrying...');
-                                this.buildFilterOptionsFromTags(tagsForFilters);
-                            }
-                        }, 200);
-                    } else {
-                        console.log('⏭️ Skipping filter rebuild - already built and filters populated');
                     }
                 };
-                
-                // Start building filters immediately
                 buildFiltersWithRetry();
             }
             
