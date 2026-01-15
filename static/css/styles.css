@@ -3788,8 +3788,8 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #e0d7ff !important;
       padding: 4px 6px !important;
   }
-  .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 1.5rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+  .brand-header, .product-type-header, .subcategory-header, .weight-header, .price-header, .container-label {
+      font-size: 1.65rem !important; /* Increased from 1.5rem */
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
@@ -4978,31 +4978,40 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--accent-color);
     font-weight: 700;
     margin-bottom: 0.25rem;
-    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+    font-size: 1.55rem !important; /* Third level - smaller than brand */
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
-  
+
   .lineage-section {
     margin-bottom: 0.75rem;
     margin-left: 10px !important;
   }
-  
+
   .lineage-header {
     font-weight: 500;
     margin-bottom: 0.5rem;
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
-  
+
   .weight-section {
     margin-bottom: 0.25rem;
     margin-left: 10px !important;
   }
-  
+
   .weight-header {
-    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+    font-size: 1.45rem !important; /* Fourth level - smaller than product type */
     color: var(--text-muted);
+    margin-bottom: 0.25rem;
+    margin-left: 0 !important;
+    padding-left: 0 !important;
+  }
+
+  .price-header {
+    font-size: 1.35rem !important; /* Fifth level - smallest */
+    color: var(--text-muted);
+    font-weight: 600;
     margin-bottom: 0.25rem;
     margin-left: 0 !important;
     padding-left: 0 !important;
@@ -6265,12 +6274,12 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 60px;
     font-size: 1.625rem !important; /* Increased from 1.5rem (24px) to ~26px */
   }
-  .brand-header, .product-type-header, .subcategory-header, .weight-header,
+  .brand-header, .product-type-header, .subcategory-header, .weight-header, .price-header,
   .container-label, .filter-label {
     padding: 0 0.25rem 0 0 !important;
     margin-bottom: 0 !important;
     min-width: 60px;
-    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+    font-size: 1.65rem !important; /* Increased from 1.425rem to ~26.4px */
   }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
@@ -6690,7 +6699,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.4em; /* Increased substantially */
+    font-size: 1.55em; /* Increased from 1.4em */
     font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
@@ -6700,7 +6709,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.35em; /* Increased substantially */
+    font-size: 1.45em; /* Increased from 1.35em */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -6712,7 +6721,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 0.98em;
+    font-size: 1.3em; /* Increased from 0.98em */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 3.2em;
@@ -6720,8 +6729,18 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #a99cc7;
   }
 
+  /* Price (fifth-level) */
+  .price-section > .price-header {
+    font-size: 1.2em; /* Smaller than weight */
+    font-weight: 500;
+    margin-bottom: 0.2em;
+    margin-left: 4.2em;
+    letter-spacing: 0.01em;
+    color: #9d8fba;
+  }
+
   /* Add vertical spacing between all group headers */
-  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
+  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header, .price-header {
     margin-top: 0.5em;
     margin-bottom: 0.5em;
   }
@@ -10151,22 +10170,27 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .brand-header .text-container {
-    font-size: clamp(11px, 1rem, 19px) !important;
+    font-size: clamp(13px, 1.15rem, 22px) !important;
     font-weight: 500 !important;
   }
-  
+
   .product-type-header .text-container {
-    font-size: clamp(10px, 1.05rem, 18px) !important;
+    font-size: clamp(12px, 1.1rem, 20px) !important;
     font-weight: 500 !important;
   }
-  
+
   .subcategory-header .text-container {
     font-size: clamp(12px, 1.3rem, 22px) !important;
     font-weight: 600 !important;
   }
-  
+
   .weight-header .text-container {
-    font-size: clamp(10px, 1.05rem, 18px) !important;
+    font-size: clamp(11px, 1.05rem, 19px) !important;
+    font-weight: 500 !important;
+  }
+
+  .price-header .text-container {
+    font-size: clamp(10px, 1rem, 18px) !important;
     font-weight: 500 !important;
   }
   
