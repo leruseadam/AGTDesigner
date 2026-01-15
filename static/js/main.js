@@ -1086,7 +1086,8 @@ const TagManager = {
     // CRITICAL FIX: Lower threshold for Windows (PC is slower, so use simplified rendering sooner)
     // PERFORMANCE FIX: Even more aggressive threshold for Windows to ensure fast loading
     get SIMPLIFIED_RENDER_THRESHOLD() {
-        return isWindows ? 300 : 900; // Much lower threshold on Windows (300 vs 500) for faster loading
+        // Even more aggressive for Windows/slow PCs: render in simplified mode for any set over 100 tags
+        return isWindows ? 100 : 900;
     },
     state: {
         selectedTags: new Set(),
@@ -1686,8 +1687,25 @@ const TagManager = {
                         (!sampleTag['Product Brand'] && !sampleTag['ProductBrand'] && !sampleTag['productBrand']) ||
                         (!sampleTag['DOH'] && !sampleTag['doh'] && !sampleTag['DOH Compliant (Yes/No)'] && !sampleTag['DOH Compliant']);
                     
-                    this._updateAvailableTags(cachedTags, null);
-                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
+                    // Aggressively chunk tag rendering for slow PCs
+                    if (isWindows && cachedTags.length > 200) {
+                        let i = 0;
+                        const chunkSize = 50;
+                        const renderChunk = () => {
+                            const end = Math.min(i + chunkSize, cachedTags.length);
+                            this._updateAvailableTags(cachedTags.slice(i, end), i === 0 ? null : true);
+                            i += chunkSize;
+                            if (i < cachedTags.length) {
+                                setTimeout(renderChunk, 0); // Yield to UI thread
+                            } else {
+                                verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache in chunks on DOM ready`);
+                            }
+                        };
+                        renderChunk();
+                    } else {
+                        this._updateAvailableTags(cachedTags, null);
+                        verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
+                    }
                     
                     // CRITICAL FIX: If tags need enrichment, fetch enriched tags in background
                     if (needsEnrichment) {
