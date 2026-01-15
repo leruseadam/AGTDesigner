@@ -1658,7 +1658,7 @@ const TagManager = {
                         this.fetchAndUpdateAvailableTags(true).catch(err => {
                             console.warn('⚠️ Background enrichment failed (non-critical):', err);
                         });
-                    }, 100); // Reduced delay for faster refresh
+                    }, 500); // Small delay to let UI render first
                 }
                 
                 // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
@@ -1737,7 +1737,7 @@ const TagManager = {
                     this.fetchAndUpdateAvailableTags(true).catch(err => {
                         console.warn('Background refresh for database lineage failed (non-critical):', err);
                     });
-                }, 100); // Reduced delay for faster refresh
+                }, 500); // Small delay to let UI render first, then refresh in background
             }
             
             return true;
