@@ -8360,7 +8360,10 @@ const TagManager = {
             }
             lineageSelect.appendChild(optionElement);
         });
-        if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
+        // Patch: For nonclassic types, if normalizedLineage is CBD or CBD_BLEND, force dropdown to show CBD
+        if (!isClassicType && (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD')) {
+            lineageSelect.value = 'CBD';
+        } else if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
             // CRITICAL FIX: Classic types should never get MIXED - use HYBRID instead
