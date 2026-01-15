@@ -7,11 +7,10 @@
  */
 
 // 🔧 DEVELOPMENT MODE: Set to true to disable all caching
-// Set to false for production to enable aggressive caching
-const DEV_MODE = false;
+const DEV_MODE = true;
 
 // Version numbers - increment to force cache refresh
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `labelmaker-${CACHE_VERSION}`;
 const STATIC_CACHE_NAME = `labelmaker-static-${CACHE_VERSION}`;
 const API_CACHE_NAME = `labelmaker-api-${CACHE_VERSION}`;

@@ -5498,18 +5498,8 @@ class TemplateProcessor:
                         # Set gray color at both run level and XML level for consistency
                         run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                         run.font.color.theme_color = None  # Clear any theme color
-
-                        # Set italic and color at XML level to ensure they stick
+                        # Also set color at XML level to ensure it sticks
                         rPr = run._element.get_or_add_rPr()
-
-                        # Set italic at XML level
-                        i_elem = rPr.find(qn('w:i'))
-                        if i_elem is None:
-                            i_elem = OxmlElement('w:i')
-                            rPr.append(i_elem)
-                        i_elem.set(qn('w:val'), '1')
-
-                        # Set color at XML level
                         color = rPr.find(qn('w:color'))
                         if color is None:
                             color = OxmlElement('w:color')
@@ -7754,24 +7744,14 @@ class TemplateProcessor:
                 from docx.shared import RGBColor
                 vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-
-                # Set italic and color at XML level to ensure they stick
+                # Also set color at XML level to ensure it sticks
                 rPr = vendor_run._element.get_or_add_rPr()
-
-                # Set italic at XML level
-                i_elem = rPr.find(qn('w:i'))
-                if i_elem is None:
-                    i_elem = OxmlElement('w:i')
-                    rPr.append(i_elem)
-                i_elem.set(qn('w:val'), '1')
-
-                # Set color at XML level
                 color = rPr.find(qn('w:color'))
                 if color is None:
                     color = OxmlElement('w:color')
                     rPr.append(color)
                 color.set(qn('w:val'), '808080')  # Gray color in hex without #
-
+            
             # Set tab stops to position vendor on the right (only if vendor content exists)
             if vendor_content:
                 # Clear existing tab stops
@@ -7891,24 +7871,14 @@ class TemplateProcessor:
                 from docx.shared import RGBColor
                 vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                 vendor_run.font.color.theme_color = None  # Clear any theme color
-
-                # Set italic and color at XML level to ensure they stick
+                # Also set color at XML level to ensure it sticks
                 rPr = vendor_run._element.get_or_add_rPr()
-
-                # Set italic at XML level
-                i_elem = rPr.find(qn('w:i'))
-                if i_elem is None:
-                    i_elem = OxmlElement('w:i')
-                    rPr.append(i_elem)
-                i_elem.set(qn('w:val'), '1')
-
-                # Set color at XML level
                 color = rPr.find(qn('w:color'))
                 if color is None:
                     color = OxmlElement('w:color')
                     rPr.append(color)
                 color.set(qn('w:val'), '808080')  # Gray color in hex without #
-
+                
                 # Set tab stops to position vendor on the right
                 paragraph.paragraph_format.tab_stops.clear_all()
                 if self.template_type == 'mini':

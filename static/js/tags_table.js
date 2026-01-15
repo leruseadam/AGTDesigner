@@ -127,10 +127,26 @@ function createTagRow(tag) {
   if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
     lineage = 'HYBRID';
   }
-  
-  // Only convert if lineage is empty
-  if (!lineage) {
-    lineage = isClassicType ? 'HYBRID' : 'MIXED';
+
+  // CRITICAL FIX: For non-classic types, detect CBD indicators in product name/strain
+  // Products with CBD/CBN/CBG/CBC in the name should show CBD lineage, not MIXED
+  const productNameForCbd = tag['Product Name*'] || tag.ProductName || '';
+  const productStrainForCbd = tag['Product Strain'] || tag.productStrain || '';
+  const nameAndStrainLower = (productNameForCbd + ' ' + productStrainForCbd).toLowerCase();
+  const hasCbdIndicator = ['cbd', 'cbn', 'cbg', 'cbc'].some(token => nameAndStrainLower.includes(token));
+
+  // CRITICAL FIX: For non-classic types, CBD indicators ALWAYS override other lineages
+  // Check CBD indicators FIRST before applying defaults
+  if (!isClassicType && hasCbdIndicator) {
+    // Non-classic types with CBD indicators should show CBD_BLEND (yellow), regardless of database value
+    lineage = 'CBD_BLEND';
+  } else if (!lineage) {
+    // Only set default if lineage is completely missing
+    if (isClassicType) {
+      lineage = 'HYBRID';
+    } else {
+      lineage = 'MIXED';
+    }
   }
     // CRITICAL FIX: Extract DOH status and normalize it consistently (same as TagsTable.createTagRow)
     const rawDohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '';
@@ -261,13 +277,17 @@ function createTagRow(tag) {
                       const productType = tag['Product Type*'] || tag.Type || '';
                       const productTypeLower = productType.toLowerCase().trim();
                       // More robust High CBD check - handle variations in product type format
-                      const isHighCbdProduct = productTypeLower.startsWith('high cbd') || 
+                      const isHighCbdProduct = productTypeLower.startsWith('high cbd') ||
                                                productTypeLower.includes('doh high cbd') ||
                                                productTypeLower.includes('high cbd edible') ||
                                                productTypeLower.includes('high cbd liquid') ||
                                                productTypeLower.includes('high cbd solid') ||
                                                productTypeLower.includes('high cbd topical');
-                      
+
+                      // Check if non-classic type (edibles, tinctures, topicals, capsules, gummies)
+                      // Non-classic types should NOT have THC option - only NONE, DOH, CBD
+                      const isNonClassicType = getUniqueLineages(productType).length === 2;
+
                       // For high CBD products, CBD trumps DOH (High CBD implies DOH compliance)
                       let effectiveDohStatus = dohStatus;
                       if (isHighCbdProduct) {
@@ -275,12 +295,28 @@ function createTagRow(tag) {
                         if (!dohStatus || dohStatus === 'No' || dohStatus === 'NONE' || dohStatus === 'DOH' || dohStatus === 'Yes') {
                           effectiveDohStatus = 'CBD';
                         }
-                        // Otherwise keep existing status (e.g., if explicitly set to THC)
                       }
-                      
-                      // All products get normal DOH dropdown
+
+                      // For non-classic types, convert THC to DOH (THC badge not valid for edibles/tinctures)
+                      if (isNonClassicType && effectiveDohStatus === 'THC') {
+                        effectiveDohStatus = 'DOH';
+                      }
+
+                      // Non-classic types get dropdown without THC option
+                      if (isNonClassicType) {
+                        return `
+                          <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini"
+                                  onchange="TagsTable.handleDohChange(this, '${tagName}')">
+                            <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>
+                            <option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
+                            <option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
+                          </select>
+                        `;
+                      }
+
+                      // Classic types get full dropdown with THC option
                       return `
-                        <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini" 
+                        <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini"
                                 onchange="TagsTable.handleDohChange(this, '${tagName}')">
                           <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>
                           <option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
@@ -347,9 +383,25 @@ class TagsTable {
     lineage = 'HYBRID';
   }
   
-  // Only set default if lineage is completely missing
-  if (!lineage) {
-    lineage = isClassicType ? 'HYBRID' : 'MIXED';
+  // CRITICAL FIX: For non-classic types, detect CBD indicators in product name/strain
+  // Products with CBD/CBN/CBG/CBC in the name should show CBD lineage, not MIXED
+  const productNameForCbd = tag['Product Name*'] || tag.ProductName || '';
+  const productStrainForCbd = tag['Product Strain'] || tag.productStrain || '';
+  const nameAndStrainLower = (productNameForCbd + ' ' + productStrainForCbd).toLowerCase();
+  const hasCbdIndicator = ['cbd', 'cbn', 'cbg', 'cbc'].some(token => nameAndStrainLower.includes(token));
+
+  // CRITICAL FIX: For non-classic types, CBD indicators ALWAYS override other lineages
+  // Check CBD indicators FIRST before applying defaults
+  if (!isClassicType && hasCbdIndicator) {
+    // Non-classic types with CBD indicators should show CBD_BLEND (yellow), regardless of database value
+    lineage = 'CBD_BLEND';
+  } else if (!lineage) {
+    // Only set default if lineage is completely missing
+    if (isClassicType) {
+      lineage = 'HYBRID';
+    } else {
+      lineage = 'MIXED';
+    }
   }
   
     // CRITICAL FIX: Extract DOH status and normalize it consistently
