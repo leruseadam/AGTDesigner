@@ -1,3 +1,15 @@
+/* Fix template dropdown and button sizing in center column */
+.control-panel .template-section select,
+.control-panel .template-section button {
+  width: 160px !important;
+  min-width: 120px !important;
+  max-width: 200px !important;
+  font-size: 1rem !important;
+  padding: 0.45rem 0.7rem !important;
+  margin: 0.2rem auto 0.5rem auto !important;
+  border-radius: 7px !important;
+  display: block !important;
+}
 /* ========================================
    SIMPLIFIED VIEWPORT & RESPONSIVE DESIGN
    ======================================== */
