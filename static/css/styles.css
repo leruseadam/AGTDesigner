@@ -1,3 +1,18 @@
+/* Consistent group header font size for all headers in inventory and selected tags */
+.tag-group-header, .tag-group-header *,
+.tag-group-subheader, .tag-group-subheader *,
+.tag-group-label, .tag-group-label *,
+.tag-group-title, .tag-group-title *,
+.tag-group, .tag-group * {
+  font-size: 1.05rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.01em !important;
+  text-transform: none !important;
+  color: #fff !important;
+  opacity: 0.95 !important;
+  margin: 0.1rem 0 0.1rem 0 !important;
+  padding: 0.1rem 0.5rem 0.1rem 0.5rem !important;
+}
 /* Fix template dropdown and button sizing in center column */
 .control-panel .template-section select,
 .control-panel .template-section button {
