@@ -879,8 +879,8 @@ const VALID_PRODUCT_TYPES = [
 const debounce = (func, delay) => {
     let timeoutId;
     const perf = devicePerformance.get();
-    // Lower minimum delay for faster refresh
-    const optimizedDelay = Math.max(delay * perf.multiplier, devicePerformance.isSlow() ? 50 : 20);
+    // Increase debounce delay for slower devices to reduce UI lag
+    const optimizedDelay = Math.max(delay * perf.multiplier, devicePerformance.isSlow() ? 100 : 50);
     
     return function(...args) {
         const context = this;
@@ -1481,23 +1481,24 @@ const TagManager = {
             const sizeKB = (payloadStr.length / 1024).toFixed(1);
             const sizeMB = (payloadStr.length / (1024 * 1024)).toFixed(2);
 
-            // Always save to both localStorage and sessionStorage with both main and normalized keys
-            const normalizedKey = this.getNormalizedCacheKey();
-            const keysToWrite = [cacheKey];
-            if (normalizedKey && normalizedKey !== cacheKey) {
-                keysToWrite.push(normalizedKey);
-            }
-            [window.localStorage, window.sessionStorage].forEach(storageTarget => {
-                if (!storageTarget) return;
-                keysToWrite.forEach(key => {
+            // Try to save to localStorage (falls back to sessionStorage if needed)
+            try {
+                storage.setItem(cacheKey, payloadStr);
+                console.log(`💾 Cached ${tags.length} tags (${sizeKB}KB / ${sizeMB}MB) with key: ${cacheKey}`);
+
+                // CRITICAL FIX: Also save with a normalized key that ignores timestamp differences
+                const normalizedKey = this.getNormalizedCacheKey();
+                if (normalizedKey && normalizedKey !== cacheKey) {
                     try {
-                        storageTarget.setItem(key, payloadStr);
-                        console.log(`💾 Cached ${tags.length} tags (${sizeKB}KB / ${sizeMB}MB) with key: ${key} in ${storageTarget === window.localStorage ? 'localStorage' : 'sessionStorage'}`);
+                        storage.setItem(normalizedKey, payloadStr);
                     } catch (e) {
-                        // Ignore quota errors for sessionStorage
+                        // Normalized key is optional, ignore errors
                     }
-                });
-            });
+                }
+            } catch (quotaError) {
+                console.warn(`⚠️ Storage quota exceeded (${sizeMB}MB) - cache too large, skipping`);
+                console.warn(`   Data size: ${sizeMB}MB for ${tags.length} tags`);
+            }
 
             // Verify tags have database lineage before caching
             const sampleTag = tags && tags.length > 0 ? tags[0] : null;
@@ -4569,7 +4570,7 @@ const TagManager = {
     },
 
     // Debounced version of updateAvailableTags to prevent multiple rapid calls
-    // PERFORMANCE: Reduced debounce delay from 150ms to 50ms for even faster response
+    // PERFORMANCE: Reduced debounce delay from 300ms to 150ms for faster response
     debouncedUpdateAvailableTags: debounce(function(originalTags, filteredTags = null) {
         // CRITICAL FIX: Don't clear the list if we're actively refreshing after lineage updates
         // Only skip if there's a pending refresh timeout (active lineage update operation)
