@@ -1583,13 +1583,17 @@ def create_app():
     # Ensure PREFERRED_URL_SCHEME is set correctly for HTTPS
     app.config['PREFERRED_URL_SCHEME'] = 'https' if os.environ.get('HTTPS', '').lower() in ('on', 'true', '1') else 'http'
     
-    # Enable development mode for auto-reload and debug features
-    # ENABLED: Allow easy restart by enabling development mode by default
-    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'true').lower() == 'true'
-    
-    # Enable detailed logging for development
-    logging.getLogger().setLevel(logging.DEBUG)
-    logging.getLogger('werkzeug').setLevel(logging.DEBUG)
+    # Development mode toggle - set DEVELOPMENT_MODE=true in environment for dev features
+    # Default to false (production mode) for better performance on slow computers
+    app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'false').lower() == 'true'
+
+    # Logging level based on mode - WARNING for production, DEBUG for development
+    if app.config['DEVELOPMENT_MODE']:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger('werkzeug').setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(logging.WARNING)
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
     
     # Performance optimizations
     app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
