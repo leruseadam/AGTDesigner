@@ -1,3 +1,21 @@
+/* Ensure template dropdown and Generate Tags button match other center column buttons */
+.template-dropdown,
+#generate-tags-btn {
+  width: 100% !important;
+  max-width: 220px !important;
+  min-width: 160px !important;
+  margin: 0.15rem auto !important;
+  box-sizing: border-box !important;
+}
+
+/* If the dropdown uses a select element, target it as well */
+.template-dropdown select {
+  width: 100% !important;
+  max-width: 220px !important;
+  min-width: 160px !important;
+  margin: 0.15rem auto !important;
+  box-sizing: border-box !important;
+}
 /* Visually enhance tag list group headers in both lists */
 .tag-group-header, .tag-group-subheader, .tag-group-label, .tag-group-title, .group-header, .group-subheader, .group-label, .group-title {
   background: linear-gradient(90deg, rgba(160,132,232,0.12) 0%, rgba(60,45,75,0.18) 100%) !important;
