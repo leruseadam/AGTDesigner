@@ -11971,12 +11971,12 @@ html, body {
     color: #d0d0d0 !important;
 }
 
-/* Level 5: PRICE - Smallest */
+/* Level 5: PRICE - Smallest but still readable */
 .price-header,
 .price-header .price-title,
 .price-header .text-container,
 .price-header span:not(.collapse-icon):not(.badge) {
-    font-size: 0.95rem !important;
+    font-size: 1.0rem !important;
     font-weight: 500 !important;
     letter-spacing: 0 !important;
     text-transform: none !important;
@@ -12040,7 +12040,7 @@ html, body {
 
 #selectedTags .price-header,
 #selectedTags .price-header span:not(.collapse-icon):not(.badge) {
-    font-size: 0.85rem !important;
+    font-size: 0.95rem !important;
 }
 
 /* ============================================================================
