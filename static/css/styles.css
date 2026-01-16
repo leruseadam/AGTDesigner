@@ -11883,17 +11883,199 @@ html, body {
     #databaseModal .modal-body {
         padding: 1.5rem;
     }
-    
+
     .analytics-card-value {
         font-size: 2rem;
     }
-    
+
     .analytics-section-header {
         padding: 1rem;
     }
-    
+
     .analytics-section-body {
         padding: 1rem;
     }
+}
+
+/* ============================================================================
+   HIERARCHICAL HEADER FONT SIZES - CONSOLIDATED & CLEAN
+   Hierarchy: Vendor > Brand > Product Type > Weight > Price
+   Each level is progressively smaller for visual hierarchy
+   ============================================================================ */
+
+/* Reset all header font sizes to prevent conflicts */
+.vendor-header,
+.brand-header,
+.product-type-header,
+.subcategory-header,
+.weight-header,
+.price-header {
+    /* Base styling for all headers */
+    display: flex !important;
+    align-items: center !important;
+    gap: 0.5em !important;
+    padding: 0.4em 0.6em !important;
+    margin-bottom: 0.3em !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    transition: background-color 0.2s ease !important;
+}
+
+/* Level 1: VENDOR - Largest (top of hierarchy) */
+.vendor-header,
+.vendor-header .vendor-title,
+.vendor-header .text-container,
+.vendor-header span:not(.collapse-icon):not(.badge) {
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.04em !important;
+    text-transform: uppercase !important;
+    color: #ffffff !important;
+}
+
+/* Level 2: BRAND - Second largest */
+.brand-header,
+.brand-header .brand-title,
+.brand-header .text-container,
+.brand-header span:not(.collapse-icon):not(.badge) {
+    font-size: 1.3rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em !important;
+    text-transform: none !important;
+    color: #f0f0f0 !important;
+}
+
+/* Level 3: PRODUCT TYPE - Medium */
+.product-type-header,
+.product-type-header .type-title,
+.product-type-header .text-container,
+.product-type-header span:not(.collapse-icon):not(.badge),
+.subcategory-header,
+.subcategory-header span:not(.collapse-icon):not(.badge) {
+    font-size: 1.15rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.01em !important;
+    text-transform: none !important;
+    color: #e0e0e0 !important;
+}
+
+/* Level 4: WEIGHT - Smaller */
+.weight-header,
+.weight-header .weight-title,
+.weight-header .text-container,
+.weight-header span:not(.collapse-icon):not(.badge) {
+    font-size: 1.05rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    color: #d0d0d0 !important;
+}
+
+/* Level 5: PRICE - Smallest */
+.price-header,
+.price-header .price-title,
+.price-header .text-container,
+.price-header span:not(.collapse-icon):not(.badge) {
+    font-size: 0.95rem !important;
+    font-weight: 500 !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    color: #c0c0c0 !important;
+}
+
+/* Collapse icons should be consistent across all levels */
+.vendor-header .collapse-icon,
+.brand-header .collapse-icon,
+.product-type-header .collapse-icon,
+.subcategory-header .collapse-icon,
+.weight-header .collapse-icon,
+.price-header .collapse-icon {
+    font-size: 0.9em !important;
+    min-width: 1.2em !important;
+    text-align: center !important;
+    color: inherit !important;
+}
+
+/* Checkboxes consistent sizing */
+.vendor-header input[type="checkbox"],
+.brand-header input[type="checkbox"],
+.product-type-header input[type="checkbox"],
+.subcategory-header input[type="checkbox"],
+.weight-header input[type="checkbox"],
+.price-header input[type="checkbox"] {
+    width: 16px !important;
+    height: 16px !important;
+    flex-shrink: 0 !important;
+}
+
+/* Hover states - keep text white on hover */
+.vendor-header:hover { background: rgba(160, 132, 232, 0.15) !important; color: #ffffff !important; }
+.brand-header:hover { background: rgba(139, 126, 200, 0.12) !important; color: #f0f0f0 !important; }
+.product-type-header:hover, .subcategory-header:hover { background: rgba(124, 111, 176, 0.1) !important; color: #e0e0e0 !important; }
+.weight-header:hover { background: rgba(156, 163, 175, 0.08) !important; color: #d0d0d0 !important; }
+.price-header:hover { background: rgba(74, 222, 128, 0.08) !important; color: #c0c0c0 !important; }
+
+/* Selected Tags panel - slightly smaller to fit more */
+#selectedTags .vendor-header,
+#selectedTags .vendor-header .vendor-title,
+#selectedTags .vendor-header .text-container,
+#selectedTags .vendor-header span:not(.collapse-icon):not(.badge) {
+    font-size: 1.3rem !important;
+}
+
+#selectedTags .brand-header,
+#selectedTags .brand-header span:not(.collapse-icon):not(.badge) {
+    font-size: 1.15rem !important;
+}
+
+#selectedTags .product-type-header,
+#selectedTags .product-type-header span:not(.collapse-icon):not(.badge) {
+    font-size: 1.0rem !important;
+}
+
+#selectedTags .weight-header,
+#selectedTags .weight-header span:not(.collapse-icon):not(.badge) {
+    font-size: 0.9rem !important;
+}
+
+#selectedTags .price-header,
+#selectedTags .price-header span:not(.collapse-icon):not(.badge) {
+    font-size: 0.85rem !important;
+}
+
+/* ============================================================================
+   TEMPLATE SELECT & GENERATE BUTTON - Narrower and Taller
+   ============================================================================ */
+
+/* Template Select - narrower width, more height */
+#templateSelect,
+#templateSelectModal,
+.control-panel #templateSelect,
+.control-panel #templateSelectModal,
+.control-panel .form-select-modern {
+    width: 180px !important;
+    max-width: 180px !important;
+    min-width: 150px !important;
+    padding: 0.75rem 1rem !important;
+    font-size: 1rem !important;
+    height: auto !important;
+    min-height: 44px !important;
+    margin: 0.5rem auto !important;
+    display: block !important;
+}
+
+/* Generate Button - narrower width, more height */
+#generateBtn,
+.control-panel #generateBtn,
+.btn-generate-themed {
+    width: 180px !important;
+    max-width: 180px !important;
+    min-width: 150px !important;
+    padding: 0.85rem 1.2rem !important;
+    font-size: 1.05rem !important;
+    height: auto !important;
+    min-height: 48px !important;
+    margin: 0.75rem auto !important;
+    display: block !important;
 }
 

@@ -1302,6 +1302,10 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
                 elif self.template_type == 'mini':
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
+                elif self.template_type == 'preroll':
+                    self._expanded_template_buffer = self._expand_template_to_4x4_fixed_preroll(num_products)
+                elif self.template_type == 'inventory':
+                    self._expanded_template_buffer = self._expand_template_to_2x2_inventory()
                 
                 # Cache the expansion (create a copy since BytesIO is consumed)
                 if hasattr(self._expanded_template_buffer, 'getvalue'):
@@ -3623,13 +3627,17 @@ class TemplateProcessor:
                 import os
 
                 try:
-                    base_url = (request.host_url or '').rstrip('/')
+                    host_url = (request.host_url or '').rstrip('/')
+                    # Skip localhost URLs - they can't be used for printed QR codes
+                    if 'localhost' in host_url.lower() or '127.0.0.1' in host_url:
+                        base_url = ''
+                    else:
+                        base_url = host_url
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable, try multiple fallbacks
+                # If host_url is unavailable or localhost, try environment variable
                 if not base_url:
-                    # First try environment variable
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
 
                 # If still no base_url, try Flask config
@@ -3643,7 +3651,7 @@ class TemplateProcessor:
                 # Last resort: use production URL as default
                 if not base_url:
                     base_url = 'https://www.agtpricetags.com'
-                    self.logger.warning(f"No QR_BASE_URL configured, using default: {base_url}")
+                    self.logger.info(f"Using production QR_BASE_URL: {base_url}")
 
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
@@ -3657,10 +3665,10 @@ class TemplateProcessor:
                     # Fallback to group_id only if no vendor (backward compatibility)
                     qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
 
-                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
-                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
+                # Safety check: warn if localhost somehow got through (shouldn't happen with above logic)
                 if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
-                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
+                    self.logger.warning(f"QR URL contains localhost - this should not happen. Using production URL instead.")
+                    qr_url = f"https://www.agtpricetags.com/preroll-items/{group_id}?vendor={quote(vendor_clean) if vendor_clean else ''}"
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)

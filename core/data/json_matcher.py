@@ -710,7 +710,35 @@ def normalize_product_name(name):
 
 class JSONMatcher:
     """Handles JSON URL fetching and product matching functionality."""
-    
+
+    # Cannabis-specific word variations for better matching (singleton for all instances)
+    WORD_SYNONYMS = {
+        'cherry': ['cherry', 'cherries'], 'berry': ['berry', 'berries'],
+        'strawberry': ['strawberry', 'strawberries'], 'blueberry': ['blueberry', 'blueberries'],
+        'raspberry': ['raspberry', 'raspberries'], 'mango': ['mango', 'mangos', 'mangoes'],
+        'grape': ['grape', 'grapes'], 'apple': ['apple', 'apples'],
+        'orange': ['orange', 'oranges'], 'lemon': ['lemon', 'lemons'],
+        'lime': ['lime', 'limes'], 'peach': ['peach', 'peaches'],
+        'watermelon': ['watermelon', 'watermelons'], 'pineapple': ['pineapple', 'pineapples'],
+        'gummy': ['gummy', 'gummies', 'gummie'], 'chew': ['chew', 'chews', 'chewable', 'fruit chew', 'fruit chews'],
+        'ball': ['ball', 'balls', 'truffle'], 'bite': ['bite', 'bites'],
+        'cookie': ['cookie', 'cookies'], 'brownie': ['brownie', 'brownies'],
+        'chocolate': ['chocolate', 'chocolates'], 'candy': ['candy', 'candies'],
+        'capsule': ['capsule', 'capsules', 'caps', 'cap'], 'tincture': ['tincture', 'tinctures'],
+        'cartridge': ['cartridge', 'cartridges', 'cart', 'carts'],
+        'preroll': ['preroll', 'prerolls', 'pre-roll', 'pre-rolls', 'joint', 'joints'],
+        'flower': ['flower', 'flowers', 'bud', 'buds', 'nug', 'nugs'],
+        'sativa': ['sativa', 'sat'], 'indica': ['indica', 'ind'], 'hybrid': ['hybrid', 'hyb'],
+        'caramel': ['caramel', 'caramels'], 'vanilla': ['vanilla'],
+        'mint': ['mint', 'minty', 'peppermint'], 'pack': ['pack', 'pk', 'pck'],
+        'freeze': ['freeze', 'frozen', 'dried'], 'dried': ['dried', 'dry', 'freeze-dried'],
+    }
+    # Build reverse synonym lookup once at class level
+    SYNONYM_LOOKUP = {}
+    for _canonical, _variants in WORD_SYNONYMS.items():
+        for _variant in _variants:
+            SYNONYM_LOOKUP[_variant.lower()] = _canonical
+
     def __init__(self, excel_processor):
         self.excel_processor = excel_processor
         self._sheet_cache = None
@@ -722,6 +750,12 @@ class JSONMatcher:
         self._product_db_instance = None
         self._cached_store_name = None
         self._product_table_columns = None
+
+    def _canonicalize_word(self, word: str) -> str:
+        """Convert a word to its canonical form (e.g., 'cherries' -> 'cherry')."""
+        if not word:
+            return word
+        return self.SYNONYM_LOOKUP.get(word.lower(), word.lower())
 
     def _determine_store_name(self) -> str:
         """Determine the best store name to use for ProductDatabase operations."""
@@ -5979,65 +6013,66 @@ class JSONMatcher:
         return normalized.strip()
     
     def _find_keyword_matches(self, json_name_normalized: str, json_vendor: str, json_brand: str = None) -> List[dict]:
-        """Find matches based on key words and vendor match - helps with variations like 'Cherries' vs 'Cherry'"""
+        """Find matches based on key words and vendor match - uses canonicalization for variations like 'Cherries' vs 'Cherry'"""
         matches = []
         all_products = self._get_all_products()
-        
-        # Extract important words (exclude common short words)
+
+        # Extract important words (exclude common short words) and canonicalize them
         stop_words = {'by', 'the', 'and', 'or', 'of', 'in', 'a', 'an', 'for', 'to'}
-        json_words = [w.lower() for w in json_name_normalized.split() if len(w) >= 3 and w.lower() not in stop_words]
-        
+        json_words_raw = [w.lower() for w in json_name_normalized.split() if len(w) >= 3 and w.lower() not in stop_words]
+        json_words = [self._canonicalize_word(w) for w in json_words_raw]
+
         if not json_words:
             return []
-        
+
         for product in all_products:
             product_name = str(product.get('Product Name*', '')).strip()
             product_name_normalized = self._normalize_name(product_name)
-            
+
             if not product_name_normalized:
                 continue
-            
+
             # Require vendor match
             product_vendor = self._get_product_vendor(product).lower()
             if not self._validate_vendor_match(json_vendor, product_vendor):
                 continue
-            
-            # Extract product words
-            product_words = [w.lower() for w in product_name_normalized.split() if len(w) >= 3 and w.lower() not in stop_words]
-            
-            # Find shared words
+
+            # Extract product words and canonicalize them
+            product_words_raw = [w.lower() for w in product_name_normalized.split() if len(w) >= 3 and w.lower() not in stop_words]
+            product_words = [self._canonicalize_word(w) for w in product_words_raw]
+
+            # Find shared canonical words (this handles cherries/cherry, gummy/gummies, etc.)
             json_set = set(json_words)
             product_set = set(product_words)
             shared_words = json_set & product_set
-            
-            # Require at least 2 shared important words
-            if len(shared_words) >= 2:
-                # Calculate score based on shared words and word positions
+
+            # Lower threshold - only require 1 shared word if canonicalization helped
+            min_shared = 1 if len(json_set) <= 3 or len(product_set) <= 3 else 2
+            if len(shared_words) >= min_shared:
+                # Calculate score based on shared canonical words
                 word_score = len(shared_words) / max(len(json_set), len(product_set), 1)
-                
-                # Check for similar words (e.g., "cherries" vs "cherry")
-                similar_words = 0
-                for jw in json_words:
-                    for pw in product_words:
-                        # Check for exact match or similar (same root word)
-                        if jw == pw:
-                            similar_words += 1
-                        elif jw in pw or pw in jw:
-                            similar_words += 0.5
-                
-                final_score = (word_score + (similar_words / max(len(json_words), len(product_words), 1))) * 50
-                
+
+                # Bonus for partial word matches (e.g., "freeze" in "freeze-dried")
+                partial_bonus = 0
+                for jw in json_set - shared_words:
+                    for pw in product_set - shared_words:
+                        if len(jw) >= 4 and len(pw) >= 4:
+                            if jw in pw or pw in jw:
+                                partial_bonus += 0.3
+
+                final_score = (word_score + partial_bonus) * 60 + (len(shared_words) * 5)
+
                 # Require minimum score
-                if final_score >= 40:
+                if final_score >= 35:
                     match_dict = dict(product)
-                    match_dict['fuzzy_score'] = final_score
+                    match_dict['fuzzy_score'] = min(final_score, 95)  # Cap at 95 for keyword matches
                     match_dict['_original_json_name'] = json_name_normalized
                     match_dict['_match_type'] = 'keyword'
                     matches.append(match_dict)
-        
+
         # Sort by score descending
         matches.sort(key=lambda x: x.get('fuzzy_score', 0), reverse=True)
-        return matches[:3]  # Return top 3 matches
+        return matches[:5]  # Return top 5 matches for better coverage
     
     def _find_substring_matches(self, json_name_normalized: str, json_vendor: str = None, json_brand: str = None) -> List[dict]:
         """Find matches by checking if JSON name is a substring of database name or vice versa"""
@@ -6314,13 +6349,267 @@ class JSONMatcher:
             else:
                 logging.debug(f"❌ No general fuzzy match for '{json_name}' (threshold: 30)")
             
+            # Step 10: No exact match - try to INFER values from similar products in same vendor
+            # This creates a "generated" tag by borrowing attributes from similar products
+            if json_vendor:
+                inferred_product = self._generate_inferred_product(json_item)
+                if inferred_product:
+                    logging.info(f"✨ INFERRED PRODUCT: '{json_name}' - generated from similar vendor products")
+                    return inferred_product, 0.25, "Inferred from similar products"
+
             # No match found
             logging.debug(f"❌ NO MATCH FOUND: '{json_name}' - tried all matching strategies")
             return None, 0.0, "No suitable match found"
-            
+
         except Exception as e:
             logging.error(f"Error in intelligent_match_product: {e}")
             return None, 0.0, f"Error during matching: {str(e)}"
+
+    def _generate_inferred_product(self, json_item: dict) -> Optional[dict]:
+        """
+        Generate an inferred product tag by analyzing similar products from the same vendor.
+        Used when no direct match is found - borrows price, weight, lineage from similar items.
+
+        Returns a product dict with inferred values, or None if inference isn't possible.
+        """
+        try:
+            json_name = str(json_item.get("product_name", "")).strip()
+            json_vendor = str(json_item.get("vendor", "")).strip().lower()
+            json_type = str(json_item.get("product_type", "")).strip().lower()
+            json_weight = str(json_item.get("weight", "")).strip()
+
+            if not json_vendor:
+                return None
+
+            # Get all products from same vendor
+            all_products = self._get_all_products()
+            vendor_products = []
+            for p in all_products:
+                p_vendor = self._get_product_vendor(p).lower()
+                if self._validate_vendor_match(json_vendor, p_vendor):
+                    vendor_products.append(p)
+
+            if not vendor_products:
+                logging.debug(f"No vendor products found for inference: {json_vendor}")
+                return None
+
+            # Find most similar products by type and name keywords
+            similar_products = self._find_similar_for_inference(json_item, vendor_products)
+
+            if not similar_products:
+                # Fall back to any product from vendor with same type
+                similar_products = [p for p in vendor_products
+                                   if json_type and json_type in str(p.get('Product Type*', '')).lower()]
+                if not similar_products:
+                    similar_products = vendor_products[:5]  # Just use first 5 vendor products
+
+            # Infer values from similar products
+            inferred = self._infer_values_from_similar(json_item, similar_products)
+
+            if inferred:
+                # Mark this as an inferred/generated product
+                inferred['_inferred'] = True
+                inferred['_inferred_from'] = [p.get('Product Name*', '') for p in similar_products[:3]]
+                inferred['_match_type'] = 'inferred'
+                inferred['original_name'] = json_name  # Keep original name
+                logging.info(f"✨ Generated inferred product for '{json_name}' from {len(similar_products)} similar products")
+                return inferred
+
+            return None
+
+        except Exception as e:
+            logging.error(f"Error generating inferred product: {e}")
+            return None
+
+    def _find_similar_for_inference(self, json_item: dict, vendor_products: List[dict]) -> List[dict]:
+        """Find the most similar products for inference based on type and keywords."""
+        json_name = str(json_item.get("product_name", "")).strip().lower()
+        json_type = str(json_item.get("product_type", "")).strip().lower()
+
+        # Extract keywords from JSON name
+        stop_words = {'by', 'the', 'and', 'or', 'of', 'in', 'a', 'an', 'for', 'to', 'mg', 'pk', 'pack'}
+        json_words = set(self._canonicalize_word(w) for w in json_name.split()
+                        if len(w) >= 3 and w.lower() not in stop_words)
+
+        scored_products = []
+        for product in vendor_products:
+            score = 0
+            p_name = str(product.get('Product Name*', '')).lower()
+            p_type = str(product.get('Product Type*', '')).lower()
+
+            # Type match is important
+            if json_type and p_type:
+                if json_type in p_type or p_type in json_type:
+                    score += 30
+                # Check product type categories
+                type_categories = {
+                    'edible': ['edible', 'gummy', 'chew', 'chocolate', 'cookie', 'brownie', 'candy', 'ball', 'bite'],
+                    'flower': ['flower', 'bud', 'nug'],
+                    'vape': ['vape', 'cart', 'cartridge', 'disposable', 'pen'],
+                    'preroll': ['pre-roll', 'preroll', 'joint'],
+                    'concentrate': ['concentrate', 'wax', 'shatter', 'rosin', 'resin'],
+                    'tincture': ['tincture', 'drops', 'oil'],
+                    'topical': ['topical', 'cream', 'balm', 'lotion'],
+                }
+                for category, keywords in type_categories.items():
+                    json_has = any(k in json_type for k in keywords)
+                    product_has = any(k in p_type for k in keywords)
+                    if json_has and product_has:
+                        score += 20
+                        break
+
+            # Keyword overlap
+            p_words = set(self._canonicalize_word(w) for w in p_name.split()
+                         if len(w) >= 3 and w.lower() not in stop_words)
+            shared = json_words & p_words
+            score += len(shared) * 10
+
+            # Lineage match (sativa/indica/hybrid)
+            for lineage in ['sativa', 'indica', 'hybrid', 'mixed']:
+                if lineage in json_name and lineage in p_name:
+                    score += 15
+                    break
+
+            if score > 0:
+                scored_products.append((score, product))
+
+        # Sort by score descending and return top products
+        scored_products.sort(key=lambda x: x[0], reverse=True)
+        return [p for score, p in scored_products[:10]]
+
+    def _infer_values_from_similar(self, json_item: dict, similar_products: List[dict]) -> Optional[dict]:
+        """
+        Create an inferred product by borrowing values from similar products.
+        Prioritizes: price, weight, lineage from JSON if available, otherwise infers.
+        """
+        if not similar_products:
+            return None
+
+        json_name = str(json_item.get("product_name", "")).strip()
+        json_type = str(json_item.get("product_type", "")).strip()
+        json_weight = str(json_item.get("weight", "")).strip()
+        json_vendor = str(json_item.get("vendor", "")).strip()
+        json_price = json_item.get("price") or json_item.get("line_price")
+
+        # Start with the JSON data we have
+        inferred = {
+            'Product Name*': json_name,
+            'ProductName': json_name,
+            'Vendor/Supplier*': json_vendor,
+            'Product Type*': json_type if json_type else similar_products[0].get('Product Type*', 'Edible'),
+            '_source': 'inferred',
+            '_priority': 99,  # Lower priority than real matches
+        }
+
+        # Determine lineage - check JSON name first, then infer
+        lineage = self._determine_lineage(json_name, json_type, similar_products)
+        inferred['Cannabis Lineage'] = lineage
+
+        # Infer weight - use JSON weight if available, otherwise most common from similar
+        if json_weight:
+            inferred['Weight*'] = json_weight
+        else:
+            inferred['Weight*'] = self._infer_most_common_value(similar_products, 'Weight*', '1')
+
+        # Infer price - use JSON price if available, otherwise average from similar
+        if json_price:
+            inferred['Price*'] = str(json_price)
+            inferred['Price'] = str(json_price)
+        else:
+            avg_price = self._infer_average_price(similar_products)
+            inferred['Price*'] = avg_price
+            inferred['Price'] = avg_price
+
+        # Copy other common fields from most similar product
+        best_similar = similar_products[0]
+        fields_to_copy = ['Units', 'Product Brand', 'ProductBrand']
+        for field in fields_to_copy:
+            if field not in inferred or not inferred.get(field):
+                if best_similar.get(field):
+                    inferred[field] = best_similar[field]
+
+        # Set brand from vendor if not present
+        if not inferred.get('Product Brand'):
+            inferred['Product Brand'] = json_vendor
+            inferred['ProductBrand'] = json_vendor
+
+        return inferred
+
+    def _determine_lineage(self, product_name: str, product_type: str, similar_products: List[dict]) -> str:
+        """
+        Determine cannabis lineage from product name or infer from similar products.
+        Classic products default to 'Hybrid', non-classic to 'Mixed'.
+        """
+        name_lower = product_name.lower()
+        type_lower = (product_type or '').lower()
+
+        # Check for explicit lineage in name
+        if 'sativa' in name_lower or 'sat ' in name_lower:
+            return 'Sativa'
+        elif 'indica' in name_lower or 'ind ' in name_lower:
+            return 'Indica'
+        elif 'hybrid' in name_lower or 'hyb ' in name_lower:
+            return 'Hybrid'
+        elif 'mixed' in name_lower:
+            return 'Mixed'
+
+        # Determine if "classic" or "non-classic" based on product type
+        # Classic = Flower, Pre-rolls, Vapes (single strain products)
+        # Non-classic = Edibles, Tinctures, Topicals (multi-strain/processed)
+        classic_types = ['flower', 'bud', 'pre-roll', 'preroll', 'joint', 'vape', 'cart', 'cartridge']
+        non_classic_types = ['edible', 'gummy', 'chew', 'chocolate', 'tincture', 'topical', 'capsule', 'beverage']
+
+        is_classic = any(ct in type_lower or ct in name_lower for ct in classic_types)
+        is_non_classic = any(nct in type_lower or nct in name_lower for nct in non_classic_types)
+
+        if is_non_classic and not is_classic:
+            return 'Mixed'  # Non-classic defaults to Mixed
+        elif is_classic:
+            return 'Hybrid'  # Classic defaults to Hybrid
+
+        # If we can't determine, check similar products
+        lineage_counts = {}
+        for p in similar_products:
+            lin = str(p.get('Cannabis Lineage', '')).strip()
+            if lin:
+                lineage_counts[lin] = lineage_counts.get(lin, 0) + 1
+
+        if lineage_counts:
+            # Return most common lineage from similar products
+            return max(lineage_counts, key=lineage_counts.get)
+
+        # Final fallback
+        return 'Mixed' if is_non_classic else 'Hybrid'
+
+    def _infer_most_common_value(self, products: List[dict], field: str, default: str) -> str:
+        """Get the most common value for a field from a list of products."""
+        value_counts = {}
+        for p in products:
+            val = str(p.get(field, '')).strip()
+            if val:
+                value_counts[val] = value_counts.get(val, 0) + 1
+
+        if value_counts:
+            return max(value_counts, key=value_counts.get)
+        return default
+
+    def _infer_average_price(self, products: List[dict]) -> str:
+        """Calculate average price from similar products."""
+        prices = []
+        for p in products:
+            price_str = str(p.get('Price*', '') or p.get('Price', '')).strip()
+            # Extract numeric value
+            price_str = re.sub(r'[^\d.]', '', price_str)
+            try:
+                if price_str:
+                    prices.append(float(price_str))
+            except ValueError:
+                pass
+
+        if prices:
+            avg = sum(prices) / len(prices)
+            return f"{avg:.2f}"
+        return "25.00"  # Default price
     
     def _find_comprehensive_matches(self, json_item: dict) -> List[dict]:
         """
@@ -6690,14 +6979,44 @@ class JSONMatcher:
             return []
     
     def _calculate_name_similarity(self, name1: str, name2: str) -> float:
-        """Calculate name similarity with fuzzy matching."""
+        """Calculate name similarity with multiple algorithms and canonicalization."""
         if not name1 or not name2:
             return 0.0
-        
-        # Use fuzzy matching for names
+
+        name1_lower = name1.lower()
+        name2_lower = name2.lower()
+
+        # Exact match
+        if name1_lower == name2_lower:
+            return 1.0
+
         try:
             from fuzzywuzzy import fuzz
-            return fuzz.ratio(name1.lower(), name2.lower()) / 100.0
+
+            # Multiple fuzzy algorithms - take the best score
+            ratio = fuzz.ratio(name1_lower, name2_lower)
+            partial = fuzz.partial_ratio(name1_lower, name2_lower)
+            token_sort = fuzz.token_sort_ratio(name1_lower, name2_lower)
+            token_set = fuzz.token_set_ratio(name1_lower, name2_lower)
+
+            # Best fuzzy score
+            best_fuzzy = max(ratio, partial, token_sort, token_set) / 100.0
+
+            # Also check canonical word overlap for cases like "cherries" vs "cherry"
+            words1 = [self._canonicalize_word(w) for w in name1_lower.split() if len(w) >= 3]
+            words2 = [self._canonicalize_word(w) for w in name2_lower.split() if len(w) >= 3]
+
+            if words1 and words2:
+                set1, set2 = set(words1), set(words2)
+                overlap = len(set1 & set2)
+                jaccard = overlap / len(set1 | set2) if (set1 | set2) else 0
+
+                # Combine fuzzy and canonical similarity
+                combined = (best_fuzzy * 0.7) + (jaccard * 0.3)
+                return max(best_fuzzy, combined)
+
+            return best_fuzzy
+
         except ImportError:
             return self._calculate_text_similarity(name1, name2)
     

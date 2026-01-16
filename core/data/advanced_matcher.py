@@ -98,7 +98,50 @@ class AdvancedMatcher:
             'tincture': ['tincture', 'drops', 'liquid', 'oil'],
             'cartridge': ['cartridge', 'cart', 'vape', 'pen']
         }
-    
+
+        # Cannabis-specific word variations for better matching (singular/plural, abbreviations)
+        self.word_synonyms = {
+            'cherry': ['cherry', 'cherries'], 'berry': ['berry', 'berries'],
+            'strawberry': ['strawberry', 'strawberries'], 'blueberry': ['blueberry', 'blueberries'],
+            'raspberry': ['raspberry', 'raspberries'], 'mango': ['mango', 'mangos', 'mangoes'],
+            'grape': ['grape', 'grapes'], 'apple': ['apple', 'apples'],
+            'orange': ['orange', 'oranges'], 'lemon': ['lemon', 'lemons'],
+            'lime': ['lime', 'limes'], 'peach': ['peach', 'peaches'],
+            'watermelon': ['watermelon', 'watermelons'], 'pineapple': ['pineapple', 'pineapples'],
+            'gummy': ['gummy', 'gummies', 'gummie'], 'chew': ['chew', 'chews', 'chewable', 'fruit chew', 'fruit chews'],
+            'ball': ['ball', 'balls', 'truffle'], 'bite': ['bite', 'bites'],
+            'cookie': ['cookie', 'cookies'], 'brownie': ['brownie', 'brownies'],
+            'chocolate': ['chocolate', 'chocolates'], 'candy': ['candy', 'candies'],
+            'capsule': ['capsule', 'capsules', 'caps', 'cap'], 'tincture': ['tincture', 'tinctures'],
+            'cartridge': ['cartridge', 'cartridges', 'cart', 'carts'],
+            'preroll': ['preroll', 'prerolls', 'pre-roll', 'pre-rolls', 'joint', 'joints'],
+            'flower': ['flower', 'flowers', 'bud', 'buds', 'nug', 'nugs'],
+            'sativa': ['sativa', 'sat'], 'indica': ['indica', 'ind'], 'hybrid': ['hybrid', 'hyb'],
+            'caramel': ['caramel', 'caramels'], 'vanilla': ['vanilla'],
+            'mint': ['mint', 'minty', 'peppermint'], 'pack': ['pack', 'pk', 'pck'],
+            'freeze': ['freeze', 'frozen', 'dried'], 'dried': ['dried', 'dry', 'freeze-dried'],
+        }
+        # Build reverse synonym lookup for fast canonicalization
+        self.synonym_lookup = {}
+        for canonical, variants in self.word_synonyms.items():
+            for variant in variants:
+                self.synonym_lookup[variant.lower()] = canonical
+
+    def canonicalize_word(self, word: str) -> str:
+        """Convert a word to its canonical form using synonym lookup."""
+        if not word:
+            return word
+        word_lower = word.lower()
+        return self.synonym_lookup.get(word_lower, word_lower)
+
+    def canonicalize_text(self, text: str) -> str:
+        """Canonicalize all words in text to their base forms for better matching."""
+        if not text:
+            return ""
+        words = text.lower().split()
+        canonical_words = [self.canonicalize_word(w) for w in words]
+        return ' '.join(canonical_words)
+
     def normalize_text(self, text: str) -> str:
         """Normalize text for consistent matching."""
         if not isinstance(text, str):
@@ -364,42 +407,88 @@ class AdvancedMatcher:
         return 0.0
     
     def _calculate_keyword_similarity(self, str1: str, str2: str) -> float:
-        """Calculate keyword-based similarity."""
+        """Calculate keyword-based similarity with synonym/canonicalization support."""
         # Extract key terms (remove common words)
         common_words = {'the', 'and', 'or', 'for', 'with', 'by', 'from', 'to', 'of', 'in', 'on', 'at', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must', 'shall', 'a', 'an', 'as', 'if', 'it', 'this', 'that', 'these', 'those'}
-        
-        words1 = [w for w in str1.lower().split() if w not in common_words and len(w) >= 3]
-        words2 = [w for w in str2.lower().split() if w not in common_words and len(w) >= 3]
-        
+
+        # Canonicalize words to handle variations like "cherries" -> "cherry"
+        words1 = [self.canonicalize_word(w) for w in str1.lower().split() if w not in common_words and len(w) >= 3]
+        words2 = [self.canonicalize_word(w) for w in str2.lower().split() if w not in common_words and len(w) >= 3]
+
         if not words1 and not words2:
             return 100.0
         if not words1 or not words2:
             return 0.0
-        
-        matches = len(set(words1).intersection(set(words2)))
-        return (matches / max(len(words1), len(words2))) * 100.0
+
+        # Direct canonical matches
+        set1 = set(words1)
+        set2 = set(words2)
+        direct_matches = len(set1.intersection(set2))
+
+        # Also check for partial word matches (e.g., "freeze" in "freeze-dried")
+        partial_matches = 0
+        for w1 in set1:
+            for w2 in set2:
+                if w1 != w2 and len(w1) >= 4 and len(w2) >= 4:
+                    if w1 in w2 or w2 in w1:
+                        partial_matches += 0.5
+
+        total_matches = direct_matches + partial_matches
+        return (total_matches / max(len(words1), len(words2))) * 100.0
     
+    def _normalize_weight_to_grams(self, value: float, unit: str) -> float:
+        """Convert weight to grams for comparison."""
+        unit = unit.lower()
+        if unit in ['oz', 'ounce', 'ounces']:
+            return value * 28.35
+        elif unit in ['lb', 'pound', 'pounds']:
+            return value * 453.592
+        elif unit in ['mg', 'milligram', 'milligrams']:
+            return value / 1000.0
+        return value  # Assume grams
+
     def _calculate_weight_pattern_score(self, str1: str, str2: str) -> float:
-        """Calculate weight/size pattern matching score."""
-        import re
-        
-        # Extract weight patterns (e.g., "3.5g", "28g", "1oz", "2oz")
-        weight_pattern = r'(\d+(?:\.\d+)?)\s*(g|oz|gram|ounce|lb|pound)'
-        
-        weights1 = re.findall(weight_pattern, str1.lower())
-        weights2 = re.findall(weight_pattern, str2.lower())
-        
+        """Calculate weight/size pattern matching score with unit conversion."""
+        # Extract weight patterns (e.g., "3.5g", "28g", "1oz", "1/8oz")
+        weight_pattern = r'(\d+(?:\.\d+)?)\s*(g|oz|gram|ounce|mg|lb|pound)'
+        fraction_pattern = r'(1/8|1/4|1/2)\s*(oz|ounce)?'
+
+        # Fraction to gram mappings
+        fraction_to_grams = {'1/8': 3.5, '1/4': 7.0, '1/2': 14.0}
+
+        def extract_weights_in_grams(text: str) -> list:
+            """Extract all weights and convert to grams."""
+            weights = []
+            text_lower = text.lower()
+
+            # Check fractions first
+            for frac_match in re.finditer(fraction_pattern, text_lower):
+                frac = frac_match.group(1)
+                if frac in fraction_to_grams:
+                    weights.append(fraction_to_grams[frac])
+
+            # Check numeric weights
+            for match in re.finditer(weight_pattern, text_lower):
+                value = float(match.group(1))
+                unit = match.group(2)
+                weights.append(self._normalize_weight_to_grams(value, unit))
+
+            return weights
+
+        weights1 = extract_weights_in_grams(str1)
+        weights2 = extract_weights_in_grams(str2)
+
         if not weights1 and not weights2:
             return 50.0  # Neutral score if no weights found
         if not weights1 or not weights2:
             return 0.0
-        
-        # Check if any weights match
+
+        # Check if any weights match (with small tolerance for rounding)
         for w1 in weights1:
             for w2 in weights2:
-                if w1 == w2:
+                if abs(w1 - w2) < 0.5:  # Within 0.5g tolerance
                     return 100.0
-        
+
         return 0.0
     
     def _calculate_type_pattern_score(self, str1: str, str2: str, json_item: Dict, candidate: Dict) -> float:
