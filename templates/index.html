@@ -287,6 +287,16 @@
 
       console.log('User confirmed - clearing caches...');
 
+      // Instantly clear tag list from UI for immediate feedback
+      var availableTagsContainer = document.getElementById('availableTags');
+      if (availableTagsContainer) {
+        availableTagsContainer.innerHTML = '';
+      }
+      if (window.TagManager && window.TagManager.state) {
+        window.TagManager.state.tags = [];
+        window.TagManager.state.originalTags = [];
+      }
+
       try {
         // Clear localStorage
         if (window.localStorage) {
