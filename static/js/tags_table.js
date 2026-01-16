@@ -1754,11 +1754,17 @@ class TagsTable {
               item.dataset.lineage = newLineage;
           });
 
-          // Refresh available tags from backend to ensure UI shows updated lineage
+          // CRITICAL: Set lineage update time in both sessionStorage and localStorage
+          const updateTime = Date.now().toString();
+          sessionStorage.setItem('lastLineageUpdateTime', updateTime);
+          localStorage.setItem('lastLineageUpdateTime', updateTime);
+          console.log('✅ Saved lineage update timestamp after lineage change');
+
+          // Force reload tags from backend to ensure all users (including new computers) see latest lineage
           if (typeof TagManager !== 'undefined' && TagManager.fetchAndUpdateAvailableTags) {
             try {
-              console.log('Refreshing available tags to show updated lineage...');
-              await TagManager.fetchAndUpdateAvailableTags();
+              console.log('Refreshing available tags to show updated lineage (force reload)...');
+              await TagManager.fetchAndUpdateAvailableTags(true);
               console.log('Available tags refreshed successfully');
             } catch (refreshError) {
               console.warn('Failed to refresh available tags:', refreshError);
