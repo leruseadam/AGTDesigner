@@ -315,16 +315,27 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # group_key format: "group_id" or "group_id|vendor"
         original_group_id = group_info['group_id']
         
-        # Use the first record as representative
-        representative = group_records_list[0].copy()
-        
-        # Update ALL fields that might be displayed on the label to show group display name
+        # Create a fresh representative record for the group to avoid accidental reuse
+        # and to ensure the label displays the group display name consistently.
+        first_rec = group_records_list[0]
+        representative = {}
         group_display_name = group_info['display_name']
+
+        # Display fields should reflect the group display name
         representative['Description'] = group_display_name
         representative['Product Name*'] = group_display_name
         representative['ProductName'] = group_display_name
-        # Also update DescAndWeight - use group name only (no individual product details)
         representative['DescAndWeight'] = group_display_name
+
+        # Preserve sensible defaults from the first record for vendor/brand/strain/lineage
+        representative['Vendor/Supplier*'] = first_rec.get('Vendor/Supplier*', first_rec.get('Vendor', first_rec.get('Vendor/Supplier', '')))
+        representative['Vendor'] = representative.get('Vendor/Supplier*')
+        representative['Product Brand'] = first_rec.get('Product Brand', first_rec.get('ProductBrand', first_rec.get('Brand', '')))
+        representative['ProductBrand'] = representative.get('Product Brand')
+        representative['Product Strain'] = first_rec.get('Product Strain', '')
+        representative['Lineage'] = first_rec.get('Lineage', '')
+        representative['Product Type*'] = first_rec.get('Product Type*', first_rec.get('ProductType', ''))
+        representative['ProductType'] = representative.get('Product Type*')
         
         # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
         # Check if this is an infused preroll group and set Product Type* accordingly
@@ -353,7 +364,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             logging.info(f"PREROLL GROUP REP: Updated representative record fields to '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
         
         # Keep the price from the first record (or could average/use min/max - using first for now)
-        original_price = representative.get('Price', '')
+        original_price = first_rec.get('Price', representative.get('Price', ''))
         # Ensure price is formatted correctly
         if original_price and str(original_price).strip():
             if not str(original_price).startswith('$'):
@@ -372,8 +383,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         representative['_group_info'] = group_info
         # Store the full group_key (with vendor) for reference
         representative['_group_key'] = group_key
-        
-        unique_records.append(representative)
+
+        # Append a deep copy to ensure later mutations do not affect stored entries
+        from copy import deepcopy
+        unique_records.append(deepcopy(representative))
         
         # Store items for this group in cache (for QR code page) - use ALL original records
         # But filter by allowed brands if configured
@@ -424,12 +437,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         
         # Store group items in cache using the full group_key (includes vendor) to avoid collisions
         # This ensures each vendor's products are stored separately even if they have the same category
-        cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
+        # Store a deep copy in cache to avoid accidental mutations later
+        cache.set(f"preroll_group_{session_id}_{group_key}", deepcopy(group_items), timeout=86400)
         # CRITICAL FIX: Also store with session-independent key so QR codes work across sessions
         # Use group_key (with vendor) to ensure vendor-specific QR codes work correctly
-        cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
+        cache.set(f"preroll_group_latest_{group_key}", deepcopy(group_items), timeout=86400)
         # Also store with original group_id for backward compatibility (may overwrite, but that's OK for QR codes)
-        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
+        cache.set(f"preroll_group_latest_{original_group_id}", deepcopy(group_items), timeout=86400)
         # Also store group info for display purposes
         cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
         cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)

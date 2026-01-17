@@ -1544,7 +1544,8 @@ class TemplateProcessor:
                     return rendered_doc
                 
                 # Apply lineage colors last to ensure they are not overwritten
-                apply_lineage_colors(rendered_doc)
+                from src.core.generation.docx_formatting import apply_lineage_colors
+                apply_lineage_colors(rendered_doc, self.template_type)
                 
                 # Apply final marker cleanup for all templates
                 self._final_marker_cleanup(rendered_doc)

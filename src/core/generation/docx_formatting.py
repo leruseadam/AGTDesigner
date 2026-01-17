@@ -31,7 +31,7 @@ def debug_lineage_data(records):
         strain = record.get('Product Strain', record.get('strain', ''))
         logger.info(f"  Record {i+1}: '{product_name}' | Lineage: '{lineage}' | Type: '{product_type}' | Strain: '{strain}'")
 
-def apply_lineage_colors(doc):
+def apply_lineage_colors(doc, template_type=None):
     """Apply lineage colors to all cells based on keywords in cell text."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -46,6 +46,11 @@ def apply_lineage_colors(doc):
                 for cell in row.cells:
                     cells_processed += 1
                     original_text = cell.text.upper()  # Keep original text to check for markers
+                    # If this is a preroll template, avoid coloring product brand center cells
+                    if template_type and str(template_type).lower() == 'preroll':
+                        if 'PRODUCTBRAND_CENTER' in original_text:
+                            # Skip coloring/processing for preroll brand-center cells
+                            continue
                     lineage_hint_value = None
                     lineage_hint_token = None
                     hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s]+)__")
