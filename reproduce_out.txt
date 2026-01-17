@@ -1,0 +1,18 @@
+ERROR:root:PREROLL DB: Error storing group in database: No module named 'requests'
+ERROR:root:PREROLL DB: Error storing group in database: No module named 'requests'
+ERROR:root:PREROLL DB: Error storing group in database: No module named 'requests'
+ERROR:root:PREROLL DB: Error storing group in database: No module named 'requests'
+ERROR:root:PREROLL DB: Error storing group in database: No module named 'requests'
+ERROR:root:PREROLL DB: Error storing group in database: No module named 'requests'
+/Users/adamcordova/Desktop/labelMaker_ QR copy final/src/core/generation/template_processor.py:491: FutureWarning: Truth-testing of elements was a source of confusion and will always return True in future versions. Use specific 'len(elem)' or 'elem is not None' test instead.
+  tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+/Users/adamcordova/Desktop/labelMaker_ QR copy final/src/core/generation/template_processor.py:679: FutureWarning: Truth-testing of elements was a source of confusion and will always return True in future versions. Use specific 'len(elem)' or 'elem is not None' test instead.
+  tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
+Grouped count: 6
+Group: Assorted Pre-Roll‑ 5g x 14 Packs Vendor: HUSTLER'S AMBITION Price: $28
+Group: Assorted Pre-Roll‑ 5g x 14 Packs Vendor: VENDOR B Price: $28
+Group: Assorted Pre-Roll‑ 5g x 14 Packs Vendor: VENDOR C Price: $28
+Group: Assorted Pre-Roll‑ 5g x 14 Packs Vendor: VENDOR D Price: $28
+Group: Assorted Pre-Roll‑ 5g x 14 Packs Vendor: VENDOR E Price: $28
+Group: Assorted Pre-Roll‑ 5g x 14 Packs Vendor: VENDOR F Price: $28
+Wrote test_preroll_output.docx

@@ -1513,8 +1513,10 @@ class TemplateProcessor:
                 doc.save(buffer)
                 # Ensure rendered .docx is editable (remove protection flags from settings.xml)
                 try:
-                    from src.core.generation.docx_formatting import make_docx_editable_bytes
+                    from src.core.generation.docx_formatting import make_docx_editable_bytes, sanitize_embedded_xml_in_docx_bytes
                     fixed_bytes = make_docx_editable_bytes(buffer.getvalue())
+                    # Also sanitize accidental embedded XML-in-text artifacts
+                    fixed_bytes = sanitize_embedded_xml_in_docx_bytes(fixed_bytes)
                     buffer = BytesIO(fixed_bytes)
                 except Exception:
                     # If anything goes wrong, continue with original buffer

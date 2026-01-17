@@ -5,6 +5,9 @@ from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT, WD_CELL_VERT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import logging
 import re
+from io import BytesIO
+from zipfile import ZipFile
+from xml.sax.saxutils import escape as xml_escape
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +386,52 @@ def _final_lineage_cleanup_after_coloring(doc):
         
     except Exception as e:
         logger.warning(f"Error in final lineage cleanup after coloring: {e}")
+
+
+def sanitize_embedded_xml_in_docx_bytes(docx_bytes: bytes) -> bytes:
+    """Sanitize docx bytes by removing accidental raw XML inserted into text nodes.
+
+    This searches for <w:t> elements that contain literal '<w:' sequences (indicating
+    embedded Word XML placed as text) and trims the content at the first '<', keeping
+    only the visible text before the embedded XML. Returns new docx bytes.
+    """
+    try:
+        bio = BytesIO(docx_bytes)
+        with ZipFile(bio, 'r') as zin:
+            names = zin.namelist()
+            files = {name: zin.read(name) for name in names}
+
+        if 'word/document.xml' not in files:
+            return docx_bytes
+
+        doc_xml = files['word/document.xml'].decode('utf-8')
+
+        # Replace any <w:t>...</w:t> where the inner text contains raw '<w:'
+        def _fix(match):
+            open_tag = match.group(1)
+            inner = match.group(2)
+            close_tag = match.group(3)
+            if '<w:' in inner:
+                # Keep only visible text before the embedded XML
+                visible = inner.split('<', 1)[0]
+                return f"{open_tag}{xml_escape(visible)}{close_tag}"
+            return match.group(0)
+
+        new_doc_xml = re.sub(r'(<w:t[^>]*>)(.*?)(</w:t>)', _fix, doc_xml, flags=re.DOTALL)
+
+        # Write back modified document.xml into a new bytes buffer
+        out = BytesIO()
+        with ZipFile(out, 'w') as zout:
+            for name, data in files.items():
+                if name == 'word/document.xml':
+                    zout.writestr(name, new_doc_xml.encode('utf-8'))
+                else:
+                    zout.writestr(name, data)
+
+        return out.getvalue()
+    except Exception:
+        logger.exception('Failed to sanitize embedded XML in docx bytes')
+        return docx_bytes
 
 def fix_table_row_heights(doc, template_type):
     """Fix table row heights based on template type using CELL_DIMENSIONS constants."""
