@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 # Cache resolved default file paths to avoid repeated filesystem scans
 DEFAULT_FILE_CACHE: Dict[str, str] = {}
 
+# Version token for tag caching logic used by tests and cache invalidation
+TAGS_CACHE_VERSION = 1
+
 # Add at the top of the file (after imports)
 VALID_LINEAGES = [
     "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA"
