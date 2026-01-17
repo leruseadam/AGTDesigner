@@ -31,7 +31,7 @@ def debug_lineage_data(records):
         strain = record.get('Product Strain', record.get('strain', ''))
         logger.info(f"  Record {i+1}: '{product_name}' | Lineage: '{lineage}' | Type: '{product_type}' | Strain: '{strain}'")
 
-def apply_lineage_colors(doc, template_type=None):
+def apply_lineage_colors(doc):
     """Apply lineage colors to all cells based on keywords in cell text."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -45,8 +45,7 @@ def apply_lineage_colors(doc, template_type=None):
             for row in table.rows:
                 for cell in row.cells:
                     cells_processed += 1
-                    raw_text = cell.text.upper()
-                    original_text = raw_text  # Keep original text to check for markers
+                    original_text = cell.text.upper()  # Keep original text to check for markers
                     lineage_hint_value = None
                     lineage_hint_token = None
                     hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s]+)__")
@@ -55,11 +54,6 @@ def apply_lineage_colors(doc, template_type=None):
                         lineage_hint_value = hint_match.group(1).strip()
                         lineage_hint_token = hint_match.group(0)
                         original_text = original_text.replace(lineage_hint_token, "")
-
-                    # For preroll templates, do not apply lineage coloring to brand-center cells
-                    if template_type == 'preroll' and 'PRODUCTBRAND_CENTER' in raw_text:
-                        # Skip coloring/processing for preroll brand-center cells
-                        continue
                     
                     # CRITICAL FIX: Skip blank cells - don't apply any background color
                     if not original_text.strip() or original_text.strip() == '':

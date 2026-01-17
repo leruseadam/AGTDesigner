@@ -230,19 +230,6 @@ def make_nonbreaking_hyphens(text):
 
     return text
 
-def make_nonbreaking_weight_units(text):
-    """
-    Ensure weight/unit pairs don't break between number and unit by replacing the
-    separator with a non-breaking space. Examples: '7g' -> '7\u00A0g', '7 g' -> '7\u00A0g'.
-    """
-    if not text or not isinstance(text, str):
-        return text
-
-    # Common weight/volume/unit abbreviations
-    units = r'g|mg|kg|oz|ml|l|ct|pack|pk|pcs|pc'
-    pattern = re.compile(rf"(\d+(?:[\.,]\d+)?)(?:\s*)({units})\b", flags=re.IGNORECASE)
-    return pattern.sub(lambda m: f"{m.group(1)}\u00A0{m.group(2)}", text)
-
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
     """Replace placeholder text with marked content in a document."""
     for table in doc.tables:
