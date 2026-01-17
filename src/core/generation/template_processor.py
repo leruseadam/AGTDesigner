@@ -1511,6 +1511,14 @@ class TemplateProcessor:
                 # CRITICAL FIX: Remove unmerged placeholders immediately after render
                 buffer = BytesIO()
                 doc.save(buffer)
+                # Ensure rendered .docx is editable (remove protection flags from settings.xml)
+                try:
+                    from src.core.generation.docx_formatting import make_docx_editable_bytes
+                    fixed_bytes = make_docx_editable_bytes(buffer.getvalue())
+                    buffer = BytesIO(fixed_bytes)
+                except Exception:
+                    # If anything goes wrong, continue with original buffer
+                    buffer.seek(0)
                 buffer.seek(0)
                 rendered_doc = Document(buffer)
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))

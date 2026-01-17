@@ -398,6 +398,9 @@ def fix_table_row_heights(doc, template_type):
                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         logger.debug(f"Fixed table row heights for template type: {template_type} to {row_height} inches")
         return doc
+
+
+    # make_docx_editable_bytes moved to module-level below to avoid nesting inside try/except
     except Exception as e:
         logger.error(f"Error fixing table row heights: {str(e)}")
         raise
@@ -422,6 +425,55 @@ def safe_fix_paragraph_spacing(doc):
     except Exception as e:
         logger.error(f"Error in safe_fix_paragraph_spacing: {str(e)}")
         raise
+
+
+def make_docx_editable_bytes(docx_bytes: bytes) -> bytes:
+    """Remove common protection/read-only elements from a .docx (zip) bytes so the
+    resulting file is editable immediately in Word.
+
+    This strips elements from `word/settings.xml` such as `w:documentProtection`,
+    `w:readOnlyRecommended`, and `w:writeProtection`.
+    """
+    import io
+    import zipfile
+    try:
+        from xml.etree import ElementTree as ET
+    except Exception:
+        import xml.etree.ElementTree as ET
+
+    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    REMOVE_TAGS = {
+        f"{{{W_NS}}}documentProtection",
+        f"{{{W_NS}}}readOnlyRecommended",
+        f"{{{W_NS}}}writeProtection",
+        f"{{{W_NS}}}locked",
+        f"{{{W_NS}}}editRestrictions",
+    }
+
+    zin = zipfile.ZipFile(io.BytesIO(docx_bytes), 'r')
+    files = {name: zin.read(name) for name in zin.namelist()}
+    zin.close()
+
+    if 'word/settings.xml' in files:
+        try:
+            root = ET.fromstring(files['word/settings.xml'])
+            changed = False
+            for child in list(root):
+                if child.tag in REMOVE_TAGS:
+                    root.remove(child)
+                    changed = True
+            if changed:
+                files['word/settings.xml'] = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+        except Exception:
+            # If parsing fails for any reason, don't block generation — return original bytes
+            return docx_bytes
+
+    out_buf = io.BytesIO()
+    with zipfile.ZipFile(out_buf, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
+        for name, data in files.items():
+            zout.writestr(name, data)
+
+    return out_buf.getvalue()
 
 def apply_conditional_formatting(doc, conditions=None):
     """
