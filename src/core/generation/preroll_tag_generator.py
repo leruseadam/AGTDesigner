@@ -367,15 +367,23 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         original_price = first_rec.get('Price', representative.get('Price', ''))
         # Ensure price is formatted correctly
         if original_price and str(original_price).strip():
-            if not str(original_price).startswith('$'):
-                try:
-                    price_val = float(str(original_price).replace('$', '').replace(',', '').strip())
+            price_str = str(original_price).strip()
+            try:
+                # If price already includes a dollar sign, use as-is
+                if price_str.startswith('$'):
+                    representative['Price'] = price_str
+                else:
+                    price_val = float(price_str.replace('$', '').replace(',', '').strip())
                     if price_val.is_integer():
                         representative['Price'] = f"${int(price_val)}"
                     else:
                         representative['Price'] = f"${price_val:.2f}".rstrip('0').rstrip('.')
-                except:
-                    representative['Price'] = f"${original_price}" if not str(original_price).startswith('$') else str(original_price)
+            except Exception:
+                # Fallback: prefix with $ if missing
+                if price_str.startswith('$'):
+                    representative['Price'] = price_str
+                else:
+                    representative['Price'] = f"${price_str}"
         
         # Store group_id and group_info for QR code generation
         # Use the original group_id (without vendor) for cache keys to maintain compatibility
