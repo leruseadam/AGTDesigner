@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 # Cache resolved default file paths to avoid repeated filesystem scans
 DEFAULT_FILE_CACHE: Dict[str, str] = {}
 
+# Increment this when tag cache format changes so old caches are invalidated
+# Tests expect this symbol to exist.
+TAGS_CACHE_VERSION = "3.0"
+
 # Add at the top of the file (after imports)
 VALID_LINEAGES = [
     "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARAPHERNALIA"

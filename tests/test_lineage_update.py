@@ -5,6 +5,11 @@ Run this to test if updates are working
 """
 import sqlite3
 import sys
+import pytest
+
+# This file is an interactive script for manual lineage updates and should be
+# skipped during automated pytest runs.
+pytest.skip("Skipping interactive lineage update script during automated tests", allow_module_level=True)
 
 db_path = "uploads/product_database_AGT_Bothell.db"
 

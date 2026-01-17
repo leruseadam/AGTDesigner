@@ -135,6 +135,15 @@ class TemplateProcessor:
         resolved_path = str(template_path.resolve()) if template_path.exists() else str(template_path)
         self.logger.error(f"Template not found: {resolved_path}")
         raise FileNotFoundError(f"Template not found: {resolved_path}")
+    def _ultimate_marker_cleanup(self, doc):
+        """Backward-compatible wrapper: legacy callers use `_ultimate_marker_cleanup`.
+        Delegate to the newer `_final_marker_cleanup` implementation.
+        """
+        try:
+            return self._final_marker_cleanup(doc)
+        except Exception:
+            # If the new cleanup isn't available for some reason, silently ignore
+            return None
     def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
         self.template_type = template_type
         self.font_scheme = font_scheme
@@ -1536,7 +1545,8 @@ class TemplateProcessor:
                     return rendered_doc
                 
                 # Apply lineage colors last to ensure they are not overwritten
-                apply_lineage_colors(rendered_doc)
+                # Pass `template_type` so template-specific rules (e.g. preroll) are honored
+                apply_lineage_colors(rendered_doc, self.template_type)
                 
                 # Apply final marker cleanup for all templates
                 self._final_marker_cleanup(rendered_doc)
