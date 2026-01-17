@@ -4798,6 +4798,37 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error in final lineage cleanup: {e}")
 
+    def _ultimate_marker_cleanup(self, doc):
+        """
+        Backwards-compatible wrapper used by tests and older callers.
+        Runs the enhanced final marker cleanup and then performs a lightweight
+        pass to remove any remaining START/END marker tokens.
+        """
+        try:
+            # Run the comprehensive cleanup first
+            if hasattr(self, '_final_marker_cleanup'):
+                self._final_marker_cleanup(doc)
+
+            # Lightweight second pass: remove any remaining _START/_END fragments
+            short_pattern = re.compile(r"\b\w+_(?:START|END)\b", flags=re.IGNORECASE)
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            for run in para.runs:
+                                new_text = short_pattern.sub('', run.text)
+                                if new_text != run.text:
+                                    run.text = new_text
+
+            for para in doc.paragraphs:
+                for run in para.runs:
+                    new_text = short_pattern.sub('', run.text)
+                    if new_text != run.text:
+                        run.text = new_text
+
+        except Exception as e:
+            self.logger.warning(f"Error in ultimate marker cleanup: {e}")
+
     def _clear_blank_cells_in_mini_template(self, doc):
         """
         Clear blank cells in mini templates when they run out of values.

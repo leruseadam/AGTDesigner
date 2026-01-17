@@ -8,8 +8,8 @@ import sys
 
 db_path = "uploads/product_database_AGT_Bothell.db"
 
-def test_update(product_name, new_lineage):
-    """Test updating a product's lineage"""
+def run_update(product_name, new_lineage):
+    """Run updating a product's lineage (not a pytest test)."""
     print(f"\n{'='*60}")
     print(f"Testing update for: {product_name}")
     print(f"New lineage: {new_lineage}")
@@ -119,4 +119,4 @@ if __name__ == "__main__":
     product_name = sys.argv[1]
     new_lineage = sys.argv[2]
 
-    test_update(product_name, new_lineage)
+    run_update(product_name, new_lineage)

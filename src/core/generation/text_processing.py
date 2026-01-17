@@ -245,7 +245,8 @@ def make_nonbreaking_weight_units(text):
     # Units commonly used in product weights
     units = r'(g|mg|kg|oz|ounce|ounces|ml|l|ct|pack|packs|pk|pcs|pc)'
     # Replace any occurrence of a number (integer or decimal) followed by optional spaces and a unit
-    return re.sub(rf'(\d+(?:\.\d+)?)\s+{units}\b', r'\1\u00A0\2', text, flags=re.IGNORECASE)
+    pattern = re.compile(rf'(\d+(?:\.\d+)?)\s+{units}\b', flags=re.IGNORECASE)
+    return pattern.sub(lambda m: f"{m.group(1)}\u00A0{m.group(2)}", text)
 
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
     """Replace placeholder text with marked content in a document."""
