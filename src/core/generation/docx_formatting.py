@@ -54,6 +54,43 @@ def apply_lineage_colors(doc):
                         lineage_hint_value = hint_match.group(1).strip()
                         lineage_hint_token = hint_match.group(0)
                         original_text = original_text.replace(lineage_hint_token, "")
+
+                    # If this cell is a brand cell (contains PRODUCTBRAND markers), ensure background is preserved
+                    # and brand font is white. If background is missing or white, set a navy background.
+                    cell_text_upper = cell.text.upper() if cell.text else ''
+                    if "PRODUCTBRAND_CENTER_START" in cell_text_upper or "PRODUCTBRAND_CENTER_END" in cell_text_upper:
+                        try:
+                            tc = cell._tc
+                            tcPr = tc.get_or_add_tcPr()
+                            shd = tcPr.find(qn('w:shd'))
+                            current_fill = None
+                            if shd is not None:
+                                current_fill = shd.get(qn('w:fill'))
+
+                            # If no background or background is white, set navy
+                            if not current_fill or (isinstance(current_fill, str) and current_fill.upper() == 'FFFFFF'):
+                                for old_shd in tcPr.findall(qn('w:shd')):
+                                    tcPr.remove(old_shd)
+                                new_shd = OxmlElement('w:shd')
+                                new_shd.set(qn('w:fill'), '1A2A4B')
+                                new_shd.set(qn('w:val'), 'clear')
+                                new_shd.set(qn('w:color'), 'auto')
+                                tcPr.append(new_shd)
+
+                            # Ensure runs are white and bold, preserve font size
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    existing_font_size = run.font.size
+                                    run.font.color.rgb = RGBColor(255, 255, 255)
+                                    run.font.bold = True
+                                    run.font.name = "Arial"
+                                    if existing_font_size is not None:
+                                        run.font.size = existing_font_size
+                            colors_applied += 1
+                            continue
+                        except Exception:
+                            # If anything goes wrong, continue with normal processing
+                            pass
                     
                     # CRITICAL FIX: Skip blank cells - don't apply any background color
                     # BUT: If this is a brand cell (contains PRODUCTBRAND_CENTER_START/END), do NOT clear background
