@@ -4220,6 +4220,8 @@ const TagManager = {
     },
 
     organizeBrandCategories(tags) {
+        // Defensive: ensure tags is always an array to avoid runtime errors
+        tags = tags || [];
         console.log('🔧 organizeBrandCategories() called with', tags.length, 'tags');
         console.log('📍 Call stack:', new Error().stack);
 
@@ -16746,6 +16748,16 @@ const TagManager = {
         
         // Update select all checkboxes state
         this.updateSelectAllCheckboxes();
+
+        // Ensure displayed elements have their lineage attributes synced with state
+        // This fixes cases where bulk select/filter flows leave data-lineage unset
+        if (typeof this.alignDisplayedLineagesWithTags === 'function') {
+            try {
+                this.alignDisplayedLineagesWithTags();
+            } catch (err) {
+                console.warn('Error aligning displayed lineages:', err);
+            }
+        }
     },
 
     // Update select all checkboxes state

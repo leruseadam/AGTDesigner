@@ -20425,6 +20425,27 @@ def update_preroll_items_from_excel(df, session_id=None):
             cache.set(f"preroll_group_info_{session_id}_{group_id}", group_info, timeout=86400)
             cache.set(f"preroll_group_info_latest_{group_id}", group_info, timeout=86400)
             logging.info(f"PREROLL: Stored {len(items)} items for group '{group_info['display_name']}' (group_id: {group_id}) from Excel upload with session-independent key for QR codes")
+
+            # Additionally, store vendor-specific cache entries so QR links with vendor filters
+            # can resolve directly to a vendor-scoped list without relying on in-route filtering.
+            try:
+                import re
+                # Build vendor -> items mapping for this group
+                vendor_buckets = {}
+                for it in items:
+                    v = str(it.get('vendor', '')).strip()
+                    vk = re.sub(r'[^a-z0-9_-]+', '-', v.lower()).strip('-') or 'unknown'
+                    vendor_buckets.setdefault(vk, []).append(it)
+
+                for vk, vitems in vendor_buckets.items():
+                    # Keys follow the same pattern as display_preroll_items expects: "{group_id}|{vendor_key}"
+                    cache.set(f"preroll_group_latest_{group_id}|{vk}", vitems, timeout=86400)
+                    cache.set(f"preroll_group_{session_id}_{group_id}|{vk}", vitems, timeout=86400)
+                    # Store group info with vendor suffix as well
+                    cache.set(f"preroll_group_info_latest_{group_id}|{vk}", group_info, timeout=86400)
+                    cache.set(f"preroll_group_info_{session_id}_{group_id}|{vk}", group_info, timeout=86400)
+            except Exception:
+                logging.debug("PREROLL: Vendor-specific cache population failed, continuing gracefully")
         
         # Update session if in request context
         try:

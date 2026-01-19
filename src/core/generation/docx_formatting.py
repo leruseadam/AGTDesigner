@@ -18,7 +18,7 @@ COLORS = {
     'CBD': 'F1C232',
     'CBD_BLEND': 'F1C232',  # Same color as CBD
     'MIXED': '0021F5',
-    'PARA': 'FFC0CB'
+    'PARA': 'C83278'
 }
 
 def debug_lineage_data(records):
