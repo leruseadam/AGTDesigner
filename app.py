@@ -2953,57 +2953,21 @@ def index():
                     logging.info(f"Auto-cleanup removed {cleanup_result['removed_count']} files")
             except Exception as cleanup_error:
                 logging.warning(f"Auto-cleanup failed: {cleanup_error}")
-
-        # ⚡ INSTANT TAG LOADING: Try to get cached tags for server-side rendering
-        # This eliminates the "Loading tags from server..." delay by injecting tags directly into HTML
-        initial_tags = None
-        initial_tags_json = '[]'
-        try:
-            session_file_path = session.get('file_path', '')
-            upload_timestamp = session.get('upload_timestamp', '')
-            lineage_update_timestamp = session.get('lineage_update_timestamp', '')
-            effective_timestamp = lineage_update_timestamp if lineage_update_timestamp else upload_timestamp
-
-            # Try file-specific cache first (most accurate)
-            if session_file_path:
-                cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}')
-                initial_tags = cache.get(cache_key)
-                if initial_tags:
-                    logging.info(f"⚡ SSR: Found {len(initial_tags)} cached tags (file-specific)")
-
-            # Fallback to general cache
-            if not initial_tags:
-                cache_key = get_session_cache_key('available_tags')
-                initial_tags = cache.get(cache_key)
-                if initial_tags:
-                    logging.info(f"⚡ SSR: Found {len(initial_tags)} cached tags (general)")
-
-            # Convert to JSON for template injection
-            if initial_tags and len(initial_tags) > 0:
-                import json
-                # Use make_json_safe to handle any serialization issues
-                safe_tags = make_json_safe(initial_tags)
-                initial_tags_json = json.dumps(safe_tags)
-                logging.info(f"⚡ SSR: Prepared {len(safe_tags)} tags for instant render")
-            else:
-                logging.info("⚡ SSR: No cached tags available, frontend will fetch")
-        except Exception as ssr_error:
-            logging.warning(f"⚡ SSR: Error loading cached tags: {ssr_error}")
-            initial_tags_json = '[]'
-
+        
+        # Don't load data here - let frontend load via API calls
+        # This makes page loads much faster
         initial_data = None
-
+        
         # CRITICAL FIX: Pass uploaded filename to template so it persists on refresh
         uploaded_filename = session.get('uploaded_filename', '')
-
+        
         logging.info("=== PAGE REFRESH COMPLETE ===")
-        return render_template('index.html',
-                             initial_data=initial_data,
+        return render_template('index.html', 
+                             initial_data=initial_data, 
                              cache_bust=cache_bust,
                              user_has_store=user_has_store,
                              current_store=current_store,
-                             uploaded_filename=uploaded_filename,
-                             initial_tags_json=initial_tags_json)
+                             uploaded_filename=uploaded_filename)
         
     except Exception as e:
         logging.error(f"❌ CRITICAL ERROR in index route: {str(e)}")
@@ -3016,7 +2980,7 @@ def index():
             current_store = None
             uploaded_filename = ''
             # Try to render template with error message
-            return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename, initial_tags_json='[]')
+            return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
         except Exception as template_error:
             # If template rendering also fails, return a simple error page
             logging.error(f"❌ Template rendering also failed: {template_error}")
@@ -24991,10 +24955,7 @@ def display_preroll_items(group_id):
         # Format: group_key = "group_id|vendor"
         preroll_items = None
         if vendor_filter:
-            # Normalize vendor filter into the same sanitized form used when groups were created
-            import re
-            vendor_key = re.sub(r'[^a-z0-9_-]+', '-', vendor_filter.lower()).strip('-') or 'unknown'
-            group_key = f"{group_id}|{vendor_key}"
+            group_key = f"{group_id}|{vendor_filter}"
             # Try session-independent key first (most recent items for this vendor+group)
             preroll_items = cache.get(f"preroll_group_latest_{group_key}")
             logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
@@ -25526,7 +25487,6 @@ if __name__ == '__main__':
     except (AttributeError, OSError):
         pass  # Not available on this platform
     print("🛑 Press Ctrl+C to stop the app")
-    
     
     try:
         # Create and run the application
