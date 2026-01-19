@@ -3397,8 +3397,28 @@ def upload_file():
                                 
                                 cache.set(cache_key, safe_tags, timeout=300)
 
+                                # Increase tag cache timeout so UI can refresh quickly without immediate recompute
+                                cache.set(cache_key, safe_tags, timeout=3600)
                                 cache_elapsed = (time.time() - cache_start) * 1000
                                 logging.info(f"[BACKGROUND] ✅ Cached {len(safe_tags)} tags with key={cache_key[:16]}... ({cache_elapsed:.0f}ms)")
+
+                                # Also cache dropdown/filter options for fast UI loading
+                                try:
+                                    dd_start = time.time()
+                                    if hasattr(processor, '_cache_dropdown_values'):
+                                        # Populate dropdown in-processor if not already
+                                        processor._cache_dropdown_values()
+                                        # Gather dropdowns structure expected by the web client
+                                        dropdowns = getattr(processor, 'filter_options', None) or getattr(processor, 'dropdowns', None)
+                                        if not dropdowns and hasattr(processor, '_build_filter_options'):
+                                            dropdowns = processor._build_filter_options()
+                                        if dropdowns:
+                                            dd_cache_key = f"dropdowns_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
+                                            cache.set(dd_cache_key, make_json_safe(dropdowns), timeout=3600)
+                                            dd_elapsed = (time.time() - dd_start) * 1000
+                                            logging.info(f"[BACKGROUND] ✅ Cached dropdowns with key={dd_cache_key[:16]}... ({dd_elapsed:.0f}ms)")
+                                except Exception as dd_err:
+                                    logging.warning(f"[BACKGROUND] Could not cache dropdowns: {dd_err}")
 
                                 # CRITICAL FIX: Mark as 'ready' immediately after caching tags
                                 # Frontend needs 'ready' status to proceed, not 'tags_ready'
@@ -14992,7 +15012,24 @@ def get_web_filter_options():
             logging.info("Web-optimized filter options route called")
         
         cache_key = get_session_cache_key('web_filter_options')
-        
+
+        # FAST-PATH: If background cached dropdowns exist for the current uploaded file, use them
+        try:
+            session_file_path = session.get('file_path', '')
+            if session_file_path:
+                import hashlib
+                cache_version = "v2_no_excel_lineage"
+                dd_cache_key = f"dropdowns_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
+                bg_dropdowns = cache.get(dd_cache_key)
+                if bg_dropdowns:
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"✅ WEB FAST-PATH: Using background-cached dropdowns ({elapsed:.1f}ms)")
+                    response = make_response(jsonify(bg_dropdowns))
+                    response = compress_response(response)
+                    return response
+        except Exception as fast_err:
+            logging.debug(f"WEB FAST-PATH (dropdowns) error: {fast_err}")
+
         # WEB OPTIMIZATION: Aggressive caching for web clients
         cached_options = cache.get(cache_key)
         if cached_options:
