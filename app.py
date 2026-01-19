@@ -14790,6 +14790,34 @@ def get_web_available_tags():
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
         else:
             cache_key = get_session_cache_key('available_tags')
+
+        # FAST-PATH: Check for background-generated file tag cache created during upload processing
+        # Background thread stores tags under a sha256(file_path) key with a version prefix
+        try:
+            if session_file_path:
+                import hashlib
+                cache_version = "v2_no_excel_lineage"
+                file_hash = hashlib.sha256(session_file_path.encode()).hexdigest()
+                bg_cache_key = f"tags_file_{cache_version}_{file_hash}"
+                bg_tags = cache.get(bg_cache_key)
+                if bg_tags:
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(f"✅ WEB FAST-PATH: Using background-cached tags ({len(bg_tags)} items) ({elapsed:.1f}ms)")
+                    # Align lineage to be safe and return
+                    try:
+                        bg_tags = _align_tags_with_db_lineage(bg_tags, get_current_store_name(allow_fallback=False), skip_if_aligned=False, force_overwrite=True)
+                    except Exception as align_err:
+                        logging.warning(f"WEB FAST-PATH: Could not align background-cached tags: {align_err}")
+                    safe_bg = make_json_safe(bg_tags)
+                    response = make_response(jsonify({
+                        'tags': safe_bg,
+                        'total_count': len(safe_bg),
+                        'source': 'web-bg-cache'
+                    }))
+                    response = compress_response(response)
+                    return response
+        except Exception as fast_err:
+            logging.debug(f"WEB FAST-PATH: error checking bg cache: {fast_err}")
         
         # CRITICAL FIX: If lineage was recently updated, CLEAR the cache and force fresh load
         if has_recent_lineage_update:
