@@ -87,7 +87,7 @@ def _load_font_sizing_config():
                 'preroll': {
                     # Preroll template: Copy all settings from mini template (identical font sizing)
                     'description': [(5, 18), (15, 17), (20, 16), (30, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
-                    'brand': [(5, 9), (20, 8), (30, 6.5), (float('inf'), 6)],
+                    'brand': [(5, 9), (20, 8), (25, 6.5), (float('inf'), 6)],
                     'price': [(5, 20), (float('inf'), 17)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
@@ -175,6 +175,40 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 f"Double template brand length rule: text='{text}' (length={text_length}) exceeds threshold, forcing {final_size}pt"
             )
             return Pt(final_size)
+
+    # Special overrides: specific known long brand names should be very small by default
+    if field_type.lower() == 'brand':
+        try:
+            import re
+            brand_text = str(text or "").strip()
+            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_text, re.IGNORECASE)
+            if brand_match:
+                brand_text = brand_match.group(1).strip()
+
+            upper_brand = brand_text.upper()
+            # Explicit exceptions requested by user
+            SMALL_BRAND_EXCEPTIONS = [
+                "WASHINGTON BUD COMPANY",
+                "MT BAKER HOMEGROWN",
+            ]
+            if any(exc in upper_brand for exc in SMALL_BRAND_EXCEPTIONS):
+                final_size = 6.5 * scale_factor
+                logger.debug(f"Brand exception match: '{brand_text}' -> forcing {final_size}pt")
+                return Pt(final_size)
+
+            # Heuristic: if brand has more than 2 words and contains words with 5+ letters,
+            # prefer a smaller, highly-readable size (user requested 'should definitely be smaller').
+            words = [w for w in re.split(r'\s+', brand_text) if w]
+            if len(words) > 2:
+                long_words = [w for w in words if len(w) >= 5]
+                if len(long_words) >= 1:
+                    final_size = 6.5 * scale_factor
+                    logger.debug(
+                        f"Brand heuristic: '{brand_text}' has {len(words)} words and {len(long_words)} long words, forcing {final_size}pt"
+                    )
+                    return Pt(final_size)
+        except Exception:
+            logger.exception("Error while applying brand-specific font-size heuristic")
     
     # Special rule: Double template prices based on number of digits
     if field_type.lower() == 'price' and orientation.lower() == 'double':
