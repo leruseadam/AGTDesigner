@@ -1520,8 +1520,10 @@ class TemplateProcessor:
                 try:
                     from src.core.generation.docx_formatting import make_docx_editable_bytes, sanitize_embedded_xml_in_docx_bytes
                     fixed_bytes = make_docx_editable_bytes(buffer.getvalue())
-                    # Also sanitize accidental embedded XML-in-text artifacts
-                    fixed_bytes = sanitize_embedded_xml_in_docx_bytes(fixed_bytes)
+                    # CRITICAL: Skip XML sanitization for preroll templates - their template structure
+                    # contains valid embedded XML that should not be stripped
+                    if self.template_type != 'preroll':
+                        fixed_bytes = sanitize_embedded_xml_in_docx_bytes(fixed_bytes)
                     buffer = BytesIO(fixed_bytes)
                 except Exception:
                     # If anything goes wrong, continue with original buffer
