@@ -2414,6 +2414,11 @@ def get_session_excel_processor():
                         row_count = len(g.excel_processor.df)
                         logging.info(f"✅ Loaded session file: {session_file_path} ({row_count} rows)")
                         g.excel_processor._last_loaded_file = session_file_path
+                        # If a user-uploaded/session file was loaded, clear any default-file fallback flag
+                        try:
+                            session.pop('default_file_loaded', None)
+                        except Exception:
+                            logging.debug("Could not clear default_file_loaded session flag")
                     else:
                         logging.warning(f"⚠️ Failed to load session file or file is empty: {session_file_path}")
                 except Exception as load_err:
@@ -2462,6 +2467,12 @@ def get_session_excel_processor():
                         success = g.excel_processor.load_file(default_file)
                         if success:
                             logging.info(f"CRITICAL FIX: Successfully loaded default file")
+                            # Mark that we loaded a fallback default file - UI should require explicit upload
+                            try:
+                                session['default_file_loaded'] = True
+                                logging.info("Marked session as having loaded a default fallback file")
+                            except Exception:
+                                logging.debug("Could not mark default_file_loaded in session")
                             # Populate dropdown cache
                             if hasattr(g.excel_processor, '_cache_dropdown_values'):
                                 try:
@@ -14797,6 +14808,16 @@ def get_web_available_tags():
         excel_processor = get_session_excel_processor()
         if excel_processor is None:
             excel_processor = get_excel_processor()
+
+        # If we loaded a default fallback file earlier in this session, require explicit upload
+        if session.get('default_file_loaded'):
+            logging.info("WEB: Default fallback file is loaded for this session - requiring user upload before showing products")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'web-no-excel',
+                'message': 'Default fallback file is present — please upload a fresh Excel file to load products.'
+            })
         
         # DISABLED: Do not automatically load default file - require explicit upload
         if False and excel_processor and (excel_processor.df is None or excel_processor.df.empty):
