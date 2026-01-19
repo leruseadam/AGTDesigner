@@ -163,7 +163,7 @@ class TemplateProcessor:
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
         elif self.template_type == 'preroll':
-            self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page (same as mini)
+            self.chunk_size = min(16, CHUNK_SIZE_LIMIT)  # Fixed: 4x4 grid = 16 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for preroll template")
         elif self.template_type == 'double':
@@ -217,7 +217,7 @@ class TemplateProcessor:
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
             elif self.template_type == 'preroll':
-                required_labels = 20  # 4x5 grid (same as mini)
+                required_labels = 16  # 4x4 grid
             else:
                 required_labels = 9   # 3x3 grid
             
@@ -236,9 +236,9 @@ class TemplateProcessor:
                     self.logger.info("Calling 4x3 expansion method")
                     return self._expand_template_to_4x3_fixed_double()
                 elif self.template_type == 'preroll':
-                    # Preroll uses 4x5 grid like mini template
-                    self.logger.info("Calling 4x5 expansion method for preroll template")
-                    return self._expand_template_to_4x5_fixed_scaled()
+                    # Preroll uses 4x4 grid (16 labels)
+                    self.logger.info("Calling 4x4 expansion method for preroll template")
+                    return self._expand_template_to_4x4_fixed_preroll()
                 else:
                     # horizontal and vertical templates expand to 3x3 grid
                     self.logger.info(f"Calling 3x3 expansion method for template type: '{self.template_type}'")
@@ -1448,8 +1448,10 @@ class TemplateProcessor:
             context = {}
             
             # Determine required label count based on template type
-            if self.template_type == 'mini' or self.template_type == 'preroll':
+            if self.template_type == 'mini':
                 required_labels = 20  # Fixed grid: 4x5 = 20 labels
+            elif self.template_type == 'preroll':
+                required_labels = 16  # Fixed grid: 4x4 = 16 labels
             elif self.template_type == 'double':
                 required_labels = 12  # Fixed grid: 3x4 = 12 labels
             elif self.template_type == 'inventory':
