@@ -3766,10 +3766,57 @@ const TagManager = {
             
             return true;
         });
-        
-        // DEBUG: Log filtering results
-        verboseLog('🔍 Filtering Results:', {
-            originalTagsCount: tagsToFilter.length,
+
+        // No local cache found — attempt a quick background fetch to the web fast-path
+        console.log('❌ No local cache found for available tags — attempting fast background fetch');
+        try {
+            const controller = new AbortController();
+            const bgTimeout = 1500; // 1.5s max - keep it short so UI stays responsive
+            const timeoutId = setTimeout(() => controller.abort(), bgTimeout);
+
+            // Use web endpoint which will return background-cached tags if present
+            const ts = Date.now();
+            fetch(`/api/web/available-tags?t=${ts}&fast_load=1`, {
+                signal: controller.signal,
+                cache: 'no-store',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            }).then(async (res) => {
+                clearTimeout(timeoutId);
+                if (res.ok) {
+                    const body = await res.json();
+                    if (body && body.tags && body.tags.length > 0) {
+                        console.log(`✅ Fast background fetch returned ${body.tags.length} tags - hydrating UI`);
+                        try {
+                            // Use existing updater to inject tags into UI
+                            if (window.TagManager && typeof window.TagManager.updateAvailableTags === 'function') {
+                                window.TagManager.updateAvailableTags(body.tags);
+                            } else if (window.TagManager && typeof window.TagManager.updateSelectedTags === 'function') {
+                                window.TagManager.updateSelectedTags(body.tags);
+                            } else {
+                                console.log('⚠️ TagManager update functions not found - skipping immediate hydration');
+                            }
+                        } catch (err) {
+                            console.warn('Error hydrating tags from bg fetch:', err);
+                        }
+                    }
+                } else {
+                    console.log('Fast background fetch returned non-OK status:', res.status);
+                }
+            }).catch((err) => {
+                clearTimeout(timeoutId);
+                if (err.name === 'AbortError') {
+                    console.log('Fast background fetch aborted (timeout)');
+                } else {
+                    console.warn('Fast background fetch failed:', err);
+                }
+            });
+        } catch (err) {
+            console.warn('Failed to start fast background fetch for tags:', err);
+        }
+
+        return false;
             filteredTagsCount: filteredTags.length,
             productTypeFilter: productTypeFilter,
             vendorFilter: vendorFilter,
