@@ -262,8 +262,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         
         # Identify the product group
         group_info = identify_preroll_product_group(description, product_name)
-        group_id = group_info['group_id']
-        logging.info(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (group_id: {group_id})")
+        # Normalize group_id for consistent grouping (lowercase, strip whitespace)
+        group_id = group_info['group_id'].strip().lower()
+        logging.info(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (normalized group_id: {group_id})")
         
         # Extract vendor to include in grouping key
         vendor = (

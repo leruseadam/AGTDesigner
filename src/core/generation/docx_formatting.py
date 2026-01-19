@@ -64,19 +64,20 @@ def apply_lineage_colors(doc, template_type=None):
                         original_text = original_text.replace(lineage_hint_token, "")
                     
                     # CRITICAL FIX: Skip blank cells - don't apply any background color
+                    # BUT: If this is a brand cell (contains PRODUCTBRAND_CENTER_START/END), do NOT clear background
                     if not original_text.strip() or original_text.strip() == '':
-                        # Set white background for blank cells
+                        if "PRODUCTBRAND_CENTER_START" in cell.text or "PRODUCTBRAND_CENTER_END" in cell.text:
+                            # Don't clear or overwrite background for brand cell
+                            continue
                         tc = cell._tc
                         tcPr = tc.find(qn('w:tcPr'))
                         if tcPr is None:
                             tcPr = OxmlElement('w:tcPr')
                             tc.insert(0, tcPr)
-                        
                         # Remove any existing background color
                         shd = tcPr.find(qn('w:shd'))
                         if shd is not None:
                             tcPr.remove(shd)
-                        
                         # Add white background
                         shd = OxmlElement('w:shd')
                         shd.set(qn('w:val'), 'clear')
