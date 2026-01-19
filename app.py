@@ -13553,6 +13553,27 @@ def set_selected_tags():
         if excel_processor is None:
             logging.error("Failed to get ExcelProcessor instance")
             return jsonify({'error': 'Server error: Unable to initialize data processor'}), 500
+
+        # Defensive: expand or sanitize any "All" markers sent from the frontend
+        try:
+            def _is_all_marker(val):
+                return isinstance(val, str) and str(val).strip().lower() in ('all', 'all items', 'select all', 'all items checked')
+
+            # If the client sent a single "All" marker, replace it with all available product names
+            if isinstance(selected_tags, list) and len(selected_tags) == 1 and _is_all_marker(selected_tags[0]):
+                try:
+                    available = excel_processor.get_available_tags() or []
+                    selected_tags = [t.get('Product Name*') for t in available if t.get('Product Name*')]
+                    logging.info(f"Expanded 'All' marker to {len(selected_tags)} product names")
+                except Exception:
+                    logging.warning("Could not expand 'All' marker; leaving selection empty")
+                    selected_tags = []
+            else:
+                # Remove any stray 'All' markers inside the list
+                if isinstance(selected_tags, list):
+                    selected_tags = [t for t in selected_tags if not _is_all_marker(t)]
+        except Exception as sanitize_err:
+            logging.warning(f"Failed to sanitize selected_tags: {sanitize_err}")
         
         # Store tags in both Excel processor and session
         excel_processor.selected_tags = selected_tags
