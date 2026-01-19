@@ -746,17 +746,20 @@ class TemplateProcessor:
                 else:
                     # Copy original cell content
                     cell = tbl.cell(r, c)
-                    dest_tc = cell._tc
+                    cell._tc.clear_content()
 
-                    # Replace destination tc with a deep copy of source tc
-                    new_tc = deepcopy(src_tc)
-                    dest_tc.getparent().replace(dest_tc, new_tc)
+                    # Deep copy source cell and update placeholders in XML
+                    tc = deepcopy(src_tc)
 
-                    # Update label placeholders (e.g., {{Label1}} -> {{Label16}})
-                    for paragraph in tbl.cell(r, c).paragraphs:
-                        for run in paragraph.runs:
-                            if run.text:
-                                run.text = run.text.replace('{{Label1}}', f'{{{{Label{cnt}}}}}')
+                    # Update Label1 references to current label number in XML elements
+                    for t in tc.iter(qn('w:t')):
+                        if t.text and 'Label1' in t.text:
+                            t.text = t.text.replace('Label1', f'Label{cnt}')
+
+                    # Append all elements from updated source to destination cell
+                    for el in tc.xpath('./*'):
+                        cell._tc.append(deepcopy(el))
+
                 cnt += 1
 
         # Add cell spacing (cut lines)
