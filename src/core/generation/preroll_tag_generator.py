@@ -126,15 +126,18 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     if pack_match:
         weight = pack_match.group(1)
         count = pack_match.group(2)
-        # Normalize weight display (remove leading zeros in decimals)
-        weight_display = weight.lstrip('0').lstrip('.') if '.' in weight else weight
-        if weight_display.startswith('.'):
-            weight_display = '0' + weight_display
+        # Normalize weight display (handle .5g -> 0.5g, but keep 0.5g as 0.5g)
+        if weight.startswith('.'):
+            # ".5" -> "0.5"
+            weight_display = '0' + weight
+        else:
+            # "0.5" stays "0.5", "1" stays "1"
+            weight_display = weight
         # Include the word "Pre-Roll" in the display name so grouped
         # pack labels clearly indicate they are prerolls.
         return {
             'group_id': f'{weight}g-{count}pack',
-            'display_name': f'Assorted Pre-Roll\u2011\u00A0{weight_display}g x {count} Packs',
+            'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
             'category': f'{weight_display}g x {count} Packs'
         }
     
@@ -143,7 +146,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         # Ensure the specific 1g x 5 pack group also includes "Pre-Roll"
         return {
             'group_id': '5packs',
-            'display_name': 'Assorted Pre-Roll\u2011\u00A01g x 5 Packs',
+            'display_name': 'Assorted Pre-Roll - 1g x 5 Packs',
             'category': '1g x 5 Packs'
         }
     
@@ -154,8 +157,8 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             weight = weight_match.group(1)
             return {
                 'group_id': f'infused-preroll-{weight}g',
-                'display_name': f'Infused Pre-Roll\u2011\u00A0{weight}g',
-                'category': f'Infused Pre-Roll\u2011\u00A0{weight}g'
+                'display_name': f'Infused Pre-Roll - {weight}g',
+                'category': f'Infused Pre-Roll - {weight}g'
             }
         else:
             return {
@@ -171,9 +174,11 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             weight = weight_match.group(1)
             return {
                 'group_id': f'preroll-{weight}g',
-                'display_name': f'Pre-Roll\u2011\u00A0{weight}g',
-                'category': f'Pre-Roll\u2011\u00A0{weight}g'
+                'display_name': f'Pre-Roll - {weight}g',
+                'category': f'Pre-Roll - {weight}g'
             }
+        # If no weight found but it's still a preroll, continue to pattern matching below
+        # This ensures prerolls without weights still get grouped
     
     # Default: use truncated description pattern
     # CRITICAL FIX: Check for infused prerolls FIRST before regular prerolls
@@ -222,30 +227,37 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         List of grouped representative records (one per category)
     """
     # Filter records by allowed brands if configured
-    if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
+    # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
+    if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
         original_count = len(records)
         # Normalize allowed brands to lowercase for case-insensitive matching
         allowed_brands_lower = {brand.lower().strip() for brand in PREROLL_ALLOWED_BRANDS if brand and str(brand).strip()}
         
-        filtered_records = []
-        for record in records:
-            # Get brand from various possible fields
-            brand = (
-                record.get('Product Brand', '') or
-                record.get('ProductBrand', '') or
-                record.get('Brand', '') or
-                ''
-            )
-            brand_lower = str(brand).strip().lower()
+        if not allowed_brands_lower:
+            # If after normalization we have no valid brands, skip filtering
+            logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is set but contains no valid brands, skipping filter (allowing all brands)")
+        else:
+            filtered_records = []
+            for record in records:
+                # Get brand from various possible fields
+                brand = (
+                    record.get('Product Brand', '') or
+                    record.get('ProductBrand', '') or
+                    record.get('Brand', '') or
+                    ''
+                )
+                brand_lower = str(brand).strip().lower()
+                
+                # Check if brand is in allowed list
+                if brand_lower in allowed_brands_lower:
+                    filtered_records.append(record)
+                else:
+                    logging.info(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands: {PREROLL_ALLOWED_BRANDS})")
             
-            # Check if brand is in allowed list
-            if brand_lower in allowed_brands_lower:
-                filtered_records.append(record)
-            else:
-                logging.debug(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands)")
-        
-        records = filtered_records
-        logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} records to {len(records)} records matching allowed brands: {PREROLL_ALLOWED_BRANDS}")
+            records = filtered_records
+            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} records to {len(records)} records matching allowed brands: {PREROLL_ALLOWED_BRANDS}")
+    else:
+        logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is empty or None, allowing all brands (no filtering applied)")
     
     # Save original records for QR page (before grouping)
     original_records_for_qr = [r.copy() for r in records]
@@ -260,11 +272,15 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         description = record.get('Description', '')
         product_name = record.get('Product Name*', record.get('ProductName', ''))
         
+        # CRITICAL: Ensure we have at least a product name to work with
+        if not product_name or not str(product_name).strip():
+            logging.warning(f"PREROLL GROUP: Skipping record with no product name: {record}")
+            continue
+        
         # Identify the product group
         group_info = identify_preroll_product_group(description, product_name)
-        # Normalize group_id for consistent grouping (lowercase, strip whitespace)
-        group_id = group_info['group_id'].strip().lower()
-        logging.info(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (normalized group_id: {group_id})")
+        group_id = group_info['group_id']
+        logging.info(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (group_id: {group_id})")
         
         # Extract vendor to include in grouping key
         vendor = (
@@ -293,12 +309,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         except Exception:
             price_tier = str(price).strip() if price else 'N/A'
         
-        # Group key should include vendor when available so we generate one label
-        # per vendor per category. If vendor is empty, fall back to category-only key.
-        if vendor_clean:
-            group_key = f"{group_id}|{vendor_clean}"
-        else:
-            group_key = group_id
+        # Group by category ONLY - do NOT include vendor in grouping
+        # This ensures all products with the same description are in one list
+        # regardless of which vendor they come from
+        group_key = group_id
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
@@ -306,6 +320,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
+        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_id}' (total in group: {len(grouped_records[group_key]['records'])})")
     
     # Step 2: Create representative records with group display names
     unique_records = []
@@ -319,27 +334,16 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # group_key format: "group_id" or "group_id|vendor"
         original_group_id = group_info['group_id']
         
-        # Create a fresh representative record for the group to avoid accidental reuse
-        # and to ensure the label displays the group display name consistently.
-        first_rec = group_records_list[0]
-        representative = {}
+        # Use the first record as representative
+        representative = group_records_list[0].copy()
+        
+        # Update ALL fields that might be displayed on the label to show group display name
         group_display_name = group_info['display_name']
-
-        # Display fields should reflect the group display name
         representative['Description'] = group_display_name
         representative['Product Name*'] = group_display_name
         representative['ProductName'] = group_display_name
+        # Also update DescAndWeight - use group name only (no individual product details)
         representative['DescAndWeight'] = group_display_name
-
-        # Preserve sensible defaults from the first record for vendor/brand/strain/lineage
-        representative['Vendor/Supplier*'] = first_rec.get('Vendor/Supplier*', first_rec.get('Vendor', first_rec.get('Vendor/Supplier', '')))
-        representative['Vendor'] = representative.get('Vendor/Supplier*')
-        representative['Product Brand'] = first_rec.get('Product Brand', first_rec.get('ProductBrand', first_rec.get('Brand', '')))
-        representative['ProductBrand'] = representative.get('Product Brand')
-        representative['Product Strain'] = first_rec.get('Product Strain', '')
-        representative['Lineage'] = first_rec.get('Lineage', '')
-        representative['Product Type*'] = first_rec.get('Product Type*', first_rec.get('ProductType', ''))
-        representative['ProductType'] = representative.get('Product Type*')
         
         # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
         # Check if this is an infused preroll group and set Product Type* accordingly
@@ -368,26 +372,18 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             logging.info(f"PREROLL GROUP REP: Updated representative record fields to '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
         
         # Keep the price from the first record (or could average/use min/max - using first for now)
-        original_price = first_rec.get('Price', representative.get('Price', ''))
+        original_price = representative.get('Price', '')
         # Ensure price is formatted correctly
         if original_price and str(original_price).strip():
-            price_str = str(original_price).strip()
-            try:
-                # If price already includes a dollar sign, use as-is
-                if price_str.startswith('$'):
-                    representative['Price'] = price_str
-                else:
-                    price_val = float(price_str.replace('$', '').replace(',', '').strip())
+            if not str(original_price).startswith('$'):
+                try:
+                    price_val = float(str(original_price).replace('$', '').replace(',', '').strip())
                     if price_val.is_integer():
                         representative['Price'] = f"${int(price_val)}"
                     else:
                         representative['Price'] = f"${price_val:.2f}".rstrip('0').rstrip('.')
-            except Exception:
-                # Fallback: prefix with $ if missing
-                if price_str.startswith('$'):
-                    representative['Price'] = price_str
-                else:
-                    representative['Price'] = f"${price_str}"
+                except:
+                    representative['Price'] = f"${original_price}" if not str(original_price).startswith('$') else str(original_price)
         
         # Store group_id and group_info for QR code generation
         # Use the original group_id (without vendor) for cache keys to maintain compatibility
@@ -395,29 +391,29 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         representative['_group_info'] = group_info
         # Store the full group_key (with vendor) for reference
         representative['_group_key'] = group_key
-
-        # Append a deep copy to ensure later mutations do not affect stored entries
-        from copy import deepcopy
-        unique_records.append(deepcopy(representative))
+        
+        unique_records.append(representative)
         
         # Store items for this group in cache (for QR code page) - use ALL original records
         # But filter by allowed brands if configured
         group_items = []
         for record in group_records_list:
             # Filter by allowed brands if configured
-            if PREROLL_ALLOWED_BRANDS and len(PREROLL_ALLOWED_BRANDS) > 0:
-                brand = (
-                    record.get('Product Brand', '') or
-                    record.get('ProductBrand', '') or
-                    record.get('Brand', '') or
-                    ''
-                )
-                brand_lower = str(brand).strip().lower()
+            # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
+            if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
                 allowed_brands_lower = {b.lower().strip() for b in PREROLL_ALLOWED_BRANDS if b and str(b).strip()}
-                
-                if brand_lower not in allowed_brands_lower:
-                    logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
-                    continue
+                if allowed_brands_lower:  # Only filter if we have valid brands after normalization
+                    brand = (
+                        record.get('Product Brand', '') or
+                        record.get('ProductBrand', '') or
+                        record.get('Brand', '') or
+                        ''
+                    )
+                    brand_lower = str(brand).strip().lower()
+                    
+                    if brand_lower not in allowed_brands_lower:
+                        logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
+                        continue
             
             # Normalize DOH/DOH-compliant field so lists and QR views can display
             # a clean YES/NO status.
@@ -449,13 +445,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         
         # Store group items in cache using the full group_key (includes vendor) to avoid collisions
         # This ensures each vendor's products are stored separately even if they have the same category
-        # Store a deep copy in cache to avoid accidental mutations later
-        cache.set(f"preroll_group_{session_id}_{group_key}", deepcopy(group_items), timeout=86400)
+        cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
         # CRITICAL FIX: Also store with session-independent key so QR codes work across sessions
         # Use group_key (with vendor) to ensure vendor-specific QR codes work correctly
-        cache.set(f"preroll_group_latest_{group_key}", deepcopy(group_items), timeout=86400)
+        cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
         # Also store with original group_id for backward compatibility (may overwrite, but that's OK for QR codes)
-        cache.set(f"preroll_group_latest_{original_group_id}", deepcopy(group_items), timeout=86400)
+        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
         # Also store group info for display purposes
         cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
         cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
@@ -474,9 +469,21 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # Verify all records were grouped (every record should be in a group)
     total_grouped = sum(len(group_data['records']) for group_data in grouped_records.values())
     if total_grouped != original_count:
-        logging.warning(f"PREROLL GROUPING WARNING: {original_count} original records but only {total_grouped} were grouped. Some products may be missing!")
+        logging.error(f"PREROLL GROUPING ERROR: {original_count} original records but only {total_grouped} were grouped. {original_count - total_grouped} products are MISSING!")
+        # Log details about which records might be missing
+        grouped_product_names = set()
+        for group_data in grouped_records.values():
+            for record in group_data['records']:
+                product_name = record.get('Product Name*', record.get('ProductName', ''))
+                if product_name:
+                    grouped_product_names.add(str(product_name).strip())
+        
+        all_product_names = {record.get('Product Name*', record.get('ProductName', '')) for record in records if record.get('Product Name*') or record.get('ProductName')}
+        missing_names = all_product_names - grouped_product_names
+        if missing_names:
+            logging.error(f"PREROLL GROUPING ERROR: Missing products: {list(missing_names)[:10]}")  # Log first 10 missing
     else:
-        logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped")
+        logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped into {len(grouped_records)} groups")
     
     grouped_records_list = unique_records
     logging.info(f"PREROLL GROUPING: Grouped {original_count} records into {len(grouped_records_list)} product groups (one label per vendor per category)")

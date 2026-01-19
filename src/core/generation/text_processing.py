@@ -230,24 +230,6 @@ def make_nonbreaking_hyphens(text):
 
     return text
 
-
-def make_nonbreaking_weight_units(text):
-    """
-    Ensure weight numbers and units stay together by replacing the space
-    between them with a non-breaking space. Examples:
-    - '5 g' -> '5\u00A0g'
-    - '0.5 g' -> '0.5\u00A0g'
-    - '1 oz' -> '1\u00A0oz'
-    """
-    if not text or not isinstance(text, str):
-        return text
-
-    # Units commonly used in product weights
-    units = r'(g|mg|kg|oz|ounce|ounces|ml|l|ct|pack|packs|pk|pcs|pc)'
-    # Replace any occurrence of a number (integer or decimal) followed by optional spaces and a unit
-    pattern = re.compile(rf'(\d+(?:\.\d+)?)\s+{units}\b', flags=re.IGNORECASE)
-    return pattern.sub(lambda m: f"{m.group(1)}\u00A0{m.group(2)}", text)
-
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
     """Replace placeholder text with marked content in a document."""
     for table in doc.tables:

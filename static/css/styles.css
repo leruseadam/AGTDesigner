@@ -1,84 +1,3 @@
-/* Ensure template dropdown and Generate Tags button match other center column buttons */
-.template-dropdown,
-#generate-tags-btn {
-  width: 100% !important;
-  max-width: 220px !important;
-  min-width: 160px !important;
-  margin: 0.15rem auto !important;
-  box-sizing: border-box !important;
-}
-
-/* If the dropdown uses a select element, target it as well */
-.template-dropdown select {
-  width: 100% !important;
-  max-width: 220px !important;
-  min-width: 160px !important;
-  margin: 0.15rem auto !important;
-  box-sizing: border-box !important;
-}
-/* Visually enhance tag list group headers in both lists */
-.tag-group-header, .tag-group-subheader, .tag-group-label, .tag-group-title, .group-header, .group-subheader, .group-label, .group-title {
-  background: linear-gradient(90deg, rgba(160,132,232,0.12) 0%, rgba(60,45,75,0.18) 100%) !important;
-  border-radius: 9px !important;
-  font-size: 1.12rem !important;
-  font-weight: 700 !important;
-  color: #fff !important;
-  opacity: 0.98 !important;
-  margin: 0.18rem 0 0.18rem 0 !important;
-  padding: 0.38rem 1.1rem 0.32rem 0.95rem !important;
-  letter-spacing: 0.01em !important;
-  box-shadow: 0 1px 6px 0 rgba(80,60,120,0.07);
-  border: 1px solid rgba(160,132,232,0.13);
-  text-shadow: 0 1px 2px rgba(0,0,0,0.08);
-  transition: background 0.2s, box-shadow 0.2s;
-}
-/* Force all group headers and subheaders in both lists to match font size and style */
-.tag-group-header, .tag-group-header *,
-.tag-group-subheader, .tag-group-subheader *,
-.tag-group-label, .tag-group-label *,
-.tag-group-title, .tag-group-title *,
-.tag-group, .tag-group *,
-.group-header, .group-header *,
-.group-subheader, .group-subheader *,
-.group-label, .group-label *,
-.group-title, .group-title * {
-  font-size: 1.08rem !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.01em !important;
-  text-transform: none !important;
-  color: #fff !important;
-  opacity: 0.95 !important;
-  margin: 0.1rem 0 0.1rem 0 !important;
-  padding: 0.1rem 0.5rem 0.1rem 0.5rem !important;
-  line-height: 1.3 !important;
-}
-/* Consistent group header font size for all headers in inventory and selected tags */
-.tag-group-header, .tag-group-header *,
-.tag-group-subheader, .tag-group-subheader *,
-.tag-group-label, .tag-group-label *,
-.tag-group-title, .tag-group-title *,
-.tag-group, .tag-group * {
-  font-size: 1.05rem !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.01em !important;
-  text-transform: none !important;
-  color: #fff !important;
-  opacity: 0.95 !important;
-  margin: 0.1rem 0 0.1rem 0 !important;
-  padding: 0.1rem 0.5rem 0.1rem 0.5rem !important;
-}
-/* Fix template dropdown and button sizing in center column */
-.control-panel .template-section select,
-.control-panel .template-section button {
-  width: 160px !important;
-  min-width: 120px !important;
-  max-width: 200px !important;
-  font-size: 1rem !important;
-  padding: 0.45rem 0.7rem !important;
-  margin: 0.2rem auto 0.5rem auto !important;
-  border-radius: 7px !important;
-  display: block !important;
-}
 /* ========================================
    SIMPLIFIED VIEWPORT & RESPONSIVE DESIGN
    ======================================== */
@@ -3862,33 +3781,34 @@ body.modal-open #mainContent.store-selection-disabled,
   .lineage-select {
     margin-left: 6px !important;
   }
-  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header, .price-header {
-    font-size: 1.35rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.08em !important;
+  .vendor-header {
+      font-size: 1.25rem !important; /* Increased from 1.5rem (24px) to ~26px */
+      font-weight: 700 !important;
+      letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
-    padding: 8px 14px !important;
-    margin: 8px 0 8px 0 !important;
+      padding: 4px 6px !important;
+  }
+  .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
+      font-size: 1.5rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+      font-weight: 700 !important;
+      letter-spacing: 0.08em !important;
+    color: #e0d7ff !important;
+      padding: 4px 6px !important;
+    margin: 1px 0 2px 0 !important;
     text-transform: uppercase !important;
-    background: linear-gradient(90deg, rgba(160,132,232,0.18) 0%, rgba(160,132,232,0.10) 100%) !important;
-    border-radius: 8px !important;
-    border: 1.5px solid rgba(160,132,232,0.22) !important;
-    opacity: 0.97 !important;
-    display: flex !important;
-    align-items: center !important;
+    background: rgba(160,132,232,0.08) !important;
+    border-radius: 4px !important;
+    border-bottom: none !important;
+    opacity: 0.92 !important;
+    display: block !important;
+    line-height: 1.1 !important;
     width: 100% !important;
     box-sizing: border-box !important;
     margin-left: 0 !important;
     margin-right: 0 !important;
-    word-break: keep-all !important;
-    overflow-wrap: anywhere !important;
-    hyphens: none !important;
-    line-height: 1.2 !important;
-    gap: 10px !important;
-    box-shadow: 0 2px 8px 0 rgba(160,132,232,0.08);
-    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-  }
-  /* Unified group header style above */
+    word-break: keep-all !important; /* Prevent word breaking */
+    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
+    hyphens: none !important; /* Prevent automatic hyphenation */
   }
   
   .lineage-select, .lineage-dropdown {
@@ -5058,37 +4978,35 @@ body.modal-open #mainContent.store-selection-disabled,
     color: var(--accent-color);
     font-weight: 700;
     margin-bottom: 0.25rem;
-    font-size: 1.55rem !important; /* Third level - smaller than brand */
+    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
-
+  
   .lineage-section {
     margin-bottom: 0.75rem;
     margin-left: 10px !important;
   }
-
+  
   .lineage-header {
     font-weight: 500;
     margin-bottom: 0.5rem;
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
-
+  
   .weight-section {
     margin-bottom: 0.25rem;
     margin-left: 10px !important;
   }
-
+  
   .weight-header {
-    font-size: 1.45rem !important; /* Fourth level - smaller than product type */
+    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
     color: var(--text-muted);
     margin-bottom: 0.25rem;
     margin-left: 0 !important;
     padding-left: 0 !important;
   }
-
-  /* .price-header is unified above */
   
   /* Tag group styling */
   .tag-group-header {
@@ -6347,7 +6265,13 @@ body.modal-open #mainContent.store-selection-disabled,
     min-width: 60px;
     font-size: 1.625rem !important; /* Increased from 1.5rem (24px) to ~26px */
   }
-  /* Unified group header style above */
+  .brand-header, .product-type-header, .subcategory-header, .weight-header,
+  .container-label, .filter-label {
+    padding: 0 0.25rem 0 0 !important;
+    margin-bottom: 0 !important;
+    min-width: 60px;
+    font-size: 1.425rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
+  }
   /* Restore old checkbox size - keep larger checkboxes */
   .tag-checkbox, .select-all-checkbox {
     /* Use the larger checkbox sizes defined in main checkbox styles */
@@ -6745,14 +6669,28 @@ body.modal-open #mainContent.store-selection-disabled,
   }
 
   /* Force vendor header font size - highest priority */
-  /* Unified group header style above */
+  .vendor-section > .vendor-header,
+  .vendor-section > .vendor-header h5,
+  .vendor-section > .vendor-header.d-flex,
+  .vendor-section > .vendor-header.mb-2,
+  .vendor-section > .vendor-header.cursor-pointer {
+    font-size: 1.65em !important; /* Increased substantially */
+    font-weight: 700 !important;
+  }
 
   /* Reduce vendor header font size in selected tags list */
-  /* Unified group header style above */
+  #selectedTags .vendor-section > .vendor-header,
+  #selectedTags .vendor-section > .vendor-header h5,
+  #selectedTags .vendor-section > .vendor-header.d-flex,
+  #selectedTags .vendor-section > .vendor-header.mb-2,
+  #selectedTags .vendor-section > .vendor-header.cursor-pointer {
+    font-size: 1.225em !important; /* Increased by 0.125em (~2px) */
+    font-weight: 700 !important;
+  }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.55em; /* Increased from 1.4em */
+    font-size: 1.4em; /* Increased substantially */
     font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
@@ -6762,7 +6700,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.45em; /* Increased from 1.35em */
+    font-size: 1.35em; /* Increased substantially */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -6774,7 +6712,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 1.3em; /* Increased from 0.98em */
+    font-size: 0.98em;
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 3.2em;
@@ -6782,11 +6720,11 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #a99cc7;
   }
 
-  /* Price (fifth-level) */
-  /* Unified group header style above */
-
   /* Add vertical spacing between all group headers */
-  /* Unified margin in main group header rule above */
+  .vendor-header, .brand-header, .product-type-header, .subcategory-header, .weight-header {
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+  }
 
   /* Add spacing between checkboxes and text */
   .vendor-header label,
@@ -10140,7 +10078,18 @@ body.modal-open #mainContent.store-selection-disabled,
   .text-container,
   .tag-name,
   .vendor-name,
-  /* Unified group header style above */
+  .brand-name,
+  .product-name,
+  .weight-text,
+  .lineage-text,
+  .price-text,
+  .description-text,
+  .label-text,
+  .header-text,
+  .title-text,
+  .subtitle-text,
+  .content-text {
+    font-size: var(--base-font-size);
     line-height: var(--line-height-ratio);
     word-spacing: var(--word-spacing);
     letter-spacing: var(--letter-spacing);
@@ -10202,27 +10151,22 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .brand-header .text-container {
-    font-size: clamp(13px, 1.15rem, 22px) !important;
+    font-size: clamp(11px, 1rem, 19px) !important;
     font-weight: 500 !important;
   }
-
+  
   .product-type-header .text-container {
-    font-size: clamp(12px, 1.1rem, 20px) !important;
+    font-size: clamp(10px, 1.05rem, 18px) !important;
     font-weight: 500 !important;
   }
-
+  
   .subcategory-header .text-container {
     font-size: clamp(12px, 1.3rem, 22px) !important;
     font-weight: 600 !important;
   }
-
+  
   .weight-header .text-container {
-    font-size: clamp(11px, 1.05rem, 19px) !important;
-    font-weight: 500 !important;
-  }
-
-  .price-header .text-container {
-    font-size: clamp(10px, 1rem, 18px) !important;
+    font-size: clamp(10px, 1.05rem, 18px) !important;
     font-weight: 500 !important;
   }
   
@@ -11901,199 +11845,17 @@ html, body {
     #databaseModal .modal-body {
         padding: 1.5rem;
     }
-
+    
     .analytics-card-value {
         font-size: 2rem;
     }
-
+    
     .analytics-section-header {
         padding: 1rem;
     }
-
+    
     .analytics-section-body {
         padding: 1rem;
     }
-}
-
-/* ============================================================================
-   HIERARCHICAL HEADER FONT SIZES - CONSOLIDATED & CLEAN
-   Hierarchy: Vendor > Brand > Product Type > Weight > Price
-   Each level is progressively smaller for visual hierarchy
-   ============================================================================ */
-
-/* Reset all header font sizes to prevent conflicts */
-.vendor-header,
-.brand-header,
-.product-type-header,
-.subcategory-header,
-.weight-header,
-.price-header {
-    /* Base styling for all headers */
-    display: flex !important;
-    align-items: center !important;
-    gap: 0.5em !important;
-    padding: 0.4em 0.6em !important;
-    margin-bottom: 0.3em !important;
-    border-radius: 6px !important;
-    cursor: pointer !important;
-    transition: background-color 0.2s ease !important;
-}
-
-/* Level 1: VENDOR - Largest (top of hierarchy) */
-.vendor-header,
-.vendor-header .vendor-title,
-.vendor-header .text-container,
-.vendor-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.5rem !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.04em !important;
-    text-transform: uppercase !important;
-    color: #ffffff !important;
-}
-
-/* Level 2: BRAND - Second largest */
-.brand-header,
-.brand-header .brand-title,
-.brand-header .text-container,
-.brand-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.3rem !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.02em !important;
-    text-transform: none !important;
-    color: #f0f0f0 !important;
-}
-
-/* Level 3: PRODUCT TYPE - Medium */
-.product-type-header,
-.product-type-header .type-title,
-.product-type-header .text-container,
-.product-type-header span:not(.collapse-icon):not(.badge),
-.subcategory-header,
-.subcategory-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.15rem !important;
-    font-weight: 500 !important;
-    letter-spacing: 0.01em !important;
-    text-transform: none !important;
-    color: #e0e0e0 !important;
-}
-
-/* Level 4: WEIGHT - Smaller */
-.weight-header,
-.weight-header .weight-title,
-.weight-header .text-container,
-.weight-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.05rem !important;
-    font-weight: 500 !important;
-    letter-spacing: 0 !important;
-    text-transform: none !important;
-    color: #d0d0d0 !important;
-}
-
-/* Level 5: PRICE - Smallest but still readable */
-.price-header,
-.price-header .price-title,
-.price-header .text-container,
-.price-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.0rem !important;
-    font-weight: 500 !important;
-    letter-spacing: 0 !important;
-    text-transform: none !important;
-    color: #c0c0c0 !important;
-}
-
-/* Collapse icons should be consistent across all levels */
-.vendor-header .collapse-icon,
-.brand-header .collapse-icon,
-.product-type-header .collapse-icon,
-.subcategory-header .collapse-icon,
-.weight-header .collapse-icon,
-.price-header .collapse-icon {
-    font-size: 0.9em !important;
-    min-width: 1.2em !important;
-    text-align: center !important;
-    color: inherit !important;
-}
-
-/* Checkboxes consistent sizing */
-.vendor-header input[type="checkbox"],
-.brand-header input[type="checkbox"],
-.product-type-header input[type="checkbox"],
-.subcategory-header input[type="checkbox"],
-.weight-header input[type="checkbox"],
-.price-header input[type="checkbox"] {
-    width: 16px !important;
-    height: 16px !important;
-    flex-shrink: 0 !important;
-}
-
-/* Hover states - keep text white on hover */
-.vendor-header:hover { background: rgba(160, 132, 232, 0.15) !important; color: #ffffff !important; }
-.brand-header:hover { background: rgba(139, 126, 200, 0.12) !important; color: #f0f0f0 !important; }
-.product-type-header:hover, .subcategory-header:hover { background: rgba(124, 111, 176, 0.1) !important; color: #e0e0e0 !important; }
-.weight-header:hover { background: rgba(156, 163, 175, 0.08) !important; color: #d0d0d0 !important; }
-.price-header:hover { background: rgba(74, 222, 128, 0.08) !important; color: #c0c0c0 !important; }
-
-/* Selected Tags panel - slightly smaller to fit more */
-#selectedTags .vendor-header,
-#selectedTags .vendor-header .vendor-title,
-#selectedTags .vendor-header .text-container,
-#selectedTags .vendor-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.3rem !important;
-}
-
-#selectedTags .brand-header,
-#selectedTags .brand-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.15rem !important;
-}
-
-#selectedTags .product-type-header,
-#selectedTags .product-type-header span:not(.collapse-icon):not(.badge) {
-    font-size: 1.0rem !important;
-}
-
-#selectedTags .weight-header,
-#selectedTags .weight-header span:not(.collapse-icon):not(.badge) {
-    font-size: 0.9rem !important;
-}
-
-#selectedTags .price-header,
-#selectedTags .price-header span:not(.collapse-icon):not(.badge) {
-    font-size: 0.95rem !important;
-}
-
-/* ============================================================================
-   TEMPLATE SELECT & GENERATE BUTTON - Narrower and Taller
-   ============================================================================ */
-
-/* Template Select - narrower width, more height */
-#templateSelect,
-#templateSelectModal,
-.control-panel #templateSelect,
-.control-panel #templateSelectModal,
-.control-panel .form-select-modern {
-    width: 180px !important;
-    max-width: 180px !important;
-    min-width: 150px !important;
-    padding: 0.75rem 1rem !important;
-    font-size: 1rem !important;
-    height: auto !important;
-    min-height: 44px !important;
-    margin: 0.5rem auto !important;
-    display: block !important;
-}
-
-/* Generate Button - narrower width, more height */
-#generateBtn,
-.control-panel #generateBtn,
-.btn-generate-themed {
-    width: 180px !important;
-    max-width: 180px !important;
-    min-width: 150px !important;
-    padding: 0.85rem 1.2rem !important;
-    font-size: 1.05rem !important;
-    height: auto !important;
-    min-height: 48px !important;
-    margin: 0.75rem auto !important;
-    display: block !important;
 }
 

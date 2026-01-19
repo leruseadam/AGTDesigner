@@ -1293,12 +1293,7 @@ def process_chunk(args):
     if DEBUG_ENABLED:
         logger.debug("Template saved to buffer")
     
-    try:
-        from src.core.generation.docx_formatting import sanitize_embedded_xml_in_docx_bytes
-        return sanitize_embedded_xml_in_docx_bytes(buffer.getvalue())
-    except Exception:
-        buffer.seek(0)
-        return buffer.getvalue()
+    return buffer.getvalue()
 
 def combine_documents(docs):
     """Combine multiple documents into one using a safer method."""
@@ -1343,12 +1338,7 @@ def combine_documents(docs):
             for table in test_doc.tables:
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
             final_buffer.seek(0)
-            try:
-                from src.core.generation.docx_formatting import sanitize_embedded_xml_in_docx_bytes
-                return sanitize_embedded_xml_in_docx_bytes(final_buffer.getvalue())
-            except Exception:
-                final_buffer.seek(0)
-                return final_buffer.getvalue()
+            return final_buffer.getvalue()
         except Exception as validation_error:
             logger.error(f"Combined document validation failed: {validation_error}")
             raise ValueError(f"Combined document is corrupted: {validation_error}")

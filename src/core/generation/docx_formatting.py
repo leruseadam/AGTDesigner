@@ -5,9 +5,6 @@ from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT, WD_CELL_VERT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import logging
 import re
-from io import BytesIO
-from zipfile import ZipFile
-from xml.sax.saxutils import escape as xml_escape
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +31,7 @@ def debug_lineage_data(records):
         strain = record.get('Product Strain', record.get('strain', ''))
         logger.info(f"  Record {i+1}: '{product_name}' | Lineage: '{lineage}' | Type: '{product_type}' | Strain: '{strain}'")
 
-def apply_lineage_colors(doc, template_type=None):
+def apply_lineage_colors(doc):
     """Apply lineage colors to all cells based on keywords in cell text."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -49,11 +46,6 @@ def apply_lineage_colors(doc, template_type=None):
                 for cell in row.cells:
                     cells_processed += 1
                     original_text = cell.text.upper()  # Keep original text to check for markers
-                    # If this is a preroll template, avoid coloring product brand center cells
-                    if template_type and str(template_type).lower() == 'preroll':
-                        if 'PRODUCTBRAND_CENTER' in original_text:
-                            # Skip coloring/processing for preroll brand-center cells
-                            continue
                     lineage_hint_value = None
                     lineage_hint_token = None
                     hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s]+)__")
@@ -64,20 +56,19 @@ def apply_lineage_colors(doc, template_type=None):
                         original_text = original_text.replace(lineage_hint_token, "")
                     
                     # CRITICAL FIX: Skip blank cells - don't apply any background color
-                    # BUT: If this is a brand cell (contains PRODUCTBRAND_CENTER_START/END), do NOT clear background
                     if not original_text.strip() or original_text.strip() == '':
-                        if "PRODUCTBRAND_CENTER_START" in cell.text or "PRODUCTBRAND_CENTER_END" in cell.text:
-                            # Don't clear or overwrite background for brand cell
-                            continue
+                        # Set white background for blank cells
                         tc = cell._tc
                         tcPr = tc.find(qn('w:tcPr'))
                         if tcPr is None:
                             tcPr = OxmlElement('w:tcPr')
                             tc.insert(0, tcPr)
+                        
                         # Remove any existing background color
                         shd = tcPr.find(qn('w:shd'))
                         if shd is not None:
                             tcPr.remove(shd)
+                        
                         # Add white background
                         shd = OxmlElement('w:shd')
                         shd.set(qn('w:val'), 'clear')
@@ -388,52 +379,6 @@ def _final_lineage_cleanup_after_coloring(doc):
     except Exception as e:
         logger.warning(f"Error in final lineage cleanup after coloring: {e}")
 
-
-def sanitize_embedded_xml_in_docx_bytes(docx_bytes: bytes) -> bytes:
-    """Sanitize docx bytes by removing accidental raw XML inserted into text nodes.
-
-    This searches for <w:t> elements that contain literal '<w:' sequences (indicating
-    embedded Word XML placed as text) and trims the content at the first '<', keeping
-    only the visible text before the embedded XML. Returns new docx bytes.
-    """
-    try:
-        bio = BytesIO(docx_bytes)
-        with ZipFile(bio, 'r') as zin:
-            names = zin.namelist()
-            files = {name: zin.read(name) for name in names}
-
-        if 'word/document.xml' not in files:
-            return docx_bytes
-
-        doc_xml = files['word/document.xml'].decode('utf-8')
-
-        # Replace any <w:t>...</w:t> where the inner text contains raw '<w:'
-        def _fix(match):
-            open_tag = match.group(1)
-            inner = match.group(2)
-            close_tag = match.group(3)
-            if '<w:' in inner:
-                # Keep only visible text before the embedded XML
-                visible = inner.split('<', 1)[0]
-                return f"{open_tag}{xml_escape(visible)}{close_tag}"
-            return match.group(0)
-
-        new_doc_xml = re.sub(r'(<w:t[^>]*>)(.*?)(</w:t>)', _fix, doc_xml, flags=re.DOTALL)
-
-        # Write back modified document.xml into a new bytes buffer
-        out = BytesIO()
-        with ZipFile(out, 'w') as zout:
-            for name, data in files.items():
-                if name == 'word/document.xml':
-                    zout.writestr(name, new_doc_xml.encode('utf-8'))
-                else:
-                    zout.writestr(name, data)
-
-        return out.getvalue()
-    except Exception:
-        logger.exception('Failed to sanitize embedded XML in docx bytes')
-        return docx_bytes
-
 def fix_table_row_heights(doc, template_type):
     """Fix table row heights based on template type using CELL_DIMENSIONS constants."""
     try:
@@ -453,9 +398,6 @@ def fix_table_row_heights(doc, template_type):
                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         logger.debug(f"Fixed table row heights for template type: {template_type} to {row_height} inches")
         return doc
-
-
-    # make_docx_editable_bytes moved to module-level below to avoid nesting inside try/except
     except Exception as e:
         logger.error(f"Error fixing table row heights: {str(e)}")
         raise
@@ -480,55 +422,6 @@ def safe_fix_paragraph_spacing(doc):
     except Exception as e:
         logger.error(f"Error in safe_fix_paragraph_spacing: {str(e)}")
         raise
-
-
-def make_docx_editable_bytes(docx_bytes: bytes) -> bytes:
-    """Remove common protection/read-only elements from a .docx (zip) bytes so the
-    resulting file is editable immediately in Word.
-
-    This strips elements from `word/settings.xml` such as `w:documentProtection`,
-    `w:readOnlyRecommended`, and `w:writeProtection`.
-    """
-    import io
-    import zipfile
-    try:
-        from xml.etree import ElementTree as ET
-    except Exception:
-        import xml.etree.ElementTree as ET
-
-    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-    REMOVE_TAGS = {
-        f"{{{W_NS}}}documentProtection",
-        f"{{{W_NS}}}readOnlyRecommended",
-        f"{{{W_NS}}}writeProtection",
-        f"{{{W_NS}}}locked",
-        f"{{{W_NS}}}editRestrictions",
-    }
-
-    zin = zipfile.ZipFile(io.BytesIO(docx_bytes), 'r')
-    files = {name: zin.read(name) for name in zin.namelist()}
-    zin.close()
-
-    if 'word/settings.xml' in files:
-        try:
-            root = ET.fromstring(files['word/settings.xml'])
-            changed = False
-            for child in list(root):
-                if child.tag in REMOVE_TAGS:
-                    root.remove(child)
-                    changed = True
-            if changed:
-                files['word/settings.xml'] = ET.tostring(root, encoding='utf-8', xml_declaration=True)
-        except Exception:
-            # If parsing fails for any reason, don't block generation — return original bytes
-            return docx_bytes
-
-    out_buf = io.BytesIO()
-    with zipfile.ZipFile(out_buf, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
-        for name, data in files.items():
-            zout.writestr(name, data)
-
-    return out_buf.getvalue()
 
 def apply_conditional_formatting(doc, conditions=None):
     """

@@ -67,54 +67,6 @@
         TagManager.checkForExistingData = async function() {
             console.log('⚡ Optimized checkForExistingData called');
 
-            // ⚡ INSTANT SSR: Check for server-side rendered tags FIRST (zero latency!)
-            if (window._ssrTags && Array.isArray(window._ssrTags) && window._ssrTags.length > 0) {
-                console.log(`⚡ SSR INSTANT: Using ${window._ssrTags.length} server-rendered tags (no fetch needed!)`);
-
-                // Update state with SSR tags
-                this.state.tags = [...window._ssrTags];
-                this.state.originalTags = [...window._ssrTags];
-                this.state.hydratedFromCache = true;
-
-                // Save to client-side cache for future page loads
-                if (this.saveAvailableTagsToCache) {
-                    this.saveAvailableTagsToCache(window._ssrTags);
-                    console.log('💾 SSR: Saved tags to client cache');
-                }
-
-                // Render immediately
-                requestAnimationFrame(() => {
-                    console.log('🎨 SSR: Rendering tags...');
-                    if (this._updateAvailableTags) {
-                        this._updateAvailableTags(window._ssrTags, null);
-                    }
-                    console.log(`✅ SSR RENDER: ${window._ssrTags.length} tags displayed instantly`);
-
-                    // Hide any loading splash
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                        AppLoadingSplash.stopAutoAdvance();
-                        AppLoadingSplash.complete();
-                    }
-                });
-
-                // Load selected tags and filters in background (non-blocking)
-                Promise.allSettled([
-                    this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
-                    this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
-                ]).then(() => {
-                    console.log('✅ SSR Background: Selected tags and filters loaded');
-                }).catch(err => {
-                    console.warn('⚠️ SSR Background load error (non-critical):', err);
-                });
-
-                // Clear SSR tags to prevent re-use on subsequent calls
-                window._ssrTags = null;
-                return;
-            }
-
             // CRITICAL FIX: If tags are already hydrated from cache (e.g., by inline script),
             // skip loading entirely and return immediately
             const alreadyHydrated = this.state && this.state.hydratedFromCache && this.state.tags && this.state.tags.length > 0;

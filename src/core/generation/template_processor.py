@@ -163,7 +163,7 @@ class TemplateProcessor:
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
         elif self.template_type == 'preroll':
-            self.chunk_size = min(16, CHUNK_SIZE_LIMIT)  # Fixed: 4x4 grid = 16 labels per page
+            self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page (same as mini)
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for preroll template")
         elif self.template_type == 'double':
@@ -217,7 +217,7 @@ class TemplateProcessor:
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
             elif self.template_type == 'preroll':
-                required_labels = 16  # 4x4 grid
+                required_labels = 20  # 4x5 grid (same as mini)
             else:
                 required_labels = 9   # 3x3 grid
             
@@ -236,9 +236,9 @@ class TemplateProcessor:
                     self.logger.info("Calling 4x3 expansion method")
                     return self._expand_template_to_4x3_fixed_double()
                 elif self.template_type == 'preroll':
-                    # Preroll uses 4x4 grid (16 labels)
-                    self.logger.info("Calling 4x4 expansion method for preroll template")
-                    return self._expand_template_to_4x4_fixed_preroll()
+                    # Preroll uses 4x5 grid like mini template
+                    self.logger.info("Calling 4x5 expansion method for preroll template")
+                    return self._expand_template_to_4x5_fixed_scaled()
                 else:
                     # horizontal and vertical templates expand to 3x3 grid
                     self.logger.info(f"Calling 3x3 expansion method for template type: '{self.template_type}'")
@@ -746,20 +746,17 @@ class TemplateProcessor:
                 else:
                     # Copy original cell content
                     cell = tbl.cell(r, c)
-                    cell._tc.clear_content()
+                    dest_tc = cell._tc
 
-                    # Deep copy source cell and update placeholders in XML
-                    tc = deepcopy(src_tc)
+                    # Replace destination tc with a deep copy of source tc
+                    new_tc = deepcopy(src_tc)
+                    dest_tc.getparent().replace(dest_tc, new_tc)
 
-                    # Update Label1 references to current label number in XML elements
-                    for t in tc.iter(qn('w:t')):
-                        if t.text and 'Label1' in t.text:
-                            t.text = t.text.replace('Label1', f'Label{cnt}')
-
-                    # Append all elements from updated source to destination cell
-                    for el in tc.xpath('./*'):
-                        cell._tc.append(deepcopy(el))
-
+                    # Update label placeholders (e.g., {{Label1}} -> {{Label16}})
+                    for paragraph in tbl.cell(r, c).paragraphs:
+                        for run in paragraph.runs:
+                            if run.text:
+                                run.text = run.text.replace('{{Label1}}', f'{{{{Label{cnt}}}}}')
                 cnt += 1
 
         # Add cell spacing (cut lines)
@@ -1305,10 +1302,6 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
                 elif self.template_type == 'mini':
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
-                elif self.template_type == 'preroll':
-                    self._expanded_template_buffer = self._expand_template_to_4x4_fixed_preroll(num_products)
-                elif self.template_type == 'inventory':
-                    self._expanded_template_buffer = self._expand_template_to_2x2_inventory()
                 
                 # Cache the expansion (create a copy since BytesIO is consumed)
                 if hasattr(self._expanded_template_buffer, 'getvalue'):
@@ -1448,10 +1441,8 @@ class TemplateProcessor:
             context = {}
             
             # Determine required label count based on template type
-            if self.template_type == 'mini':
+            if self.template_type == 'mini' or self.template_type == 'preroll':
                 required_labels = 20  # Fixed grid: 4x5 = 20 labels
-            elif self.template_type == 'preroll':
-                required_labels = 16  # Fixed grid: 4x4 = 16 labels
             elif self.template_type == 'double':
                 required_labels = 12  # Fixed grid: 3x4 = 12 labels
             elif self.template_type == 'inventory':
@@ -1516,18 +1507,6 @@ class TemplateProcessor:
                 # CRITICAL FIX: Remove unmerged placeholders immediately after render
                 buffer = BytesIO()
                 doc.save(buffer)
-                # Ensure rendered .docx is editable (remove protection flags from settings.xml)
-                try:
-                    from src.core.generation.docx_formatting import make_docx_editable_bytes, sanitize_embedded_xml_in_docx_bytes
-                    fixed_bytes = make_docx_editable_bytes(buffer.getvalue())
-                    # CRITICAL: Skip XML sanitization for preroll templates - their template structure
-                    # contains valid embedded XML that should not be stripped
-                    if self.template_type != 'preroll':
-                        fixed_bytes = sanitize_embedded_xml_in_docx_bytes(fixed_bytes)
-                    buffer = BytesIO(fixed_bytes)
-                except Exception:
-                    # If anything goes wrong, continue with original buffer
-                    buffer.seek(0)
                 buffer.seek(0)
                 rendered_doc = Document(buffer)
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))
@@ -1553,8 +1532,7 @@ class TemplateProcessor:
                     return rendered_doc
                 
                 # Apply lineage colors last to ensure they are not overwritten
-                from src.core.generation.docx_formatting import apply_lineage_colors
-                apply_lineage_colors(rendered_doc, self.template_type)
+                apply_lineage_colors(rendered_doc)
                 
                 # Apply final marker cleanup for all templates
                 self._final_marker_cleanup(rendered_doc)
@@ -3645,17 +3623,13 @@ class TemplateProcessor:
                 import os
 
                 try:
-                    host_url = (request.host_url or '').rstrip('/')
-                    # Skip localhost URLs - they can't be used for printed QR codes
-                    if 'localhost' in host_url.lower() or '127.0.0.1' in host_url:
-                        base_url = ''
-                    else:
-                        base_url = host_url
+                    base_url = (request.host_url or '').rstrip('/')
                 except Exception:
                     base_url = ''
 
-                # If host_url is unavailable or localhost, try environment variable
+                # If host_url is unavailable, try multiple fallbacks
                 if not base_url:
+                    # First try environment variable
                     base_url = os.environ.get('QR_BASE_URL', '').strip()
 
                 # If still no base_url, try Flask config
@@ -3669,7 +3643,7 @@ class TemplateProcessor:
                 # Last resort: use production URL as default
                 if not base_url:
                     base_url = 'https://www.agtpricetags.com'
-                    self.logger.info(f"Using production QR_BASE_URL: {base_url}")
+                    self.logger.warning(f"No QR_BASE_URL configured, using default: {base_url}")
 
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
                 # Format: /preroll-items/{group_id}?vendor={vendor}
@@ -3683,10 +3657,10 @@ class TemplateProcessor:
                     # Fallback to group_id only if no vendor (backward compatibility)
                     qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
 
-                # Safety check: warn if localhost somehow got through (shouldn't happen with above logic)
+                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
+                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
                 if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
-                    self.logger.warning(f"QR URL contains localhost - this should not happen. Using production URL instead.")
-                    qr_url = f"https://www.agtpricetags.com/preroll-items/{group_id}?vendor={quote(vendor_clean) if vendor_clean else ''}"
+                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
@@ -4806,37 +4780,6 @@ class TemplateProcessor:
             
         except Exception as e:
             self.logger.warning(f"Error in final lineage cleanup: {e}")
-
-    def _ultimate_marker_cleanup(self, doc):
-        """
-        Backwards-compatible wrapper used by tests and older callers.
-        Runs the enhanced final marker cleanup and then performs a lightweight
-        pass to remove any remaining START/END marker tokens.
-        """
-        try:
-            # Run the comprehensive cleanup first
-            if hasattr(self, '_final_marker_cleanup'):
-                self._final_marker_cleanup(doc)
-
-            # Lightweight second pass: remove any remaining _START/_END fragments
-            short_pattern = re.compile(r"\b\w+_(?:START|END)\b", flags=re.IGNORECASE)
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for para in cell.paragraphs:
-                            for run in para.runs:
-                                new_text = short_pattern.sub('', run.text)
-                                if new_text != run.text:
-                                    run.text = new_text
-
-            for para in doc.paragraphs:
-                for run in para.runs:
-                    new_text = short_pattern.sub('', run.text)
-                    if new_text != run.text:
-                        run.text = new_text
-
-        except Exception as e:
-            self.logger.warning(f"Error in ultimate marker cleanup: {e}")
 
     def _clear_blank_cells_in_mini_template(self, doc):
         """
