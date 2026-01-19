@@ -205,7 +205,7 @@ class LineageEditor:
                                and k.upper() in VALID_CLASSIC_LINEAGES]
             else:
                 # For non-classic types, show all lineages including MIXED
-            lineage_keys = [k for k in self.LINEAGE_MAP.keys() if k != "CBD_BLEND"]
+                lineage_keys = [k for k in self.LINEAGE_MAP.keys() if k != "CBD_BLEND"]
             
             abbr_values = [self.ABBREVIATED_LINEAGE.get(k, k) for k in lineage_keys]
             combo = ttk.Combobox(

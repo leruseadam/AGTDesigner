@@ -3816,7 +3816,8 @@ const TagManager = {
             console.warn('Failed to start fast background fetch for tags:', err);
         }
 
-        return false;
+        // Debug: log filter metrics for diagnostics
+        console.log('Filter metrics', {
             filteredTagsCount: filteredTags.length,
             productTypeFilter: productTypeFilter,
             vendorFilter: vendorFilter,

@@ -12,14 +12,6 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 class SmartExcelNormalizer:
-        def debug_log_vendor_columns(self, product_data: Dict[str, Any]):
-            # Log all possible vendor/brand fields and their values for this product
-            vendor_fields = [
-                'Vendor/Supplier*', 'Vendor', 'vendor', 'Product Brand', 'Brand', 'brand'
-            ]
-            values = {field: product_data.get(field, None) for field in vendor_fields}
-            logger.debug(f"[VENDOR DEBUG] Product: {product_data.get('Product Name*', '')} | Vendor fields: {values}")
-
     """Comprehensive Excel data normalization for all product fields."""
     
     def __init__(self):
@@ -37,6 +29,17 @@ class SmartExcelNormalizer:
             'validation_errors': 0,
             'validation_warnings': 0
         }
+
+    def debug_log_vendor_columns(self, product_data: Dict[str, Any]):
+        """Log all possible vendor/brand fields and their values for this product."""
+        try:
+            vendor_fields = [
+                'Vendor/Supplier*', 'Vendor', 'vendor', 'Product Brand', 'Brand', 'brand'
+            ]
+            values = {field: product_data.get(field, None) for field in vendor_fields}
+            logger.debug(f"[VENDOR DEBUG] Product: {product_data.get('Product Name*', '')} | Vendor fields: {values}")
+        except Exception:
+            logger.debug("Failed to debug vendor columns for product.")
     
     def normalize_product_data(self, product_data: Dict[str, Any]) -> Dict[str, Any]:
         """

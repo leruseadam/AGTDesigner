@@ -275,6 +275,7 @@ class LineageEditor:
                 save_shared_data(df2)
             except Exception as e:
                 # Warning: Could not save shared data from LineageEditor: {e}
+                pass
             self._background_save(df2)
         else:
             self.popup.destroy()
