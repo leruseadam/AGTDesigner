@@ -14826,12 +14826,9 @@ def get_web_available_tags():
             cached_tags = cache.get(cache_key)
             if cached_tags:
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ WEB: Using {len(cached_tags)} cached tags ({elapsed:.1f}ms)")
-                # CRITICAL: Align tags even for web endpoint to ensure sovereign_lineage is included
-                try:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                except Exception as align_err:
-                    logging.warning(f"WEB: Could not align cached tags: {align_err}")
+                logging.info(f"⚡ WEB CACHE HIT: Returning {len(cached_tags)} cached tags ({elapsed:.1f}ms) - skipping DB queries for speed")
+                # PERFORMANCE: Skip lineage alignment for cached tags - they were already aligned when cached
+                # Only re-align if lineage was recently updated (handled above by clearing cache)
                 safe_cached_tags = make_json_safe(cached_tags)
                 response = make_response(jsonify({
                     'tags': safe_cached_tags,

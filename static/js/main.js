@@ -11763,8 +11763,8 @@ const TagManager = {
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
-                // PERFORMANCE: Much shorter timeout for faster failure recovery
-                const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
+                // PERFORMANCE: Allow more time for initial load, especially with large datasets
+                const safetyTimeoutMs = isWebClient ? 12000 : 15000; // 12s for web, 15s for desktop
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
                     // Just hide the splash, don't show error message
