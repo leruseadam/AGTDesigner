@@ -111,7 +111,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     desc_lower = str(description).lower()
     name_lower = str(product_name).lower()
     combined = f"{desc_lower} {name_lower}"
-    
+
     # Check for flavored blunts
     if 'flavored blunt' in combined or 'flavoured blunt' in combined:
         return {
@@ -119,38 +119,29 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             'display_name': 'Assorted Blunts',
             'category': 'Flavored Blunts'
         }
-    
-    # Check for pack sizes (general pattern - check this BEFORE specific 1g x 5 check)
-    # Pattern: "0.5g x 7 Pack", "1g x 5 Pack", ".5g x 2 Pack", etc.
+
+    # Check for pack sizes (general pattern)
     pack_match = re.search(r'(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)\s*pack', combined, re.IGNORECASE)
     if pack_match:
         weight = pack_match.group(1)
         count = pack_match.group(2)
-        # Normalize weight display (handle .5g -> 0.5g, but keep 0.5g as 0.5g)
-        if weight.startswith('.'):
-            # ".5" -> "0.5"
-            weight_display = '0' + weight
-        else:
-            # "0.5" stays "0.5", "1" stays "1"
-            weight_display = weight
-        # Include the word "Pre-Roll" in the display name so grouped
-        # pack labels clearly indicate they are prerolls.
+        # Normalize weight display (handle .5 -> 0.5)
+        weight_display = ('0' + weight) if weight.startswith('.') else weight
         return {
             'group_id': f'{weight}g-{count}pack',
-            'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
+            'display_name': f'Assorted Pre-Rolls - {weight_display}g x {count} Packs',
             'category': f'{weight_display}g x {count} Packs'
         }
-    
-    # Check specifically for 1g x 5 packs (more specific, should be caught by above but keeping for safety)
+
+    # Specific 1g x 5 packs
     if re.search(r'1g\s*x\s*5\s*pack', combined, re.IGNORECASE) or '1g x 5 pack' in combined.lower() or '1 g x 5 pack' in combined.lower():
-        # Ensure the specific 1g x 5 pack group also includes "Pre-Roll"
         return {
             'group_id': '5packs',
-            'display_name': 'Assorted Pre-Roll - 1g x 5 Packs',
+            'display_name': 'Assorted Pre-Rolls - 1g x 5 Packs',
             'category': '1g x 5 Packs'
         }
-    
-    # Check for infused prerolls with weight
+
+    # Infused prerolls
     if 'infused' in combined and 'pre' in combined and 'roll' in combined:
         weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
         if weight_match:
@@ -166,43 +157,45 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
                 'display_name': 'Infused Pre-Roll',
                 'category': 'Infused Pre-Roll'
             }
-    
-    # Check for regular prerolls with weight
+
+    # Regular prerolls with weight
     if ('pre' in combined and 'roll' in combined) and 'infused' not in combined:
         weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
         if weight_match:
             weight = weight_match.group(1)
             return {
                 'group_id': f'preroll-{weight}g',
-                'display_name': f'Pre-Roll - {weight}g',
+                'display_name': f'Assorted Pre-Rolls - {weight}g',
                 'category': f'Pre-Roll - {weight}g'
             }
-        # If no weight found but it's still a preroll, continue to pattern matching below
-        # This ensures prerolls without weights still get grouped
-    
-    # Default: use truncated description pattern
-    # CRITICAL FIX: Check for infused prerolls FIRST before regular prerolls
+
+    # Fallback pattern matching for generic preroll descriptions
     preroll_patterns = [
-        r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',  # Infused prerolls first
-        r'(.+?)(Pre[-‑ ]?Roll.*)',  # Regular prerolls second
+        r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',
+        r'(.+?)(Pre[-‑ ]?Roll.*)',
     ]
     for pattern in preroll_patterns:
         match = re.search(pattern, description, re.IGNORECASE)
         if match:
             universal_desc = match.group(2).strip().lower()
-            # Create a safe group ID from the description
             group_id = re.sub(r'[^a-z0-9-]+', '-', universal_desc).strip('-')
-            display_name = universal_desc.replace('pre-roll', 'Pre-Roll').replace('pre roll', 'Pre-Roll')
-            # CRITICAL FIX: Ensure "infused" is capitalized and preserved in display name
             if 'infused' in universal_desc:
-                display_name = display_name.replace('infused', 'Infused').title()
-                # Ensure "Infused" appears before "Pre-Roll" in the display name
+                display_name = universal_desc.replace('infused', 'Infused').title()
                 if 'infused' in display_name.lower() and 'pre-roll' not in display_name:
                     display_name = display_name.replace('Infused', 'Infused Pre-Roll')
             else:
-                display_name = display_name.title()
+                if 'pre-roll' in universal_desc or 'pre roll' in universal_desc:
+                    weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', universal_desc)
+                    if weight_match:
+                        weight = weight_match.group(1)
+                        display_name = f'Assorted Pre-Rolls - {weight}g'
+                    else:
+                        display_name = 'Assorted Pre-Rolls'
+                else:
+                    display_name = universal_desc.title()
+
             return {
-                'group_id': group_id[:50],  # Limit length
+                'group_id': group_id[:50],
                 'display_name': display_name,
                 'category': universal_desc
             }
@@ -213,6 +206,18 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         'display_name': 'Assorted Pre-Rolls',
         'category': 'Other'
     }
+
+
+def _sanitize_vendor_key(vendor: str) -> str:
+    """Create a filesystem/cache/DB safe vendor key from a vendor display name."""
+    try:
+        v = str(vendor or '').strip().lower()
+        # Replace spaces and unsafe characters with hyphens, keep alphanumerics, hyphen and underscore
+        v = re.sub(r'[^a-z0-9_-]+', '-', v)
+        v = v.strip('-')
+        return v or 'unknown'
+    except Exception:
+        return 'unknown'
 
 
 def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[Dict[str, Any]]:
@@ -309,10 +314,14 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         except Exception:
             price_tier = str(price).strip() if price else 'N/A'
         
-        # Group by category ONLY - do NOT include vendor in grouping
-        # This ensures all products with the same description are in one list
-        # regardless of which vendor they come from
-        group_key = group_id
+        # Group by category + vendor so we create one representative per vendor per category.
+        # This prevents different vendors' prerolls from collapsing into a single representative
+        # and ensures vendor-specific QR pages show the correct items.
+        if vendor_clean:
+            vendor_key = _sanitize_vendor_key(vendor_clean)
+            group_key = f"{group_id}|{vendor_key}"
+        else:
+            group_key = group_id
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {

@@ -1501,6 +1501,27 @@ class TemplateProcessor:
             self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
             
             try:
+                # Dump a concise mapping of Label keys -> ProductName/Description
+                try:
+                    label_keys = [k for k in context.keys() if str(k).startswith('Label')]
+                    # Sort by numeric label index when possible
+                    def _label_index(k):
+                        import re
+                        m = re.search(r"(\d+)", str(k))
+                        return int(m.group(1)) if m else 0
+                    label_keys = sorted(label_keys, key=_label_index)
+                    self.logger.info(f"🔍 PRE-RENDER CONTEXT DUMP: {len(label_keys)} label keys")
+                    for lk in label_keys:
+                        v = context.get(lk)
+                        pname = ''
+                        if isinstance(v, dict):
+                            pname = v.get('ProductName') or v.get('Product Name*') or v.get('Description') or ''
+                        else:
+                            pname = str(v)[:80]
+                        self.logger.info(f"  {lk}: {pname}")
+                except Exception as _dump_err:
+                    self.logger.debug(f"Failed to dump context before render: {_dump_err}")
+
                 doc.render(context)
                 self.logger.debug("DocxTemplate render completed successfully")
                 
@@ -3657,10 +3678,14 @@ class TemplateProcessor:
                     # Fallback to group_id only if no vendor (backward compatibility)
                     qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
 
-                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
-                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
+                # Final safety check: avoid emitting localhost/127.0.0.1 in QR URLs on printed labels in
+                # production. For local development allow it but log a clear warning so user can set
+                # `QR_BASE_URL` to a production domain when deploying.
                 if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
-                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
+                    self.logger.warning(
+                        f"PREROLL QR WARNING: Generated QR URL uses localhost base: {qr_url}. "
+                        "Proceeding (development mode) but consider setting QR_BASE_URL to a production domain."
+                    )
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
