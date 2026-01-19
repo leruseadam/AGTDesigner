@@ -3782,6 +3782,7 @@ def upload_file_streaming():
     """Ultra-fast streaming Excel upload with chunked processing for maximum performance"""
     try:
         start_time = time.time()
+        logging.info("WEB: /api/web/available-tags called - params=%s", dict(request.args))
         max_processing_time = MAX_TOTAL_PROCESSING_TIME if 'MAX_TOTAL_PROCESSING_TIME' in globals() else 300
         max_processing_time = MAX_TOTAL_PROCESSING_TIME if 'MAX_TOTAL_PROCESSING_TIME' in globals() else 300
         
@@ -14917,7 +14918,9 @@ def get_web_available_tags():
         # Excel processor already loaded and validated above - just use it
         # Get tags from Excel
         try:
+            logging.info("WEB: Calling excel_processor.get_available_tags() - starting")
             excel_tags = excel_processor.get_available_tags()
+            logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
             
             # CRITICAL FIX: Always align tags with database lineage to ensure lineage is available
             # Use the robust _align_tags_with_db_lineage helper function used throughout the codebase
