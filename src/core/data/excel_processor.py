@@ -4349,13 +4349,16 @@ class ExcelProcessor:
                                     if brand_part:
                                         product_brand = brand_part.upper()
                                         break
-                        
+
                         # If still no brand, try vendor as fallback
+                        # CRITICAL FIX: Do NOT use vendor as brand fallback for preroll types
+                        # Preroll labels should show actual brand, not vendor name
                         if not product_brand or product_brand.strip() == '':
-                            vendor = record.get('Vendor', '') or record.get('Vendor/Supplier*', '')
-                            if vendor and vendor.strip() != '':
-                                product_brand = vendor.strip().upper()
-                    
+                            if product_type not in ['pre-roll', 'infused pre-roll', 'preroll', 'infused preroll']:
+                                vendor = record.get('Vendor', '') or record.get('Vendor/Supplier*', '')
+                                if vendor and vendor.strip() != '':
+                                    product_brand = vendor.strip().upper()
+
                     # CRITICAL FIX: Normalize lineage to ensure proper format (HYBRID/SATIVA, etc.)
                     original_lineage_raw = str(record.get('Lineage', ''))
                     original_lineage = normalize_lineage(original_lineage_raw)
@@ -7523,13 +7526,16 @@ class ExcelProcessor:
                                     if brand_part:
                                         product_brand = brand_part.upper()
                                         break
-                        
+
                         # If still no brand, try vendor as fallback
+                        # CRITICAL FIX: Do NOT use vendor as brand fallback for preroll types
+                        # Preroll labels should show actual brand, not vendor name
                         if not product_brand or product_brand.strip() == '':
-                            vendor = record.get('Vendor', '') or record.get('Vendor/Supplier*', '')
-                            if vendor and vendor.strip() != '':
-                                product_brand = vendor.strip().upper()
-                    
+                            if product_type not in ['pre-roll', 'infused pre-roll', 'preroll', 'infused preroll']:
+                                vendor = record.get('Vendor', '') or record.get('Vendor/Supplier*', '')
+                                if vendor and vendor.strip() != '':
+                                    product_brand = vendor.strip().upper()
+
                     original_lineage = str(record.get('Lineage', '')).upper()
                     original_product_strain = record.get('ProductStrain', '') or record.get('strain_name', '')
                     

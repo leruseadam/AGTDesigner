@@ -2646,10 +2646,11 @@ class TemplateProcessor:
                 self.logger.warning(f"🔧 BRAND ENRICHMENT FAILED: Could not retrieve brand from cache: {e}")
             
             # If database enrichment failed, fall back to vendor when available
-            # Prefer vendor fallback for preroll/mini templates to avoid generic defaults
-            if not enriched_brand:
-                vendor_fallback = (record.get('Vendor') or 
-                                 record.get('Vendor/Supplier*') or 
+            # CRITICAL FIX: Do NOT use vendor fallback for preroll/mini templates - vendor is not the brand
+            # Only use vendor fallback for non-preroll/mini templates where it makes sense
+            if not enriched_brand and self.template_type not in ('preroll', 'mini'):
+                vendor_fallback = (record.get('Vendor') or
+                                 record.get('Vendor/Supplier*') or
                                  record.get('ProductVendor', ''))
                 if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                     enriched_brand = str(vendor_fallback).strip()
