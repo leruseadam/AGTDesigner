@@ -1,0 +1,27 @@
+index,product_name,inventory_type,inventory_category,mapped_type
+0,Fried Strawberry Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+1,Gello Shotz Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+2,Fried Ice Cream Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+3,GMO Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+4,Grape Gas Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+5,Ice Cream Cake Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+6,Wedding Cake Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+7,Pineapple Express Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+8,Hawaiian Runtz Honey Crystal 1.0g,Concentrate for Inhalation,IntermediateProduct,Concentrate
+9,Honey Beltz Live Resin 1.0g,Concentrate for Inhalation,IntermediateProduct,Live Resin
+10,Papaya Juice Live Resin 1.0g,Concentrate for Inhalation,IntermediateProduct,Live Resin
+11,Runtz Live Resin 1.0g,Concentrate for Inhalation,IntermediateProduct,Live Resin
+12,Wedding Cake Live Resin 1.0g,Concentrate for Inhalation,IntermediateProduct,Live Resin
+13,Smarties Sugar Cone *2 Pack* 1.0g,Marijuana Mix Infused,EndProduct,Pre-Roll
+14,Jet Fuel Gelato Sugar Cone *2 Pack* 1.0g,Marijuana Mix Infused,EndProduct,Pre-Roll
+15,Watermelon Crush Sugar Cone *2 Pack* 1.0g,Marijuana Mix Infused,EndProduct,Pre-Roll
+16,Runtz Cured Resin Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+17,Wedding Cake Cured Resin Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+18,Blue Dream Cured Resin Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+19,Super Boof Liquid Diamond Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+20,Blueberry Pancakes Liquid Diamond Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+21,Grape Gas Liquid Diamond Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+22,Ice Cream Cake Liquid Diamond Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+23,Nectarine Jelly Liquid Diamond Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+24,Golden Pineapple Live Resin Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge
+25,Lemon Slushie Live Resin Vaporizer 1.0g,Concentrate for Inhalation,IntermediateProduct,Vape Cartridge

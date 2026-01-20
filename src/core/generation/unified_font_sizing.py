@@ -57,7 +57,7 @@ def _load_font_sizing_config():
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(10, 36), (20, 34), (30, 30), (40, 28), (45, 26), (50, 24), (60, 23), (70, 22), (80, 20), (float('inf'), 18)],
+                    'description': [(10, 36), (20, 34), (30, 32), (40, 30), (45, 28), (50, 26), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
                     'lineage': [(100, 18), (float('inf'), 14)],  # Max 18pt for lineage to prevent 20pt sizing
@@ -71,7 +71,7 @@ def _load_font_sizing_config():
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
                 'horizontal': {
-                    'description': [(10, 36), (20, 34), (25, 32), (30, 28), (35, 26), (40, 25), (50, 24), (60, 23), (70, 22), (80, 21), (80, 20), (100, 19), (120, 18), (float('inf'), 16)],
+                    'description': [(10, 36), (20, 34), (25, 32), (30, 28), (35, 26), (40, 25), (50, 24), (65, 23), (70, 22), (75, 21), (80, 20), (90, 19), (100, 18), (120, 16), (130, 15), (float('inf'), 14)],
                     'brand': [(20, 18), (40, 16), (120, 14), (140, 12), (160, 10), (float('inf'), 10)],
                     'price': [(5, 40), (10, 38), (20, 36), (80, 20), (float('inf'), 18)],
                     'lineage': [(10, 20), (80, 18), (60, 10), (float('inf'), 10)],
@@ -158,6 +158,25 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     
     # Special rule: Mini template long brand names forced to minimum readable size
     if field_type.lower() == 'brand' and orientation.lower() == 'mini':
+        # New rule: If the brand contains more than 3 words, force 6pt per request
+        try:
+            import re
+            brand_text = str(text or "").strip()
+            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_text, re.IGNORECASE)
+            if brand_match:
+                brand_text = brand_match.group(1).strip()
+
+            words = [w for w in re.split(r"\s+", brand_text) if w]
+            if len(words) > 3:
+                final_size = 6.0 * scale_factor
+                logger.debug(
+                    f"Mini template brand word-count rule: '{brand_text}' has {len(words)} words, forcing {final_size}pt"
+                )
+                return Pt(final_size)
+        except Exception:
+            logger.exception("Error while applying mini-template brand word-count rule")
+
+        # Fallback legacy rule based on letter count
         text_length = _brand_letter_count(text)
         if text_length >= 20:
             final_size = 6.5 * scale_factor

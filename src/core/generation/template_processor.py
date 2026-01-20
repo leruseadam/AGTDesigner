@@ -135,7 +135,7 @@ class TemplateProcessor:
         resolved_path = str(template_path.resolve()) if template_path.exists() else str(template_path)
         self.logger.error(f"Template not found: {resolved_path}")
         raise FileNotFoundError(f"Template not found: {resolved_path}")
-    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
+    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None, fast_mode: bool = False):
         self.template_type = template_type
         self.font_scheme = font_scheme
         self.logger = logging.getLogger(__name__)  # Initialize logger first
@@ -148,6 +148,9 @@ class TemplateProcessor:
         else:
             self.scale_factor = scale_factor
         self.excel_processor = excel_processor  # Store the session's Excel processor
+        # fast_mode parameter kept for backwards compatibility but no longer skips any processing
+        # All features (font sizing, lineage colors, markers) are now applied regardless of batch size
+        self.fast_mode = bool(fast_mode)
         self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
         self._dynamic_template_created = False  # Track if dynamic template was created
@@ -1501,27 +1504,6 @@ class TemplateProcessor:
             self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
             
             try:
-                # Dump a concise mapping of Label keys -> ProductName/Description
-                try:
-                    label_keys = [k for k in context.keys() if str(k).startswith('Label')]
-                    # Sort by numeric label index when possible
-                    def _label_index(k):
-                        import re
-                        m = re.search(r"(\d+)", str(k))
-                        return int(m.group(1)) if m else 0
-                    label_keys = sorted(label_keys, key=_label_index)
-                    self.logger.info(f"🔍 PRE-RENDER CONTEXT DUMP: {len(label_keys)} label keys")
-                    for lk in label_keys:
-                        v = context.get(lk)
-                        pname = ''
-                        if isinstance(v, dict):
-                            pname = v.get('ProductName') or v.get('Product Name*') or v.get('Description') or ''
-                        else:
-                            pname = str(v)[:80]
-                        self.logger.info(f"  {lk}: {pname}")
-                except Exception as _dump_err:
-                    self.logger.debug(f"Failed to dump context before render: {_dump_err}")
-
                 doc.render(context)
                 self.logger.debug("DocxTemplate render completed successfully")
                 
@@ -1545,19 +1527,15 @@ class TemplateProcessor:
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
             try:
                 # Post-process the document to apply dynamic font sizing first
+                # NOTE: fast_mode no longer skips post-processing - all features are applied
                 self._post_process_and_replace_content(rendered_doc)
-                
-                # Check timeout before lineage colors
-                if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                    self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                    return rendered_doc
-                
+
                 # Apply lineage colors last to ensure they are not overwritten
                 apply_lineage_colors(rendered_doc)
-                
+
                 # Apply final marker cleanup for all templates
                 self._final_marker_cleanup(rendered_doc)
-                
+
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
                 # Continue processing without post-processing features
@@ -2614,6 +2592,30 @@ class TemplateProcessor:
         product_type = (label_context.get('ProductType', '').lower() or 
                        label_context.get('Product Type*', '').lower())
         product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
+        # If product_brand looks like the vendor (common when upstream matching used vendor-as-brand),
+        # clear it for preroll/mini templates so we don't display vendor in the brand slot.
+        try:
+            vendor_candidate = (
+                label_context.get('_vendor_from_record') or
+                record.get('Vendor') or
+                record.get('Vendor/Supplier*') or
+                record.get('ProductVendor') or
+                ''
+            )
+            def _clean(s):
+                return str(s).strip().lower() if s is not None else ''
+
+            pb_clean = _clean(product_brand)
+            v_clean = _clean(vendor_candidate)
+            if self.template_type in ('preroll', 'mini') and pb_clean and v_clean:
+                if pb_clean == v_clean or v_clean in pb_clean or pb_clean in v_clean:
+                    self.logger.info(f"PREROLL/MINI BRAND CLEANUP: Detected brand same-as-vendor for '{product_name}' -> clearing ProductBrand")
+                    product_brand = ''
+                    label_context['ProductBrand'] = ''
+                    label_context['Product Brand'] = ''
+        except Exception:
+            # Non-fatal - if anything goes wrong, leave product_brand unchanged
+            pass
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
@@ -2660,12 +2662,19 @@ class TemplateProcessor:
             
             # If database enrichment failed, fallback to vendor
             if not enriched_brand:
-                vendor_fallback = (record.get('Vendor') or 
-                                 record.get('Vendor/Supplier*') or 
-                                 record.get('ProductVendor', ''))
-                if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                    enriched_brand = str(vendor_fallback).strip()
-                    self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
+                # For preroll and mini templates, prefer leaving brand empty or using
+                # a default rather than falling back to vendor names. Vendor names
+                # are displayed elsewhere and should not substitute for ProductBrand
+                # on small labels where brand must be accurate.
+                if self.template_type not in ('preroll', 'mini'):
+                    vendor_fallback = (record.get('Vendor') or 
+                                     record.get('Vendor/Supplier*') or 
+                                     record.get('ProductVendor', ''))
+                    if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                        enriched_brand = str(vendor_fallback).strip()
+                        self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
+                else:
+                    self.logger.debug(f"SKIP VENDOR FALLBACK: template_type='{self.template_type}' for '{product_name}' - preserving brand over vendor")
             
             # CRITICAL FIX: If still no brand after all fallbacks, use a default brand based on product type
             if not enriched_brand:
@@ -3207,14 +3216,19 @@ class TemplateProcessor:
                     clean_brand_text = clean_brand_text.strip()
 
                     if clean_brand_text:
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
+                        lineage_value = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
                     else:
                         # Fallback to original brand text if cleaning removed everything
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                        lineage_value = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
 
-                    # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
+                    # Set Lineage and also populate ProductBrand_Center so downstream
+                    # docx formatting consistently recognizes the centered brand field.
+                    label_context['Lineage'] = lineage_value
+                    # Keep ProductBrand empty to avoid duplication, but ensure the
+                    # ProductBrand_Center field contains the same centered marker text
+                    # so templates that render brand from a dedicated cell will center it.
                     label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
+                    label_context['ProductBrand_Center'] = lineage_value
                 
                 # Product Strain gets its own field with small font size
                 # CRITICAL FIX: For vertical template, allow ProductStrain but use proper font sizing
@@ -3641,7 +3655,6 @@ class TemplateProcessor:
                 # Always derive the QR base from the current request host so we don't
                 # bake any specific domain into the code or printed labels.
                 from flask import request
-                import os
 
                 try:
                     base_url = (request.host_url or '').rstrip('/')
@@ -3678,14 +3691,10 @@ class TemplateProcessor:
                     # Fallback to group_id only if no vendor (backward compatibility)
                     qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
 
-                # Final safety check: avoid emitting localhost/127.0.0.1 in QR URLs on printed labels in
-                # production. For local development allow it but log a clear warning so user can set
-                # `QR_BASE_URL` to a production domain when deploying.
+                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
+                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
                 if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
-                    self.logger.warning(
-                        f"PREROLL QR WARNING: Generated QR URL uses localhost base: {qr_url}. "
-                        "Proceeding (development mode) but consider setting QR_BASE_URL to a production domain."
-                    )
+                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
                 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)

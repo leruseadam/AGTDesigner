@@ -1,0 +1,7 @@
+{
+  "suggested_type_mappings": {
+    "Concentrate for Inhalation": "Concentrate",
+    "Marijuana Mix Infused": "Pre-Roll"
+  },
+  "notes": "Derived from scripts/debug/all_mappings_cultivera.csv (Cultivera_ORD-13106).\n- 'Concentrate for Inhalation' appears with both hardware and extract variants; defaulting to 'Concentrate' is conservative (product-name heuristics already upgrade to 'Vape Cartridge' or 'Live Resin' when detected).\n- 'Marijuana Mix Infused' consistently mapped to 'Pre-Roll' in observed data.\nReview and approve these suggestions or modify before moving into json_type_overrides.json."
+}

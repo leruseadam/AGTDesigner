@@ -40,7 +40,7 @@ os.environ['BATCH_SIZE_LIMIT'] = '500'  # Larger batches for faster processing
 logging.basicConfig(
     level=logging.ERROR,
     format='%(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
+    handlers=[logging.StreamHandler(stream=sys.__stderr__)]
 )
 
 # Suppress verbose logging from libraries

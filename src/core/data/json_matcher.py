@@ -202,9 +202,9 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
     # Enhanced mappings for common inventory types based on Cultivera data
     type_mappings = {
         # Concentrates and Vape Cartridges
-        "concentrate for inhalation": "Vape Cartridge",
-        "concentrate": "Vape Cartridge", 
-        "extract": "Vape Cartridge",
+        "concentrate for inhalation": "Concentrate",
+        "concentrate": "Concentrate",
+        "extract": "Concentrate",
         "oil": "Vape Cartridge",
         "distillate": "Vape Cartridge",
         "live resin": "Live Resin",
@@ -284,81 +284,126 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
         "eye drops": "Eye Drops"
     }
     
+    # Load optional overrides from external JSON file (allows quick fixes without code changes)
+    try:
+        overrides_path = os.environ.get('JSON_TYPE_OVERRIDES')
+        if not overrides_path:
+            # Default location: project root json_type_overrides.json
+            overrides_path = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'json_type_overrides.json'))
+        if overrides_path and os.path.exists(overrides_path):
+            try:
+                with open(overrides_path, 'r', encoding='utf-8') as f:
+                    overrides = json.load(f)
+                # Merge simple key->type mappings
+                if isinstance(overrides, dict):
+                    for k, v in overrides.get('type_mappings', overrides).items():
+                        type_mappings[str(k).lower().strip()] = v
+                    # Merge token overrides
+                    for k, v in overrides.get('token_overrides', {}).items():
+                        TYPE_OVERRIDES[str(k).lower().strip()] = v
+                logging.info(f"json_matcher: loaded JSON overrides from {overrides_path}")
+            except Exception as _e:
+                logging.warning(f"json_matcher: failed to load overrides from {overrides_path}: {_e}")
+    except Exception:
+        pass
+
+    # Helper to log mapping decisions
+    def _log_and_return(mapped, reason):
+        try:
+            logging.debug(f"json_matcher.map: inventory_type='{inventory_type}' category='{inventory_category}' name='{product_name}' -> '{mapped}' (reason={reason})")
+        except Exception:
+            logging.debug(f"json_matcher.map: mapped='{mapped}' reason='{reason}'")
+        return mapped
+
     # Check direct mapping first
     if inventory_type_lower in type_mappings:
-        return type_mappings[inventory_type_lower]
-    
+        # For concentrate-like types, use product-name heuristics to decide between
+        # general 'Concentrate' vs 'Vape Cartridge' (hardware vs extract form).
+        mapped = type_mappings[inventory_type_lower]
+        if mapped.lower() == 'concentrate':
+            name = product_name_lower
+            hardware_indicators = ['vaporizer', 'vaporizer', 'vaporiser', 'vape', 'cartridge', 'cart', 'disposable', 'liquid diamond', 'cured resin vaporizer', 'vaporizer']
+            # If product name explicitly mentions hardware, prefer Vape Cartridge
+            if any(tok in name for tok in hardware_indicators):
+                return _log_and_return('Vape Cartridge', 'direct_mapping_hardware_indicator')
+            # Live-resin / honey-crystal / liquid-diamond indicate specific concentrate types
+            if 'live resin' in inventory_type_lower or 'live resin' in name:
+                return _log_and_return('Live Resin', 'direct_mapping_live_resin')
+            if 'honey crystal' in name or 'honey crystal' in inventory_type_lower:
+                return _log_and_return('Concentrate', 'direct_mapping_honey_crystal')
+        return _log_and_return(type_mappings[inventory_type_lower], 'direct_mapping')
+
     # Check category-based mappings
     if "intermediate" in inventory_category_lower:
         if "concentrate" in inventory_type_lower or "extract" in inventory_type_lower:
-            return "Vape Cartridge"
+            return _log_and_return("Vape Cartridge", 'category_intermediate_concentrate')
         elif "flower" in inventory_type_lower:
-            return "Flower"
+            return _log_and_return("Flower", 'category_intermediate_flower')
 
     # Handle Washington-style usable marijuana inventory types
     if inventory_type_lower.startswith("usable"):
         if product_name_lower:
             joint_keywords = ["pre-roll", "pre roll", "joint", "blunt", "cone"]
             if any(keyword in product_name_lower for keyword in joint_keywords):
-                return "Pre-Roll"
+                return _log_and_return("Pre-Roll", 'usable_name_joint')
             if any(keyword in product_name_lower for keyword in ["shake", "trim"]):
-                return "Flower"
-        return "Flower"
-    
+                return _log_and_return("Flower", 'usable_name_shake')
+        return _log_and_return("Flower", 'usable_default_flower')
+
     # Enhanced product name analysis for "Medically Compliant" products
     if product_name_lower and "medically compliant" in product_name_lower:
         # Look for specific product type indicators in the name
         if any(keyword in product_name_lower for keyword in ["rosin", "wax", "shatter", "live resin", "distillate", "cartridge", "all-in-one", "liquid diamond", "caviar", "hash rosin", "sugar wax"]):
-            return "Vape Cartridge"
+            return _log_and_return("Vape Cartridge", 'medically_rosin_like')
         elif any(keyword in product_name_lower for keyword in ["flower", "bud", "pre-roll", "pre roll"]):
-            return "Flower" if "flower" in product_name_lower else "Pre-Roll"
+            return _log_and_return("Flower" if "flower" in product_name_lower else "Pre-Roll", 'medically_flower_or_preroll')
         elif any(keyword in product_name_lower for keyword in ["edible", "gummy", "chocolate", "cookie"]):
-            return "Edible"
+            return _log_and_return("Edible", 'medically_edible')
         elif any(keyword in product_name_lower for keyword in ["melt stix", "flavour stix", "rosin rolls", "infused blunt"]):
-            return "Pre-Roll"
-    
+            return _log_and_return("Pre-Roll", 'medically_meltstix_like')
+
     # Additional product-name based heuristics
     if product_name_lower:
         if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
-            return "Pre-Roll"
+            return _log_and_return("Pre-Roll", 'name_preroll_keywords')
         if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "vape", "510", "all-in-one", "aio", "disposable"]):
-            return "Vape Cartridge"
+            return _log_and_return("Vape Cartridge", 'name_vape_keywords')
         if any(keyword in product_name_lower for keyword in ["rosin", "resin", "wax", "shatter", "crumble", "sauce", "badder", "diamonds", "hash", "solventless", "distillate"]):
-            return "Concentrate"
+            return _log_and_return("Concentrate", 'name_concentrate_keywords')
         if any(keyword in product_name_lower for keyword in ["gummy", "chew", "cookie", "brownie", "chocolate", "edible", "candy", "lozenge"]):
-            return "Edible"
+            return _log_and_return("Edible", 'name_edible_keywords')
         if any(keyword in product_name_lower for keyword in ["tincture", "drops", "sublingual", "dropper"]):
-            return "Tincture"
+            return _log_and_return("Tincture", 'name_tincture_keywords')
         if any(keyword in product_name_lower for keyword in ["topical", "lotion", "salve", "balm", "cream", "ointment"]):
-            return "Topical"
+            return _log_and_return("Topical", 'name_topical_keywords')
 
     # Check for specific keywords in the inventory type
     if any(keyword in inventory_type_lower for keyword in ["cartridge", "pen", "vape"]):
-        return "Vape Cartridge"
+        return _log_and_return("Vape Cartridge", 'inventorytype_vape_keywords')
     elif any(keyword in inventory_type_lower for keyword in ["flower", "bud", "nug"]):
-        return "Flower"
+        return _log_and_return("Flower", 'inventorytype_flower_keywords')
     elif any(keyword in inventory_type_lower for keyword in ["edible", "gummy", "chocolate", "brownie", "cookie"]):
-        return "Edible"
+        return _log_and_return("Edible", 'inventorytype_edible_keywords')
     elif any(keyword in inventory_type_lower for keyword in ["tincture", "oil", "drops"]):
-        return "Tincture"
+        return _log_and_return("Tincture", 'inventorytype_tincture_keywords')
     elif any(keyword in inventory_type_lower for keyword in ["topical", "cream", "lotion", "salve"]):
-        return "Topical"
+        return _log_and_return("Topical", 'inventorytype_topical_keywords')
     elif any(keyword in inventory_type_lower for keyword in ["pre-roll", "joint", "cigar"]):
-        return "Pre-Roll"
-    
+        return _log_and_return("Pre-Roll", 'inventorytype_preroll_keywords')
+
     # Default fallback based on category
     if "concentrate" in inventory_type_lower or "extract" in inventory_type_lower:
-        return "Vape Cartridge"
+        return _log_and_return("Vape Cartridge", 'fallback_concentrate_in_type')
     elif "flower" in inventory_type_lower:
-        return "Flower"
+        return _log_and_return("Flower", 'fallback_flower_in_type')
     else:
         # Final fallback - make a conservative guess based on product name keywords
         if product_name_lower:
             if any(keyword in product_name_lower for keyword in ["rosin", "resin", "wax", "shatter", "crumble", "sauce", "badder", "diamonds", "hash"]):
-                return "Concentrate"
+                return _log_and_return("Concentrate", 'finalfallback_concentrate_name')
             if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
-                return "Pre-Roll"
-        return "Flower"
+                return _log_and_return("Pre-Roll", 'finalfallback_preroll_name')
+        return _log_and_return("Flower", 'finalfallback_default')
 
 def extract_cannabinoids(lab_result_data):
     """Enhanced cannabinoid extraction with better parsing and validation."""

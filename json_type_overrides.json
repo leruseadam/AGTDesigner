@@ -1,0 +1,36 @@
+{
+  "type_mappings": {
+    "disposable vape": "Disposable",
+    "disposable cartridge": "Disposable",
+    "concentrate for inhalation": "Concentrate",
+    "live resin cartridge": "Live Resin",
+    "live resin": "Live Resin",
+    "marijuana mix infused": "Pre-Roll",
+    "hash rosin": "Rosin",
+    "rosin roll": "Pre-Roll",
+    "pre roll": "Pre-Roll",
+    "preroll": "Pre-Roll",
+    "pre-roll": "Pre-Roll",
+    "high cbd flower": "Flower",
+    "high cbd edible": "Edible",
+    "tincture oil": "Tincture"
+  },
+  "token_overrides": {
+    "jefe": "Vape Cartridge",
+    "twisted": "Vape Cartridge",
+    "fire": "Vape Cartridge",
+    "cart": "Vape Cartridge",
+    "cartridge": "Vape Cartridge",
+    "vape": "Vape Cartridge",
+    "disposable": "Disposable",
+    "rosin": "Rosin",
+    "rosin-roll": "Pre-Roll",
+    "preroll": "Pre-Roll",
+    "pre-roll": "Pre-Roll",
+    "gummy": "Gummy",
+    "gummies": "Gummy",
+    "edible": "Edible",
+    "chocolate": "Chocolate",
+    "shatter": "Shatter"
+  }
+}
