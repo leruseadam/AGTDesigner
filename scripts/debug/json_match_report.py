@@ -48,6 +48,7 @@ def main():
 
     path = sys.argv[1]
     out_path = None
+    all_flag = '--all' in sys.argv
     if '--output' in sys.argv:
         try:
             out_path = sys.argv[sys.argv.index('--output') + 1]
@@ -73,16 +74,19 @@ def main():
             'mapped_type': mapped
         })
 
-    # If out_path specified, write CSV of mismatches (where source_type exists and differs)
+    # If out_path specified, write CSV. By default write mismatches only; with --all write all mappings.
     if out_path:
         with open(out_path, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['product_name', 'inventory_type', 'inventory_category', 'source_type', 'mapped_type']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             for r in rows:
-                if r['source_type'] and r['source_type'].strip().lower() != r['mapped_type'].strip().lower():
+                if all_flag:
                     writer.writerow(r)
-        print(f'Wrote mismatches to {out_path}')
+                else:
+                    if r['source_type'] and r['source_type'].strip().lower() != r['mapped_type'].strip().lower():
+                        writer.writerow(r)
+        print(f'Wrote to {out_path} (all={all_flag})')
     else:
         # Print all rows
         for r in rows:

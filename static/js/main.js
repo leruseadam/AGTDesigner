@@ -1570,6 +1570,121 @@ const TagManager = {
         }
     },
 
+    // Helper method to hydrate UI from cached tags (extracted to avoid duplication)
+    _hydrateFromCachedTags(cachedTags, hasRecentLineageUpdate, lastLineageUpdateTime) {
+        // INSTANT LOADING FIX: Even if there was a recent lineage update, use cache for instant display
+        // This ensures tags load instantly while fresh lineage data is fetched in background
+        if (hasRecentLineageUpdate) {
+            const timeSinceUpdate = Date.now() - parseInt(lastLineageUpdateTime, 10);
+            console.log(`⚡ Recent lineage update detected (${Math.round(timeSinceUpdate/1000)}s ago) - using cache for instant load, will refresh in background`);
+        }
+        // Cache found - use it for instant load (works for both Excel and database mode)
+        console.log(`✅ Found ${cachedTags.length} cached tags - using for instant load`);
+
+        // PERFORMANCE: Check if cache needs background refresh (old format)
+        // Still use cache for instant display - background refresh will update with database lineage
+        const needsBackgroundRefresh = cachedTags._needsBackgroundRefresh || false;
+        if (needsBackgroundRefresh) {
+            console.log('⚡ Using old cache for instant display - will refresh in background for canonical_lineage');
+        }
+
+        // PERFORMANCE: Optimize normalization - batch process for faster execution
+        // CRITICAL FIX: Preserve vendor data and user-edited lineage when loading from cache
+        const tagCount = cachedTags.length;
+        for (let i = 0; i < tagCount; i++) {
+            const tag = cachedTags[i];
+            // Preserve vendor data (fast check)
+            const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
+            if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
+                if (!tag['Vendor*']) tag['Vendor*'] = vendor;
+                if (!tag['Vendor']) tag['Vendor'] = vendor;
+                if (!tag.vendor) tag.vendor = vendor;
+            }
+
+            // CRITICAL FIX: Preserve price data when loading from cache
+            const price = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag.price || tag['Product Price'] || tag['ProductPrice'] || tag['Unit Price'] || tag['UnitPrice'] || tag['Retail Price'] || tag['RetailPrice'] || '';
+            if (price && price.trim() !== '' && price.trim().toLowerCase() !== 'none' && price.trim().toLowerCase() !== 'nan') {
+                if (!tag['Price*']) tag['Price*'] = price;
+                if (!tag.Price) tag.Price = price;
+                if (!tag.price) tag.price = price;
+            }
+        }
+
+        verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
+        this.state.hydratedFromCache = true;
+        this.state.forceFullAvailableTagRender = true;
+        this.state.simplifiedAvailableTagsActive = false;
+        this.state.tags = [...cachedTags];
+        this.state.originalTags = [...cachedTags];
+
+        if (this.hideActionSplash) {
+            this.hideActionSplash();
+        }
+        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+            AppLoadingSplash.stopAutoAdvance();
+            AppLoadingSplash.complete();
+        }
+
+        const availableContainer = document.getElementById('availableTags');
+        const renderTags = () => {
+            const sampleTag = cachedTags[0];
+            const needsEnrichment = !sampleTag ||
+                (!sampleTag['Product Brand'] && !sampleTag['ProductBrand'] && !sampleTag['productBrand']) ||
+                (!sampleTag['DOH'] && !sampleTag['doh'] && !sampleTag['DOH Compliant (Yes/No)'] && !sampleTag['DOH Compliant']);
+
+            this._updateAvailableTags(cachedTags, null);
+            verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
+
+            if (needsEnrichment) {
+                console.log('🔄 Cached tags missing DOH/Brand - fetching enriched tags in background...');
+                setTimeout(() => {
+                    this.fetchAndUpdateAvailableTags(true).catch(err => {
+                        console.warn('⚠️ Background enrichment failed (non-critical):', err);
+                    });
+                }, 500);
+            }
+
+            const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0
+                ? this.state.originalTags
+                : cachedTags;
+            this.buildFilterOptionsFromTags(tagsForFilters);
+            this._filtersBuiltThisSession = true;
+            setTimeout(() => {
+                if (typeof this.setupFilterEventListeners === 'function') {
+                    this.setupFilterEventListeners();
+                    console.log('✅ Filter event listeners attached after cache hydration');
+                }
+                if (typeof this.setupSearchEventListeners === 'function') {
+                    this.setupSearchEventListeners();
+                    console.log('✅ Search event listeners attached after cache hydration');
+                }
+            }, 50);
+        };
+
+        if (availableContainer) {
+            renderTags();
+        } else {
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', renderTags, { once: true });
+            } else {
+                renderTags();
+            }
+        }
+
+        // PERFORMANCE: Trigger background refresh if cache is old format OR if lineage was recently updated
+        if (needsBackgroundRefresh || hasRecentLineageUpdate) {
+            const refreshReason = needsBackgroundRefresh ? 'old cache format' : 'recent lineage update';
+            console.log(`🔄 Triggering background refresh to update cache (reason: ${refreshReason})...`);
+            setTimeout(() => {
+                this.fetchAndUpdateAvailableTags(true).catch(err => {
+                    console.warn('Background refresh for database lineage failed (non-critical):', err);
+                });
+            }, 500);
+        }
+
+        return true;
+    },
+
     hydrateAvailableTagsFromCache() {
         if (this.state.hydratedFromCache) {
             console.log('⏭️ Skipping cache hydration - already hydrated this session');
@@ -1581,179 +1696,29 @@ const TagManager = {
         // Only skip cache if lineage was recently updated (cache might have stale lineage)
         const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
         const shouldLoadFromDatabase = (!file || file === 'nofile' || file === '' || file === 'database');
-        
+
         // CRITICAL: After lineage updates, still use cache for instant loading but refresh in background
         // This ensures instant UI while fresh canonical_lineage is fetched from database
         const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
         const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
 
+        // PERFORMANCE FIX: Check window._earlyCacheFound first (set by fast-page-load.js)
+        // This bridges the gap between early cache detection and hydration
+        if (window._earlyCacheFound && window._earlyCacheFound.tags && window._earlyCacheFound.tags.length > 0) {
+            console.log(`⚡ Using early cache found by fast-page-load.js: ${window._earlyCacheFound.tags.length} tags from ${window._earlyCacheFound.storage}`);
+            const cachedTags = window._earlyCacheFound.tags;
+            // Clear it so we don't use stale data on subsequent calls
+            window._earlyCacheFound = null;
+            return this._hydrateFromCachedTags(cachedTags, hasRecentLineageUpdate, lastLineageUpdateTime);
+        }
+
         // PERFORMANCE: Always check cache first (works for both Excel and database mode)
         // This allows tags to load instantly on page refresh instead of waiting for API call
         console.log(shouldLoadFromDatabase ? '📊 Database mode - checking cache first...' : '📊 Excel mode - checking cache first...');
         const cachedTags = this.loadAvailableTagsFromCache();
-        
+
         if (cachedTags && cachedTags.length > 0) {
-            // INSTANT LOADING FIX: Even if there was a recent lineage update, use cache for instant display
-            // This ensures tags load instantly while fresh lineage data is fetched in background
-            if (hasRecentLineageUpdate) {
-                const timeSinceUpdate = Date.now() - parseInt(lastLineageUpdateTime, 10);
-                console.log(`⚡ Recent lineage update detected (${Math.round(timeSinceUpdate/1000)}s ago) - using cache for instant load, will refresh in background`);
-            }
-            // Cache found - use it for instant load (works for both Excel and database mode)
-            console.log(`✅ Found ${cachedTags.length} cached tags - using for instant load`);
-            
-            // PERFORMANCE: Check if cache needs background refresh (old format)
-            // Still use cache for instant display - background refresh will update with database lineage
-            const needsBackgroundRefresh = cachedTags._needsBackgroundRefresh || false;
-            if (needsBackgroundRefresh) {
-                console.log('⚡ Using old cache for instant display - will refresh in background for canonical_lineage');
-            }
-            
-            // PERFORMANCE: Optimize normalization - batch process for faster execution
-            // CRITICAL FIX: Preserve vendor data and user-edited lineage when loading from cache
-            // This ensures vendor is available when tags are organized, and user-edited lineage is preserved
-            // Use efficient batch processing instead of forEach for better performance
-            const tagCount = cachedTags.length;
-            for (let i = 0; i < tagCount; i++) {
-                const tag = cachedTags[i];
-                // Preserve vendor data (fast check)
-                const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
-                if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
-                    // Preserve vendor in all possible field names for extraction
-                    if (!tag['Vendor*']) tag['Vendor*'] = vendor;
-                    if (!tag['Vendor']) tag['Vendor'] = vendor;
-                    if (!tag.vendor) tag.vendor = vendor;
-                }
-                
-                // CRITICAL FIX: Preserve price data when loading from cache
-                // Check all possible price field variations to ensure prices are available
-                const price = tag['Price*'] || tag['Price* (Tier Name for Bulk)'] || tag.Price || tag.price || tag['Product Price'] || tag['ProductPrice'] || tag['Unit Price'] || tag['UnitPrice'] || tag['Retail Price'] || tag['RetailPrice'] || '';
-                if (price && price.trim() !== '' && price.trim().toLowerCase() !== 'none' && price.trim().toLowerCase() !== 'nan') {
-                    // Preserve price in all possible field names for extraction
-                    if (!tag['Price*']) tag['Price*'] = price;
-                    if (!tag.Price) tag.Price = price;
-                    if (!tag.price) tag.price = price;
-                }
-                
-            }
-            // Use the same rendering logic as below
-            verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
-            this.state.hydratedFromCache = true;
-            this.state.forceFullAvailableTagRender = true;
-            this.state.simplifiedAvailableTagsActive = false;
-            this.state.tags = [...cachedTags];
-            this.state.originalTags = [...cachedTags];
-
-            if (this.hideActionSplash) {
-                this.hideActionSplash();
-            }
-            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                AppLoadingSplash.stopAutoAdvance();
-                AppLoadingSplash.complete();
-            }
-
-            const availableContainer = document.getElementById('availableTags');
-            if (availableContainer) {
-                // CRITICAL FIX: Check if tags need enrichment (missing DOH/Brand fields)
-                const sampleTag = cachedTags[0];
-                const needsEnrichment = !sampleTag || 
-                    (!sampleTag['Product Brand'] && !sampleTag['ProductBrand'] && !sampleTag['productBrand']) ||
-                    (!sampleTag['DOH'] && !sampleTag['doh'] && !sampleTag['DOH Compliant (Yes/No)'] && !sampleTag['DOH Compliant']);
-                
-                this._updateAvailableTags(cachedTags, null);
-                verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache`);
-                
-                // CRITICAL FIX: If tags need enrichment, fetch enriched tags in background
-                if (needsEnrichment) {
-                    console.log('🔄 Cached tags missing DOH/Brand - fetching enriched tags in background...');
-                    setTimeout(() => {
-                        // Use forceReload=true to bypass cache and get enriched tags from backend
-                        this.fetchAndUpdateAvailableTags(true).catch(err => {
-                            console.warn('⚠️ Background enrichment failed (non-critical):', err);
-                        });
-                    }, 500); // Small delay to let UI render first
-                }
-                
-                // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
-                // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
-                const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
-                    ? this.state.originalTags 
-                    : cachedTags;
-                this.buildFilterOptionsFromTags(tagsForFilters);
-                this._filtersBuiltThisSession = true; // Mark filters as built
-                setTimeout(() => {
-                    if (typeof this.setupFilterEventListeners === 'function') {
-                        this.setupFilterEventListeners();
-                        console.log('✅ Filter event listeners attached after cache hydration');
-                    }
-                    if (typeof this.setupSearchEventListeners === 'function') {
-                        this.setupSearchEventListeners();
-                        console.log('✅ Search event listeners attached after cache hydration');
-                    }
-                }, 50);
-            } else {
-                const renderCachedTags = () => {
-                    // CRITICAL FIX: Check if tags need enrichment (missing DOH/Brand fields)
-                    const sampleTag = cachedTags[0];
-                    const needsEnrichment = !sampleTag || 
-                        (!sampleTag['Product Brand'] && !sampleTag['ProductBrand'] && !sampleTag['productBrand']) ||
-                        (!sampleTag['DOH'] && !sampleTag['doh'] && !sampleTag['DOH Compliant (Yes/No)'] && !sampleTag['DOH Compliant']);
-                    
-                    this._updateAvailableTags(cachedTags, null);
-                    verboseLog(`✅ INSTANT LOAD: ${cachedTags.length} tags rendered from cache on DOM ready`);
-                    
-                    // CRITICAL FIX: If tags need enrichment, fetch enriched tags in background
-                    if (needsEnrichment) {
-                        console.log('🔄 Cached tags missing DOH/Brand - fetching enriched tags in background...');
-                        setTimeout(() => {
-                            // Use forceReload=true to bypass cache and get enriched tags from backend
-                            this.fetchAndUpdateAvailableTags(true).catch(err => {
-                                console.warn('⚠️ Background enrichment failed (non-critical):', err);
-                            });
-                        }, 500); // Small delay to let UI render first
-                    }
-                    
-                    // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
-                    // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
-                    const tagsForFilters = this.state.originalTags && this.state.originalTags.length > 0 
-                        ? this.state.originalTags 
-                        : cachedTags;
-                    this.buildFilterOptionsFromTags(tagsForFilters);
-                    this._filtersBuiltThisSession = true; // Mark filters as built
-                    setTimeout(() => {
-                        if (typeof this.setupFilterEventListeners === 'function') {
-                            this.setupFilterEventListeners();
-                            console.log('✅ Filter event listeners attached after cache hydration');
-                        }
-                        if (typeof this.setupSearchEventListeners === 'function') {
-                            this.setupSearchEventListeners();
-                            console.log('✅ Search event listeners attached after cache hydration');
-                        }
-                    }, 50);
-                };
-                if (document.readyState === 'loading') {
-                    document.addEventListener('DOMContentLoaded', renderCachedTags, { once: true });
-                } else {
-                    renderCachedTags();
-                }
-            }
-            
-            // PERFORMANCE: Trigger background refresh if cache is old format OR if lineage was recently updated (non-blocking)
-            // This will update cache with database lineage without blocking UI
-            if (needsBackgroundRefresh || hasRecentLineageUpdate) {
-                const refreshReason = needsBackgroundRefresh ? 'old cache format' : 'recent lineage update';
-                console.log(`🔄 Triggering background refresh to update cache (reason: ${refreshReason})...`);
-                // Don't await - let it run in background without blocking
-                // Use forceReload=true to bypass cache and get fresh data
-                setTimeout(() => {
-                    // Background refresh - fetch fresh data to update cache
-                    this.fetchAndUpdateAvailableTags(true).catch(err => {
-                        console.warn('Background refresh for database lineage failed (non-critical):', err);
-                    });
-                }, 500); // Small delay to let UI render first, then refresh in background
-            }
-            
-            return true;
+            return this._hydrateFromCachedTags(cachedTags, hasRecentLineageUpdate, lastLineageUpdateTime);
         } else {
             // No cache - return false so init() or fetchAndUpdateAvailableTags() can fetch from backend
             console.log('📊 No cache found - will fetch from backend');

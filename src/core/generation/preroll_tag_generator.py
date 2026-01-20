@@ -309,10 +309,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         except Exception:
             price_tier = str(price).strip() if price else 'N/A'
         
-        # Group by category ONLY - do NOT include vendor in grouping
-        # This ensures all products with the same description are in one list
-        # regardless of which vendor they come from
-        group_key = group_id
+        # Group by category AND vendor - each vendor gets their own group
+        # This ensures QR codes show only products from the specific vendor
+        # Format: "group_id|vendor" (e.g., "5packs|Acme Corp")
+        if vendor_clean:
+            group_key = f"{group_id}|{vendor_clean}"
+        else:
+            group_key = group_id
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
@@ -320,7 +323,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
-        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_id}' (total in group: {len(grouped_records[group_key]['records'])})")
+        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (vendor: '{vendor_clean}', total in group: {len(grouped_records[group_key]['records'])})")
     
     # Step 2: Create representative records with group display names
     unique_records = []

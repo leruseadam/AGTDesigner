@@ -135,7 +135,7 @@ class TemplateProcessor:
         resolved_path = str(template_path.resolve()) if template_path.exists() else str(template_path)
         self.logger.error(f"Template not found: {resolved_path}")
         raise FileNotFoundError(f"Template not found: {resolved_path}")
-    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
+    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None, fast_mode: bool = False):
         self.template_type = template_type
         self.font_scheme = font_scheme
         self.logger = logging.getLogger(__name__)  # Initialize logger first
@@ -148,6 +148,9 @@ class TemplateProcessor:
         else:
             self.scale_factor = scale_factor
         self.excel_processor = excel_processor  # Store the session's Excel processor
+        # When fast_mode is True, skip expensive post-processing (font sizing, lineage coloring, marker cleanup)
+        # This improves throughput for large batches where visual perfection is less important.
+        self.fast_mode = bool(fast_mode)
         self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
         self._dynamic_template_created = False  # Track if dynamic template was created
@@ -1523,20 +1526,28 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
             try:
+                # If fast_mode is enabled, skip expensive post-processing steps to improve throughput
+                if self.fast_mode:
+                    self.logger.info("⚡ FAST MODE: Skipping post-processing (font sizing, lineage colors, marker cleanup)")
+                    # Still remove headers/footers for cleanliness
+                    from src.core.generation.docx_formatting import remove_all_headers_and_footers
+                    rendered_doc = remove_all_headers_and_footers(rendered_doc)
+                    return rendered_doc
+
                 # Post-process the document to apply dynamic font sizing first
                 self._post_process_and_replace_content(rendered_doc)
-                
+
                 # Check timeout before lineage colors
                 if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
                     self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
                     return rendered_doc
-                
+
                 # Apply lineage colors last to ensure they are not overwritten
                 apply_lineage_colors(rendered_doc)
-                
+
                 # Apply final marker cleanup for all templates
                 self._final_marker_cleanup(rendered_doc)
-                
+
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
                 # Continue processing without post-processing features
@@ -3186,14 +3197,19 @@ class TemplateProcessor:
                     clean_brand_text = clean_brand_text.strip()
 
                     if clean_brand_text:
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
+                        lineage_value = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
                     else:
                         # Fallback to original brand text if cleaning removed everything
-                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                        lineage_value = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
 
-                    # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
+                    # Set Lineage and also populate ProductBrand_Center so downstream
+                    # docx formatting consistently recognizes the centered brand field.
+                    label_context['Lineage'] = lineage_value
+                    # Keep ProductBrand empty to avoid duplication, but ensure the
+                    # ProductBrand_Center field contains the same centered marker text
+                    # so templates that render brand from a dedicated cell will center it.
                     label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
+                    label_context['ProductBrand_Center'] = lineage_value
                 
                 # Product Strain gets its own field with small font size
                 # CRITICAL FIX: For vertical template, allow ProductStrain but use proper font sizing
@@ -3620,7 +3636,6 @@ class TemplateProcessor:
                 # Always derive the QR base from the current request host so we don't
                 # bake any specific domain into the code or printed labels.
                 from flask import request
-                import os
 
                 try:
                     base_url = (request.host_url or '').rstrip('/')

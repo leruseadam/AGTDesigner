@@ -3081,8 +3081,8 @@ body.modal-open #mainContent.store-selection-disabled,
     text-align-last: center !important;
     font-size: 1em !important;
     padding: 10px 54px 10px 42px !important;  /* Balanced padding to center text with arrow */
-    border: 3px solid #00d4aa !important;
-    box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important;
+    border: 1px solid #ffffff !important;
+    box-shadow: 0 0 20px rgba(0, 212, 170, 0.847) !important;
     color: #f7f8ff !important;
   }
 
@@ -6908,7 +6908,7 @@ body.modal-open #mainContent.store-selection-disabled,
     background-color: rgba(0, 212, 170, 0.3) !important;
     background: rgba(0, 212, 170, 0.3) !important;
     -webkit-background-color: rgba(0, 212, 170, 0.3) !important;
-    color: #f7f8ff !important;
+    color: #ffffff !important;
     -webkit-text-fill-color: #f7f8ff !important;
     font-weight: 500 !important;
   }

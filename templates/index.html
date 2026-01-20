@@ -5053,8 +5053,7 @@
     #weightFilter,
     #priceFilter,
     #dohFilter,
-    #highCbdFilter,
-    #templateSelect {
+    #highCbdFilter {
       background-color: rgba(44, 34, 58, 0.85) !important;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%2300d4aa' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
       background-repeat: no-repeat !important;
@@ -5083,7 +5082,12 @@
       -moz-appearance: none !important;
       appearance: none !important;
     }
-    
+
+    /* Template select should have white text to match generate button */
+    #templateSelect {
+      color: #ffffff !important;
+    }
+
     .filter-select:hover {
       background-color: rgba(255, 255, 255, 0.25) !important;
       border-color: rgba(160, 132, 232, 0.7) !important;
@@ -5182,13 +5186,12 @@
       padding: 0.7rem 54px 0.7rem 42px !important;
     }
 
-    /* Preserve original color scheme for template select: force teal border and dark background
-       Prevent other generic hover/focus rules from applying a light/red overlay to this control. */
+    /* Template select styling - white text to match generate button */
     #templateSelect {
       background-color: rgba(44, 34, 58, 0.85) !important;
       border-color: rgba(0, 212, 170, 0.95) !important;
-      color: #00d4aa !important;
-      -webkit-text-fill-color: #00d4aa !important;
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
       mix-blend-mode: normal !important;
       filter: none !important;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%2300d4aa' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
@@ -5200,10 +5203,10 @@
     #templateSelect:hover,
     #templateSelect:focus,
     #templateSelect:active {
-      /* Keep hover/focus consistent with original theme (no white/red overlay) */
       background-color: rgba(44, 34, 58, 0.95) !important;
       border-color: rgba(0, 212, 170, 1) !important;
-      color: #00d4aa !important;
+      color: #ffffff !important;
+      -webkit-text-fill-color: #ffffff !important;
       box-shadow: 0 6px 16px rgba(0,0,0,0.45) !important;
       outline: none !important;
     }
@@ -6093,8 +6096,7 @@
               <!-- Template Section -->
               <div class="control-section mb-2">
                 <label for="templateSelect" class="filter-label">TEMPLATE</label>
-                <div class="select-centered-wrapper" style="position: relative; width: 70% !important; max-width: 70% !important; margin: 1.5rem auto 0 auto !important;">
-                  <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="width:100% !important; padding: 0.9rem 1.25rem !important; font-size: 18px !important; font-weight: 800 !important; min-height: 60px !important; line-height:1 !important; border-radius: 14px !important; display: block !important; appearance: none !important; -webkit-appearance: none !important; -moz-appearance: none !important; color: transparent !important; background-color: rgba(44, 34, 58, 0.85) !important; border: 3px solid rgba(0, 212, 170, 0.95) !important; padding-right: 48px !important;">
+                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 50% !important; text-align: center !important; text-align-last: center !important; color: #ffffff !important;">
                   <option value="horizontal">Horizontal</option>
                   <option value="vertical">Vertical</option>
                   <option value="mini">Mini</option>
@@ -6102,10 +6104,8 @@
                   <option value="preroll">Preroll</option>
                   <option value="inventory">Inventory</option>
                 </select>
-                  <span id="templateSelectOverlay" class="select-centered-overlay" aria-hidden="true" style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); pointer-events:none; color:#ffffff; font-weight:800; font-size:18px; text-align:center; width: calc(100% - 56px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></span>
-                </div>
 
-                <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 70% !important; max-width: 70% !important; padding: 0.8rem 1.2rem !important; font-size: 1.05rem !important; font-weight: 700 !important; margin: 1.5rem auto 0 auto !important; display: block !important;">
+                <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 100% !important; min-height: 60px !important; padding: 1rem 1.25rem !important; font-size: 20px !important; font-weight: 700 !important; border-radius: 14px !important; margin-top: 1rem !important; display: block !important;">
                   Generate Tags
                 </button>
 
@@ -12397,6 +12397,16 @@
       
       showDatabaseModal('Database Optimization Tools', optimizationHtml);
     }
+
+    // Expose modal functions to window object so they can be called from onclick handlers
+    window.openDatabaseHealth = openDatabaseHealth;
+    window.openAdvancedSearch = openAdvancedSearch;
+    window.openDatabaseBackup = openDatabaseBackup;
+    window.openTrendAnalysis = openTrendAnalysis;
+    window.openVendorAnalytics = openVendorAnalytics;
+    window.openDatabaseOptimization = openDatabaseOptimization;
+    window.openProductSimilarity = openProductSimilarity;
+    console.log('✅ Database modal functions exposed globally');
 
     // Helper functions for the new features
     function findSimilarProducts() {

@@ -8158,7 +8158,7 @@ def generate_labels():
                 has_data = excel_processor.df is not None and not excel_processor.df.empty
                 
                 # Normalize paths for comparison (handle different path formats)
-                import os
+                # Use module-level `os` import to avoid creating a local shadowed name
                 file_path_normalized = os.path.normpath(file_path) if file_path else None
                 last_loaded_normalized = os.path.normpath(last_loaded) if last_loaded else None
                 
@@ -9353,7 +9353,7 @@ def generate_labels():
 
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
-        fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '200'))
+        fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '500'))
         fast_mode = len(records) >= fast_mode_threshold
         if fast_mode:
             logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)
@@ -19183,7 +19183,7 @@ def json_inventory():
         except Exception:
             excel_processor = None  # Inventory slips can work without ExcelProcessor
         
-        fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '200'))
+        fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '500'))
         fast_mode = len(records) >= fast_mode_threshold
         if fast_mode:
             logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)

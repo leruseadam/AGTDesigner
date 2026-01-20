@@ -46,6 +46,12 @@ def apply_lineage_colors(doc):
                 for cell in row.cells:
                     cells_processed += 1
                     original_text = cell.text.upper()  # Keep original text to check for markers
+                    # Detect if this cell contains center-brand markers so we can
+                    # force paragraph centering later (handles capsules/non-classic)
+                    has_productbrand_center_marker = (
+                        'PRODUCTBRAND_CENTER_START' in original_text or
+                        'PRODUCTBRAND_CENTER_END' in original_text
+                    )
                     lineage_hint_value = None
                     lineage_hint_token = None
                     hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s]+)__")
@@ -113,6 +119,10 @@ def apply_lineage_colors(doc):
                                         run.font.name = "Arial"
                                         if existing_font_size is not None:
                                             run.font.size = existing_font_size
+                                # Center brand text when markers are used
+                                if has_productbrand_center_marker:
+                                    for paragraph in cell.paragraphs:
+                                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 logger.info(f"LINEAGE COLOR (hint-only cell): Applied {hint_upper} color #{color_candidate}")
                                 colors_applied += 1
                                 continue
@@ -1179,7 +1189,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                         if tblGrid is not None:
                             # Remove existing grid
                             tblGrid.getparent().remove(tblGrid)
-                        
+
                         # Create new grid with correct dimensions
                         tblGrid = OxmlElement('w:tblGrid')
                         # Use the actual number of columns in the table, not table.columns
@@ -1190,12 +1200,12 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                 gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
                                 tblGrid.append(gridCol)
                             table._element.insert(0, tblGrid)
-                            
+
                             # Set row heights and cell widths based on template type
                             for row in table.rows:
                                 row.height = Inches(cell_dims['height'])
                                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                                
+
                                 # Set individual cell widths
                                 for cell in row.cells:
                                     tcPr = cell._tc.get_or_add_tcPr()
@@ -1206,47 +1216,8 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                     tcW.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
                                     tcW.set(qn('w:type'), 'dxa')
                 except Exception as e:
-                    logger.warning(f"Could not enforce mini template dimensions: {e}")
+                    logger.warning(f"Could not enforce template-specific dimensions for {template_type}: {e}")
                     # Continue with general dimension enforcement
-            
-            try:
-                from src.core.constants import CELL_DIMENSIONS
-                cell_dims = CELL_DIMENSIONS.get(template_type)
-                if cell_dims and table.rows:
-                    # Set column widths based on template type
-                    tblGrid = table._element.find(qn('w:tblGrid'))
-                    if tblGrid is not None:
-                        # Remove existing grid
-                        tblGrid.getparent().remove(tblGrid)
-                    
-                    # Create new grid with correct dimensions
-                    tblGrid = OxmlElement('w:tblGrid')
-                    # Use the actual number of columns in the table, not table.columns
-                    num_cols = len(table.rows[0].cells) if table.rows else 0
-                    if num_cols > 0:
-                        for _ in range(num_cols):
-                            gridCol = OxmlElement('w:gridCol')
-                            gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
-                            tblGrid.append(gridCol)
-                        table._element.insert(0, tblGrid)
-                        
-                        # Set row heights and cell widths based on template type
-                        for row in table.rows:
-                            row.height = Inches(cell_dims['height'])
-                            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-                            
-                            # Set individual cell widths
-                            for cell in row.cells:
-                                tcPr = cell._tc.get_or_add_tcPr()
-                                tcW = tcPr.find(qn('w:tcW'))
-                                if tcW is None:
-                                    tcW = OxmlElement('w:tcW')
-                                    tcPr.append(tcW)
-                                tcW.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
-                                tcW.set(qn('w:type'), 'dxa')
-            except Exception as e:
-                logger.warning(f"Could not enforce template-specific dimensions for {template_type}: {e}")
-                # Continue with general dimension enforcement
         
         # Ensure table has a valid tblGrid before processing cells
         tblGrid = table._element.find(qn('w:tblGrid'))
