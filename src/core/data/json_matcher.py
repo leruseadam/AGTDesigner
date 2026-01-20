@@ -202,9 +202,9 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
     # Enhanced mappings for common inventory types based on Cultivera data
     type_mappings = {
         # Concentrates and Vape Cartridges
-        "concentrate for inhalation": "Vape Cartridge",
-        "concentrate": "Vape Cartridge", 
-        "extract": "Vape Cartridge",
+        "concentrate for inhalation": "Concentrate",
+        "concentrate": "Concentrate",
+        "extract": "Concentrate",
         "oil": "Vape Cartridge",
         "distillate": "Vape Cartridge",
         "live resin": "Live Resin",
@@ -317,6 +317,20 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
 
     # Check direct mapping first
     if inventory_type_lower in type_mappings:
+        # For concentrate-like types, use product-name heuristics to decide between
+        # general 'Concentrate' vs 'Vape Cartridge' (hardware vs extract form).
+        mapped = type_mappings[inventory_type_lower]
+        if mapped.lower() == 'concentrate':
+            name = product_name_lower
+            hardware_indicators = ['vaporizer', 'vaporizer', 'vaporiser', 'vape', 'cartridge', 'cart', 'disposable', 'liquid diamond', 'cured resin vaporizer', 'vaporizer']
+            # If product name explicitly mentions hardware, prefer Vape Cartridge
+            if any(tok in name for tok in hardware_indicators):
+                return _log_and_return('Vape Cartridge', 'direct_mapping_hardware_indicator')
+            # Live-resin / honey-crystal / liquid-diamond indicate specific concentrate types
+            if 'live resin' in inventory_type_lower or 'live resin' in name:
+                return _log_and_return('Live Resin', 'direct_mapping_live_resin')
+            if 'honey crystal' in name or 'honey crystal' in inventory_type_lower:
+                return _log_and_return('Concentrate', 'direct_mapping_honey_crystal')
         return _log_and_return(type_mappings[inventory_type_lower], 'direct_mapping')
 
     # Check category-based mappings
