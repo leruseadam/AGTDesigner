@@ -395,12 +395,21 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         representative['_group_key'] = group_key
 
         # Ensure representative preserves a sensible Lineage value
-        # Prefer the first non-empty lineage found in the group's records
+        # Prefer proprietary/sovereign lineage fields first (owner-managed),
+        # then fall back to canonical or generic Lineage fields.
         rep_lineage = ''
         for r in group_records_list:
-            candidate = r.get('Lineage') or r.get('lineage') or r.get('canonical_lineage') or r.get('sovereign_lineage')
+            candidate = (
+                r.get('sovereign_lineage') or
+                r.get('proprietary_lineage') or
+                r.get('proprietaryLineage') or
+                r.get('canonical_lineage') or
+                r.get('Lineage') or
+                r.get('lineage')
+            )
             if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
                 rep_lineage = str(candidate).strip()
+                logging.info(f"PREROLL GROUP REP: Using lineage '{rep_lineage}' for group representative of '{group_display_name}'")
                 break
         representative['Lineage'] = rep_lineage
         

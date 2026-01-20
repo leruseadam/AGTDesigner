@@ -8040,6 +8040,10 @@ def generate_labels():
             logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time)")
             needs_file_load = False
             skip_default_file_load = True  # Skip ALL further file loading operations
+            # If filters are provided, we must ensure database enrichment runs so lineage is populated
+            if filters:
+                excel_processor._skip_enrichment = False
+                logging.info("🔄 FILTERS DETECTED: Overriding _skip_enrichment to enable DB enrichment for lineage")
         else:
             logging.info("📂 No tags in request - using normal file loading")
             needs_file_load = True

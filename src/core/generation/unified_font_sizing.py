@@ -57,7 +57,7 @@ def _load_font_sizing_config():
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(10, 36), (20, 34), (30, 32), (40, 30), (45, 28), (50, 26), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
+                    'description': [(10, 36), (20, 34), (30, 32), (40, 30), (45, 28), (50, 26), (55, 24), (60, 22), (70, 20), (80, 19), (90, 18), (float('inf'), 16)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
                     'lineage': [(100, 18), (float('inf'), 14)],  # Max 18pt for lineage to prevent 20pt sizing
@@ -272,14 +272,17 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             return Pt(first_size * scale_factor)
         return Pt(12 * scale_factor)
     
-    # Special rule: If Description has any word longer than 9 characters in Vertical Template, reduce font size
+    # Special rule: If Description has any word longer than 8 characters in Vertical Template,
+    # reduce font size so that it's 28pt or smaller (user requirement: >8-letter words must be 28pt or smaller)
     if field_type.lower() == 'description' and orientation.lower() == 'vertical':
         words = str(text).split()
         if words:
             max_word_length = max(len(word) for word in words)
-            if max_word_length > 9:
-                # Calculate appropriate font size based on the longest word
-                if max_word_length <= 12:
+            if max_word_length > 8:
+                # Calculate appropriate font size based on the longest word, but cap at 28pt
+                if max_word_length <= 10:
+                    font_size = 28
+                elif max_word_length <= 12:
                     font_size = 24
                 elif max_word_length <= 15:
                     font_size = 20
@@ -287,9 +290,11 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                     font_size = 16
                 else:
                     font_size = 11
-                
+
+                # Enforce upper cap of 28pt to satisfy requirement
+                font_size = min(font_size, 28)
                 final_size = font_size * scale_factor
-                logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font")
+                logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font (capped at 28pt)")
                 return Pt(final_size)
     
     
