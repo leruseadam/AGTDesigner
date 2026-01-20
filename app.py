@@ -2219,7 +2219,10 @@ class LabelMakerApp:
                 formatter = logging.Formatter(log_format)
                 
                 # Configure console handler - show info and above for debugging
-                console_handler = logging.StreamHandler()
+                # Use the original stderr (sys.__stderr__) to avoid wrappers
+                # (e.g. PythonAnywhere's user_wsgi_wrapper) that route stderr
+                # back into the logging system and can cause recursive logging.
+                console_handler = logging.StreamHandler(stream=sys.__stderr__)
                 console_handler.setLevel(logging.INFO)  # Show info, warnings, and errors
                 console_handler.setFormatter(formatter)
                 
@@ -9350,7 +9353,11 @@ def generate_labels():
 
         # Use the already imported TemplateProcessor and get_font_scheme
         font_scheme = get_font_scheme(template_type)
-        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor)
+        fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '200'))
+        fast_mode = len(records) >= fast_mode_threshold
+        if fast_mode:
+            logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)
+        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor, fast_mode=fast_mode)
         
         # No need to pass preroll_session_id anymore - QR code uses static URL
         
@@ -19176,7 +19183,11 @@ def json_inventory():
         except Exception:
             excel_processor = None  # Inventory slips can work without ExcelProcessor
         
-        processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor)
+        fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '200'))
+        fast_mode = len(records) >= fast_mode_threshold
+        if fast_mode:
+            logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)
+        processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor, fast_mode=fast_mode)
         
         # CRITICAL: For mini and double templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
         if hasattr(processor, '_expand_template_if_needed') and processor.template_type not in ['mini', 'double']:
