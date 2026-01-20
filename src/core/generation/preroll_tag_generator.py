@@ -393,6 +393,16 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         representative['_group_info'] = group_info
         # Store the full group_key (with vendor) for reference
         representative['_group_key'] = group_key
+
+        # Ensure representative preserves a sensible Lineage value
+        # Prefer the first non-empty lineage found in the group's records
+        rep_lineage = ''
+        for r in group_records_list:
+            candidate = r.get('Lineage') or r.get('lineage') or r.get('canonical_lineage') or r.get('sovereign_lineage')
+            if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
+                rep_lineage = str(candidate).strip()
+                break
+        representative['Lineage'] = rep_lineage
         
         unique_records.append(representative)
         
