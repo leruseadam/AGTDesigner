@@ -2754,14 +2754,26 @@ class TemplateProcessor:
             # CRITICAL FIX: Use vendor fallback for ALL templates including preroll/mini
             # Vendor is better than "PREMIUM CANNABIS" as it at least identifies the source
             if not enriched_brand:
-                vendor_fallback = (record.get('Vendor') or
-                                 record.get('Vendor/Supplier*') or
-                                 record.get('ProductVendor', ''))
-                if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                    enriched_brand = str(vendor_fallback).strip()
-                    self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
+                # Prefer explicit Product Brand fields before falling back to vendor
+                brand_fallback = (
+                    record.get('Product Brand') or
+                    record.get('ProductBrand') or
+                    record.get('Brand') or
+                    None
+                )
+                if brand_fallback and str(brand_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                    enriched_brand = str(brand_fallback).strip()
+                    self.logger.info(f"🔧 BRAND FALLBACK: Using Product Brand '{enriched_brand}' as brand for '{product_name}'")
                 else:
-                    self.logger.debug(f"NO VENDOR FALLBACK: No vendor available for '{product_name}'")
+                    # Fall back to vendor only if no Product Brand is available
+                    vendor_fallback = (record.get('Vendor') or
+                                     record.get('Vendor/Supplier*') or
+                                     record.get('ProductVendor', ''))
+                    if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                        enriched_brand = str(vendor_fallback).strip()
+                        self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}' (no Product Brand present)")
+                    else:
+                        self.logger.debug(f"NO BRAND/VENDOR FALLBACK: No Product Brand or vendor available for '{product_name}'")
 
             # If still no brand after vendor fallback, try to extract from product name
             # Product names follow pattern: "Product Description by BrandName - Size"
@@ -3053,6 +3065,12 @@ class TemplateProcessor:
             # For ALL non-classic types (including tinctures), Lineage shows brand and ProductVendor is empty
             # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)
             self.logger.debug(f"Processing non-classic type '{product_type}' for Lineage and ProductVendor")
+            # Ensure ProductVendor is empty for non-classic types so vendor does not appear
+            # when Lineage is intended to show the brand. This prevents later rendering
+            # from picking up a vendor fallback for non-classic products.
+            label_context['ProductVendor'] = ""
+            label_context['ProductVendor_START'] = 'PRODUCTVENDOR_START'
+            label_context['ProductVendor_END'] = 'PRODUCTVENDOR_END'
             if product_brand:
                 self.logger.info(f"BRAND PROCESSING: Non-classic type '{product_type}' with brand '{product_brand}' (len={len(product_brand)}), template_type='{self.template_type}'")
                 # For non-classic types, separate Product Strain and Product Brand for different font sizing

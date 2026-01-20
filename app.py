@@ -2763,7 +2763,21 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
     # Ensure we have a proper display name
     if 'displayName' not in enhanced_tag or not enhanced_tag['displayName']:
         product_name = enhanced_tag.get(get_canonical_field('Product Name*'), enhanced_tag.get(get_canonical_field('ProductName'), ''))
-        vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
+        # Prefer Product Brand for non-classic product types; classic types keep Vendor as the primary
+        try:
+            from src.core.constants import CLASSIC_TYPES
+            product_type_val = (enhanced_tag.get(get_canonical_field('Product Type*')) or enhanced_tag.get('ProductType') or '')
+            product_type_norm = str(product_type_val).lower() if product_type_val else ''
+            is_classic = product_type_norm in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_norm for ct in CLASSIC_TYPES)
+        except Exception:
+            # Fallback: if we can't determine, preserve existing behavior
+            is_classic = True
+
+        if not is_classic:
+            vendor = enhanced_tag.get(get_canonical_field('Product Brand'), enhanced_tag.get(get_canonical_field('Vendor'), ''))
+        else:
+            vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
+
         if product_name and vendor:
             enhanced_tag['displayName'] = f"{product_name} by {vendor}"
         elif product_name:

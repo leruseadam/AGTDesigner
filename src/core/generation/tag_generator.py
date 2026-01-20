@@ -1099,8 +1099,8 @@ def process_chunk(args):
                 if " by " in product_name:
                     product_brand = product_name.split(" by ")[-1].strip()
                 else:
-                    # Fallback to vendor if no "by" in name
-                    product_brand = str(row.get("Vendor", "")).strip()
+                    # Prefer Product Brand field, fallback to vendor only if Product Brand absent
+                    product_brand = str(row.get("Product Brand", "")).strip() or str(row.get("Vendor", "")).strip()
             
             # Only add brand markers for non-classic types
             # Classic types should show lineage instead of brand

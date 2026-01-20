@@ -301,15 +301,24 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         if by_match:
             brand_for_grouping = by_match.group(1).strip()
 
-        # Fallback to vendor if brand extraction failed
+        # Fallback: prefer explicit Product Brand fields; if none, use vendor
         if not brand_for_grouping:
-            vendor = (
-                record.get('Vendor/Supplier*', '') or
-                record.get('Vendor', '') or
-                record.get('Vendor/Supplier', '') or
+            brand_field = (
+                record.get('Product Brand', '') or
+                record.get('ProductBrand', '') or
+                record.get('Brand', '') or
                 ''
             )
-            brand_for_grouping = str(vendor).strip()
+            if brand_field and str(brand_field).strip():
+                brand_for_grouping = str(brand_field).strip()
+            else:
+                vendor = (
+                    record.get('Vendor/Supplier*', '') or
+                    record.get('Vendor', '') or
+                    record.get('Vendor/Supplier', '') or
+                    ''
+                )
+                brand_for_grouping = str(vendor).strip()
 
         # Group by category AND brand - each brand gets their own group
         # Normalize brand into a compact key to avoid duplicate groups caused
