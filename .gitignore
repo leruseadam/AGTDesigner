@@ -92,3 +92,6 @@ __pycache__/*
 *.pyo
 .DS_Store
 src/core/generation/templates/~echo "src/core/generation/templates/~$*.docx" >> .gitignore 2>/dev/null || true.docx
+
+# Local browser cookie file created during testing
+cookies.txt
