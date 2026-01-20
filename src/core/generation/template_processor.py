@@ -1507,7 +1507,6 @@ class TemplateProcessor:
             try:
                 if self.template_type in ('preroll', 'mini'):
                     default_brand = "PREMIUM CANNABIS"
-                    # Group labels by normalized product name
                     label_keys = [k for k in context.keys() if k.startswith('Label')]
                     name_groups = {}
                     for k in label_keys:
@@ -1517,26 +1516,43 @@ class TemplateProcessor:
                             continue
                         name_groups.setdefault(pname.lower(), []).append(k)
 
-                    # For each product name where at least one branded record exists,
-                    # drop entries that only have the generic default brand to avoid duplicates.
+                    # Debug: log per-label brand values before dedupe
                     for pname, keys in name_groups.items():
-                        branded_exists = False
+                        brands = []
                         for k in keys:
                             lbl = context.get(k) or {}
-                            pb = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '').strip()
-                            if pb and pb.upper() != default_brand:
-                                branded_exists = True
-                                break
-                        if branded_exists:
-                            for k in keys:
-                                lbl = context.get(k) or {}
-                                pb = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '').strip()
-                                if pb and pb.upper() == default_brand:
-                                    # Replace the generic/default entry with an empty label context
-                                    context[k] = empty_label_context
-                                    self.logger.debug(f"DEDUP: Replaced default-brand tag for '{pname}' at {k} with empty label to prefer branded result")
+                            pb = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '')
+                            brands.append((k, str(pb).strip()))
+                        self.logger.info(f"DEDUP DEBUG: Product '{pname}' label brands before dedupe: {brands}")
+
+                    # For each product name where at least one branded (non-default) record exists,
+                    # drop entries that only have the generic default brand to avoid duplicates.
+                    for pname, keys in name_groups.items():
+                        # Normalize and find branded keys
+                        branded_keys = []
+                        default_keys = []
+                        other_empty = []
+                        for k in keys:
+                            lbl = context.get(k) or {}
+                            pb_raw = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '')
+                            pb = str(pb_raw).strip()
+                            pb_norm = pb.lower()
+                            if pb and pb_norm != default_brand.lower():
+                                branded_keys.append(k)
+                            elif pb and pb_norm == default_brand.lower():
+                                default_keys.append(k)
+                            else:
+                                other_empty.append(k)
+
+                        if branded_keys:
+                            # If branded entries exist, remove default-brand entries
+                            for k in default_keys + other_empty:
+                                context[k] = empty_label_context
+                            self.logger.info(f"DEDUP ACTION: Kept branded keys {branded_keys} for '{pname}', removed {len(default_keys)+len(other_empty)} default/empty entries")
+                        else:
+                            self.logger.info(f"DEDUP ACTION: No branded keys for '{pname}' - keeping all {len(keys)} entries")
             except Exception as dedup_err:
-                self.logger.warning(f"DEDUP BRAND FILTER FAILED: {dedup_err}")
+                self.logger.exception(f"DEDUP BRAND FILTER FAILED: {dedup_err}")
 
             try:
                 doc.render(context)
@@ -3677,6 +3693,13 @@ class TemplateProcessor:
                     base_url = (request.host_url or '').rstrip('/')
                 except Exception:
                     base_url = ''
+
+                # Prefer explicit environment QR_BASE_URL when provided (useful for local/dev testing).
+                # This avoids using request.host_url (which may be localhost) when a production
+                # QR base is configured in the environment.
+                env_qr = os.environ.get('QR_BASE_URL', '').strip()
+                if env_qr:
+                    base_url = env_qr.rstrip('/')
 
                 # If host_url is unavailable, try multiple fallbacks
                 if not base_url:

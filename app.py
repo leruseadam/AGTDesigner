@@ -10697,18 +10697,14 @@ def get_available_tags():
                 except Exception:
                     needs_realignment = False
             
-            if needs_realignment:
-                logging.info(f"🔄 Recent lineage update detected - re-aligning cached tags with database")
-                try:
-                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                    if store_name_align:
-                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to ensure cache uses the correct timestamp-based key
-                        # The timestamp changes the cache key, so old cached tags won't be used
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
-                except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+            # ALWAYS re-align cached tags with the database to avoid serving stale lineage
+            try:
+                store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                if store_name_align:
+                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                    logging.info("✅ Re-aligned cached tags with database lineage (forced alignment)")
+            except Exception as align_err:
+                logging.warning(f"Could not align cached tags after lineage update or cache hit: {align_err}")
             
             # CRITICAL FIX: Enrich cached tags with DOH and Brand data (cached tags may be missing these fields)
             # This ensures DOH badges and filters work even when tags come from cache
@@ -10953,23 +10949,17 @@ def get_available_tags():
                 except Exception:
                     pass
             
-            if needs_realignment:
-                reason = "first request of session" if first_request else "recent lineage update"
-                logging.info(f"🔄 SLOW MODE: Re-aligning cached tags with database ({reason})")
-                try:
-                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                    if store_name_align:
-                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # Mark that we've aligned tags in this session
-                        session['tags_aligned_this_session'] = True
-                        session.modified = True
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to change the cache key and ensure fresh database lineage
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
-                except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
-            else:
-                logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
+            # ALWAYS re-align cached tags with the database on cache hit (slow mode)
+            try:
+                store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                if store_name_align:
+                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                    # Mark that we've aligned tags in this session
+                    session['tags_aligned_this_session'] = True
+                    session.modified = True
+                    logging.info("✅ Re-aligned cached tags with database lineage (forced alignment - slow mode)")
+            except Exception as align_err:
+                logging.warning(f"Could not align cached tags on slow-mode cache hit: {align_err}")
             
             # CRITICAL FIX: Enrich cached tags with DOH and Brand data (same as fast_load path)
             try:
