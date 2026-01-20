@@ -10555,12 +10555,39 @@ def get_available_tags():
         # CRITICAL: Check if lineage was updated BEFORE checking cache
         # If lineage was updated, we must bypass cache to get fresh database lineage
         has_lineage_updates = bool(session.get('lineage_update_timestamp'))
-        bypass_cache_for_lineage = has_lineage_updates and nocache
+
+        # If any lineage updates exist, force bypass of cache and attempt to reload the last uploaded file
+        if has_lineage_updates:
+            logging.info("🔔 LINEAGE UPDATE DETECTED: Forcing cache bypass and reloading last uploaded Excel file to avoid stale lineage")
+            try:
+                cache.delete(cache_key)
+            except Exception:
+                pass
+
+            # Force reload of the Excel processor from the session file path if available
+            try:
+                if session_file_path and os.path.exists(session_file_path):
+                    from src.core.data.excel_processor import ExcelProcessor
+                    reloaded_processor = ExcelProcessor(store_name=store_name)
+                    load_ok = False
+                    try:
+                        load_ok = reloaded_processor.load_file(session_file_path)
+                    except Exception as _load_err:
+                        logging.warning(f"LINEAGE RELOAD: load_file failed for {session_file_path}: {_load_err}")
+                    if load_ok and reloaded_processor.df is not None and not reloaded_processor.df.empty:
+                        g.excel_processor = reloaded_processor
+                        reloaded_processor._last_loaded_file = session_file_path
+                        has_excel_data = True
+                        logging.info(f"✅ LINEAGE RELOAD: Successfully reloaded Excel file for fresh lineage: {session_file_path}")
+                    else:
+                        logging.warning(f"⚠️ LINEAGE RELOAD: Could not reload Excel file or file empty: {session_file_path}")
+            except Exception as reload_err:
+                logging.warning(f"LINEAGE RELOAD ERROR: {reload_err}")
 
         # PERFORMANCE: Allow caching (keyed by file + timestamp) to avoid recomputing tags on every request.
         # CRITICAL: Only check cache AFTER verifying Excel file exists
-        # CRITICAL: Bypass cache if lineage was updated and nocache=1
-        cached_tags = None if (nocache or bypass_cache_for_lineage) else cache.get(cache_key)
+        # CRITICAL: Bypass cache if nocache requested or lineage updates detected
+        cached_tags = None if (nocache or has_lineage_updates) else cache.get(cache_key)
 
         # Respect nocache fully: only use file cache when nocache is not requested
         if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
