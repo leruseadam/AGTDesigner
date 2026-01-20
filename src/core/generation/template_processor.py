@@ -2645,21 +2645,17 @@ class TemplateProcessor:
             except Exception as e:
                 self.logger.warning(f"🔧 BRAND ENRICHMENT FAILED: Could not retrieve brand from cache: {e}")
             
-            # If database enrichment failed, fallback to vendor
+            # If database enrichment failed, fall back to vendor when available
+            # Prefer vendor fallback for preroll/mini templates to avoid generic defaults
             if not enriched_brand:
-                # For preroll and mini templates, prefer leaving brand empty or using
-                # a default rather than falling back to vendor names. Vendor names
-                # are displayed elsewhere and should not substitute for ProductBrand
-                # on small labels where brand must be accurate.
-                if self.template_type not in ('preroll', 'mini'):
-                    vendor_fallback = (record.get('Vendor') or 
-                                     record.get('Vendor/Supplier*') or 
-                                     record.get('ProductVendor', ''))
-                    if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                        enriched_brand = str(vendor_fallback).strip()
-                        self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
+                vendor_fallback = (record.get('Vendor') or 
+                                 record.get('Vendor/Supplier*') or 
+                                 record.get('ProductVendor', ''))
+                if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                    enriched_brand = str(vendor_fallback).strip()
+                    self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
                 else:
-                    self.logger.debug(f"SKIP VENDOR FALLBACK: template_type='{self.template_type}' for '{product_name}' - preserving brand over vendor")
+                    self.logger.debug(f"NO VENDOR FALLBACK: No vendor available for '{product_name}'")
             
             # CRITICAL FIX: If still no brand after all fallbacks, use a default brand based on product type
             if not enriched_brand:
