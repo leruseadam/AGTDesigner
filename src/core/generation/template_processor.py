@@ -148,8 +148,8 @@ class TemplateProcessor:
         else:
             self.scale_factor = scale_factor
         self.excel_processor = excel_processor  # Store the session's Excel processor
-        # When fast_mode is True, skip expensive post-processing (font sizing, lineage coloring, marker cleanup)
-        # This improves throughput for large batches where visual perfection is less important.
+        # fast_mode parameter kept for backwards compatibility but no longer skips any processing
+        # All features (font sizing, lineage colors, markers) are now applied regardless of batch size
         self.fast_mode = bool(fast_mode)
         self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
@@ -1526,21 +1526,9 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
             try:
-                # If fast_mode is enabled, skip expensive post-processing steps to improve throughput
-                if self.fast_mode:
-                    self.logger.info("⚡ FAST MODE: Skipping post-processing (font sizing, lineage colors, marker cleanup)")
-                    # Still remove headers/footers for cleanliness
-                    from src.core.generation.docx_formatting import remove_all_headers_and_footers
-                    rendered_doc = remove_all_headers_and_footers(rendered_doc)
-                    return rendered_doc
-
                 # Post-process the document to apply dynamic font sizing first
+                # NOTE: fast_mode no longer skips post-processing - all features are applied
                 self._post_process_and_replace_content(rendered_doc)
-
-                # Check timeout before lineage colors
-                if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
-                    self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping lineage colors")
-                    return rendered_doc
 
                 # Apply lineage colors last to ensure they are not overwritten
                 apply_lineage_colors(rendered_doc)
