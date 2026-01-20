@@ -1503,6 +1503,41 @@ class TemplateProcessor:
                           not (isinstance(label_data.get('QR'), str) and label_data.get('QR').strip() == ''))
             self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
             
+            # Remove duplicate default-brand entries for preroll/mini templates
+            try:
+                if self.template_type in ('preroll', 'mini'):
+                    default_brand = "PREMIUM CANNABIS"
+                    # Group labels by normalized product name
+                    label_keys = [k for k in context.keys() if k.startswith('Label')]
+                    name_groups = {}
+                    for k in label_keys:
+                        lbl = context.get(k) or {}
+                        pname = (lbl.get('Product Name*') or lbl.get('ProductName') or lbl.get('Product Name') or '').strip()
+                        if not pname:
+                            continue
+                        name_groups.setdefault(pname.lower(), []).append(k)
+
+                    # For each product name where at least one branded record exists,
+                    # drop entries that only have the generic default brand to avoid duplicates.
+                    for pname, keys in name_groups.items():
+                        branded_exists = False
+                        for k in keys:
+                            lbl = context.get(k) or {}
+                            pb = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '').strip()
+                            if pb and pb.upper() != default_brand:
+                                branded_exists = True
+                                break
+                        if branded_exists:
+                            for k in keys:
+                                lbl = context.get(k) or {}
+                                pb = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '').strip()
+                                if pb and pb.upper() == default_brand:
+                                    # Replace the generic/default entry with an empty label context
+                                    context[k] = empty_label_context
+                                    self.logger.debug(f"DEDUP: Replaced default-brand tag for '{pname}' at {k} with empty label to prefer branded result")
+            except Exception as dedup_err:
+                self.logger.warning(f"DEDUP BRAND FILTER FAILED: {dedup_err}")
+
             try:
                 doc.render(context)
                 self.logger.debug("DocxTemplate render completed successfully")
