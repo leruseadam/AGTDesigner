@@ -4963,17 +4963,30 @@ const TagManager = {
                     return; // Skip this checkbox - user just unchecked it
                 }
                 
-                // CRITICAL FIX: After generation, only restore checked state, never uncheck
-                // This prevents the first checkbox from disappearing after generation
-                if (recentlyGenerated && checkbox.checked) {
-                    // If checkbox is already checked after generation, ensure it stays checked
-                    const isSelected = this.state.persistentSelectedTags.includes(tagName) || 
-                                      persistentSet.has(tagName.toLowerCase());
-                    if (isSelected && !checkbox.checked) {
-                        checkbox.checked = true;
-                        restoredCount++;
+                // CRITICAL FIX: After generation, prefer to preserve checked state but
+                // allow explicit user-initiated unchecks to take effect immediately.
+                // If generation just occurred, skip aggressive unchecking unless the
+                // checkbox was recently-unchecked by the user (marked via
+                // `data-recently-unchecked`) — in that case allow the uncheck to proceed.
+                if (recentlyGenerated) {
+                    // If the user explicitly just unchecked this checkbox, allow it
+                    if (checkbox.hasAttribute('data-recently-unchecked')) {
+                        // allow normal processing below to handle the uncheck
+                    } else {
+                        // For safety, avoid unchecking boxes during the short window
+                        // after generation to prevent flicker; however ensure checked
+                        // boxes that should remain checked are set.
+                        if (checkbox.checked) {
+                            const isSelected = this.state.persistentSelectedTags.includes(tagName) || 
+                                              persistentSet.has(tagName.toLowerCase());
+                            if (isSelected && !checkbox.checked) {
+                                checkbox.checked = true;
+                                restoredCount++;
+                            }
+                        }
+                        // Skip uncheck processing for this checkbox during generation window
+                        return;
                     }
-                    return; // Don't uncheck anything after generation
                 }
                 
                 // Check both exact match and case-insensitive match
