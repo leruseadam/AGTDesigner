@@ -57,7 +57,7 @@ def _load_font_sizing_config():
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
                 'vertical': {
-                    'description': [(10, 36), (20, 34), (30, 30), (40, 28), (45, 26), (50, 24), (60, 23), (70, 22), (80, 20), (float('inf'), 18)],
+                    'description': [(10, 36), (20, 34), (30, 32), (40, 30), (45, 28), (50, 26), (60, 24), (70, 22), (80, 20), (float('inf'), 18)],
                     'brand': [(10, 16), (15, 14), (25, 12), (35, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
                     'lineage': [(100, 18), (float('inf'), 14)],  # Max 18pt for lineage to prevent 20pt sizing
