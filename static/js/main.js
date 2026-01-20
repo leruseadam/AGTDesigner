@@ -15402,8 +15402,12 @@ const TagManager = {
                 if (!this.state.persistentSelectedTags.includes(tagName)) {
                     this.state.persistentSelectedTags.push(tagName);
                 }
+                // CRITICAL FIX: Also add to _selectedTagsSet to keep checkbox state in sync
+                if (this.state._selectedTagsSet) {
+                    this.state._selectedTagsSet.add(tagName);
+                }
             });
-            
+
             // Update the regular selectedTags set to match persistent ones
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             
@@ -15510,8 +15514,12 @@ const TagManager = {
                 if (index > -1) {
                     this.state.persistentSelectedTags.splice(index, 1);
                 }
+                // CRITICAL FIX: Also remove from _selectedTagsSet to keep checkbox state in sync
+                if (this.state._selectedTagsSet) {
+                    this.state._selectedTagsSet.delete(tagName);
+                }
             });
-            
+
             // Update the regular selectedTags set to match persistent ones
             this.state.selectedTags = new Set(this.state.persistentSelectedTags);
             
@@ -15539,13 +15547,18 @@ const TagManager = {
             // Show moved back tags in available tags display for better performance - batched DOM operations
             const availableTagsContainer = document.getElementById('availableTags');
             if (availableTagsContainer) {
-                const tagElementsToShow = checked.map(tagName => 
-                    availableTagsContainer.querySelector(`.tag-checkbox[value="${tagName}"]`)?.closest('.tag-item')
-                ).filter(Boolean);
-                
-                // Batch DOM updates
-                tagElementsToShow.forEach(tagItem => {
-                    tagItem.style.display = 'block';
+                checked.forEach(tagName => {
+                    // Find the checkbox in available tags
+                    const availableCheckbox = availableTagsContainer.querySelector(`.tag-checkbox[value="${tagName}"]`);
+                    if (availableCheckbox) {
+                        // CRITICAL FIX: Uncheck the checkbox so it can be re-selected
+                        availableCheckbox.checked = false;
+                        // Show the tag item
+                        const tagItem = availableCheckbox.closest('.tag-item');
+                        if (tagItem) {
+                            tagItem.style.display = 'block';
+                        }
+                    }
                 });
             }
             

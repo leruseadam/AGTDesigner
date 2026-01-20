@@ -2707,30 +2707,20 @@ class TemplateProcessor:
         product_type = (label_context.get('ProductType', '').lower() or 
                        label_context.get('Product Type*', '').lower())
         product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
-        # If product_brand looks like the vendor (common when upstream matching used vendor-as-brand),
-        # clear it for preroll/mini templates so we don't display vendor in the brand slot.
-        try:
-            vendor_candidate = (
-                label_context.get('_vendor_from_record') or
-                record.get('Vendor') or
-                record.get('Vendor/Supplier*') or
-                record.get('ProductVendor') or
-                ''
-            )
-            def _clean(s):
-                return str(s).strip().lower() if s is not None else ''
-
-            pb_clean = _clean(product_brand)
-            v_clean = _clean(vendor_candidate)
-            if self.template_type in ('preroll', 'mini') and pb_clean and v_clean:
-                if pb_clean == v_clean or v_clean in pb_clean or pb_clean in v_clean:
-                    self.logger.info(f"PREROLL/MINI BRAND CLEANUP: Detected brand same-as-vendor for '{product_name}' -> clearing ProductBrand")
-                    product_brand = ''
-                    label_context['ProductBrand'] = ''
-                    label_context['Product Brand'] = ''
-        except Exception:
-            # Non-fatal - if anything goes wrong, leave product_brand unchanged
-            pass
+        # CRITICAL FIX: Do NOT clear brand for preroll templates even if it matches vendor.
+        # The preroll_tag_generator has already done the work to find the correct brand from the
+        # actual Product Brand field in the Excel data. If the brand happens to match the vendor
+        # name (e.g., "Hustler's Ambition" brand from "Hustler's Ambition" vendor), that's correct
+        # and should be preserved. Only clear brand if it's genuinely empty.
+        #
+        # DISABLED: The previous logic was clearing legitimate brands:
+        # if self.template_type in ('preroll', 'mini') and pb_clean and v_clean:
+        #     if pb_clean == v_clean or v_clean in pb_clean or pb_clean in v_clean:
+        #         product_brand = ''  # This was incorrectly clearing valid brands
+        #
+        # Now we trust the brand value that was set by preroll_tag_generator.
+        if self.template_type in ('preroll', 'mini'):
+            self.logger.debug(f"PREROLL/MINI BRAND: Preserving brand '{product_brand}' for '{product_name}' (not clearing same-as-vendor)")
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
@@ -2761,9 +2751,9 @@ class TemplateProcessor:
                 self.logger.warning(f"🔧 BRAND ENRICHMENT FAILED: Could not retrieve brand from cache: {e}")
             
             # If database enrichment failed, fall back to vendor when available
-            # CRITICAL FIX: Do NOT use vendor fallback for preroll/mini templates - vendor is not the brand
-            # Only use vendor fallback for non-preroll/mini templates where it makes sense
-            if not enriched_brand and self.template_type not in ('preroll', 'mini'):
+            # CRITICAL FIX: Use vendor fallback for ALL templates including preroll/mini
+            # Vendor is better than "PREMIUM CANNABIS" as it at least identifies the source
+            if not enriched_brand:
                 vendor_fallback = (record.get('Vendor') or
                                  record.get('Vendor/Supplier*') or
                                  record.get('ProductVendor', ''))
@@ -2772,19 +2762,16 @@ class TemplateProcessor:
                     self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
                 else:
                     self.logger.debug(f"NO VENDOR FALLBACK: No vendor available for '{product_name}'")
-            
-            # CRITICAL FIX: If still no brand after all fallbacks, use a default brand based on product type
+
+            # If still no brand after vendor fallback, try to extract from product name
+            # Product names follow pattern: "Product Description by BrandName - Size"
             if not enriched_brand:
-                # Extract a meaningful default brand from product name or use generic fallback
-                if 'lemonade' in product_name.lower():
-                    enriched_brand = "LEMONADE CO."
-                elif 'moonshot' in product_name.lower():
-                    enriched_brand = "MOONSHOT"
-                elif 'sorbet' in product_name.lower():
-                    enriched_brand = "SORBET CO."
-                else:
-                    enriched_brand = "PREMIUM CANNABIS"
-                self.logger.info(f"🔧 DEFAULT BRAND: Using default brand '{enriched_brand}' for '{product_name}' (no brand data available)")
+                by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name, re.IGNORECASE)
+                if by_match:
+                    potential_brand = by_match.group(1).strip()
+                    if potential_brand and potential_brand.lower() not in ['', 'none', 'nan']:
+                        enriched_brand = potential_brand
+                        self.logger.info(f"🔧 EXTRACTED BRAND: Using brand '{enriched_brand}' extracted from product name '{product_name}' (by X - pattern)")
             
             # Update the brand field if enrichment was successful
             if enriched_brand:
@@ -3778,29 +3765,45 @@ class TemplateProcessor:
                     except Exception:
                         pass
 
-                # Last resort: use production URL as default
+                # Last resort: prefer AGT Designer URL if provided, otherwise use legacy default
                 if not base_url:
-                    base_url = 'https://www.agtpricetags.com'
-                    self.logger.warning(f"No QR_BASE_URL configured, using default: {base_url}")
+                    # Allow explicit AGT Designer URL to be set via env var for QR links
+                    base_url = os.environ.get('AGT_DESIGNER_URL', '').strip()
+                if not base_url:
+                    base_url = os.environ.get('QR_BASE_URL', '').strip() or 'https://www.agtpricetags.com'
+                    self.logger.warning(f"No QR_BASE_URL or AGT_DESIGNER_URL configured, using default: {base_url}")
 
                 # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
-                # Format: /preroll-items/{group_id}?vendor={vendor}
-                # This allows the route to filter products by vendor
-                if vendor_clean:
-                    # URL encode vendor to handle special characters
-                    from urllib.parse import quote
-                    vendor_encoded = quote(vendor_clean)
-                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
-                else:
-                    # Fallback to group_id only if no vendor (backward compatibility)
-                    qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}"
+                # Prefer the normalized vendor/brand key embedded in the group_key
+                # so the preroll-items route can find the cached group (keys use
+                # normalized brand_key). If no group_key vendor is available,
+                # normalize the vendor_clean value.
+                group_key_val = label_context.get('_group_key') or record.get('_group_key')
+                vendor_param = None
+                if group_key_val and '|' in group_key_val:
+                    try:
+                        vendor_param = group_key_val.split('|', 1)[1]
+                    except Exception:
+                        vendor_param = None
 
-                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels.
-                # If we detect a local host, raise an error (never allow local URLs for QR/menu)
-                if 'localhost' in qr_url.lower() or '127.0.0.1' in qr_url:
+                if not vendor_param:
+                    # Normalize vendor_clean into a stable key: lowercase, strip non-alphanum
+                    vendor_param = re.sub(r'[^a-z0-9]+', '', vendor_clean.lower()) if vendor_clean else ''
+                    if not vendor_param:
+                        vendor_param = vendor_clean.replace(' ', '_')[:60]
+
+                # URL encode vendor_param to handle special characters
+                from urllib.parse import quote
+                vendor_encoded = quote(vendor_param)
+                qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
+
+                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels
+                # unless explicitly allowed by QR_ALLOW_LOCAL environment variable (dev only)
+                allow_local = os.environ.get('QR_ALLOW_LOCAL', '') in ['1', 'true', 'True']
+                if ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url) and not allow_local:
                     raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
-                
-                self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor '{vendor_clean}': {qr_url}")
+
+                self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor param '{vendor_param}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
                 qr_url_for_log = qr_url  # Store for logging
                 if qr_code:

@@ -52,7 +52,8 @@
     "deny": [],
     "ask": [],
     "additionalDirectories": [
-      "/Users/adamcordova/Desktop/labelMaker_ QR copy final/static/js"
+      "/Users/adamcordova/Desktop/labelMaker_ QR copy final/static/js",
+      "/private/var/folders/vr/l8k_67rs6_x46rpw9p0lywzh0000gn/T"
     ]
   }
 }

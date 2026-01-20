@@ -9760,6 +9760,9 @@ def generate_labels():
         tag_count = len(records)
         
         # Get vendor information from the processed records
+        # Defensive defaults to avoid NameError if counting logic is skipped or fails
+        vendor_clean = 'Unknown'
+        product_type_clean = 'Unknown'
         vendor_counts = {}
         product_type_counts = {}
         
@@ -25067,15 +25070,26 @@ def display_preroll_items(group_id):
         # Format: group_key = "group_id|vendor"
         preroll_items = None
         if vendor_filter:
-            group_key = f"{group_id}|{vendor_filter}"
-            # Try session-independent key first (most recent items for this vendor+group)
-            preroll_items = cache.get(f"preroll_group_latest_{group_key}")
-            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
-            
-            # If not found, try current session
+            # Try raw vendor key first (backwards compatibility)
+            group_key_raw = f"{group_id}|{vendor_filter}"
+            preroll_items = cache.get(f"preroll_group_latest_{group_key_raw}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key_raw}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+
+            # If not found, try current session-scoped key
             if not preroll_items:
                 current_session_id = session.get('session_id', 'default')
-                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
+                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key_raw}")
+
+            # If still not found, try normalized vendor key (newer code stores normalized brand_key)
+            if not preroll_items:
+                import re
+                normalized_vendor = re.sub(r'[^a-z0-9]+', '', vendor_filter.lower()) if vendor_filter else ''
+                if normalized_vendor:
+                    group_key_norm = f"{group_id}|{normalized_vendor}"
+                    preroll_items = cache.get(f"preroll_group_latest_{group_key_norm}")
+                    logging.info(f"PREROLL ROUTE: Cache lookup for normalized key 'preroll_group_latest_{group_key_norm}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+                    if not preroll_items:
+                        preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key_norm}")
         
         # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:

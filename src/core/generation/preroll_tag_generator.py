@@ -219,14 +219,23 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
 def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[Dict[str, Any]]:
     """
     Generate preroll tags by grouping products by category.
-    
+
     Args:
         records: List of product records to group
         cache: Flask cache instance for storing group data
-        
+
     Returns:
         List of grouped representative records (one per category)
     """
+    # DEBUG: Log brand values in input records
+    if records:
+        # Log all keys from first record to understand data structure
+        logging.info(f"PREROLL INPUT DEBUG: First record keys ({len(records[0].keys())} total): {list(records[0].keys())}")
+        for i, r in enumerate(records[:5]):
+            brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '')
+            vendor_val = r.get('Vendor/Supplier*', '') or r.get('Vendor', '')
+            logging.info(f"PREROLL INPUT DEBUG [{i+1}]: Name='{r.get('Product Name*', 'N/A')}', Brand='{brand_val}', Vendor='{vendor_val}', ALL_BRAND_FIELDS: Product Brand={repr(r.get('Product Brand'))}, ProductBrand={repr(r.get('ProductBrand'))}, Brand={repr(r.get('Brand'))}")
+
     # Filter records by allowed brands if configured
     # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
     # Prepare normalized allowed brand set once to avoid repeated work
@@ -284,38 +293,40 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         group_id = group_info['group_id']
         logging.debug(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (group_id: {group_id})")
         
-        # Extract vendor to include in grouping key
-        vendor = (
-            record.get('Vendor/Supplier*', '') or
-            record.get('Vendor', '') or
-            record.get('Vendor/Supplier', '') or
-            ''
-        )
-        vendor_clean = str(vendor).strip()
-        
-        # Extract price and normalize it
-        price = record.get('Price', '')
-        try:
-            if isinstance(price, str):
-                price_clean = price.replace('$', '').replace(',', '').strip()
-                try:
-                    price_float = float(price_clean)
-                    if price_float.is_integer():
-                        price_tier = str(int(price_float))
-                    else:
-                        price_tier = f"{price_float:.2f}".rstrip('0').rstrip('.')
-                except ValueError:
-                    price_tier = price_clean
-            else:
-                price_tier = str(price).strip()
-        except Exception:
-            price_tier = str(price).strip() if price else 'N/A'
-        
-        # Group by category AND vendor - each vendor gets their own group
-        # This ensures QR codes show only products from the specific vendor
-        # Format: "group_id|vendor" (e.g., "5packs|Acme Corp")
-        if vendor_clean:
-            group_key = f"{group_id}|{vendor_clean}"
+        # Extract brand from product name using "by BrandName -" pattern
+        # This is used for grouping to avoid duplicates
+        brand_for_grouping = ''
+        product_name_str = str(product_name).strip()
+        by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name_str, re.IGNORECASE)
+        if by_match:
+            brand_for_grouping = by_match.group(1).strip()
+
+        # Fallback to vendor if brand extraction failed
+        if not brand_for_grouping:
+            vendor = (
+                record.get('Vendor/Supplier*', '') or
+                record.get('Vendor', '') or
+                record.get('Vendor/Supplier', '') or
+                ''
+            )
+            brand_for_grouping = str(vendor).strip()
+
+        # Group by category AND brand - each brand gets their own group
+        # Normalize brand into a compact key to avoid duplicate groups caused
+        # by minor whitespace/punctuation/casing differences.
+        # We'll keep the original `brand_for_grouping` for display, but use
+        # a normalized `brand_key` inside the group_key to ensure consistent grouping.
+        brand_key = ''
+        if brand_for_grouping:
+            brand_for_grouping = str(brand_for_grouping).strip()
+            # Normalize: lowercase, remove non-alphanumeric characters
+            brand_key = re.sub(r'[^a-z0-9]+', '', brand_for_grouping.lower())
+            if not brand_key:
+                # Fallback to underscored short form
+                brand_key = brand_for_grouping.lower().replace(' ', '_')
+
+        if brand_key:
+            group_key = f"{group_id}|{brand_key}"
         else:
             group_key = group_id
         
@@ -325,7 +336,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
-        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (vendor: '{vendor_clean}', total in group: {len(grouped_records[group_key]['records'])})")
+        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (brand/vendor: '{brand_for_grouping}', total in group: {len(grouped_records[group_key]['records'])})")
     
     # Step 2: Create representative records with group display names
     unique_records = []
@@ -434,28 +445,27 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         representative['Lineage'] = rep_lineage
 
         # Ensure representative preserves a sensible Brand value
-        # Prefer a non-default (actual) brand when choosing the representative's brand
+        # PRIORITY 1: Extract brand from product name using "by BrandName -" pattern
+        # This is the most reliable source since product names follow the pattern:
+        # "Product Description by BrandName - Size"
         rep_brand = ''
-        default_brand = 'PREMIUM CANNABIS'
-        # First pass: prefer a brand that is not the generic default
         for r in group_records_list:
-            candidate = (
-                r.get('Product Brand') or
-                r.get('ProductBrand') or
-                r.get('Brand') or
-                r.get('brand')
-            )
-            if not candidate:
-                continue
-            cand_str = str(candidate).strip()
-            if not cand_str or cand_str.lower() in ['none', 'nan']:
-                continue
-            if cand_str.lower() != default_brand.lower():
-                rep_brand = cand_str
-                logging.info(f"PREROLL GROUP REP: Using NON-DEFAULT brand '{rep_brand}' for group representative of '{group_display_name}'")
-                break
-        # Fallback: if no non-default brand found, use the first valid brand
+            product_name = r.get('Product Name*', '') or r.get('ProductName', '') or r.get('Description', '')
+            if product_name:
+                product_name_str = str(product_name).strip()
+                # Pattern: "... by BrandName - ..." or "... by BrandName" (case insensitive)
+                by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name_str, re.IGNORECASE)
+                if by_match:
+                    potential_brand = by_match.group(1).strip()
+                    if potential_brand and potential_brand.lower() not in ['', 'none', 'nan']:
+                        rep_brand = potential_brand
+                        logging.info(f"PREROLL GROUP REP: Extracted brand '{rep_brand}' from product name '{product_name_str}' (by X - pattern)")
+                        break
+
+        # PRIORITY 2: Fall back to Product Brand field if extraction failed
+        # Note: The Product Brand field often contains vendor names, so extraction is preferred
         if not rep_brand:
+            default_brand = 'PREMIUM CANNABIS'
             for r in group_records_list:
                 candidate = (
                     r.get('Product Brand') or
@@ -463,14 +473,48 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                     r.get('Brand') or
                     r.get('brand')
                 )
-                if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
-                    rep_brand = str(candidate).strip()
-                    logging.info(f"PREROLL GROUP REP: Using fallback brand '{rep_brand}' for group representative of '{group_display_name}'")
-                    break
+                if not candidate:
+                    continue
+                cand_str = str(candidate).strip()
+                if not cand_str or cand_str.lower() in ['none', 'nan', 'premium cannabis']:
+                    continue
+                # Skip if it looks like a vendor (contains LLC, Inc, Co, etc.)
+                if any(suffix in cand_str.upper() for suffix in ['LLC', ' INC', ' CO', 'CORP', 'COMPANY']):
+                    logging.debug(f"PREROLL GROUP REP: Skipping vendor-like brand '{cand_str}' for '{group_display_name}'")
+                    continue
+                rep_brand = cand_str
+                logging.info(f"PREROLL GROUP REP: Using Product Brand field '{rep_brand}' for '{group_display_name}'")
+                break
+
+        # PRIORITY 3: Final fallback - use vendor as brand if still nothing
+        if not rep_brand:
+            vendor_fallback = (
+                representative.get('Vendor/Supplier*', '') or
+                representative.get('Vendor', '') or
+                representative.get('ProductVendor', '')
+            )
+            if vendor_fallback and str(vendor_fallback).strip():
+                rep_brand = str(vendor_fallback).strip()
+                logging.info(f"PREROLL GROUP REP: Using vendor '{rep_brand}' as brand fallback for '{group_display_name}'")
+
         if rep_brand:
             representative['Product Brand'] = rep_brand
             representative['ProductBrand'] = rep_brand
             representative['Brand'] = rep_brand
+            logging.info(f"PREROLL GROUP REP: ✅ Set brand '{rep_brand}' on representative for '{group_display_name}'")
+        else:
+            # Log warning with details about what brands were found in records
+            all_brands = []
+            for i, r in enumerate(group_records_list[:5]):
+                brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '') or r.get('brand', '')
+                all_brands.append(f"[{i}]={repr(brand_val)}")
+            logging.warning(f"PREROLL GROUP REP: ⚠️ NO BRAND found for '{group_display_name}'. Sample brand values: {', '.join(all_brands)}")
+            logging.warning(f"PREROLL GROUP REP: ⚠️ Record keys available: {list(group_records_list[0].keys())[:20] if group_records_list else 'N/A'}")
+
+        # Log final representative record summary for debugging
+        final_brand = representative.get('Product Brand', '') or representative.get('ProductBrand', '')
+        final_vendor = representative.get('Vendor/Supplier*', '') or representative.get('Vendor', '')
+        logging.info(f"PREROLL GROUP REP FINAL: '{group_display_name}' -> Brand='{final_brand}', Vendor='{final_vendor}'")
 
         unique_records.append(representative)
         
@@ -568,7 +612,20 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     else:
         logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped into {len(grouped_records)} groups")
     
-    grouped_records_list = unique_records
+    # Deduplicate final grouped representatives by normalized display name
+    deduped = []
+    seen_names = set()
+    for rep in unique_records:
+        pname = (rep.get('ProductName') or rep.get('Product Name*') or rep.get('Description') or '').strip()
+        pname_key = re.sub(r'[^a-z0-9]+', '', pname.lower()) if pname else None
+        if pname_key and pname_key in seen_names:
+            logging.debug(f"PREROLL DEDUP: Skipping duplicate representative '{pname}'")
+            continue
+        if pname_key:
+            seen_names.add(pname_key)
+        deduped.append(rep)
+
+    grouped_records_list = deduped
     logging.info(f"PREROLL GROUPING: Grouped {original_count} records into {len(grouped_records_list)} product groups (one label per vendor per category)")
     
     # Store group IDs in session for later retrieval when creating list document
