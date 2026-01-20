@@ -259,12 +259,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     else:
         logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is empty or None, allowing all brands (no filtering applied)")
     
-    # Save original records for QR page (before grouping)
-    original_records_for_qr = [r.copy() for r in records]
-    
-    # Store original records in session so they can be used in the product list document
-    session['preroll_original_records'] = original_records_for_qr
-    session.modified = True
+    # NOTE: We'll populate session['preroll_original_records'] after grouping
+    # so that the QR page references the full cached group items (not just
+    # the possibly filtered input records). This prevents QR pages from
+    # showing incomplete item lists when the incoming `records` were
+    # pre-filtered by Product Type or other UI filters.
     
     # Step 1: Identify product groups and group records
     grouped_records = {}
@@ -500,7 +499,41 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     session['preroll_session_id'] = session_id
     session.modified = True
     
+    # Build a merged, cache-backed original records list for the QR product list
+    merged_originals = []
+    seen = set()
+    for group_key in group_keys:
+        candidates = []
+        # Prefer session-independent latest vendor-inclusive key
+        ck = cache.get(f"preroll_group_latest_{group_key}")
+        if ck:
+            candidates = ck
+        else:
+            # Fallback to group_id-only latest key
+            base_id = group_key.split('|')[0]
+            ck2 = cache.get(f"preroll_group_latest_{base_id}")
+            if ck2:
+                candidates = ck2
+            else:
+                # Last fallback: session-scoped key
+                ck3 = cache.get(f"preroll_group_{session_id}_{group_key}")
+                if ck3:
+                    candidates = ck3
+
+        for item in candidates:
+            name = (item.get('product_name') or '').strip()
+            if not name:
+                continue
+            if name in seen:
+                continue
+            seen.add(name)
+            merged_originals.append(item)
+
+    # Persist merged originals for QR / product list generation
+    session['preroll_original_records'] = merged_originals
+    session.modified = True
+
     # Note: Group items are already stored in cache above during grouping
     logging.info(f"PREROLL: Generated {len(grouped_records_list)} grouped labels (one per vendor per product category)")
-    
+
     return grouped_records_list

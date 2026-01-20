@@ -158,6 +158,25 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     
     # Special rule: Mini template long brand names forced to minimum readable size
     if field_type.lower() == 'brand' and orientation.lower() == 'mini':
+        # New rule: If the brand contains more than 3 words, force 6pt per request
+        try:
+            import re
+            brand_text = str(text or "").strip()
+            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_text, re.IGNORECASE)
+            if brand_match:
+                brand_text = brand_match.group(1).strip()
+
+            words = [w for w in re.split(r"\s+", brand_text) if w]
+            if len(words) > 3:
+                final_size = 6.0 * scale_factor
+                logger.debug(
+                    f"Mini template brand word-count rule: '{brand_text}' has {len(words)} words, forcing {final_size}pt"
+                )
+                return Pt(final_size)
+        except Exception:
+            logger.exception("Error while applying mini-template brand word-count rule")
+
+        # Fallback legacy rule based on letter count
         text_length = _brand_letter_count(text)
         if text_length >= 20:
             final_size = 6.5 * scale_factor

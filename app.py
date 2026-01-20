@@ -7477,65 +7477,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     lineage_map[normalized] = lineage_info
                     lineage_map[db_name.lower().strip()] = lineage_info
         
-        # CRITICAL FIX: Initialize doh_brand_map for enrichment even without lineage matches
-        doh_brand_map = {}
-        
-        # Build doh_brand_map from all database results (even those without lineage)
-        # This ensures we can enrich tags even if they don't match in lineage_map
-        try:
-            product_names_for_doh_brand = [tag.get('Product Name*') for tag in aligned_tags if tag.get('Product Name*')]
-            if product_names_for_doh_brand:
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-                chunk_size = 400
-                for chunk_start in range(0, len(product_names_for_doh_brand), chunk_size):
-                    chunk = product_names_for_doh_brand[chunk_start:chunk_start + chunk_size]
-                    placeholders = ','.join(['?' for _ in chunk])
-                    cursor.execute(f'''
-                        SELECT "Product Name*", 
-                               "Product Brand",
-                               COALESCE("DOH", "DOH Compliant (Yes/No)") as doh_value,
-                               "DOH",
-                               "DOH Compliant (Yes/No)"
-                        FROM products
-                        WHERE "Product Name*" IN ({placeholders})
-                    ''', chunk)
-                    for row in cursor.fetchall():
-                        db_name = row[0]
-                        db_brand = row[1]
-                        db_doh_coalesced = row[2]
-                        db_doh_raw = row[3]
-                        db_doh_compliant_raw = row[4]
-                        
-                        # Clean DOH value (same logic as _clean_doh)
-                        db_doh_clean = None
-                        doh_final = db_doh_coalesced or db_doh_raw or db_doh_compliant_raw
-                        if doh_final:
-                            doh_str = str(doh_final).strip().upper()
-                            if doh_str and doh_str not in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N', '0', '0.0']:
-                                if doh_str in ['YES', 'Y', 'DOH', 'COMPLIANT']:
-                                    db_doh_clean = 'DOH'
-                                elif doh_str not in ['NO', 'N']:
-                                    db_doh_clean = doh_str
-                        
-                        # Clean brand value
-                        db_brand_clean = None
-                        if db_brand:
-                            brand_str = str(db_brand).strip()
-                            if brand_str and brand_str.lower() not in ['none', 'null', 'nan', 'product brand', '']:
-                                db_brand_clean = brand_str
-                        
-                        if db_name:
-                            doh_brand_map[db_name] = {'product_brand': db_brand_clean, 'doh': db_doh_clean}
-                            normalized = product_db._normalize_product_name(db_name)
-                            doh_brand_map[normalized] = {'product_brand': db_brand_clean, 'doh': db_doh_clean}
-                            doh_brand_map[db_name.lower().strip()] = {'product_brand': db_brand_clean, 'doh': db_doh_clean}
-        except Exception as e:
-            logging.warning(f"Failed to build doh_brand_map: {e}")
-        
-        if not lineage_map:
-            # Even if no lineage_map, we can still enrich DOH/Brand
-            pass
+        # PERFORMANCE: DOH and Brand data is already included in lineage_map from the first query
+        # No need for a separate query - just use lineage_map for all enrichment
+        # The first query already fetches product_brand and doh fields
         
         # Apply lineage to tags
         aligned_count = 0
@@ -7662,26 +7606,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     }
                     logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to MIXED (THC) - no Product Strain")
             
-            # CRITICAL FIX: Don't skip tags without lineage_info - they still need DOH/Brand enrichment
-            # Only skip if we have no way to enrich them
+            # Skip tags without lineage_info - we can't enrich them
             if not lineage_info:
-                # Try to enrich DOH/Brand even without lineage_info
-                if 'doh_brand_map' in locals():
-                    doh_brand_info = doh_brand_map.get(name) or doh_brand_map.get(product_db._normalize_product_name(name)) or doh_brand_map.get(str(name).lower().strip())
-                    if doh_brand_info:
-                        db_doh = doh_brand_info.get('doh')
-                        db_brand = doh_brand_info.get('product_brand')
-                        
-                        if db_doh:
-                            tag['DOH'] = db_doh
-                            tag['DOH Compliant (Yes/No)'] = db_doh
-                            tag['doh'] = db_doh.lower() if db_doh else ''
-                            tag['DOH Compliant'] = db_doh
-                        
-                        if db_brand:
-                            tag['Product Brand'] = db_brand
-                            tag['ProductBrand'] = db_brand
-                            tag['productBrand'] = db_brand
                 continue
             
             # Helper function to validate lineage for classic types
@@ -7793,36 +7719,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     else:
                         logging.debug(f"⏭️ Tag '{name}' already has DOH '{current_doh_clean}', skipping enrichment")
                 else:
-                    # CRITICAL FIX: Try to get DOH/Brand from doh_brand_map even if lineage_info doesn't have it
-                    # This ensures tags without lineage matches still get DOH/Brand enrichment
-                    doh_brand_info = doh_brand_map.get(name) or doh_brand_map.get(product_db._normalize_product_name(name)) or doh_brand_map.get(str(name).lower().strip())
-                    if doh_brand_info:
-                        db_doh = doh_brand_info.get('doh')
-                        db_brand = doh_brand_info.get('product_brand')
-                        
-                        if db_doh:
-                            current_doh_clean = str(tag.get('DOH') or '').strip().upper()
-                            if not current_doh_clean or current_doh_clean in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N', 'UNDEFINED']:
-                                tag['DOH'] = db_doh
-                                tag['DOH Compliant (Yes/No)'] = db_doh
-                                tag['doh'] = db_doh.lower() if db_doh else ''
-                                tag['DOH Compliant'] = db_doh
-                                logging.info(f"✅ Enriched tag '{name}' with DOH '{db_doh}' from doh_brand_map")
-                        
-                        if db_brand:
-                            current_brand_clean = str(tag.get('Product Brand') or '').strip()
-                            if not current_brand_clean or current_brand_clean.lower() in ['none', 'null', 'nan', 'undefined', '']:
-                                tag['Product Brand'] = db_brand
-                                tag['ProductBrand'] = db_brand
-                                tag['productBrand'] = db_brand
-                                logging.info(f"✅ Enriched tag '{name}' with Brand '{db_brand}' from doh_brand_map")
-                    else:
-                        # Log when DOH is not found in lineage_info or doh_brand_map
-                        if isinstance(lineage_info, dict):
-                            logging.debug(f"⚠️ No DOH found in lineage_info for '{name}' - lineage_info keys: {list(lineage_info.keys())}")
-                        else:
-                            logging.debug(f"⚠️ No lineage_info dict for '{name}' - cannot enrich DOH")
-                    
                     # Ensure DOH fields exist even if database doesn't have a value
                     # Set to empty string (not None) so frontend can check for them
                     if 'DOH' not in tag or not tag.get('DOH'):
@@ -14807,7 +14703,7 @@ def get_web_available_tags():
         # FAST-PATH: Check for background-generated file tag cache created during upload processing
         # Background thread stores tags under a sha256(file_path) key with a version prefix
         try:
-            if session_file_path:
+            if session_file_path and not has_recent_lineage_update:
                 import hashlib
                 cache_version = "v2_no_excel_lineage"
                 file_hash = hashlib.sha256(session_file_path.encode()).hexdigest()
@@ -14816,11 +14712,7 @@ def get_web_available_tags():
                 if bg_tags:
                     elapsed = (time.time() - start_time) * 1000
                     logging.info(f"✅ WEB FAST-PATH: Using background-cached tags ({len(bg_tags)} items) ({elapsed:.1f}ms)")
-                    # Align lineage to be safe and return
-                    try:
-                        bg_tags = _align_tags_with_db_lineage(bg_tags, get_current_store_name(allow_fallback=False), skip_if_aligned=False, force_overwrite=True)
-                    except Exception as align_err:
-                        logging.warning(f"WEB FAST-PATH: Could not align background-cached tags: {align_err}")
+                    # PERFORMANCE: Skip alignment on cache hits - tags were already aligned when cached
                     safe_bg = make_json_safe(bg_tags)
                     response = make_response(jsonify({
                         'tags': safe_bg,
@@ -14889,11 +14781,8 @@ def get_web_available_tags():
             if cached_tags:
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ WEB: Using {len(cached_tags)} cached tags ({elapsed:.1f}ms)")
-                # CRITICAL: Align tags even for web endpoint to ensure sovereign_lineage is included
-                try:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                except Exception as align_err:
-                    logging.warning(f"WEB: Could not align cached tags: {align_err}")
+                # PERFORMANCE: Skip alignment on cache hits - tags were already aligned when cached
+                # Only re-align if lineage was recently updated (handled by has_recent_lineage_update above)
                 safe_cached_tags = make_json_safe(cached_tags)
                 response = make_response(jsonify({
                     'tags': safe_cached_tags,
