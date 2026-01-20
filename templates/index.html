@@ -1168,7 +1168,7 @@
               return Promise.resolve([]);
             }
             
-            return fetchWithTimeout('/api/web/available-tags?fast_load=1', 5000).catch(e => { 
+            return fetchWithTimeout('/api/web/available-tags?fast_load=1', 60000).catch(e => { 
               console.error('Available tags failed:', e); 
               return []; 
             });

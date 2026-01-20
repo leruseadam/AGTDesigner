@@ -7302,6 +7302,12 @@ def _enforce_nonclassic_lineage_rules(tags):
     from src.core.constants import CLASSIC_TYPES
     
     fixed_count = 0
+    # Try to get product DB for lineage checks; if unavailable, fall back to using tags only
+    try:
+        store_name_for_check = get_current_store_name()
+        product_db_for_check = get_product_database(store_name_for_check)
+    except Exception:
+        product_db_for_check = None
     for tag in tags:
         if not isinstance(tag, dict):
             continue
@@ -7337,16 +7343,31 @@ def _enforce_nonclassic_lineage_rules(tags):
         # Only fix if current lineage is not MIXED or CBD
         valid_nonclassic_lineages = ['MIXED', 'CBD', 'CBD_BLEND', 'THC']  # THC is treated as MIXED
         if current_lineage_upper not in valid_nonclassic_lineages:
-            # Force to correct lineage based on Product Strain
-            tag['Lineage'] = correct_lineage
-            tag['Lineage*'] = correct_lineage
-            tag['currentLineage'] = correct_lineage
-            tag['canonical_lineage'] = correct_lineage
-            tag['lineage'] = correct_lineage.lower()
-            
-            product_name = tag.get('Product Name*', 'unknown')
-            logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}'")
-            fixed_count += 1
+            # Before forcing, check database — if DB has lineage for this product, DO NOT overwrite
+            product_name_for_check = tag.get('Product Name*') or tag.get('ProductName')
+            db_has_lineage_for_product = False
+            try:
+                if product_db_for_check and product_name_for_check:
+                    db_line = product_db_for_check.get_product_lineage(product_name_for_check, bypass_cache=True)
+                    if db_line and str(db_line).strip().upper() not in ['', 'NONE', 'NULL', 'NAN']:
+                        db_has_lineage_for_product = True
+            except Exception:
+                # If DB check fails, don't block enforcement (fail open)
+                db_has_lineage_for_product = False
+
+            if db_has_lineage_for_product:
+                logging.debug(f"⏭️ NON-CLASSIC LINEAGE: DB has lineage for '{product_name_for_check}', skipping Excel-based enforcement")
+            else:
+                # Force to correct lineage based on Product Strain
+                tag['Lineage'] = correct_lineage
+                tag['Lineage*'] = correct_lineage
+                tag['currentLineage'] = correct_lineage
+                tag['canonical_lineage'] = correct_lineage
+                tag['lineage'] = correct_lineage.lower()
+                
+                product_name = tag.get('Product Name*', 'unknown')
+                logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}' (DB missing)")
+                fixed_count += 1
         elif current_lineage_upper == 'THC':
             # THC is an abbreviation for MIXED - normalize it
             tag['Lineage'] = 'MIXED'
@@ -7648,29 +7669,41 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower().strip()
             is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
             
-            # CRITICAL FIX: For non-classic types, ALWAYS set lineage from Product Strain (override database)
-            # Non-classic types should be either MIXED (THC) or CBD based on Product Strain
+            # For non-classic types, prefer database lineage. Only derive from Product Strain
+            # when the database has no lineage for this product (new product or missing DB data).
             if not is_classic:
                 product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
-                if product_strain:
-                    # Check if Product Strain contains CBD-related terms
-                    strain_upper = product_strain.upper()
-                    # Check for CBD indicators in Product Strain
-                    has_cbd = any(indicator in strain_upper for indicator in ['CBD', 'HIGH CBD', 'CBG', 'CBN', 'CBC'])
-                    
-                    if has_cbd:
-                        # Set to CBD for non-classic types with CBD in Product Strain
+
+                # Determine whether database already provides lineage info for this tag
+                db_has_lineage = False
+                if isinstance(lineage_info, dict):
+                    # db_lineage or strain_canonical or any sovereign indicates DB has lineage
+                    if lineage_info.get('db_lineage') or lineage_info.get('strain_canonical') or lineage_info.get('product_sovereign') or lineage_info.get('strain_sovereign'):
+                        db_has_lineage = True
+
+                # If DB has lineage, do NOT override it with Excel-derived values
+                if db_has_lineage:
+                    logging.debug(f"⏭️ NON-CLASSIC LINEAGE: Database provides lineage for '{name}', not overriding with Excel/strain-derived value")
+                else:
+                    # Database missing lineage for this product — derive from Product Strain (or default to MIXED)
+                    if product_strain:
+                        strain_upper = product_strain.upper()
+                        has_cbd = any(indicator in strain_upper for indicator in ['CBD', 'HIGH CBD', 'CBG', 'CBN', 'CBC'])
+                        if has_cbd:
+                            derived = 'CBD'
+                        else:
+                            derived = 'MIXED'
                         lineage_info = {
-                            'lineage': 'CBD',
+                            'lineage': derived,
                             'has_sovereign': False,
                             'product_sovereign': None,
                             'strain_sovereign': None,
                             'strain_canonical': None,
-                            'db_lineage': 'CBD'
+                            'db_lineage': derived
                         }
-                        logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to CBD based on Product Strain '{product_strain}' (overriding database)")
+                        logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' set to '{derived}' from Product Strain '{product_strain}' (DB missing)")
                     else:
-                        # Default to MIXED (THC) for non-classic types without CBD
+                        # No strain available and DB missing — default to MIXED
                         lineage_info = {
                             'lineage': 'MIXED',
                             'has_sovereign': False,
@@ -7679,18 +7712,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                             'strain_canonical': None,
                             'db_lineage': 'MIXED'
                         }
-                        logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to MIXED (THC) based on Product Strain '{product_strain}' (overriding database)")
-                else:
-                    # No Product Strain - default to MIXED for non-classic types
-                    lineage_info = {
-                        'lineage': 'MIXED',
-                        'has_sovereign': False,
-                        'product_sovereign': None,
-                        'strain_sovereign': None,
-                        'strain_canonical': None,
-                        'db_lineage': 'MIXED'
-                    }
-                    logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to MIXED (THC) - no Product Strain")
+                        logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' defaulted to 'MIXED' (no Product Strain and DB missing)")
             
             # Skip tags without lineage_info - we can't enrich them
             if not lineage_info:
@@ -14976,17 +14998,18 @@ def get_web_available_tags():
             excel_tags = excel_processor.get_available_tags()
             logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
             
-            # CRITICAL FIX: Always align tags with database lineage to ensure lineage is available
-            # Use the robust _align_tags_with_db_lineage helper function used throughout the codebase
+            # Enforce database-as-source-of-truth: always align Excel tags with DB lineage
+            # before returning to the web UI. This ensures Excel data cannot override
+            # database lineage except when DB is missing lineage for the product.
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and excel_tags:
                 try:
-                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
+                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage (web fast-path)...")
                     excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
                     matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
-                    logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
+                    logging.info(f"✅ WEB: Aligned {matched_count} tags with database lineage")
                 except Exception as align_err:
-                    logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
+                    logging.warning(f"WEB: Lineage alignment failed, returning Excel tags: {align_err}")
                     import traceback
                     logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
