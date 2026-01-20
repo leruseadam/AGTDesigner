@@ -330,6 +330,16 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   zoom: reset;
 }
 
+/* Ensure CURRENT INVENTORY and tag lists show a vertical scrollbar when content overflows. */
+/* Use a viewport-based max-height so the list remains usable on small screens. */
+#availableTags,
+#selectedTags,
+.tag-list-container {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  max-height: calc(100vh - 240px) !important; /* Adjust offset as needed */
+}
+
 /* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
   font-size: 24px !important; /* Increased from 22px by 2px */
