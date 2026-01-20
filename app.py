@@ -10027,6 +10027,34 @@ def clear_available_tags_cache(reason=None):
         json_matched_cache_key = session.get('json_matched_cache_key')
         if json_matched_cache_key:
             _clear_key(json_matched_cache_key)
+
+        # Also clear any background 'tags_file_*' caches created during pre-processing
+        try:
+            import hashlib
+            session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
+            if session_file_path:
+                # Known cache version used by background pre-cache
+                for ver in ("v2_no_excel_lineage", "v1"):
+                    tkey = f"tags_file_{ver}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
+                    _clear_key(tkey)
+                    # Also attempt deleting without version suffix (legacy)
+                    tkey2 = f"tags_file_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
+                    _clear_key(tkey2)
+        except Exception as e:
+            logging.debug(f"Could not clear tags_file caches: {e}")
+
+        # Clear any in-memory excel processor caches to prevent stale available-tags
+        try:
+            global _excel_processor
+            if _excel_processor is not None:
+                if hasattr(_excel_processor, '_available_tags_cache'):
+                    _excel_processor._available_tags_cache.clear()
+                    logging.info("✅ Cleared _excel_processor._available_tags_cache (in-memory)")
+                if hasattr(_excel_processor, '_filter_options_cache'):
+                    _excel_processor._filter_options_cache.clear()
+                    logging.info("✅ Cleared _excel_processor._filter_options_cache (in-memory)")
+        except Exception as e:
+            logging.debug(f"Error clearing in-memory excel processor caches: {e}")
         
         # Related caches to keep UI in sync
         related_bases = [
