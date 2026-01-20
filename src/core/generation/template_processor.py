@@ -2626,26 +2626,11 @@ class TemplateProcessor:
         if self._brand_debug_count <= 3:
             self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
         
-        # CRITICAL FIX: Check if brand is missing and apply fallback logic FIRST
+        # If brand is missing, defer immediate fallback and attempt cache/vendor enrichment first
+        # (Avoid setting generic 'PREMIUM PREROLLS' for prerolls which hides the real brand)
         if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
-            # Apply fallback logic immediately for missing brands
-            # Check more specific terms first, then more general ones
-            if 'sorbet' in product_name.lower():
-                enriched_brand = "SORBET CO."
-            elif 'moonshot' in product_name.lower():
-                enriched_brand = "MOONSHOT"
-            elif 'lemonade' in product_name.lower():
-                enriched_brand = "LEMONADE CO."
-            elif 'pre-roll' in product_name.lower() or 'preroll' in product_name.lower():
-                enriched_brand = "PREMIUM PREROLLS"
-            else:
-                enriched_brand = "PREMIUM CANNABIS"
-            
-            if enriched_brand:
-                product_brand = enriched_brand
-                label_context['Product Brand'] = enriched_brand
-                label_context['ProductBrand'] = enriched_brand
-                self.logger.info(f"🔧 IMMEDIATE BRAND FALLBACK: Set '{enriched_brand}' for '{product_name}' (no brand data)")
+            enriched_brand = ""
+            self.logger.debug(f"BRAND MISSING: No ProductBrand for '{product_name}', will try cache/vendor enrichment")
         
         # BRAND ENRICHMENT: If brand is still missing, try to get it from database cache, then fallback to vendor
         # OPTIMIZATION: Use pre-loaded cache instead of individual queries
