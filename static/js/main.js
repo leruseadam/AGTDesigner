@@ -20058,35 +20058,6 @@ async function clearStuckUploads() {
             const result = await response.json();
             verboseLog('Upload status cleared:', result.message);
             
-            // Small UX fix: ensure manual deselection of tags in the selected list
-            // always takes effect even after filters change. This delegated listener
-            // calls the internal `_performUpdateSelectedTags` method with the
-            // current checked tags so the TagManager updates state without being
-            // blocked by other filter-update guards.
-            try {
-                document.addEventListener('DOMContentLoaded', function() {
-                    const sel = document.getElementById('selectedTags');
-                    if (!sel) return;
-                    sel.addEventListener('change', function(e) {
-                        const target = e.target;
-                        if (!target || !target.matches || !target.matches('input[type="checkbox"].tag-checkbox')) return;
-                        // Only handle user-initiated unchecks here
-                        if (target.checked) return; // ignore checks (moves handled elsewhere)
-                        const checked = Array.from(document.querySelectorAll('#selectedTags input[type="checkbox"].tag-checkbox:checked'))
-                            .map(cb => cb.value);
-                        if (window.TagManager && typeof window.TagManager._performUpdateSelectedTags === 'function') {
-                            try {
-                                window.TagManager._performUpdateSelectedTags.call(window.TagManager, checked);
-                            } catch (err) {
-                                console.error('Error forcing selected-tags update:', err);
-                            }
-                        }
-                    }, {capture: false});
-                });
-            } catch (e) {
-                console.warn('Selected-tag delegated handler not attached:', e);
-            }
-
             // Show a toast notification
             if (window.Toast) {
                 Toast.show('success', result.message);
