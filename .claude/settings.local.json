@@ -45,7 +45,8 @@
       "Bash(cd /Users/adamcordova/Desktop/labelMaker_\\\\ QR\\\\ copy\\\\ final:*)",
       "Bash(git log --all --oneline --grep=\"price\" -i)",
       "Bash(xxd:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(node --check:*)"
     ],
     "deny": [],
     "ask": [],

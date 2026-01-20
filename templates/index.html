@@ -7887,77 +7887,80 @@
   <script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}" defer></script>
   
   <script>
-    // Mark as loaded immediately after script tag (synchronous scripts execute immediately)
-    window.mainJsLoaded = true;
-    console.log('✅ main.js script tag executed');
+    // CRITICAL: main.js is loaded with defer, so it won't execute until DOMContentLoaded
+    // We must wait for DOMContentLoaded before checking TagManager
+    document.addEventListener('DOMContentLoaded', function() {
+      window.mainJsLoaded = true;
+      console.log('✅ DOMContentLoaded fired - main.js should now be executed');
 
-    // CRITICAL: Hydrate tags from cache IMMEDIATELY for instant page load
-    // This must happen right after main.js loads, before any other initialization
-    if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
-      try {
-        console.log('⚡ Attempting to hydrate tags from cache...');
+      // CRITICAL: Hydrate tags from cache IMMEDIATELY for instant page load
+      // This must happen right after main.js loads, before any other initialization
+      if (window.TagManager && typeof window.TagManager.hydrateAvailableTagsFromCache === 'function') {
+        try {
+          console.log('⚡ Attempting to hydrate tags from cache...');
 
-        // Debug: Check what's available in localStorage and sessionStorage
-        const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
-        console.log('📦 Expected cache key:', cacheKey);
+          // Debug: Check what's available in localStorage and sessionStorage
+          const cacheKey = window.TagManager.getAvailableTagsCacheKey ? window.TagManager.getAvailableTagsCacheKey() : 'unknown';
+          console.log('📦 Expected cache key:', cacheKey);
 
-        const localStorageKeys = [];
-        const sessionStorageKeys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.includes('agt_available_tags')) {
-            localStorageKeys.push(key);
+          const localStorageKeys = [];
+          const sessionStorageKeys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.includes('agt_available_tags')) {
+              localStorageKeys.push(key);
+            }
           }
-        }
-        for (let i = 0; i < sessionStorage.length; i++) {
-          const key = sessionStorage.key(i);
-          if (key && key.includes('agt_available_tags')) {
-            sessionStorageKeys.push(key);
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && key.includes('agt_available_tags')) {
+              sessionStorageKeys.push(key);
+            }
           }
-        }
-        console.log('📦 LocalStorage tag cache keys:', localStorageKeys);
-        console.log('📦 SessionStorage tag cache keys:', sessionStorageKeys);
+          console.log('📦 LocalStorage tag cache keys:', localStorageKeys);
+          console.log('📦 SessionStorage tag cache keys:', sessionStorageKeys);
 
-        const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
-        if (hydrated) {
-          console.log('✅ INSTANT: Tags hydrated from cache immediately after main.js load');
-        } else {
-          console.warn('⚠️ Cache hydration returned false - no cache available or cache check failed');
+          const hydrated = window.TagManager.hydrateAvailableTagsFromCache();
+          if (hydrated) {
+            console.log('✅ INSTANT: Tags hydrated from cache immediately after main.js load');
+          } else {
+            console.warn('⚠️ Cache hydration returned false - no cache available or cache check failed');
+          }
+        } catch (err) {
+          console.error('❌ Cache hydration failed:', err);
         }
-      } catch (err) {
-        console.error('❌ Cache hydration failed:', err);
-      }
-    } else {
-      console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
-    }
-
-    // Check TagManager immediately after script loads (synchronous execution)
-    (function checkTagManager() {
-      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
-        console.log('✅ TagManager is available immediately after main.js execution');
-        console.log('✅ TagManager methods confirmed:', {
-          createTagElement: typeof window.TagManager.createTagElement === 'function',
-          init: typeof window.TagManager.init === 'function',
-          uploadFile: typeof window.TagManager.uploadFile === 'function'
-        });
       } else {
-        console.error('❌ CRITICAL: TagManager not available after main.js execution');
-        console.error('❌ TagManager exists:', !!window.TagManager);
-        if (window.TagManager) {
-          console.error('❌ TagManager type:', typeof window.TagManager);
-          console.error('❌ TagManager has createTagElement:', typeof window.TagManager.createTagElement);
-          console.error('❌ TagManager keys (first 20):', Object.keys(window.TagManager).slice(0, 20));
-          console.error('❌ This suggests main.js executed but TagManager was not assigned to window.TagManager');
-        } else {
-          console.error('❌ TagManager is completely undefined');
-          console.error('❌ This suggests main.js either:');
-          console.error('   1. Failed to load (check Network tab)');
-          console.error('   2. Has a JavaScript error preventing execution (check Console for red errors)');
-          console.error('   3. TagManager object was never created or assigned');
-        }
-        window.mainJsError = 'TagManager not available after main.js execution';
+        console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
       }
-    })();
+
+      // Check TagManager after deferred scripts have executed
+      (function checkTagManager() {
+        if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+          console.log('✅ TagManager is available after DOMContentLoaded');
+          console.log('✅ TagManager methods confirmed:', {
+            createTagElement: typeof window.TagManager.createTagElement === 'function',
+            init: typeof window.TagManager.init === 'function',
+            uploadFile: typeof window.TagManager.uploadFile === 'function'
+          });
+        } else {
+          console.error('❌ CRITICAL: TagManager not available after DOMContentLoaded');
+          console.error('❌ TagManager exists:', !!window.TagManager);
+          if (window.TagManager) {
+            console.error('❌ TagManager type:', typeof window.TagManager);
+            console.error('❌ TagManager has createTagElement:', typeof window.TagManager.createTagElement);
+            console.error('❌ TagManager keys (first 20):', Object.keys(window.TagManager).slice(0, 20));
+            console.error('❌ This suggests main.js executed but TagManager was not assigned to window.TagManager');
+          } else {
+            console.error('❌ TagManager is completely undefined');
+            console.error('❌ This suggests main.js either:');
+            console.error('   1. Failed to load (check Network tab)');
+            console.error('   2. Has a JavaScript error preventing execution (check Console for red errors)');
+            console.error('   3. TagManager object was never created or assigned');
+          }
+          window.mainJsError = 'TagManager not available after DOMContentLoaded';
+        }
+      })();
+    });
   </script>
   
   <!-- ⚡ PERFORMANCE: Defer non-critical scripts -->
