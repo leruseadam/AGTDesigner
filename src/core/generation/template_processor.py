@@ -1522,7 +1522,11 @@ class TemplateProcessor:
                         for k in keys:
                             lbl = context.get(k) or {}
                             pb = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '')
-                            brands.append((k, str(pb).strip()))
+                            try:
+                                pb_unwrapped = unwrap_marker(str(pb)) if pb is not None else ''
+                            except Exception:
+                                pb_unwrapped = str(pb).strip() if pb is not None else ''
+                            brands.append((k, pb_unwrapped.strip()))
                         self.logger.info(f"DEDUP DEBUG: Product '{pname}' label brands before dedupe: {brands}")
 
                     # For each product name where at least one branded (non-default) record exists,
@@ -1532,10 +1536,49 @@ class TemplateProcessor:
                         branded_keys = []
                         default_keys = []
                         other_empty = []
+                        def _unwrap_candidates(lbl):
+                            # Consider multiple possible brand sources (ProductBrand, Product Brand, ProductVendor, Vendor)
+                            candidates = [
+                                lbl.get('ProductBrand'),
+                                lbl.get('Product Brand'),
+                                lbl.get('ProductBrand_Center'),
+                                lbl.get('ProductBrand_Center'),
+                                lbl.get('ProductVendor'),
+                                lbl.get('Product Vendor'),
+                                lbl.get('Vendor'),
+                                lbl.get('Vendor/Supplier*'),
+                                lbl.get('vendor'),
+                                lbl.get('Brand')
+                            ]
+                            for c in candidates:
+                                if c is None:
+                                    continue
+                                try:
+                                    s = str(c)
+                                except Exception:
+                                    continue
+                                # Try unwrapping common markers
+                                try:
+                                    s2 = unwrap_marker(s, 'PRODUCTBRAND')
+                                except Exception:
+                                    s2 = s
+                                try:
+                                    s2 = unwrap_marker(s2, 'PRODUCTBRAND_CENTER')
+                                except Exception:
+                                    pass
+                                try:
+                                    s2 = unwrap_marker(s2, 'PRODUCTVENDOR')
+                                except Exception:
+                                    pass
+                                s2 = s2.strip()
+                                if s2:
+                                    return s2
+                            return ''
+
                         for k in keys:
                             lbl = context.get(k) or {}
-                            pb_raw = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '')
-                            pb = str(pb_raw).strip()
+                            pb = _unwrap_candidates(lbl)
+                            pb = pb.strip()
                             pb_norm = pb.lower()
                             if pb and pb_norm != default_brand.lower():
                                 branded_keys.append(k)
@@ -1553,6 +1596,27 @@ class TemplateProcessor:
                             self.logger.info(f"DEDUP ACTION: No branded keys for '{pname}' - keeping all {len(keys)} entries")
             except Exception as dedup_err:
                 self.logger.exception(f"DEDUP BRAND FILTER FAILED: {dedup_err}")
+
+            # DEBUG: Log final label-brand context immediately before render
+            try:
+                label_keys = sorted([k for k in context.keys() if k.startswith('Label')])
+                for k in label_keys:
+                    lbl = context.get(k) or {}
+                    pb_raw = lbl.get('ProductBrand') or lbl.get('Product Brand') or ''
+                    try:
+                        pb_unwrapped = unwrap_marker(str(pb_raw), 'PRODUCTBRAND') if isinstance(pb_raw, str) else pb_raw
+                    except Exception:
+                        pb_unwrapped = str(pb_raw)
+                    pbc_raw = lbl.get('ProductBrand_Center') or ''
+                    try:
+                        pbc_unwrapped = unwrap_marker(str(pbc_raw), 'PRODUCTBRAND_CENTER') if isinstance(pbc_raw, str) else pbc_raw
+                    except Exception:
+                        pbc_unwrapped = str(pbc_raw)
+                    lineage = lbl.get('Lineage') or ''
+                    self.logger.info(f"FINAL CONTEXT: {k} ProductBrand:'{pb_unwrapped}' ProductBrand_Center:'{pbc_unwrapped}' Lineage:'{lineage}'")
+            except Exception:
+                # Keep render path resilient; only best-effort logging
+                self.logger.debug("FINAL CONTEXT: failed to dump label contexts before render")
 
             try:
                 doc.render(context)

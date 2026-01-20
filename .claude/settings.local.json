@@ -46,7 +46,8 @@
       "Bash(git log --all --oneline --grep=\"price\" -i)",
       "Bash(xxd:*)",
       "Bash(python:*)",
-      "Bash(node --check:*)"
+      "Bash(node --check:*)",
+      "Bash(vendor\"\\)\n3. Any record in the group\n\nSets vendor on Vendor/Supplier*, Vendor, and ProductVendor fields.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": [],

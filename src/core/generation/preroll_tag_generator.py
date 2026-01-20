@@ -365,16 +365,33 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         
         # CRITICAL FIX: Preserve vendor information in the representative record
         # This ensures each vendor's label shows their vendor name
+        # First try to get vendor from the representative record
         vendor = (
             representative.get('Vendor/Supplier*', '') or
             representative.get('Vendor', '') or
             representative.get('Vendor/Supplier', '') or
             ''
         )
+        # If no vendor found in representative, extract from group_key (format: "group_id|vendor")
+        if not vendor and '|' in group_key:
+            vendor = group_key.split('|', 1)[1]
+            logging.info(f"PREROLL GROUP REP: Extracted vendor '{vendor}' from group_key for '{group_display_name}'")
+        # If still no vendor, search through all records in the group
+        if not vendor:
+            for r in group_records_list:
+                v = (r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or r.get('Vendor/Supplier', '') or '')
+                if v and str(v).strip():
+                    vendor = str(v).strip()
+                    logging.info(f"PREROLL GROUP REP: Found vendor '{vendor}' from group record for '{group_display_name}'")
+                    break
+        # Set vendor on representative record to ensure it's passed to template processor
         if vendor:
-            logging.debug(f"PREROLL GROUP REP: Updated representative record for vendor '{vendor}' with group '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
+            representative['Vendor/Supplier*'] = vendor
+            representative['Vendor'] = vendor
+            representative['ProductVendor'] = vendor
+            logging.debug(f"PREROLL GROUP REP: Set vendor '{vendor}' on representative for '{group_display_name}'")
         else:
-            logging.debug(f"PREROLL GROUP REP: Updated representative record fields to '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
+            logging.warning(f"PREROLL GROUP REP: No vendor found for group '{group_display_name}' (group_key: {group_key})")
         
         # Keep the price from the first record (or could average/use min/max - using first for now)
         original_price = representative.get('Price', '')

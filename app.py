@@ -7397,6 +7397,52 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         if not product_names:
             logging.debug("⚡ No products need lineage alignment")
             return aligned_tags
+
+
+        def _cached_tags_missing_db_sovereign(tags, store_name, sample_limit: int = 200) -> bool:
+            """
+            Detect whether cached `tags` are missing sovereign lineage values that exist in the database.
+            Returns True if at least one product in the sampled set has a sovereign/canonical lineage
+            in the database while the cached tag lacks database lineage fields.
+            """
+            try:
+                product_db = get_product_database(store_name)
+                if not product_db:
+                    return False
+
+                names_to_check = []
+                for tag in tags:
+                    if not isinstance(tag, dict):
+                        continue
+                    name = tag.get('Product Name*') or tag.get('ProductName')
+                    if not name:
+                        continue
+                    # If tag already has DB lineage fields or sovereign_lineage, skip it
+                    if tag.get('sovereign_lineage') or tag.get('canonical_lineage') or tag.get('currentLineage'):
+                        continue
+                    names_to_check.append(name)
+                    if len(names_to_check) >= sample_limit:
+                        break
+
+                if not names_to_check:
+                    return False
+
+                # Check each name using bypass_cache to ensure fresh DB result
+                for name in names_to_check:
+                    try:
+                        db_line = product_db.get_product_lineage(name, bypass_cache=True)
+                        if db_line and str(db_line).strip().upper() not in ['', 'NONE', 'NULL', 'NAN']:
+                            # Database has a lineage for this product while cached tag lacked it
+                            logging.info(f"CACHE STALE CHECK: DB has lineage for '{name}' but cached tag lacks it")
+                            return True
+                    except Exception:
+                        # Ignore per-item errors and continue
+                        continue
+
+                return False
+            except Exception as e:
+                logging.warning(f"Error during cached tags stale check: {e}")
+                return False
         
         lineage_map = {}
         conn = product_db._get_connection()
@@ -10674,6 +10720,23 @@ def get_available_tags():
         # CRITICAL: Only check cache AFTER verifying Excel file exists
         # CRITICAL: Bypass cache if nocache requested or lineage updates detected
         cached_tags = None if (nocache or has_lineage_updates) else cache.get(cache_key)
+
+        # EXTRA SAFETY: If cached tags exist, ensure they are not missing sovereign_lineage
+        # that exists in the database. If so, invalidate the cache to prevent showing
+        # stale Excel-only lineage to users.
+        if cached_tags:
+            try:
+                # Use current store_name (may be None) - prefer explicit store
+                store_for_check = store_name or get_current_store_name(allow_fallback=False)
+                if store_for_check and _cached_tags_missing_db_sovereign(cached_tags, store_for_check):
+                    logging.info("🧯 Invalidating cached available-tags: missing DB sovereign_lineage detected")
+                    try:
+                        cache.delete(cache_key)
+                    except Exception:
+                        logging.warning("Failed to delete stale available-tags cache key")
+                    cached_tags = None
+            except Exception as stale_check_err:
+                logging.warning(f"Cached tags stale-check failed: {stale_check_err}")
 
         # Respect nocache fully: only use file cache when nocache is not requested
         if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
