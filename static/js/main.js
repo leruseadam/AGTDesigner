@@ -11888,7 +11888,7 @@ const TagManager = {
             // Desktop/localhost should respond quickly with fast_load=1
             const maxRetries = isWebClient ? 1 : 2; // Fewer retries for web
             const maxProcessingRetries = isWebClient ? 1 : 2; // Reduce processing retries
-            const fetchTimeout = isWebClient ? 30000 : 5000; // Web: 30s, Desktop: 5s
+            const fetchTimeout = 30000; // 30s timeout for all clients
             
             let retryCount = 0;
             let processingRetryCount = 0;

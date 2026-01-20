@@ -663,8 +663,10 @@ class ProductDatabase:
                 # Only create strain_id index if the column exists
                 if 'strain_id' in product_columns:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_strain ON products(strain_id)')
-                    
+
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
+                # PERFORMANCE: Index on Product Strain for faster lineage lookups
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_products_product_strain ON products("Product Strain")')
                 
                 conn.commit()
                 
@@ -1127,7 +1129,9 @@ class ProductDatabase:
             cursor.execute('CREATE INDEX idx_products_normalized ON products(normalized_name)')
             cursor.execute('CREATE INDEX idx_products_strain ON products(strain_id)')
             cursor.execute('CREATE INDEX idx_products_vendor_brand ON products("Vendor/Supplier*", "Product Brand")')
-            
+            # PERFORMANCE: Index on Product Strain for faster lineage lookups
+            cursor.execute('CREATE INDEX idx_products_product_strain ON products("Product Strain")')
+
             conn.commit()
             logger.info("Database recreated with correct schema")
             
@@ -2723,7 +2727,123 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error getting strain info for '{strain_name}': {e}")
             return None
-    
+
+    def get_strain_info_batch(self, strain_names: list) -> Dict[str, Dict[str, Any]]:
+        """Get information about multiple strains in a single batch query (PERFORMANCE OPTIMIZATION).
+
+        Returns a dict mapping normalized strain name -> strain info dict.
+        This eliminates N+1 queries when processing many tags.
+        """
+        if not strain_names:
+            return {}
+
+        try:
+            self.init_database()
+
+            # Normalize all strain names and build lookup
+            normalized_to_original = {}
+            unique_normalized = set()
+            for name in strain_names:
+                if name:
+                    normalized = self._normalize_strain_name(name)
+                    normalized_to_original[normalized] = name
+                    unique_normalized.add(normalized)
+
+            if not unique_normalized:
+                return {}
+
+            # Known sativa hybrid strains (same as get_strain_info)
+            KNOWN_SATIVA_HYBRIDS = {
+                'blue dream', 'blue dream haze', 'blueberry dream', 'dream', 'dream star',
+                'sour diesel', 'sour d', 'green crack', 'green crack haze',
+                'jack herer', 'jack', 'super silver haze', 'silver haze',
+                'durban poison', 'durban', 'trainwreck', 'train wreck',
+                'amnesia haze', 'amnesia', 'strawberry cough', 'strawberry',
+                'white widow', 'white', 'ak-47', 'ak47', 'ak 47',
+                'purple haze', 'haze', 'lemon haze', 'lemon',
+                'pineapple express', 'pineapple', 'maui wowie', 'maui',
+                'chocolope', 'chocolate', 'tangie', 'tangerine dream',
+                'cannatonic', 'harlequin', 'acdc', 'ac/dc', 'pennywise'
+            }
+
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Batch query all strains at once
+            result_map = {}
+            normalized_list = list(unique_normalized)
+            chunk_size = 400
+
+            for start in range(0, len(normalized_list), chunk_size):
+                chunk = normalized_list[start:start + chunk_size]
+                placeholders = ','.join(['?' for _ in chunk])
+                cursor.execute(f'''
+                    SELECT id, strain_name, normalized_name, canonical_lineage, sovereign_lineage,
+                           total_occurrences, lineage_confidence, first_seen_date, last_seen_date
+                    FROM strains
+                    WHERE normalized_name IN ({placeholders})
+                ''', chunk)
+
+                for row in cursor.fetchall():
+                    strain_id = row[0]
+                    strain_name = row[1]
+                    normalized_name = row[2]
+                    canonical_lineage = row[3]
+                    sovereign_lineage = row[4]
+
+                    # Use canonical_lineage directly (skip mode_lineage query for performance)
+                    # The canonical_lineage should already be set to mode via update_all_canonical_lineages_to_mode()
+                    display_lineage = sovereign_lineage or canonical_lineage
+
+                    # Check if known sativa hybrid
+                    is_known_sativa_hybrid = normalized_name in KNOWN_SATIVA_HYBRIDS or any(
+                        known in normalized_name for known in KNOWN_SATIVA_HYBRIDS
+                    )
+
+                    # Override for known sativa hybrids
+                    if is_known_sativa_hybrid and display_lineage and str(display_lineage).strip().upper() == 'HYBRID':
+                        display_lineage = 'HYBRID/SATIVA'
+                        if not canonical_lineage or str(canonical_lineage).strip().upper() == 'HYBRID':
+                            canonical_lineage = 'HYBRID/SATIVA'
+
+                    result_map[normalized_name] = {
+                        'id': strain_id,
+                        'strain_name': strain_name,
+                        'canonical_lineage': canonical_lineage,
+                        'sovereign_lineage': sovereign_lineage,
+                        'total_occurrences': row[5],
+                        'lineage_confidence': row[6],
+                        'first_seen_date': row[7],
+                        'last_seen_date': row[8],
+                        'display_lineage': display_lineage
+                    }
+
+            # Add default entries for known sativa hybrids not found in database
+            for normalized in unique_normalized:
+                if normalized not in result_map:
+                    is_known_sativa_hybrid = normalized in KNOWN_SATIVA_HYBRIDS or any(
+                        known in normalized for known in KNOWN_SATIVA_HYBRIDS
+                    )
+                    if is_known_sativa_hybrid:
+                        result_map[normalized] = {
+                            'id': None,
+                            'strain_name': normalized_to_original.get(normalized, normalized),
+                            'canonical_lineage': 'HYBRID/SATIVA',
+                            'sovereign_lineage': None,
+                            'total_occurrences': 0,
+                            'lineage_confidence': 0.0,
+                            'first_seen_date': '',
+                            'last_seen_date': '',
+                            'display_lineage': 'HYBRID/SATIVA'
+                        }
+
+            logger.debug(f"Batch strain lookup: {len(strain_names)} requested, {len(result_map)} found")
+            return result_map
+
+        except Exception as e:
+            logger.error(f"Error in batch strain lookup: {e}")
+            return {}
+
     @timed_operation("get_product_info")
     def get_product_info(self, product_name: str, vendor: str = None, brand: str = None) -> Optional[Dict[str, Any]]:
         """Get information about a specific product (with caching)."""

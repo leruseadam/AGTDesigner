@@ -48,6 +48,9 @@
       "Bash(python:*)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "additionalDirectories": [
+      "/Users/adamcordova/Desktop/labelMaker_ QR copy final/static/js"
+    ]
   }
 }

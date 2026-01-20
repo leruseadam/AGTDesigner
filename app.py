@@ -7480,12 +7480,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         # PERFORMANCE: DOH and Brand data is already included in lineage_map from the first query
         # No need for a separate query - just use lineage_map for all enrichment
         # The first query already fetches product_brand and doh fields
-        
+
         # Apply lineage to tags
         aligned_count = 0
         # Import CLASSIC_TYPES for validation
         from src.core.constants import CLASSIC_TYPES
-        
+
         # CRITICAL FIX: Initialize DOH/Brand fields on ALL tags FIRST (before any matching)
         # This ensures fields exist even if tag doesn't match in lineage_map
         for tag in aligned_tags:
@@ -7506,7 +7506,69 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 tag['ProductBrand'] = ''
             if 'productBrand' not in tag:
                 tag['productBrand'] = ''
-        
+
+        # PERFORMANCE OPTIMIZATION: Batch strain lookup to eliminate N+1 queries
+        # Collect all Product Strain values first, then do ONE batch query
+        strain_names_to_lookup = set()
+        tags_needing_strain_lookup = []
+        for tag in aligned_tags:
+            if not isinstance(tag, dict):
+                continue
+            name = tag.get('Product Name*')
+            if not name:
+                continue
+            # Check if this tag needs strain lookup (missing or incomplete lineage_info)
+            lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
+            if not lineage_info or (isinstance(lineage_info, dict) and not lineage_info.get('strain_canonical')):
+                product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
+                if product_strain:
+                    strain_names_to_lookup.add(product_strain)
+                    tags_needing_strain_lookup.append((tag, name, product_strain, lineage_info))
+
+        # Do ONE batch query for all strains (instead of N queries)
+        strain_info_batch = {}
+        if strain_names_to_lookup:
+            try:
+                strain_info_batch = product_db.get_strain_info_batch(list(strain_names_to_lookup))
+                logging.debug(f"✅ BATCH STRAIN LOOKUP: Fetched {len(strain_info_batch)} strains in single query (was {len(strain_names_to_lookup)} individual queries)")
+            except Exception as e:
+                logging.warning(f"❌ BATCH STRAIN LOOKUP failed, falling back to individual lookups: {e}")
+
+        # Apply batch strain results to tags that need it
+        for tag, name, product_strain, existing_lineage_info in tags_needing_strain_lookup:
+            # Look up from batch results using normalized name
+            normalized_strain = product_db._normalize_strain_name(product_strain)
+            strain_info = strain_info_batch.get(normalized_strain)
+
+            if strain_info:
+                canonical_from_strain = strain_info.get('canonical_lineage') or strain_info.get('display_lineage')
+                if canonical_from_strain:
+                    if not existing_lineage_info:
+                        # Create new lineage_info from strain
+                        new_lineage_info = {
+                            'lineage': canonical_from_strain,
+                            'has_sovereign': False,
+                            'product_sovereign': None,
+                            'strain_sovereign': strain_info.get('sovereign_lineage'),
+                            'strain_canonical': canonical_from_strain,
+                            'db_lineage': canonical_from_strain
+                        }
+                        # Add to lineage_map for this tag
+                        lineage_map[name] = new_lineage_info
+                        lineage_map[product_db._normalize_product_name(name)] = new_lineage_info
+                        lineage_map[str(name).lower().strip()] = new_lineage_info
+                        logging.debug(f"✅ BATCH STRAIN: Found canonical_lineage '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
+                    else:
+                        # Update existing lineage_info
+                        old_canonical = existing_lineage_info.get('strain_canonical')
+                        existing_lineage_info['strain_canonical'] = canonical_from_strain
+                        if not existing_lineage_info.get('db_lineage') or (existing_lineage_info.get('db_lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED'):
+                            existing_lineage_info['db_lineage'] = canonical_from_strain
+                        if existing_lineage_info.get('lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED':
+                            existing_lineage_info['lineage'] = canonical_from_strain
+                        if old_canonical != canonical_from_strain:
+                            logging.debug(f"✅ BATCH STRAIN: Updated canonical_lineage from '{old_canonical}' to '{canonical_from_strain}' for product '{name}'")
+
         # Now process tags for lineage and enrichment
         for tag in aligned_tags:
             if not isinstance(tag, dict):
@@ -7516,47 +7578,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 continue
             # Try exact match first (like docx generation), then normalized, then lowercase
             lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
-            
-            # CRITICAL FIX: If lineage_info is missing or strain_canonical is None, try looking up strain by name
-            # This matches DOCX generation which also looks up strains by name (template_processor.py line 1984-1987)
-            if not lineage_info or (isinstance(lineage_info, dict) and not lineage_info.get('strain_canonical')):
-                # Try to get canonical_lineage from strain by Product Strain name (check multiple field name variations)
-                product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
-                if product_strain:
-                    try:
-                        strain_info = product_db.get_strain_info(product_strain)
-                        if strain_info:
-                            canonical_from_strain = strain_info.get('canonical_lineage') or strain_info.get('display_lineage')
-                            if canonical_from_strain:
-                                # Create or update lineage_info with strain canonical_lineage
-                                if not lineage_info:
-                                    lineage_info = {
-                                        'lineage': canonical_from_strain,
-                                        'has_sovereign': False,
-                                        'product_sovereign': None,
-                                        'strain_sovereign': strain_info.get('sovereign_lineage'),
-                                        'strain_canonical': canonical_from_strain,
-                                        'db_lineage': canonical_from_strain
-                                    }
-                                    logging.info(f"✅ STRAIN LOOKUP: Found canonical_lineage '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
-                                else:
-                                    # Update existing lineage_info with strain canonical_lineage
-                                    old_canonical = lineage_info.get('strain_canonical')
-                                    lineage_info['strain_canonical'] = canonical_from_strain
-                                    # Update db_lineage if it's currently MIXED and we have a better value
-                                    if not lineage_info.get('db_lineage') or (lineage_info.get('db_lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED'):
-                                        lineage_info['db_lineage'] = canonical_from_strain
-                                    # Also update lineage if it was MIXED
-                                    if lineage_info.get('lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED':
-                                        lineage_info['lineage'] = canonical_from_strain
-                                    if old_canonical != canonical_from_strain:
-                                        logging.info(f"✅ STRAIN LOOKUP: Updated canonical_lineage from '{old_canonical}' to '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
-                            else:
-                                logging.debug(f"⚠️ STRAIN LOOKUP: Strain '{product_strain}' found but no canonical_lineage for product '{name}'")
-                        else:
-                            logging.debug(f"⚠️ STRAIN LOOKUP: Strain '{product_strain}' not found in database for product '{name}'")
-                    except Exception as e:
-                        logging.warning(f"❌ STRAIN LOOKUP: Could not lookup strain '{product_strain}' for product '{name}': {e}")
             
             # Check if this is a classic product type
             product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower().strip()
@@ -8724,14 +8745,32 @@ def generate_labels():
                                         processed_record['JointRatio'] = joint_ratio_value
                                     
                                     # Map database fields to template fields (using correct field names from database)
+                                    # CRITICAL FIX: Extract vendor from multiple possible field names
+                                    vendor_value = (
+                                        processed_record.get('Vendor/Supplier*') or
+                                        processed_record.get('Vendor') or
+                                        processed_record.get('ProductVendor') or
+                                        processed_record.get('vendor') or
+                                        ''
+                                    )
+                                    # CRITICAL FIX: Extract brand from multiple possible field names
+                                    brand_value = (
+                                        processed_record.get('Product Brand') or
+                                        processed_record.get('ProductBrand') or
+                                        processed_record.get('Brand') or
+                                        processed_record.get('brand') or
+                                        ''
+                                    )
                                     record = {
                                         'Product Name*': processed_record.get('Product Name*', ''),
                                         'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
                                         'ProductType': processed_record.get('Product Type*', ''),
                                         'Lineage': docx_lineage,
-                                        'ProductBrand': processed_record.get('Product Brand', ''),
-                                        'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
-                                        'Vendor': processed_record.get('Vendor/Supplier*', ''),
+                                        'ProductBrand': brand_value,
+                                        'Product Brand': brand_value,  # Add Product Brand for template processor compatibility
+                                        'Brand': brand_value,  # Also set Brand for template processor compatibility
+                                        'Vendor': vendor_value,
+                                        'Vendor/Supplier*': vendor_value,  # Also set Vendor/Supplier* for template processor compatibility
                                         'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                         'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
                                         'Price': formatted_price,  # Use extracted and formatted price

@@ -415,7 +415,26 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 logging.info(f"PREROLL GROUP REP: Using lineage '{rep_lineage}' for group representative of '{group_display_name}'")
                 break
         representative['Lineage'] = rep_lineage
-        
+
+        # Ensure representative preserves a sensible Brand value
+        # Search through all records in the group to find the first valid brand
+        rep_brand = ''
+        for r in group_records_list:
+            candidate = (
+                r.get('Product Brand') or
+                r.get('ProductBrand') or
+                r.get('Brand') or
+                r.get('brand')
+            )
+            if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
+                rep_brand = str(candidate).strip()
+                logging.info(f"PREROLL GROUP REP: Using brand '{rep_brand}' for group representative of '{group_display_name}'")
+                break
+        if rep_brand:
+            representative['Product Brand'] = rep_brand
+            representative['ProductBrand'] = rep_brand
+            representative['Brand'] = rep_brand
+
         unique_records.append(representative)
         
         # Store items for this group in cache (for QR code page) - use ALL original records

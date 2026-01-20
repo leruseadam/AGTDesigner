@@ -12921,13 +12921,13 @@
   {% include 'lineage_editor.html' %}
   
   <!-- Lineage Editor JavaScript -->
-  <script src="{{ url_for('static', filename='js/lineage-editor.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/lineage-editor.js') }}" defer></script>
   
   <!-- Database Sync JavaScript -->
-  <script src="{{ url_for('static', filename='js/database-sync.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/database-sync.js') }}" defer></script>
   
   <!-- Tags Table JavaScript -->
-  <script src="{{ url_for('static', filename='js/tags_table.js') }}?v={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', filename='js/tags_table.js') }}?v={{ cache_bust }}" defer></script>
   
   <!-- Database Modal -->
   <div class="modal fade" id="databaseModal" tabindex="-1" aria-labelledby="databaseModalLabel" aria-hidden="true">
