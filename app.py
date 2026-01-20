@@ -1637,6 +1637,21 @@ def create_app():
         Session(app)
         logging.info(f"Flask-Session initialized with filesystem storage at {sessions_dir}")
         logging.info(f"Session config: TYPE={app.config.get('SESSION_TYPE')}, DIR={app.config.get('SESSION_FILE_DIR')}")
+        # Monkeypatch session save to ensure cookie values are text (not bytes)
+        # Some signer implementations may return bytes; werkzeug expects str.
+        try:
+            original_save = app.session_interface.save_session
+            def _patched_save(app_obj, session_obj, response_obj):
+                try:
+                    if isinstance(session_obj.sid, (bytes, bytearray)):
+                        session_obj.sid = session_obj.sid.decode('utf-8')
+                except Exception:
+                    session_obj.sid = str(session_obj.sid)
+                return original_save(app_obj, session_obj, response_obj)
+            app.session_interface.save_session = _patched_save
+            logging.info('Patched session save to normalize session ID to str')
+        except Exception:
+            logging.exception('Failed to patch session save')
     else:
         logging.warning("Flask-Session not available, using default session handling")
     
