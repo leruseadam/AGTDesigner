@@ -2592,6 +2592,30 @@ class TemplateProcessor:
         product_type = (label_context.get('ProductType', '').lower() or 
                        label_context.get('Product Type*', '').lower())
         product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
+        # If product_brand looks like the vendor (common when upstream matching used vendor-as-brand),
+        # clear it for preroll/mini templates so we don't display vendor in the brand slot.
+        try:
+            vendor_candidate = (
+                label_context.get('_vendor_from_record') or
+                record.get('Vendor') or
+                record.get('Vendor/Supplier*') or
+                record.get('ProductVendor') or
+                ''
+            )
+            def _clean(s):
+                return str(s).strip().lower() if s is not None else ''
+
+            pb_clean = _clean(product_brand)
+            v_clean = _clean(vendor_candidate)
+            if self.template_type in ('preroll', 'mini') and pb_clean and v_clean:
+                if pb_clean == v_clean or v_clean in pb_clean or pb_clean in v_clean:
+                    self.logger.info(f"PREROLL/MINI BRAND CLEANUP: Detected brand same-as-vendor for '{product_name}' -> clearing ProductBrand")
+                    product_brand = ''
+                    label_context['ProductBrand'] = ''
+                    label_context['Product Brand'] = ''
+        except Exception:
+            # Non-fatal - if anything goes wrong, leave product_brand unchanged
+            pass
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
