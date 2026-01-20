@@ -40,6 +40,18 @@ from src.core.constants import (
     LINEAGE_COLOR_MAP
 )
 
+# In-memory cache of template bytes to avoid repeated file I/O and speed up
+# template loading. Keys are absolute template paths.
+_template_bytes_cache = {}
+
+def _get_template_bytes(path: str) -> bytes:
+    b = _template_bytes_cache.get(path)
+    if b is None:
+        with open(path, 'rb') as fh:
+            b = fh.read()
+            _template_bytes_cache[path] = b
+    return b
+
 # Performance optimization: disable debug logging in production
 DEBUG_ENABLED = False
 
@@ -217,7 +229,9 @@ def create_dynamic_mini_template(template_path, num_products, scale_factor=1.0):
     row_height_pts = Pt(1.5 * 72)           # 1.5 inches per row
     cut_line_twips = int(0.001 * 1440)
 
-    doc = Document(template_path)
+    # Load template bytes from cache to avoid repeated disk reads
+    tpl_bytes = _get_template_bytes(template_path)
+    doc = Document(BytesIO(tpl_bytes))
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     old = doc.tables[0]
@@ -325,7 +339,8 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
     row_height_pts = Pt(2.4 * 72)  # 2.4 inches per row for horizontal template
     cut_line_twips = int(0.001 * 1440)
     
-    doc = Document(template_path)
+    tpl_bytes = _get_template_bytes(template_path)
+    doc = Document(BytesIO(tpl_bytes))
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     
@@ -343,7 +358,7 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
     tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
     
     # Copy the original table properties and styling from the source template
-    old_tbl = Document(template_path).tables[0]
+    old_tbl = Document(BytesIO(tpl_bytes)).tables[0]
     for prop in old_tbl._element.xpath('./w:tblPr/*'):
         tbl._element.append(deepcopy(prop))
     
@@ -389,7 +404,8 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
             # Copy table properties from the original template
-            old_tbl = Document(template_path).tables[0]
+            old_tpl_bytes = _get_template_bytes(template_path)
+            old_tbl = Document(BytesIO(old_tpl_bytes)).tables[0]
             for prop in old_tbl._element.xpath('./w:tblPr/*'):
                 tbl._element.append(deepcopy(prop))
             
@@ -559,7 +575,8 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
     row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for double template
     cut_line_twips = int(0.001 * 1440)
 
-    doc = Document(template_path)
+    tpl_bytes = _get_template_bytes(template_path)
+    doc = Document(BytesIO(tpl_bytes))
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     old = doc.tables[0]
@@ -651,7 +668,8 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
             # Copy table properties from the original template
-            old_tbl = Document(template_path).tables[0]
+            old_tpl_bytes = _get_template_bytes(template_path)
+            old_tbl = Document(BytesIO(old_tpl_bytes)).tables[0]
             for prop in old_tbl._element.xpath('./w:tblPr/*'):
                 tbl._element.append(deepcopy(prop))
             
@@ -782,7 +800,8 @@ def expand_template_to_4x5_fixed_scaled(template_path, scale_factor=1.0):
     row_height_pts  = Pt(1.5 * 72)           # 1.5 inches per row for equal height
     cut_line_twips  = int(0.001 * 1440)
 
-    doc = Document(template_path)
+    tpl_bytes = _get_template_bytes(template_path)
+    doc = Document(BytesIO(tpl_bytes))
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     old = doc.tables[0]
@@ -851,22 +870,31 @@ def process_chunk(args):
     if orientation == "mini":
         local_template_buffer = base_template
         num_labels = 20  # Use standard 4x5 grid
-        logger.info(f"🔧 MINI TEMPLATE EXPANSION: Using standard template expansion")
+        logger.debug(f"🔧 MINI TEMPLATE EXPANSION: Using standard template expansion")
     elif orientation == "preroll":
         local_template_buffer = base_template
         num_labels = 20  # Use standard 4x5 grid (same as mini)
-        logger.info(f"🔧 PREROLL TEMPLATE EXPANSION: Using standard 4x5 expansion (same as mini)")
+        logger.debug(f"🔧 PREROLL TEMPLATE EXPANSION: Using standard 4x5 expansion (same as mini)")
     elif orientation == "double":
         local_template_buffer = base_template
         num_labels = 12  # Use standard 4x3 grid
-        logger.info(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
+        logger.debug(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
     else:
         # CRITICAL FIX: Use dynamic label count based on chunk size
         # Allow templates to expand to accommodate all products in the chunk
         local_template_buffer = base_template
         num_labels = len(chunk)  # Use actual chunk size instead of hardcoded 9
-        logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
-    tpl = DocxTemplate(local_template_buffer)
+        logger.debug(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
+    # Prefer loading from cached bytes when possible
+    try:
+        if isinstance(local_template_buffer, (bytes, bytearray)):
+            local_buf = BytesIO(local_template_buffer)
+            tpl = DocxTemplate(local_buf)
+        else:
+            tpl = DocxTemplate(local_template_buffer)
+    except Exception:
+        # Fallback to direct load
+        tpl = DocxTemplate(local_template_buffer)
     context = {}
     image_width = Mm(10) if orientation == "preroll" else (Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12))
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))

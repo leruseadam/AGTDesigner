@@ -12,6 +12,7 @@ from typing import List, Dict, Any, Optional
 from flask import session
 from flask_caching import Cache
 from src.core.constants import PREROLL_ALLOWED_BRANDS
+import threading
 
 
 def _store_preroll_group_in_database(group_key: str, group_id: str, group_items: List[Dict], group_info: Dict):
@@ -228,6 +229,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     """
     # Filter records by allowed brands if configured
     # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
+    # Prepare normalized allowed brand set once to avoid repeated work
+    allowed_brands_lower = None
     if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
         original_count = len(records)
         # Normalize allowed brands to lowercase for case-insensitive matching
@@ -279,7 +282,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # Identify the product group
         group_info = identify_preroll_product_group(description, product_name)
         group_id = group_info['group_id']
-        logging.info(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (group_id: {group_id})")
+        logging.debug(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (group_id: {group_id})")
         
         # Extract vendor to include in grouping key
         vendor = (
@@ -352,13 +355,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         if 'infused' in group_display_name.lower() or original_group_id.startswith('infused-preroll'):
             representative['Product Type*'] = 'Infused Pre-Roll'
             representative['ProductType'] = 'infused pre-roll'
-            logging.info(f"PREROLL GROUP REP: Set Product Type* to 'Infused Pre-Roll' for infused preroll group '{group_display_name}'")
+                logging.debug(f"PREROLL GROUP REP: Set Product Type* to 'Infused Pre-Roll' for infused preroll group '{group_display_name}'")
         else:
             # For regular prerolls, ensure Product Type* is set correctly
             if 'pre' in group_display_name.lower() and 'roll' in group_display_name.lower():
                 representative['Product Type*'] = 'Pre-Roll'
                 representative['ProductType'] = 'pre-roll'
-                logging.info(f"PREROLL GROUP REP: Set Product Type* to 'Pre-Roll' for regular preroll group '{group_display_name}'")
+                logging.debug(f"PREROLL GROUP REP: Set Product Type* to 'Pre-Roll' for regular preroll group '{group_display_name}'")
         
         # CRITICAL FIX: Preserve vendor information in the representative record
         # This ensures each vendor's label shows their vendor name
@@ -369,9 +372,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             ''
         )
         if vendor:
-            logging.info(f"PREROLL GROUP REP: Updated representative record for vendor '{vendor}' with group '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
+            logging.debug(f"PREROLL GROUP REP: Updated representative record for vendor '{vendor}' with group '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
         else:
-            logging.info(f"PREROLL GROUP REP: Updated representative record fields to '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
+            logging.debug(f"PREROLL GROUP REP: Updated representative record fields to '{group_display_name}' (was: '{group_records_list[0].get('ProductName', '')}')")
         
         # Keep the price from the first record (or could average/use min/max - using first for now)
         original_price = representative.get('Price', '')
@@ -421,20 +424,18 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         for record in group_records_list:
             # Filter by allowed brands if configured
             # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
-            if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
-                allowed_brands_lower = {b.lower().strip() for b in PREROLL_ALLOWED_BRANDS if b and str(b).strip()}
-                if allowed_brands_lower:  # Only filter if we have valid brands after normalization
-                    brand = (
-                        record.get('Product Brand', '') or
-                        record.get('ProductBrand', '') or
-                        record.get('Brand', '') or
-                        ''
-                    )
-                    brand_lower = str(brand).strip().lower()
-                    
-                    if brand_lower not in allowed_brands_lower:
-                        logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
-                        continue
+            if allowed_brands_lower:
+                brand = (
+                    record.get('Product Brand', '') or
+                    record.get('ProductBrand', '') or
+                    record.get('Brand', '') or
+                    ''
+                )
+                brand_lower = str(brand).strip().lower()
+                
+                if brand_lower not in allowed_brands_lower:
+                    logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
+                    continue
             
             # Normalize DOH/DOH-compliant field so lists and QR views can display
             # a clean YES/NO status.
@@ -478,10 +479,15 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
         
         # CRITICAL FIX: Store in database for persistence across site refreshes
+        # Persist group to DB in background so web request isn't blocked by I/O
         try:
-            _store_preroll_group_in_database(group_key, original_group_id, group_items, group_info)
+            threading.Thread(
+                target=_store_preroll_group_in_database,
+                args=(group_key, original_group_id, group_items, group_info),
+                daemon=True
+            ).start()
         except Exception as db_error:
-            logging.warning(f"PREROLL: Failed to store in database (using cache only): {db_error}")
+            logging.warning(f"PREROLL: Failed to start background DB store (using cache only): {db_error}")
         
         logging.info(f"PREROLL: Stored {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_key: {group_key}, group_id: {original_group_id}) with session-independent key and database")
     
