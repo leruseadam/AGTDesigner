@@ -355,7 +355,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         if 'infused' in group_display_name.lower() or original_group_id.startswith('infused-preroll'):
             representative['Product Type*'] = 'Infused Pre-Roll'
             representative['ProductType'] = 'infused pre-roll'
-                logging.debug(f"PREROLL GROUP REP: Set Product Type* to 'Infused Pre-Roll' for infused preroll group '{group_display_name}'")
+            logging.debug(f"PREROLL GROUP REP: Set Product Type* to 'Infused Pre-Roll' for infused preroll group '{group_display_name}'")
         else:
             # For regular prerolls, ensure Product Type* is set correctly
             if 'pre' in group_display_name.lower() and 'roll' in group_display_name.lower():
