@@ -6,12 +6,14 @@ Common utility functions used across the application.
 import logging
 import re
 from typing import Optional
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
 # Constants
 WORD_WEIGHT = 2
 
+@lru_cache(maxsize=4096)
 def calculate_text_complexity(text: str, complexity_type: str = 'standard') -> float:
     """
     Unified text complexity calculation function.
@@ -25,7 +27,8 @@ def calculate_text_complexity(text: str, complexity_type: str = 'standard') -> f
     """
     if not text:
         return 0.0
-    
+
+    # Normalize input to a string for consistent caching keys
     text = str(text or "")
     
     if complexity_type == 'mini':
