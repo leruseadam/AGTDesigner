@@ -1871,7 +1871,10 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
-        
+
+        # DEBUG: Log Product Brand from record vs label_context
+        self.logger.info(f"🔍 RECORD BRAND DEBUG for '{product_name}': record['Product Brand']='{record.get('Product Brand')}', record['ProductBrand']='{record.get('ProductBrand')}', record['Vendor']='{record.get('Vendor')}'")
+
         # CRITICAL FIX: Read vendor directly from record first - it should already be in the Excel column
         # Check ALL possible vendor field variations, including case-insensitive matching
         vendor_from_record = None
@@ -2704,9 +2707,23 @@ class TemplateProcessor:
         
         # CRITICAL: Lineage and ProductVendor logic for classic types
         # This implements the same logic that was in tag_generator
-        product_type = (label_context.get('ProductType', '').lower() or 
+        product_type = (label_context.get('ProductType', '').lower() or
                        label_context.get('Product Type*', '').lower())
-        product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
+
+        # CRITICAL FIX: Extract brand from product name FIRST using "by BrandName -" pattern
+        # The Product Brand field in the database often contains vendor names, not actual brands
+        # The actual brand is reliably found in the product name after "by"
+        product_brand = ''
+        by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name, re.IGNORECASE)
+        if by_match:
+            extracted_brand = by_match.group(1).strip()
+            if extracted_brand and extracted_brand.lower() not in ['', 'none', 'nan']:
+                product_brand = extracted_brand
+                self.logger.info(f"✅ BRAND EXTRACTED from product name: '{product_brand}' for '{product_name}'")
+
+        # Fallback to Product Brand field only if extraction failed
+        if not product_brand:
+            product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
         # CRITICAL FIX: Do NOT clear brand for preroll templates even if it matches vendor.
         # The preroll_tag_generator has already done the work to find the correct brand from the
         # actual Product Brand field in the Excel data. If the brand happens to match the vendor
@@ -2754,6 +2771,9 @@ class TemplateProcessor:
             # CRITICAL FIX: Use vendor fallback for ALL templates including preroll/mini
             # Vendor is better than "PREMIUM CANNABIS" as it at least identifies the source
             if not enriched_brand:
+                # DEBUG: Log what brand fields are available in the record
+                self.logger.info(f"🔍 BRAND LOOKUP DEBUG for '{product_name}': Product Brand='{record.get('Product Brand')}', ProductBrand='{record.get('ProductBrand')}', Brand='{record.get('Brand')}', Vendor='{record.get('Vendor')}'")
+
                 # Prefer explicit Product Brand fields before falling back to vendor
                 brand_fallback = (
                     record.get('Product Brand') or
@@ -2766,12 +2786,13 @@ class TemplateProcessor:
                     self.logger.info(f"🔧 BRAND FALLBACK: Using Product Brand '{enriched_brand}' as brand for '{product_name}'")
                 else:
                     # Fall back to vendor only if no Product Brand is available
+                    # CRITICAL: This should ONLY happen if Product Brand is truly empty
                     vendor_fallback = (record.get('Vendor') or
                                      record.get('Vendor/Supplier*') or
                                      record.get('ProductVendor', ''))
                     if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                         enriched_brand = str(vendor_fallback).strip()
-                        self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}' (no Product Brand present)")
+                        self.logger.warning(f"⚠️ BRAND FALLBACK TO VENDOR: Using vendor '{enriched_brand}' as brand for '{product_name}' (Product Brand was empty/missing)")
                     else:
                         self.logger.debug(f"NO BRAND/VENDOR FALLBACK: No Product Brand or vendor available for '{product_name}'")
 
@@ -3259,12 +3280,16 @@ class TemplateProcessor:
                             # Collapse extra whitespace created by removals
                             final_brand_text = re.sub(r"\s{2,}", " ", final_brand_text).strip()
                             final_brand_text = final_brand_text.rstrip("-–/").rstrip()
+                            # CRITICAL FIX: Remove store ID suffixes like " - 435011" from brand names
+                            final_brand_text = re.sub(r'\s*-\s*\d{3,}.*$', '', final_brand_text).strip()
                             if final_brand_text != original_brand:
                                 self.logger.info(
                                     f"🎯 DOUBLE TEMPLATE STRAIN SPLIT: Removed strain/lineage token from brand -> '{final_brand_text}'"
                                 )
                     if not final_brand_text:
                         final_brand_text = clean_brand_text or str(brand_center_text).strip().upper()
+                    # CRITICAL FIX: Remove store ID suffixes from final_brand_text
+                    final_brand_text = re.sub(r'\s*-\s*\d{3,}.*$', '', final_brand_text).strip()
                     
                     # CRITICAL FIX: Add debugging to see final brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
@@ -3314,6 +3339,10 @@ class TemplateProcessor:
                     # CRITICAL FIX: Remove any remaining $ symbols that might be marker remnants
                     # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
                     clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
+
+                    # CRITICAL FIX: Remove store ID suffixes like " - 435011" from brand names
+                    # Pattern: " - " followed by digits (store/database IDs)
+                    clean_brand_text = re.sub(r'\s*-\s*\d{3,}.*$', '', clean_brand_text)
 
                     clean_brand_text = clean_brand_text.strip()
 

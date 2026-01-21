@@ -36,9 +36,11 @@ def build_context(record, doc, template_type='vertical'):
     )
     context['doh'] = record.get('DOH', '')
     
-    # Vendor/brand: always include the first non-empty value from all possible fields
+    # Vendor/brand: prefer explicit product brand fields before vendor fields.
+    # This helps ensure non-classic products (edibles, tinctures, etc.) display
+    # the Product Brand where present instead of the Vendor name.
     vendor_fields = [
-        'Vendor/Supplier*', 'Vendor', 'vendor', 'Product Brand', 'Brand', 'brand'
+        'Product Brand', 'ProductBrand', 'Brand', 'Vendor/Supplier*', 'Vendor', 'vendor'
     ]
     vendor = ''
     for field in vendor_fields:

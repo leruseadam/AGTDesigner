@@ -2766,17 +2766,38 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
         # Prefer Product Brand for non-classic product types; classic types keep Vendor as the primary
         try:
             from src.core.constants import CLASSIC_TYPES
+            # Normalize the product type using the matcher to avoid brittle substring checks
             product_type_val = (enhanced_tag.get(get_canonical_field('Product Type*')) or enhanced_tag.get('ProductType') or '')
-            product_type_norm = str(product_type_val).lower() if product_type_val else ''
-            is_classic = product_type_norm in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_norm for ct in CLASSIC_TYPES)
+            # Use the shared mapper to get a canonical product type name
+            try:
+                mapped_type = map_inventory_type_to_product_type(product_type_val, enhanced_tag.get('inventory_category'), enhanced_tag.get(get_canonical_field('Product Name*')))
+            except Exception:
+                mapped_type = product_type_val
+            mapped_norm = str(mapped_type).lower() if mapped_type else ''
+            classic_set = {ct.lower() for ct in CLASSIC_TYPES}
+            is_classic = mapped_norm in classic_set
         except Exception:
             # Fallback: if we can't determine, preserve existing behavior
             is_classic = True
 
+        # Robustly pick brand/vendor values from multiple possible keys to avoid alias issues
+        def _first_nonempty(tag, keys):
+            for k in keys:
+                v = tag.get(k)
+                if v and str(v).strip():
+                    return v
+            return ''
+
+        brand_keys = [get_canonical_field('Product Brand'), 'ProductBrand', 'productBrand', 'Brand', 'brand']
+        vendor_keys = [get_canonical_field('Vendor'), 'Vendor', 'vendor', 'vendor_name', 'Vendor/Supplier*', 'Vendor/Supplier']
+
+        brand_val = _first_nonempty(enhanced_tag, brand_keys)
+        vendor_val = _first_nonempty(enhanced_tag, vendor_keys)
+
         if not is_classic:
-            vendor = enhanced_tag.get(get_canonical_field('Product Brand'), enhanced_tag.get(get_canonical_field('Vendor'), ''))
+            vendor = brand_val or vendor_val or ''
         else:
-            vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
+            vendor = vendor_val or brand_val or ''
 
         if product_name and vendor:
             enhanced_tag['displayName'] = f"{product_name} by {vendor}"
@@ -7382,6 +7403,15 @@ def _enforce_nonclassic_lineage_rules(tags):
                 product_name = tag.get('Product Name*', 'unknown')
                 logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}' (DB missing)")
                 fixed_count += 1
+                # Ensure ProductBrand fields prefer the explicit Product Brand (don't fall back to Vendor)
+                product_brand_candidate = (tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or '').strip()
+                if product_brand_candidate:
+                    brand_upper = product_brand_candidate.upper()
+                    tag['ProductBrand'] = brand_upper
+                    tag['Product Brand'] = brand_upper
+                    tag['productBrand'] = brand_upper
+                    # Also set center marker variant used by templates
+                    tag['ProductBrand_Center'] = brand_upper
         elif current_lineage_upper == 'THC':
             # THC is an abbreviation for MIXED - normalize it
             tag['Lineage'] = 'MIXED'
@@ -7390,6 +7420,14 @@ def _enforce_nonclassic_lineage_rules(tags):
             tag['canonical_lineage'] = 'MIXED'
             tag['lineage'] = 'mixed'
             fixed_count += 1
+            # Preserve Product Brand values for non-classic types
+            product_brand_candidate = (tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or '').strip()
+            if product_brand_candidate:
+                brand_upper = product_brand_candidate.upper()
+                tag['ProductBrand'] = brand_upper
+                tag['Product Brand'] = brand_upper
+                tag['productBrand'] = brand_upper
+                tag['ProductBrand_Center'] = brand_upper
         elif current_lineage_upper == 'CBD_BLEND':
             # Normalize CBD_BLEND to CBD
             tag['Lineage'] = 'CBD'
@@ -7398,6 +7436,14 @@ def _enforce_nonclassic_lineage_rules(tags):
             tag['canonical_lineage'] = 'CBD'
             tag['lineage'] = 'cbd'
             fixed_count += 1
+            # Preserve Product Brand values for non-classic types
+            product_brand_candidate = (tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or '').strip()
+            if product_brand_candidate:
+                brand_upper = product_brand_candidate.upper()
+                tag['ProductBrand'] = brand_upper
+                tag['Product Brand'] = brand_upper
+                tag['productBrand'] = brand_upper
+                tag['ProductBrand_Center'] = brand_upper
     
     if fixed_count > 0:
         logging.info(f"✅ NON-CLASSIC LINEAGE ENFORCEMENT: Fixed {fixed_count} non-classic products to have only MIXED or CBD lineage")
@@ -11226,6 +11272,7 @@ def get_available_tags():
                     tag['ProductBrand'] = ''
                 if 'productBrand' not in tag:
                     tag['productBrand'] = ''
+            
             
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000

@@ -5,14 +5,20 @@ This module replaces the repetitive font sizing functions across the codebase.
 """
 
 import logging
+from functools import lru_cache
 from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from src.core.utils.common import calculate_text_complexity
 import json
 import os
+import re
 
 logger = logging.getLogger(__name__)
+
+# Precompile common regexes to avoid recompiling on every call (performance)
+PRODUCTBRAND_RE = re.compile(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', re.IGNORECASE)
+WORD_SPLIT_RE = re.compile(r"\s+")
 
 def _load_font_sizing_config():
     config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'font_sizing_config.json')
@@ -29,8 +35,8 @@ def _load_font_sizing_config():
         return {
             'standard': {
                 'mini': {
-                    'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
-                    'brand': [(5, 9), (10, 8), (20, 7.5), (30, 7), (float('inf'), 6.5)],
+                    'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (60, 13), (80, 12), (100, 10), (120, 9), (float('inf'), 8)],
+                    'brand': [(5, 11), (10, 8), (20, 7.5), (30, 7), (float('inf'), 6.5)],
                     'price': [(1, 18), (2, 16), (float('inf'), 14)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
@@ -71,7 +77,7 @@ def _load_font_sizing_config():
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
                 'horizontal': {
-                    'description': [(10, 36), (20, 34), (25, 32), (30, 28), (35, 26), (40, 25), (45, 24), (55, 23), (60, 22), (65, 21), (70, 20), (80, 19), (100, 18), (120, 17), (140, 16), (float('inf'), 14)],
+                    'description': [(10, 36), (20, 34), (25, 32), (30, 28), (35, 26), (40, 25), (45, 24), (50, 23), (55, 22), (60, 21), (70, 20), (80, 19), (100, 18), (120, 17), (140, 16), (float('inf'), 14)],
                     'brand': [(20, 18), (40, 16), (120, 14), (140, 12), (160, 10), (float('inf'), 8)],
                     'price': [(5, 40), (10, 38), (20, 36), (80, 20), (float('inf'), 18)],
                     'lineage': [(10, 20), (80, 18), (60, 10), (float('inf'), 10)],
@@ -109,11 +115,8 @@ def _brand_letter_count(text) -> int:
     if text is None:
         return 0
     text = str(text)
-    
-    # CRITICAL FIX: Extract brand name from markers before counting
-    # Handle PRODUCTBRAND_CENTER_START...PRODUCTBRAND_CENTER_END markers
-    import re
-    brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', text, re.IGNORECASE)
+    # Extract brand name from markers before counting using precompiled regex
+    brand_match = PRODUCTBRAND_RE.search(text)
     if brand_match:
         # Extract just the brand name from between the markers
         text = brand_match.group(1)
@@ -141,145 +144,102 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
     """
   
     
+    # Delegate to cached computation to avoid repeated expensive work
+    size_pt = _get_font_size_cached(str(text or ''), field_type, orientation, float(scale_factor), complexity_type)
+    return Pt(size_pt)
+
+
+@lru_cache(maxsize=8192)
+def _get_font_size_cached(text: str, field_type: str = 'default', orientation: str = 'vertical', 
+                          scale_factor: float = 1.0, complexity_type: str = 'standard') -> float:
+    """Cached internal font-size computation. Returns numeric point size (float).
+    This function is intentionally pure (no side-effects) to be cacheable.
+    """
+    # Normalize inputs for caching
+    field_type_l = (field_type or 'default').lower()
+    orientation_l = (orientation or 'vertical').lower()
+    complexity_type_l = (complexity_type or 'standard')
+
     # Special rule: Mini template prices based on number of digits
-    if field_type.lower() == 'price' and orientation.lower() == 'mini':
-        # Remove $ and any non-digit characters, then count digits
+    if field_type_l == 'price' and orientation_l == 'mini':
         clean_text = ''.join(char for char in str(text) if char.isdigit())
         num_digits = len(clean_text)
-        
-        if num_digits <= 2:  # Single or two digit prices (e.g., $12, $30)
-            final_size = 20 * scale_factor
-            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 20pt font")
-            return Pt(final_size)
-        else:  # Three or more digits (e.g., $100, $1000+) - use 15pt font
-            final_size = 15 * scale_factor
-            logger.debug(f"Mini template price rule: '{text}' has {num_digits} digits, using 15pt font")
-            return Pt(final_size)
-    
+
+        if num_digits <= 2:
+            final_size = 20.0 * scale_factor
+            return final_size
+        else:
+            final_size = 15.0 * scale_factor
+            return final_size
+
     # Special rule: Mini template long brand names forced to minimum readable size
-    if field_type.lower() == 'brand' and orientation.lower() == 'mini':
-        # New rule: If the brand contains more than 3 words, force 6pt per request
+    if field_type_l == 'brand' and orientation_l == 'mini':
         try:
-            import re
             brand_text = str(text or "").strip()
-            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_text, re.IGNORECASE)
+            brand_match = PRODUCTBRAND_RE.search(brand_text)
             if brand_match:
                 brand_text = brand_match.group(1).strip()
 
-            words = [w for w in re.split(r"\s+", brand_text) if w]
+            words = [w for w in WORD_SPLIT_RE.split(brand_text) if w]
             if len(words) > 3:
                 final_size = 6.0 * scale_factor
-                logger.debug(
-                    f"Mini template brand word-count rule: '{brand_text}' has {len(words)} words, forcing {final_size}pt"
-                )
-                return Pt(final_size)
+                return final_size
         except Exception:
             logger.exception("Error while applying mini-template brand word-count rule")
 
-        # Fallback legacy rule based on letter count
         text_length = _brand_letter_count(text)
         if text_length >= 20:
             final_size = 6.5 * scale_factor
-            logger.debug(
-                f"Mini template brand length rule: text='{text}' (length={text_length}) exceeds threshold, forcing {final_size}pt"
-            )
-            return Pt(final_size)
-    
+            return final_size
+
     # Special rule: Double template long brand names forced to 8pt minimum for readability
-    if field_type.lower() == 'brand' and orientation.lower() == 'double':
+    if field_type_l == 'brand' and orientation_l == 'double':
         text_length = _brand_letter_count(text)
-        if text_length >= 12:  # Lowered threshold to catch more long brands like "fairwinds manufacturing"
-            final_size = 8 * scale_factor
-            logger.debug(
-                f"Double template brand length rule: text='{text}' (length={text_length}) exceeds threshold, forcing {final_size}pt"
-            )
-            return Pt(final_size)
+        if text_length >= 12:
+            final_size = 8.0 * scale_factor
+            return final_size
 
-    # Special overrides: specific known long brand names should be very small by default
-    if field_type.lower() == 'brand':
-        try:
-            import re
-            brand_text = str(text or "").strip()
-            brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', brand_text, re.IGNORECASE)
-            if brand_match:
-                brand_text = brand_match.group(1).strip()
-
-            upper_brand = brand_text.upper()
-            # Explicit exceptions requested by user
-            SMALL_BRAND_EXCEPTIONS = [
-                "WASHINGTON BUD COMPANY",
-                "MT BAKER HOMEGROWN",
-            ]
-            if any(exc in upper_brand for exc in SMALL_BRAND_EXCEPTIONS):
-                final_size = 6.5 * scale_factor
-                logger.debug(f"Brand exception match: '{brand_text}' -> forcing {final_size}pt")
-                return Pt(final_size)
-
-            # Heuristic: if brand has more than 2 words and contains words with 5+ letters,
-            # prefer a smaller, highly-readable size (user requested 'should definitely be smaller').
-            words = [w for w in re.split(r'\s+', brand_text) if w]
-            if len(words) > 2:
-                long_words = [w for w in words if len(w) >= 5]
-                if len(long_words) >= 1:
-                    final_size = 6.5 * scale_factor
-                    logger.debug(
-                        f"Brand heuristic: '{brand_text}' has {len(words)} words and {len(long_words)} long words, forcing {final_size}pt"
-                    )
-                    return Pt(final_size)
-        except Exception:
-            logger.exception("Error while applying brand-specific font-size heuristic")
-    
     # Special rule: Double template prices based on number of digits
-    if field_type.lower() == 'price' and orientation.lower() == 'double':
-        # Remove $ and any non-digit characters, then count digits
+    if field_type_l == 'price' and orientation_l == 'double':
         clean_text = ''.join(char for char in str(text) if char.isdigit())
         num_digits = len(clean_text)
-        
-        if num_digits <= 2:  # Two digit prices (e.g., $12, $30, $55)
-            final_size = 28 * scale_factor
-            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 26pt font")
-            return Pt(final_size)
-        elif num_digits == 3:  # Three digit prices (e.g., $100, $128, $250)
-            final_size = 20 * scale_factor
-            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 20pt font")
-            return Pt(final_size)
-        else:  # Four or more digits (e.g., $1000+)
-            final_size = 16 * scale_factor
-            logger.debug(f"Double template price rule: '{text}' has {num_digits} digits, using 16pt font")
-            return Pt(final_size)
-    
+
+        if num_digits <= 2:
+            final_size = 28.0 * scale_factor
+            return final_size
+        elif num_digits == 3:
+            final_size = 20.0 * scale_factor
+            return final_size
+        else:
+            final_size = 16.0 * scale_factor
+            return final_size
+
     # Special rule: Vertical template prices based on number of digits
-    if field_type.lower() == 'price' and orientation.lower() == 'vertical':
-        # Remove $ and any non-digit characters, then count digits
+    if field_type_l == 'price' and orientation_l == 'vertical':
         clean_text = ''.join(char for char in str(text) if char.isdigit())
         num_digits = len(clean_text)
-        
-        if num_digits <= 2:  # $1 or $11 - use 36pt font
-            final_size = 36 * scale_factor
-            logger.debug(f"Vertical template price rule: '{text}' has {num_digits} digits, using 36pt font")
-            return Pt(final_size)
-        else:  # $111 or more - use 30pt font
-            final_size = 30 * scale_factor
-            logger.debug(f"Vertical template price rule: '{text}' has {num_digits} digits, using 30pt font")
-            return Pt(final_size)
-    
+
+        if num_digits <= 2:
+            final_size = 36.0 * scale_factor
+            return final_size
+        else:
+            final_size = 30.0 * scale_factor
+            return final_size
+
     if not text:
-        # For empty text, use the appropriate field configuration instead of default
-        config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation.lower(), {}).get(field_type.lower(), [])
+        config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation_l, {}).get(field_type_l, [])
         if config:
-            # Use the first size from the field's configuration
             first_size = config[0][1] if config else 12
-            return Pt(first_size * scale_factor)
-        return Pt(12 * scale_factor)
-    
+            return float(first_size * scale_factor)
+        return float(12 * scale_factor)
+
     # Special rule: If Description has any word longer than 8 characters in Vertical Template,
     # reduce font size so that it's 28pt or smaller (user requirement: >8-letter words must be 28pt or smaller)
-    if field_type.lower() == 'description' and orientation.lower() == 'vertical':
+    if field_type_l == 'description' and orientation_l == 'vertical':
         words = str(text).split()
         if words:
             max_word_length = max(len(word) for word in words)
             if max_word_length > 8:
-                # Calculate appropriate font size based on the longest word, but cap at 28pt
                 if max_word_length <= 10:
                     font_size = 28
                 elif max_word_length <= 12:
@@ -291,86 +251,63 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 else:
                     font_size = 11
 
-                # Enforce upper cap of 28pt to satisfy requirement
                 font_size = min(font_size, 28)
                 final_size = font_size * scale_factor
-                logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font (capped at 28pt)")
-                return Pt(final_size)
-    
-    
-    # Special guard: extremely long double-template brands still maintain 8pt minimum (removed 6.5pt cap)
-    # Long brands (12+) are already forced to 8pt above, so this guard is no longer needed
-    
+                return float(final_size)
+
     # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
-    if orientation.lower() == 'double' and field_type.lower() == 'description':
+    if orientation_l == 'double' and field_type_l == 'description':
         words = str(text).split()
         long_words = [word for word in words if len(word) >= 9]
-        if len(long_words) >= 2:  # Multiple words with 9+ characters each
-            final_size = 18 * scale_factor
-            logger.debug(f"Double template description word length rule: text='{text}' has {len(long_words)} words with 9+ chars each: {long_words}, forcing 18pt font")
-            return Pt(final_size)
-        # NEW: Cap at 20pt for any single long word (like "Cheesecake")
+        if len(long_words) >= 2:
+            final_size = 18.0 * scale_factor
+            return final_size
         elif any(len(word) >= 10 for word in words):
-            final_size = 20 * scale_factor
-            logger.debug(f"Double template description single long word rule: text='{text}' has word(s) with 10+ chars, capping at 20pt font")
-            return Pt(final_size)
-    
+            final_size = 20.0 * scale_factor
+            return final_size
+
     # Get the appropriate configuration
-    config = FONT_SIZING_CONFIG.get(complexity_type, {}).get(orientation.lower(), {}).get(field_type.lower(), [])
-    
+    config = FONT_SIZING_CONFIG.get(complexity_type_l, {}).get(orientation_l, {}).get(field_type_l, [])
+
     if not config:
-        # Fallback to default configuration
-        config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation.lower(), {}).get('default', [])
-    
+        config = FONT_SIZING_CONFIG.get('standard', {}).get(orientation_l, {}).get('default', [])
+
     if not config:
-        # Ultimate fallback
-        fallback_size = 11 * scale_factor
-        logger.warning(f"No font configuration found for {field_type} in {orientation} template, using {fallback_size}pt")
-        return Pt(fallback_size)
-    
+        fallback_size = 11.0 * scale_factor
+        logger.warning(f"No font configuration found for {field_type_l} in {orientation_l} template, using {fallback_size}pt")
+        return float(fallback_size)
+
     # Calculate text complexity
-    if field_type.lower() == 'brand' and orientation.lower() in ('mini', 'preroll', 'double'):
+    if field_type_l == 'brand' and orientation_l in ('mini', 'preroll', 'double'):
         comp = _brand_letter_count(text)
-        logger.debug(f"Brand complexity override (letter count): text='{text}', letters={comp}, orientation={orientation}")
     else:
         comp = calculate_text_complexity(text)
-    
-    # Special debugging for price field
-    if field_type.lower() == 'price':
-        logger.info(f"PRICE DEBUG: '{text}' -> complexity: {comp}, orientation: {orientation}")
-        logger.info(f"PRICE DEBUG: Config: {config}")
-    
-    # Special debugging for brand field with CONSTELLATION
-    if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
-        logger.info(f"🔍 CONSTELLATION FONT DEBUG: '{text}' -> complexity: {comp}, orientation: {orientation}")
-        logger.info(f"🔍 CONSTELLATION FONT DEBUG: Config: {config}")
-    
-    logger.debug(f"Font sizing for '{text}' (field_type: {field_type}, orientation: {orientation}, complexity: {comp})")
+
+    logger.debug(f"Font sizing for '{text}' (field_type: {field_type_l}, orientation: {orientation_l}, complexity: {comp})")
     logger.debug(f"Config: {config}")
-    
+
     # Find appropriate font size based on complexity
     for threshold, size in config:
         logger.debug(f"Checking threshold {threshold} -> size {size}")
-        if field_type.lower() == 'price':
+        if field_type_l == 'price':
             logger.info(f"PRICE DEBUG: threshold {threshold} -> size {size}, comp {comp} <= threshold? {comp <= threshold}")
-        if comp <= threshold:  # Fixed: Use <= instead of < for proper threshold matching
-            final_size = size * scale_factor
+        if comp <= threshold:
+            final_size = float(size * scale_factor)
             logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
-            if field_type.lower() == 'price':
+            if field_type_l == 'price':
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
-            if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():
+            if field_type_l == 'brand' and 'CONSTELLATION' in str(text).upper():
                 logger.info(f"🔍 CONSTELLATION FONT DEBUG: SELECTED {size}pt for '{text}' (complexity: {comp}, threshold: {threshold})")
-            return Pt(final_size)
-    
+            return final_size
+
     # Fallback to smallest size - ensure price gets proper fallback
-    if field_type.lower() == 'price':
-        fallback_size = 12 * scale_factor  # Price should never go below 12pt
-    elif field_type.lower() == 'thc_cbd':
-        # Use the configured fallback size for THC_CBD instead of hardcoded 8pt
-        fallback_size = 6.5 * scale_factor  # Use the configured size from the config
+    if field_type_l == 'price':
+        fallback_size = 12.0 * scale_factor
+    elif field_type_l == 'thc_cbd':
+        fallback_size = 6.5 * scale_factor
     else:
-        fallback_size = 8 * scale_factor
-    return Pt(fallback_size)
+        fallback_size = 8.0 * scale_factor
+    return float(fallback_size)
 
 def set_run_font_size(run, font_size):
     """Set font size for both the run and its XML element while preserving bold formatting."""

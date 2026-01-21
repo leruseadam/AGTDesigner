@@ -301,7 +301,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         if by_match:
             brand_for_grouping = by_match.group(1).strip()
 
-        # Fallback: prefer explicit Product Brand fields; if none, use vendor
+        # Fallback: prefer explicit Product Brand fields, then vendor as last resort
         if not brand_for_grouping:
             brand_field = (
                 record.get('Product Brand', '') or
@@ -312,6 +312,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             if brand_field and str(brand_field).strip():
                 brand_for_grouping = str(brand_field).strip()
             else:
+                # Fall back to vendor for grouping purposes
                 vendor = (
                     record.get('Vendor/Supplier*', '') or
                     record.get('Vendor', '') or

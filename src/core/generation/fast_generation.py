@@ -8,6 +8,7 @@ import time
 import hashlib
 import json
 from io import BytesIO
+import traceback
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
 from docx import Document
@@ -103,11 +104,25 @@ class FastGenerationEngine:
         self.cache_misses += 1
         logger.info(f"⚡ CACHE MISS: Generating labels for {len(records)} records")
         
-        # Generate the document
-        final_doc = self.template_processor.process_records(records)
+        # Generate the document (wrap to capture internal errors and context)
+        try:
+            final_doc = self.template_processor.process_records(records)
+        except Exception as e:
+            logger.error(f"Exception in template_processor.process_records: {e}")
+            logger.error(traceback.format_exc())
+            raise RuntimeError(f"Failed to generate document: template processing failed: {e}")
+
         if final_doc is None:
             logger.error("❌ FastGenerationEngine: process_records returned None (no document generated)")
-            raise RuntimeError("Failed to generate document: no valid records or template error.")
+            try:
+                tmpl_type = getattr(self.template_processor, 'template_type', 'UNKNOWN')
+                expanded_buffer = getattr(self.template_processor, '_expanded_template_buffer', None)
+                logger.error(f"TemplateProcessor state: template_type={tmpl_type}, has_expanded_buffer={expanded_buffer is not None}")
+                sample_names = [r.get('ProductName', r.get('Product Name*', '')) for r in records[:5]]
+                logger.error(f"Sample records: {sample_names}")
+            except Exception:
+                pass
+            raise RuntimeError("Failed to generate document: no valid records or template error. See logs for details.")
 
         # Cache the result
         buffer = BytesIO()

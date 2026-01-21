@@ -3093,16 +3093,15 @@ class JSONMatcher:
             
             # ===== STEP 5: Ensure brand is populated =====
             if not brand:
-                # Try multiple extraction methods
-                if vendor:
-                    brand = vendor
-                elif product_name:
-                    brand = self._extract_brand_from_product_name(product_name)
-                
-                # Final fallback - use vendor as brand
+                # Try extracting from product name first
+                if product_name:
+                    brand = self._extract_brand_from_product_name(product_name) or ''
+
+                # Intentionally DO NOT use vendor as a brand fallback here to avoid vendor being used
+                # where a product brand is expected; leave empty if not found
                 if not brand:
-                    brand = vendor if vendor else "Unknown Brand"
-                    
+                    brand = ''
+
             logging.info(f"📦 Brand determined: '{brand}'")
             
             # ===== STEP 6: Normalize weight and units =====
@@ -5562,10 +5561,9 @@ class JSONMatcher:
                                             brand = potential_brand.title()
                                             logging.debug(f"  -> Detected brand from Medically Compliant pattern: {brand}")
                     
-                    # If still no brand, use vendor as brand
-                    if not brand and vendor:
-                        brand = vendor.title()
-                        logging.debug(f"  -> Using vendor as brand: {brand}")
+                    # If still no brand, do NOT use vendor as brand; leave empty
+                    if not brand:
+                        brand = ''
                     
                     # If still no brand, try to extract from product name using capitalization patterns
                     if not brand:
