@@ -248,6 +248,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # CRITICAL: Track original count BEFORE any filtering
     original_input_count = len(records)
     logging.info(f"PREROLL INPUT: Received {original_input_count} records for grouping")
+    # DEBUG: Log PREROLL_ALLOWED_BRANDS status
+    if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
+        logging.info(f"PREROLL BRAND FILTER DEBUG: PREROLL_ALLOWED_BRANDS is set to: {PREROLL_ALLOWED_BRANDS}")
+    else:
+        logging.info(f"PREROLL BRAND FILTER DEBUG: PREROLL_ALLOWED_BRANDS is not set or empty - no brand filtering will be applied")
 
     # If environment requests preserve-all, skip grouping and return records unchanged
     if os.getenv('PREROLL_PRESERVE_ALL', '').lower() in ['1', 'true', 'yes']:
@@ -375,6 +380,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
+        
+        # DEBUG: Log first few group keys to verify grouping logic
+        if len(grouped_records) <= 25 and logging.getLogger().isEnabledFor(logging.DEBUG):
+            logging.debug(f"PREROLL GROUPING DEBUG: Added record to group_key '{group_key}' (group_id: {group_id}, brand_key: {brand_key}, product: {product_name_str[:50]})")
     
     if skipped_count > 0:
         logging.warning(f"PREROLL GROUP: Skipped {skipped_count} records with no product name")
@@ -386,6 +395,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     groups_failed = 0
     
     logging.info(f"PREROLL GROUPING: Processing {len(grouped_records)} groups to create representatives...")
+    # DEBUG: Log all group keys to see what groups were created
+    if len(grouped_records) <= 30:  # Only log if reasonable number of groups
+        group_keys_list = list(grouped_records.keys())
+        logging.info(f"PREROLL GROUPING DEBUG: Created {len(group_keys_list)} groups with keys: {group_keys_list}")
+    else:
+        logging.info(f"PREROLL GROUPING DEBUG: Created {len(grouped_records)} groups (too many to log all keys)")
     
     for group_key, group_data in grouped_records.items():
         try:
@@ -689,7 +704,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         
         grouped_records_list = unique_records
     
-    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records_list)} product groups (one label per vendor per category)")
+    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups (one label per vendor per category)")
+    # DEBUG: Log if we're losing groups
+    if len(grouped_records_list) < len(grouped_records):
+        logging.warning(f"PREROLL GROUPING WARNING: Lost {len(grouped_records) - len(grouped_records_list)} groups during processing!")
+    elif len(grouped_records_list) > len(grouped_records):
+        logging.warning(f"PREROLL GROUPING WARNING: Created {len(grouped_records_list) - len(grouped_records)} extra groups (unexpected)!")
     
     # Log summary only (reduce logging overhead)
     if grouped_records_list and logging.getLogger().isEnabledFor(logging.DEBUG):

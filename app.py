@@ -8966,6 +8966,7 @@ def generate_labels():
                         
                         if not preroll_df.empty:
                             # Convert DataFrame rows to records (dictionary format)
+                            # CRITICAL: Use 'records' orientation to preserve all columns as dict keys
                             records = preroll_df.to_dict('records')
                             # Replace NaN values with empty strings for consistency
                             for record in records:
@@ -8973,6 +8974,34 @@ def generate_labels():
                                     if pd.isna(value):
                                         record[key] = ''
                             logging.info(f"🔄 PREROLL TEMPLATE: Found {len(records)} preroll products directly from DataFrame (auto-included all prerolls)")
+                            # DEBUG: Log sample records to verify they have the right fields
+                            if records:
+                                sample = records[0]
+                                logging.info(f"🔄 PREROLL TEMPLATE DEBUG: Sample record fields: Product Name*={sample.get('Product Name*', 'N/A')}, Product Type*={sample.get('Product Type*', 'N/A')}, Vendor={sample.get('Vendor/Supplier*', 'N/A')}, Brand={sample.get('Product Brand', 'N/A')}")
+                                # Count unique combinations for debugging (matching generate_preroll_tags logic)
+                                unique_combos = set()
+                                for r in records:
+                                    # Use same logic as generate_preroll_tags to estimate groups
+                                    description = str(r.get('Description', '')).strip()
+                                    product_name = str(r.get('Product Name*', r.get('ProductName', ''))).strip()
+                                    # Try to extract brand using same pattern as generate_preroll_tags
+                                    import re
+                                    BY_PATTERN = re.compile(r'\s+by\s+([^-]+?)(?:\s*-\s*|$)', re.IGNORECASE)
+                                    brand_for_grouping = ''
+                                    by_match = BY_PATTERN.search(product_name)
+                                    if by_match:
+                                        brand_for_grouping = by_match.group(1).strip()
+                                    if not brand_for_grouping:
+                                        brand_for_grouping = str(r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Vendor/Supplier*', '') or r.get('Vendor', '')).strip()
+                                    # Create group_id estimate (simplified)
+                                    group_id_est = 'preroll'  # Simplified for estimation
+                                    if 'infused' in description.lower() or 'infused' in product_name.lower():
+                                        group_id_est = 'infused-preroll'
+                                    brand_key_est = re.sub(r'[^a-z0-9]+', '', brand_for_grouping.lower()) if brand_for_grouping else 'unknown'
+                                    combo = f"{group_id_est}|{brand_key_est}"
+                                    unique_combos.add(combo)
+                                logging.info(f"🔄 PREROLL TEMPLATE DEBUG: Estimated unique group combinations: {len(unique_combos)} (from {len(records)} records)")
+                                logging.info(f"🔄 PREROLL TEMPLATE DEBUG: Sample combinations: {list(unique_combos)[:10]}")
                         else:
                             logging.warning("🔄 PREROLL TEMPLATE: No preroll products found in DataFrame")
                             records = []
@@ -9332,8 +9361,20 @@ def generate_labels():
             logging.info(f"PREROLL: Starting grouping for {len(records)} preroll products...")
             # Log sample records for debugging
             if records:
-                for i, record in enumerate(records[:3]):
-                    logging.info(f"PREROLL INPUT {i+1}: Name={record.get('Product Name*', 'N/A')}, Type={record.get('Product Type*', 'N/A')}, Vendor={record.get('Vendor/Supplier*', 'N/A')}")
+                logging.info(f"PREROLL DEBUG: Total records received: {len(records)}")
+                for i, record in enumerate(records[:5]):
+                    logging.info(f"PREROLL INPUT {i+1}: Name={record.get('Product Name*', 'N/A')}, Type={record.get('Product Type*', 'N/A')}, Vendor={record.get('Vendor/Supplier*', 'N/A')}, Brand={record.get('Product Brand', 'N/A')}")
+                # Count unique vendors/brands for debugging
+                vendors = set()
+                brands = set()
+                for record in records:
+                    vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '')
+                    brand = record.get('Product Brand', '') or record.get('ProductBrand', '')
+                    if vendor:
+                        vendors.add(str(vendor).strip())
+                    if brand:
+                        brands.add(str(brand).strip())
+                logging.info(f"PREROLL DEBUG: Found {len(vendors)} unique vendors and {len(brands)} unique brands in {len(records)} records")
             else:
                 logging.error(f"PREROLL: No records passed to grouping function!")
             
@@ -9362,7 +9403,14 @@ def generate_labels():
             records = generate_preroll_tags(records, cache)
             # Log what came out of grouping
             if records:
-                logging.info(f"PREROLL OUTPUT: Generated {len(records)} groups")
+                logging.info(f"PREROLL OUTPUT: Generated {len(records)} groups from {len(records)} input records")
+                # DEBUG: Log group keys to see what groups were created
+                group_keys = [r.get('_group_key', r.get('_group_id', 'unknown')) for r in records]
+                logging.info(f"PREROLL OUTPUT DEBUG: Group keys: {group_keys[:20]}")  # Log first 20
+                if len(group_keys) != len(set(group_keys)):
+                    logging.warning(f"PREROLL OUTPUT WARNING: Found {len(group_keys) - len(set(group_keys))} duplicate group keys!")
+            else:
+                logging.error(f"PREROLL OUTPUT: No groups generated!")
                 for i, record in enumerate(records[:3]):
                     logging.info(f"PREROLL GROUP {i+1}: Name={record.get('Product Name*', 'N/A')}, Vendor={record.get('Vendor/Supplier*', 'N/A')}")
             # If preroll grouping produced no records (e.g., brand filtering removed all items),
