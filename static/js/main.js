@@ -11927,11 +11927,11 @@ const TagManager = {
             let response;
             let responseData;
             
-            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (30s)
+            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (45s for large datasets)
             // Desktop/localhost should respond quickly with fast_load=1
             const maxRetries = isWebClient ? 1 : 2; // Fewer retries for web
             const maxProcessingRetries = isWebClient ? 1 : 2; // Reduce processing retries
-            const fetchTimeout = 30000; // 30s timeout for all clients
+            const fetchTimeout = 45000; // 45s timeout for large datasets (increased from 30s)
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -12094,6 +12094,8 @@ const TagManager = {
                             if (cachedTags && cachedTags.length > 0) {
                                 console.log(`⚡ TIMEOUT CACHE FALLBACK: Using ${cachedTags.length} cached tags immediately`);
                                 verboseLog('✅ Using cached tags immediately after timeout');
+                                // CRITICAL FIX: Reset flag immediately when using cache to prevent stuck loading
+                                this._fetchingAvailableTags = false;
                                 // Render cached tags immediately
                                 this.state.tags = [...cachedTags];
                                 this.state.originalTags = [...cachedTags];
@@ -12120,8 +12122,12 @@ const TagManager = {
                         if (cacheUsedForDisplay || retryCount >= maxRetries - 1) {
                             // We have cache or exhausted retries - exit gracefully
                             if (cacheUsedForDisplay) {
+                                // CRITICAL: Ensure flag is reset before returning
+                                this._fetchingAvailableTags = false;
                                 return true; // Successfully loaded from cache
                             }
+                            // CRITICAL: Reset flag before throwing error
+                            this._fetchingAvailableTags = false;
                             console.error(`❌ Max retries reached, throwing error:`, error);
                             throw error;
                         }
@@ -12136,6 +12142,8 @@ const TagManager = {
                         verboseLog(`Retrying immediately...`);
                         // PERFORMANCE: No delay - retry immediately for faster response
                     } else {
+                        // CRITICAL: Reset flag before throwing error to prevent stuck loading
+                        this._fetchingAvailableTags = false;
                         console.error(`❌ Max retries reached, throwing error:`, error);
                         throw error;
                     }
@@ -12146,9 +12154,13 @@ const TagManager = {
                 // Try cache as final fallback before throwing error
                 const cachedTags = this.hydrateAvailableTagsFromCache();
                 if (cachedTags) {
+                    // CRITICAL: Reset flag when using cache fallback
+                    this._fetchingAvailableTags = false;
                     verboseLog('✅ Using cached tags as final fallback after failed fetch');
                     return true;
                 }
+                // CRITICAL: Reset flag before throwing error
+                this._fetchingAvailableTags = false;
                 throw lastError || new Error('Failed to fetch tags after retries. Please try refreshing the page or uploading the file again.');
             }
             verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
@@ -12167,9 +12179,13 @@ const TagManager = {
                 // Try cache before giving up
                 const cachedTags = this.hydrateAvailableTagsFromCache();
                 if (cachedTags) {
+                    // CRITICAL: Reset flag when using cache fallback
+                    this._fetchingAvailableTags = false;
                     verboseLog('✅ Using cached tags as fallback for invalid response format');
                     return true;
                 }
+                // CRITICAL: Reset flag before clearing tags
+                this._fetchingAvailableTags = false;
                 // Clear existing tags if no new data
                 this.state.tags = [];
                 this.state.originalTags = [];
@@ -12210,6 +12226,8 @@ const TagManager = {
                     // Try cache as fallback
                     const cachedTags = this.hydrateAvailableTagsFromCache();
                     if (cachedTags) {
+                        // CRITICAL: Reset flag when using cache fallback
+                        this._fetchingAvailableTags = false;
                         verboseLog('✅ Using cached tags as fallback for error response');
                         return true;
                     }
@@ -12228,6 +12246,8 @@ const TagManager = {
                         `;
                     }
                 } else {
+                    // CRITICAL: Reset flag when no tags returned
+                    this._fetchingAvailableTags = false;
                     console.warn('Backend returned empty tags array - no Excel file loaded');
                     // Show message to user when no Excel file is uploaded
                     const availableTagsContainer = document.getElementById('availableTags');
@@ -12855,15 +12875,25 @@ const TagManager = {
             const hasExistingTags = Array.isArray(this.state.tags) && this.state.tags.length > 0;
             if (error && error.name === 'AbortError' && hasExistingTags) {
                 verboseLog('Available tags request aborted, preserving existing inventory');
+                // CRITICAL: Reset flag immediately on abort to prevent stuck loading
+                this._fetchingAvailableTags = false;
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
                 return true;
             }
+            
+            // CRITICAL FIX: Reset flag on any error to prevent stuck loading state
+            if (error && error.name === 'AbortError') {
+                console.warn('⚠️ Request aborted - resetting fetch flag');
+                this._fetchingAvailableTags = false;
+            }
 
             // Try cache as fallback before showing error
             const cachedTags = this.hydrateAvailableTagsFromCache();
             if (cachedTags) {
+                // CRITICAL: Reset flag when using cache fallback
+                this._fetchingAvailableTags = false;
                 verboseLog('✅ Using cached tags as fallback after error');
                 return true;
             }
@@ -12907,35 +12937,34 @@ const TagManager = {
 
             return false;
         } finally {
-            // CRITICAL FIX: Don't clear _fetchingAvailableTags here - let _waitForTagsToAppear clear it
-            // when tags are actually rendered in the DOM. This keeps the loading icon visible until Excel is fully loaded.
-            // Only clear on error - successful loads will be cleared by _waitForTagsToAppear after rendering
-            
             // Clear safety timeout since operation completed
             if (this._fetchingTimeout) {
                 clearTimeout(this._fetchingTimeout);
                 this._fetchingTimeout = null;
             }
             
-            // CRITICAL FIX: Call _waitForTagsToAppear to ensure flag is cleared only after tags are rendered
-            // This keeps loading icon visible until tags are actually in the DOM
-            if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
-                this._waitForTagsToAppear();
-            } else {
-                // Fallback: If _waitForTagsToAppear doesn't exist, clear flag after a delay to allow rendering
-                setTimeout(() => {
-                    const availableTagsContainer = document.getElementById('availableTags');
-                    const tagItems = availableTagsContainer?.querySelectorAll('.tag-item');
-                    if (tagItems && tagItems.length > 0) {
-                        // Tags are rendered, safe to clear flag
-                        this._fetchingAvailableTags = false;
-                        console.log(`✅ Tags rendered (${tagItems.length} items) - clearing loading flag`);
-                    } else {
-                        // No tags yet, but clear flag anyway to prevent permanent blocking
-                        console.warn('⚠️ No tags found after fetch, clearing loading flag anyway');
+            // CRITICAL FIX: Always clear flag after a short delay to prevent stuck loading
+            // This ensures the flag is reset even if _waitForTagsToAppear fails or doesn't exist
+            setTimeout(() => {
+                const availableTagsContainer = document.getElementById('availableTags');
+                const tagItems = availableTagsContainer?.querySelectorAll('.tag-item, .tag-row');
+                if (tagItems && tagItems.length > 0) {
+                    // Tags are rendered, safe to clear flag
+                    this._fetchingAvailableTags = false;
+                    console.log(`✅ Tags rendered (${tagItems.length} items) - clearing loading flag`);
+                } else {
+                    // CRITICAL FIX: Clear flag even if no tags found to prevent permanent blocking
+                    // This handles cases where fetch fails or times out
+                    if (this._fetchingAvailableTags) {
+                        console.warn('⚠️ Clearing loading flag (no tags found or fetch failed)');
                         this._fetchingAvailableTags = false;
                     }
-                }, 500); // Give tags time to render
+                }
+            }, 1000); // Give tags time to render, but clear flag even if they don't
+            
+            // Also call _waitForTagsToAppear if it exists for additional safety
+            if (this._waitForTagsToAppear && typeof this._waitForTagsToAppear === 'function') {
+                this._waitForTagsToAppear();
             }
         }
     },
