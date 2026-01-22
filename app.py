@@ -10631,28 +10631,22 @@ def get_available_tags():
         
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            # CRITICAL: Check if lineage was recently updated - if so, re-align to get fresh DB lineage
-            lineage_update_ts = session.get('lineage_update_timestamp')
-            needs_realignment = False
-            if lineage_update_ts:
-                try:
-                    # Within 10 minutes of lineage update, re-align cached tags
-                    needs_realignment = (time.time() - float(lineage_update_ts)) < 600
-                except Exception:
-                    needs_realignment = False
-            
-            if needs_realignment:
-                logging.info(f"🔄 Recent lineage update detected - re-aligning cached tags with database")
-                try:
-                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                    if store_name_align:
-                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to ensure cache uses the correct timestamp-based key
-                        # The timestamp changes the cache key, so old cached tags won't be used
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
-                except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+            # CRITICAL FIX: ALWAYS re-align cached tags with database to get fresh sovereign_lineage
+            # This ensures user-edited lineage (sovereign_lineage) appears even when loading from cache
+            # Previously only re-aligned if lineage_update_timestamp existed, but users may have edited
+            # lineage without that timestamp being set, or the timestamp may have expired
+            logging.info(f"🔄 Re-aligning cached tags with database to ensure fresh sovereign_lineage")
+            try:
+                store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                if store_name_align:
+                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                    logging.info("✅ Re-aligned cached tags with database lineage (sovereign_lineage included)")
+                else:
+                    logging.warning("⚠️ Cannot re-align cached tags - no store name available")
+            except Exception as align_err:
+                logging.warning(f"Could not align cached tags with database: {align_err}")
+                import traceback
+                logging.warning(traceback.format_exc())
             
             # CRITICAL FIX: Enrich cached tags with DOH and Brand data (cached tags may be missing these fields)
             # This ensures DOH badges and filters work even when tags come from cache
@@ -10878,41 +10872,31 @@ def get_available_tags():
                 'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
             })
         
-        # CRITICAL: Also return cached tags even when fast_load=0, but re-align if lineage updated OR first request of session
-        # This handles the case where UI sends fast_load=0 to ensure fresh lineage
+        # CRITICAL: Also return cached tags even when fast_load=0, but ALWAYS re-align to get fresh sovereign_lineage
+        # This ensures user-edited lineage (sovereign_lineage) appears even when loading from cache
         if cached_tags and not fast_load:
-            logging.info(f"⚡ CACHE HIT (slow mode): Checking if re-alignment needed for {len(cached_tags)} tags")
+            logging.info(f"⚡ CACHE HIT (slow mode): Re-aligning {len(cached_tags)} cached tags with database to ensure fresh sovereign_lineage")
             
-            # Check if this is first request of session (no tags_aligned_this_session flag)
-            first_request = not session.get('tags_aligned_this_session', False)
+            # CRITICAL FIX: ALWAYS re-align cached tags with database to get fresh sovereign_lineage
+            # Previously only re-aligned on first request or recent lineage update, but users may have
+            # edited lineage without that timestamp being set, or the timestamp may have expired
+            try:
+                store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                if store_name_align:
+                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                    # Mark that we've aligned tags in this session
+                    session['tags_aligned_this_session'] = True
+                    session.modified = True
+                    logging.info("✅ Re-aligned cached tags with database lineage (sovereign_lineage included)")
+                else:
+                    logging.warning("⚠️ Cannot re-align cached tags - no store name available")
+            except Exception as align_err:
+                logging.warning(f"Could not align cached tags with database: {align_err}")
+                import traceback
+                logging.warning(traceback.format_exc())
             
-            # Check if lineage was recently updated
-            lineage_update_ts = session.get('lineage_update_timestamp')
-            needs_realignment = first_request  # Always align on first request
-            if lineage_update_ts:
-                try:
-                    # Within 10 minutes of lineage update, re-align cached tags
-                    if (time.time() - float(lineage_update_ts)) < 600:
-                        needs_realignment = True
-                except Exception:
-                    pass
-            
-            if needs_realignment:
-                reason = "first request of session" if first_request else "recent lineage update"
-                logging.info(f"🔄 SLOW MODE: Re-aligning cached tags with database ({reason})")
-                try:
-                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                    if store_name_align:
-                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                        # Mark that we've aligned tags in this session
-                        session['tags_aligned_this_session'] = True
-                        session.modified = True
-                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
-                        # It must persist to change the cache key and ensure fresh database lineage
-                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
-                except Exception as align_err:
-                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
-            else:
+            # Continue to return cached tags even if alignment failed
+            if False:  # Disabled - always align now
                 logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
             
             # CRITICAL FIX: Enrich cached tags with DOH and Brand data (same as fast_load path)
