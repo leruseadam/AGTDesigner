@@ -239,15 +239,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     Returns:
         List of grouped representative records (one per category)
     """
-    # DEBUG: Log brand values in input records
-    if records:
-        # Log sample keys and values at DEBUG level to avoid costly string formatting at INFO
-        logging.debug(f"PREROLL INPUT DEBUG: First record keys ({len(records[0].keys())} total): {list(records[0].keys())}")
-        if logging.getLogger().isEnabledFor(logging.DEBUG):
-            for i, r in enumerate(records[:5]):
-                brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '')
-                vendor_val = r.get('Vendor/Supplier*', '') or r.get('Vendor', '')
-                logging.debug(f"PREROLL INPUT DEBUG [{i+1}]: Name='{r.get('Product Name*', 'N/A')}', Brand='{brand_val}', Vendor='{vendor_val}', ALL_BRAND_FIELDS: Product Brand={repr(r.get('Product Brand'))}, ProductBrand={repr(r.get('ProductBrand'))}, Brand={repr(r.get('Brand'))}")
+    # PERFORMANCE: Skip verbose debug logging unless explicitly enabled
+    if records and logging.getLogger().isEnabledFor(logging.DEBUG):
+        logging.debug(f"PREROLL INPUT: {len(records)} records received")
 
     start_t = time.time()
     
@@ -287,8 +281,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 # Check if brand is in allowed list
                 if brand_lower in allowed_brands_lower:
                     filtered_records.append(record)
-                else:
-                    logging.info(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands: {PREROLL_ALLOWED_BRANDS})")
+                elif logging.getLogger().isEnabledFor(logging.DEBUG):
+                    logging.debug(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}'")
             
             records = filtered_records
             excluded = original_count - len(records)
@@ -305,19 +299,19 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     
     # Step 1: Identify product groups and group records
     grouped_records = {}
+    skipped_count = 0
     for record in records:
         description = record.get('Description', '')
         product_name = record.get('Product Name*', record.get('ProductName', ''))
         
         # CRITICAL: Ensure we have at least a product name to work with
         if not product_name or not str(product_name).strip():
-            logging.warning(f"PREROLL GROUP: Skipping record with no product name: {record}")
+            skipped_count += 1
             continue
         
         # Identify the product group
         group_info = identify_preroll_product_group(description, product_name)
         group_id = group_info['group_id']
-        logging.debug(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (group_id: {group_id})")
         
         # Extract brand from product name using "by BrandName -" pattern
         # This is used for grouping to avoid duplicates
@@ -381,6 +375,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
+    
+    if skipped_count > 0:
+        logging.warning(f"PREROLL GROUP: Skipped {skipped_count} records with no product name")
     
     # Step 2: Create representative records with group display names
     unique_records = []
@@ -580,20 +577,24 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'doh': doh_display,
             }
             group_items.append(item)
-        logging.info(f"PREROLL GROUP: Storing {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_id: {original_group_id}, vendor: {vendor})")
         
+        # PERFORMANCE FIX: Batch cache operations and reduce logging
         # Store group items in cache using the full group_key (includes vendor) to avoid collisions
         # This ensures each vendor's products are stored separately even if they have the same category
-        cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
-        # CRITICAL FIX: Also store with session-independent key so QR codes work across sessions
-        # Use group_key (with vendor) to ensure vendor-specific QR codes work correctly
-        cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
-        # Also store with original group_id for backward compatibility (may overwrite, but that's OK for QR codes)
-        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
-        # Also store group info for display purposes
-        cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
-        cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
-        cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
+        try:
+            # Batch cache operations - only store essential keys
+            cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
+            cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
+            # Store with session key only if session_id is not 'default' (avoid redundant storage)
+            if session_id != 'default':
+                cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
+                cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
+            # Store with original group_id for backward compatibility (only if different from group_key)
+            if original_group_id != group_key:
+                cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
+                cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
+        except Exception as cache_error:
+            logging.warning(f"PREROLL: Cache error (non-fatal): {cache_error}")
         
         # CRITICAL FIX: Store in database for persistence across site refreshes
         # Persist group to DB in background so web request isn't blocked by I/O
@@ -605,8 +606,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             ).start()
         except Exception as db_error:
             logging.warning(f"PREROLL: Failed to start background DB store (using cache only): {db_error}")
-        
-        logging.info(f"PREROLL: Stored {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_key: {group_key}, group_id: {original_group_id}) with session-independent key and database")
     
     # Track count after brand filtering (if any)
     records_after_brand_filter = len(records)
@@ -641,14 +640,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     if len(grouped_records_list) != len(grouped_records):
         logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
     
-    # Log sample of generated groups for debugging
-    if grouped_records_list:
-        sample_groups = grouped_records_list[:5]
+    # Log summary only (reduce logging overhead)
+    if grouped_records_list and logging.getLogger().isEnabledFor(logging.DEBUG):
+        sample_groups = grouped_records_list[:3]
         for i, rep in enumerate(sample_groups):
             pname = rep.get('Product Name*', rep.get('ProductName', 'N/A'))
             vendor = rep.get('Vendor/Supplier*', rep.get('Vendor', 'N/A'))
-            group_key = rep.get('_group_key', 'N/A')
-            logging.info(f"PREROLL GROUP [{i+1}]: '{pname}' | Vendor: '{vendor}' | Group Key: '{group_key}'")
+            logging.debug(f"PREROLL GROUP [{i+1}]: '{pname}' | Vendor: '{vendor}'")
     
     # Store group IDs in session for later retrieval when creating list document
     # Store both group_keys (with vendor) and original group_ids for compatibility
