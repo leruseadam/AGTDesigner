@@ -6433,7 +6433,9 @@
             
             if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
               // Loading splash is still visible, wait a bit longer
-              console.log(`⏳ Waiting for loading splash to hide before showing store modal... (attempt ${attemptCount}/${MAX_ATTEMPTS})`);
+              if (attemptCount % 5 === 0 || attemptCount <= 2) {
+                console.log(`⏳ Waiting for loading splash to hide... (attempt ${attemptCount}/${MAX_ATTEMPTS})`);
+              }
               setTimeout(attemptShow, 200);
               return;
             }
@@ -8079,8 +8081,8 @@
         }
       } else if (window.tagManagerInitAttempts < window.MAX_TAG_MANAGER_INIT_ATTEMPTS) {
         // Keep waiting for main.js to load
-        // Only log every 10th attempt to reduce console spam
-        if (window.tagManagerInitAttempts % 10 === 0 || window.tagManagerInitAttempts <= 5) {
+        // Only log every 20th attempt to reduce console spam
+        if (window.tagManagerInitAttempts % 20 === 0 || window.tagManagerInitAttempts <= 3) {
           console.log(`⏳ Waiting for main.js TagManager... attempt ${window.tagManagerInitAttempts}/${window.MAX_TAG_MANAGER_INIT_ATTEMPTS}`);
         }
         setTimeout(waitForTagManagerAndInit, 100);
