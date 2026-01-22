@@ -8934,20 +8934,54 @@ def generate_labels():
             # CRITICAL FIX: For preroll template, automatically include ALL preroll products
             # This ensures all preroll groups are created, not just selected ones
             if template_type == 'preroll':
-                logging.info("🔄 PREROLL TEMPLATE: Auto-including ALL preroll products (not just selected)")
-                # Get all available tags and filter for preroll products
-                all_tags = excel_processor.get_available_tags(filters=None)
-                preroll_keywords = ['preroll', 'pre-roll', 'infused preroll', 'infused pre-roll', 'blunt']
-                records = []
-                for tag in all_tags:
-                    product_type = str(tag.get('Product Type*', tag.get('ProductType', ''))).lower()
-                    product_name = str(tag.get('Product Name*', tag.get('ProductName', ''))).lower()
-                    description = str(tag.get('Description', '')).lower()
-                    combined = f"{product_type} {product_name} {description}"
-                    # Check if this is a preroll product
-                    if any(keyword in combined for keyword in preroll_keywords):
-                        records.append(tag)
-                logging.info(f"🔄 PREROLL TEMPLATE: Found {len(records)} preroll products from all available tags (auto-included all prerolls)")
+                logging.info("🔄 PREROLL TEMPLATE: Auto-including ALL preroll products directly from DataFrame (not just selected)")
+                # Get preroll records directly from DataFrame (same logic as update_preroll_items_from_excel)
+                if excel_processor.df is not None and not excel_processor.df.empty:
+                    preroll_keywords = ['preroll', 'pre-roll', 'infused preroll', 'infused pre-roll', 'blunt']
+                    
+                    # Find product type column
+                    product_type_col = None
+                    for col in ['Product Type*', 'ProductType', 'Product_Type']:
+                        if col in excel_processor.df.columns:
+                            product_type_col = col
+                            break
+                    
+                    if product_type_col:
+                        # Filter DataFrame for preroll/blunt products
+                        preroll_mask = excel_processor.df[product_type_col].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+                        
+                        # Also check description/product name for preroll keywords
+                        desc_mask = pd.Series([False] * len(excel_processor.df), index=excel_processor.df.index)
+                        if 'Description' in excel_processor.df.columns:
+                            desc_mask = excel_processor.df['Description'].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+                        
+                        name_mask = pd.Series([False] * len(excel_processor.df), index=excel_processor.df.index)
+                        if 'Product Name*' in excel_processor.df.columns:
+                            name_mask = excel_processor.df['Product Name*'].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+                        elif 'ProductName' in excel_processor.df.columns:
+                            name_mask = excel_processor.df['ProductName'].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
+                        
+                        combined_mask = preroll_mask | desc_mask | name_mask
+                        preroll_df = excel_processor.df[combined_mask].copy()
+                        
+                        if not preroll_df.empty:
+                            # Convert DataFrame rows to records (dictionary format)
+                            records = preroll_df.to_dict('records')
+                            # Replace NaN values with empty strings for consistency
+                            for record in records:
+                                for key, value in record.items():
+                                    if pd.isna(value):
+                                        record[key] = ''
+                            logging.info(f"🔄 PREROLL TEMPLATE: Found {len(records)} preroll products directly from DataFrame (auto-included all prerolls)")
+                        else:
+                            logging.warning("🔄 PREROLL TEMPLATE: No preroll products found in DataFrame")
+                            records = []
+                    else:
+                        logging.warning("🔄 PREROLL TEMPLATE: No product type column found in DataFrame")
+                        records = []
+                else:
+                    logging.warning("🔄 PREROLL TEMPLATE: DataFrame is empty or None, falling back to selected records")
+                    records = excel_processor.get_selected_records(template_type)
             else:
                 records = excel_processor.get_selected_records(template_type)
                 logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
