@@ -7428,6 +7428,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         # Copy tags so we don't mutate cached objects
         aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
         
+        # PERFORMANCE: Early exit if skip_if_aligned and tags already have lineage
+        if skip_if_aligned:
+            # Check if tags already have database lineage fields
+            tags_with_lineage = sum(1 for t in aligned_tags 
+                                   if isinstance(t, dict) and 
+                                   (t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage')))
+            if tags_with_lineage >= len(aligned_tags) * 0.5:  # 50%+ already have lineage
+                logging.debug(f"⚡ Skipping alignment - {tags_with_lineage}/{len(aligned_tags)} tags already have database lineage")
+                return aligned_tags
+        
         # Collect product names for lookup (always include; alignment now force-overwrites)
         product_names = []
         for t in aligned_tags:
@@ -10646,22 +10656,26 @@ def get_available_tags():
         
         if cached_tags and fast_load:
             logging.info(f"⚡ CACHE HIT: Returning {len(cached_tags)} cached tags for fast_load (skipping Excel reload)")
-            # CRITICAL FIX: ALWAYS re-align cached tags with database to get fresh sovereign_lineage
-            # This ensures user-edited lineage (sovereign_lineage) appears even when loading from cache
-            # Previously only re-aligned if lineage_update_timestamp existed, but users may have edited
-            # lineage without that timestamp being set, or the timestamp may have expired
-            logging.info(f"🔄 Re-aligning cached tags with database to ensure fresh sovereign_lineage")
-            try:
-                store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                if store_name_align:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    logging.info("✅ Re-aligned cached tags with database lineage (sovereign_lineage included)")
-                else:
-                    logging.warning("⚠️ Cannot re-align cached tags - no store name available")
-            except Exception as align_err:
-                logging.warning(f"Could not align cached tags with database: {align_err}")
-                import traceback
-                logging.warning(traceback.format_exc())
+            # PERFORMANCE: Only re-align if tags are missing lineage (skip if already aligned)
+            # Check if tags already have database lineage before expensive alignment
+            tags_with_lineage = sum(1 for t in cached_tags if t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage'))
+            needs_alignment = tags_with_lineage < len(cached_tags) * 0.5  # Less than 50% have lineage
+            
+            if needs_alignment:
+                logging.info(f"🔄 Re-aligning cached tags with database ({tags_with_lineage}/{len(cached_tags)} already have lineage)...")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=True, force_overwrite=False)
+                        logging.info("✅ Re-aligned cached tags with database lineage (sovereign_lineage included)")
+                    else:
+                        logging.warning("⚠️ Cannot re-align cached tags - no store name available")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags with database: {align_err}")
+                    import traceback
+                    logging.warning(traceback.format_exc())
+            else:
+                logging.info(f"⚡ Skipping alignment - {tags_with_lineage}/{len(cached_tags)} cached tags already have database lineage")
             
             # CRITICAL FIX: Enrich cached tags with DOH and Brand data (cached tags may be missing these fields)
             # This ensures DOH badges and filters work even when tags come from cache
@@ -10887,28 +10901,31 @@ def get_available_tags():
                 'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
             })
         
-        # CRITICAL: Also return cached tags even when fast_load=0, but ALWAYS re-align to get fresh sovereign_lineage
-        # This ensures user-edited lineage (sovereign_lineage) appears even when loading from cache
+        # CRITICAL: Also return cached tags even when fast_load=0, but re-align only if needed
+        # PERFORMANCE: Skip expensive alignment if tags already have database lineage
         if cached_tags and not fast_load:
-            logging.info(f"⚡ CACHE HIT (slow mode): Re-aligning {len(cached_tags)} cached tags with database to ensure fresh sovereign_lineage")
+            # PERFORMANCE: Check if tags already have database lineage before aligning
+            tags_with_lineage = sum(1 for t in cached_tags if t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage'))
+            needs_alignment = tags_with_lineage < len(cached_tags) * 0.5  # Less than 50% have lineage
             
-            # CRITICAL FIX: ALWAYS re-align cached tags with database to get fresh sovereign_lineage
-            # Previously only re-aligned on first request or recent lineage update, but users may have
-            # edited lineage without that timestamp being set, or the timestamp may have expired
-            try:
-                store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                if store_name_align:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    # Mark that we've aligned tags in this session
-                    session['tags_aligned_this_session'] = True
-                    session.modified = True
-                    logging.info("✅ Re-aligned cached tags with database lineage (sovereign_lineage included)")
-                else:
-                    logging.warning("⚠️ Cannot re-align cached tags - no store name available")
-            except Exception as align_err:
-                logging.warning(f"Could not align cached tags with database: {align_err}")
-                import traceback
-                logging.warning(traceback.format_exc())
+            if needs_alignment:
+                logging.info(f"⚡ CACHE HIT (slow mode): Re-aligning {len(cached_tags)} cached tags with database ({tags_with_lineage}/{len(cached_tags)} already have lineage)...")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=True, force_overwrite=False)
+                        # Mark that we've aligned tags in this session
+                        session['tags_aligned_this_session'] = True
+                        session.modified = True
+                        logging.info("✅ Re-aligned cached tags with database lineage (sovereign_lineage included)")
+                    else:
+                        logging.warning("⚠️ Cannot re-align cached tags - no store name available")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags with database: {align_err}")
+                    import traceback
+                    logging.warning(traceback.format_exc())
+            else:
+                logging.info(f"⚡ CACHE HIT (slow mode): Skipping alignment - {tags_with_lineage}/{len(cached_tags)} cached tags already have database lineage")
             
             # Continue to return cached tags even if alignment failed
             if False:  # Disabled - always align now
@@ -14863,19 +14880,27 @@ def get_web_available_tags():
             excel_tags = excel_processor.get_available_tags()
             logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
             
-            # CRITICAL FIX: Always align tags with database lineage to ensure lineage is available
-            # Use the robust _align_tags_with_db_lineage helper function used throughout the codebase
+            # CRITICAL FIX: Only align tags with database lineage if they don't already have it
+            # PERFORMANCE: Skip expensive alignment if tags already have canonical_lineage/sovereign_lineage
+            # This speeds up web endpoint significantly for large datasets
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and excel_tags:
-                try:
-                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
-                    excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
-                    logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
-                except Exception as align_err:
-                    logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
-                    import traceback
-                    logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
+                # PERFORMANCE: Check if tags already have database lineage before aligning
+                tags_with_lineage = sum(1 for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage'))
+                needs_alignment = tags_with_lineage < len(excel_tags) * 0.5  # Less than 50% have lineage
+                
+                if needs_alignment:
+                    try:
+                        logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage ({tags_with_lineage}/{len(excel_tags)} already have lineage)...")
+                        excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=True, force_overwrite=False)
+                        matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
+                        logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
+                    except Exception as align_err:
+                        logging.warning(f"WEB: Lineage alignment failed, using existing lineage: {align_err}")
+                        import traceback
+                        logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
+                else:
+                    logging.info(f"⚡ WEB: Skipping alignment - {tags_with_lineage}/{len(excel_tags)} tags already have database lineage")
             
             # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
             simple_tags = []
