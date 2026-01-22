@@ -11202,6 +11202,43 @@ def get_available_tags():
                 g.excel_processor = simple_processor
                 simple_processor._last_loaded_file = session_file_path
                 logging.info(f"📂 Loaded Excel file: {session_file_path}")
+                
+                # CRITICAL FIX: Update preroll groups from Excel data (non-blocking in fast_load mode)
+                # Preroll groups are needed for QR code generation and preroll product lists
+                if simple_processor.df is not None and not simple_processor.df.empty:
+                    if fast_load:
+                        # In fast_load mode, update preroll groups in background to avoid blocking
+                        try:
+                            import threading
+                            def update_preroll_background():
+                                try:
+                                    from flask import has_request_context
+                                    if has_request_context():
+                                        session_id = session.get('session_id', 'default')
+                                    else:
+                                        session_id = 'default'
+                                    update_preroll_items_from_excel(simple_processor.df, session_id=session_id)
+                                    logging.info("✅ PREROLL: Updated preroll groups in background (fast_load mode)")
+                                except Exception as bg_err:
+                                    logging.warning(f"PREROLL: Background update failed: {bg_err}")
+                            
+                            bg_thread = threading.Thread(target=update_preroll_background, daemon=True)
+                            bg_thread.start()
+                            logging.info("🔄 PREROLL: Started background thread to update preroll groups (non-blocking)")
+                        except Exception as thread_err:
+                            logging.warning(f"PREROLL: Could not start background thread: {thread_err}")
+                            # Fallback: update synchronously if threading fails (should be fast for small datasets)
+                            try:
+                                update_preroll_items_from_excel(simple_processor.df)
+                            except Exception as sync_err:
+                                logging.warning(f"PREROLL: Synchronous update also failed: {sync_err}")
+                    else:
+                        # Not fast_load mode: update synchronously
+                        try:
+                            update_preroll_items_from_excel(simple_processor.df)
+                            logging.info("✅ PREROLL: Updated preroll groups synchronously")
+                        except Exception as preroll_err:
+                            logging.warning(f"PREROLL: Failed to update preroll groups: {preroll_err}")
 
             # PERFORMANCE FIX: Set skip_enrichment flag when fast_load is enabled
             # This prevents expensive database queries during tag generation
@@ -20447,7 +20484,8 @@ def update_preroll_items_from_excel(df, session_id=None):
             logging.info("PREROLL: No preroll products found in Excel data")
             return
         
-        # Group items by product category
+        # Group items by product category AND brand/vendor (matching generate_preroll_tags logic)
+        # CRITICAL FIX: Use same grouping logic as generate_preroll_tags to ensure all groups are created
         grouped_items = {}
         for _, row in preroll_df.iterrows():
             description = str(row.get('Description', ''))
@@ -20457,32 +20495,65 @@ def update_preroll_items_from_excel(df, session_id=None):
             group_info = identify_preroll_product_group(description, product_name)
             group_id = group_info['group_id']
             
-            # Extract price and normalize it
-            price = row.get('Price', '')
-            try:
-                if isinstance(price, str):
-                    price_clean = price.replace('$', '').replace(',', '').strip()
-                    try:
-                        price_float = float(price_clean)
-                        if price_float.is_integer():
-                            price_tier = str(int(price_float))
-                        else:
-                            price_tier = f"{price_float:.2f}".rstrip('0').rstrip('.')
-                    except ValueError:
-                        price_tier = price_clean
-                else:
-                    price_tier = str(price).strip()
-            except Exception:
-                price_tier = str(price).strip() if price else 'N/A'
+            # Extract brand/vendor for grouping (matching generate_preroll_tags logic)
+            import re
+            BY_PATTERN = re.compile(r'\s+by\s+([^-]+?)(?:\s*-\s*|$)', re.IGNORECASE)
+            brand_for_grouping = ''
+            product_name_str = str(product_name).strip()
+            by_match = BY_PATTERN.search(product_name_str)
+            if by_match:
+                brand_for_grouping = by_match.group(1).strip()
             
-            # Create grouping key: (price_tier, group_id)
-            group_key = (price_tier, group_id)
+            # Fallback: prefer explicit Product Brand fields, then vendor as last resort
+            if not brand_for_grouping:
+                brand_field = (
+                    str(row.get('Product Brand', '')).strip() or
+                    str(row.get('ProductBrand', '')).strip() or
+                    str(row.get('Brand', '')).strip() or
+                    ''
+                )
+                if brand_field:
+                    brand_for_grouping = brand_field
+                else:
+                    # Fall back to vendor for grouping purposes
+                    vendor = (
+                        str(row.get('Vendor/Supplier*', '')).strip() or
+                        str(row.get('Vendor', '')).strip() or
+                        str(row.get('Vendor/Supplier', '')).strip() or
+                        ''
+                    )
+                    brand_for_grouping = vendor
+            
+            # Normalize brand into a compact key (matching generate_preroll_tags)
+            brand_key = ''
+            if brand_for_grouping:
+                brand_for_grouping = str(brand_for_grouping).strip()
+                # Normalize: lowercase, remove non-alphanumeric characters
+                brand_key = re.sub(r'[^a-z0-9]+', '', brand_for_grouping.lower())
+                if not brand_key:
+                    brand_key = brand_for_grouping.lower().replace(' ', '_')
+            
+            # CRITICAL FIX: Use same group_key format as generate_preroll_tags: group_id|brand_key
+            # This ensures all groups created here match the groups created during tag generation
+            if brand_key:
+                group_key = f"{group_id}|{brand_key}"
+            else:
+                # Use product name as fallback to ensure uniqueness when no brand/vendor
+                product_name_key = re.sub(r'[^a-z0-9]+', '', product_name_str.lower())[:20]
+                if product_name_key:
+                    group_key = f"{group_id}|{product_name_key}"
+                else:
+                    # Last resort: use group_id with index to ensure uniqueness
+                    group_key = f"{group_id}|unknown_{len(grouped_items)}"
             
             if group_key not in grouped_items:
                 grouped_items[group_key] = {
                     'items': [],
                     'group_info': group_info
                 }
+            
+            # Extract price for item dictionary
+            price = row.get('Price', '')
             
             # Create item dictionary
             item = {
@@ -20504,19 +20575,30 @@ def update_preroll_items_from_excel(df, session_id=None):
         
         # Store items by group in cache
         for group_key, group_data in grouped_items.items():
-            price_tier, group_id = group_key
             group_info = group_data['group_info']
             items = group_data['items']
             
-            # Store group items in cache (with session_id for session-specific access)
-            cache.set(f"preroll_group_{session_id}_{group_id}", items, timeout=86400)
+            # CRITICAL FIX: group_key is now in format "group_id|brand_key" (matching generate_preroll_tags)
+            # Extract group_id from group_key (format: "group_id|brand_key" or just "group_id")
+            if '|' in str(group_key):
+                group_id = str(group_key).split('|')[0]
+            else:
+                group_id = str(group_key)
+            
+            # Store group items in cache using group_key (includes brand for vendor-specific groups)
+            # This matches the format used by generate_preroll_tags
+            cache.set(f"preroll_group_{session_id}_{group_key}", items, timeout=86400)
             # CRITICAL: Also store with session-independent key so QR codes work across sessions
-            # This ensures QR codes can be scanned by anyone, not just the original session
+            cache.set(f"preroll_group_latest_{group_key}", items, timeout=86400)
+            # Also store by group_id only for backward compatibility
+            cache.set(f"preroll_group_{session_id}_{group_id}", items, timeout=86400)
             cache.set(f"preroll_group_latest_{group_id}", items, timeout=86400)
             # Also store group info for display purposes
+            cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
+            cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
             cache.set(f"preroll_group_info_{session_id}_{group_id}", group_info, timeout=86400)
             cache.set(f"preroll_group_info_latest_{group_id}", group_info, timeout=86400)
-            logging.info(f"PREROLL: Stored {len(items)} items for group '{group_info['display_name']}' (group_id: {group_id}) from Excel upload with session-independent key for QR codes")
+            logging.info(f"PREROLL: Stored {len(items)} items for group '{group_info['display_name']}' (group_key: {group_key}, group_id: {group_id}) from Excel upload")
 
             # Additionally, store vendor-specific cache entries so QR links with vendor filters
             # can resolve directly to a vendor-scoped list without relying on in-route filtering.
