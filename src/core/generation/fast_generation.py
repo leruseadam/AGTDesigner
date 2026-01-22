@@ -47,21 +47,19 @@ class FastGenerationEngine:
     
     def _get_cache_key(self, records: List[Dict], template_type: str, scale_factor: float) -> str:
         """Generate a cache key for the generation request"""
-        # Create a deterministic hash of the inputs
-        cache_data = {
-            'records': [
-                {
-                    'name': r.get('Product Name*', r.get('ProductName', '')),
-                    'type': r.get('ProductType', ''),
-                    'lineage': r.get('Lineage', '')
-                }
-                for r in records
-            ],
-            'template': template_type,
-            'scale': scale_factor
-        }
-        cache_str = json.dumps(cache_data, sort_keys=True)
-        return hashlib.md5(cache_str.encode()).hexdigest()
+        # Create a deterministic but faster hash of the inputs by concatenating
+        # only the minimal identifying fields per record. Avoid expensive
+        # json.dumps on large lists.
+        parts = []
+        for r in records:
+            name = str(r.get('Product Name*', r.get('ProductName', '')) or '')
+            ptype = str(r.get('ProductType', '') or '')
+            lineage = str(r.get('Lineage', '') or '')
+            parts.append(f"{name}||{ptype}||{lineage}")
+        parts.append(f"TEMPLATE||{template_type}")
+        parts.append(f"SCALE||{scale_factor}")
+        cache_str = '\n'.join(parts)
+        return hashlib.md5(cache_str.encode('utf-8')).hexdigest()
     
     def generate_with_cache(
         self,
@@ -95,14 +93,13 @@ class FastGenerationEngine:
         
         if cache_key in _generation_cache:
             self.cache_hits += 1
-            logger.info(f"⚡ CACHE HIT: Returning cached generation for {len(records)} records")
-            
+            logger.debug(f"⚡ CACHE HIT: Returning cached generation for {len(records)} records")
             # Return a copy of the cached document
             cached_bytes = _generation_cache[cache_key]
             return Document(BytesIO(cached_bytes))
         
         self.cache_misses += 1
-        logger.info(f"⚡ CACHE MISS: Generating labels for {len(records)} records")
+        logger.debug(f"⚡ CACHE MISS: Generating labels for {len(records)} records")
         
         # Generate the document (wrap to capture internal errors and context)
         try:
@@ -138,7 +135,7 @@ class FastGenerationEngine:
                 self._cleanup_cache()
 
         generation_time = time.time() - start_time
-        logger.info(f"⚡ Generation completed in {generation_time:.2f}s (cache hit rate: {self._get_hit_rate():.1f}%)")
+        logger.debug(f"⚡ Generation completed in {generation_time:.2f}s (cache hit rate: {self._get_hit_rate():.1f}%)")
 
         # Return the document
         buffer.seek(0)
@@ -290,36 +287,43 @@ def optimize_records_for_generation(records: List[Dict]) -> List[Dict]:
     """
     start_time = time.time()
     
-    optimized = []
-    for record in records:
-        # Create a minimal record with only required fields
-        optimized_record = {
-            'Product Name*': record.get('Product Name*', record.get('ProductName', '')),
-            'ProductName': record.get('Product Name*', record.get('ProductName', '')),
-            'ProductType': record.get('ProductType', ''),
-            'Lineage': record.get('Lineage', 'MIXED'),
-            'ProductBrand': record.get('ProductBrand', record.get('Product Brand', '')),
-            'Product Brand': record.get('Product Brand', record.get('ProductBrand', '')),
-            'Vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
-            'Product Strain': record.get('Product Strain', ''),
-            'ProductStrain': record.get('ProductStrain', record.get('Product Strain', '')),
-            'Price': record.get('Price', ''),
-            'DOH': record.get('DOH', ''),
-            'DOH Compliant (Yes/No)': record.get('DOH Compliant (Yes/No)', ''),
-            'Weight*': record.get('Weight*', '1'),
-            'Units': record.get('Units', 'g'),
-            'WeightUnits': record.get('WeightUnits', record.get('CombinedWeight', '')),
-            'CombinedWeight': record.get('CombinedWeight', ''),
-            'Description': record.get('Description', ''),
-            'DescAndWeight': record.get('DescAndWeight', ''),
-            'THC test result': record.get('THC test result', ''),
-            'CBD test result': record.get('CBD test result', ''),
-            'Test result unit (% or mg)': record.get('Test result unit (% or mg)', '%'),
-            'Ratio': record.get('Ratio', ''),
-            'JointRatio': record.get('JointRatio', ''),
-            'Ratio_or_THC_CBD': record.get('Ratio_or_THC_CBD', ''),
+    # Use local variables and comprehension for speed
+    def _get(r, *keys, default=''):
+        for k in keys:
+            val = r.get(k)
+            if val is not None and val != '':
+                return val
+        return default
+
+    optimized = [
+        {
+            'Product Name*': _get(record, 'Product Name*', 'ProductName'),
+            'ProductName': _get(record, 'Product Name*', 'ProductName'),
+            'ProductType': _get(record, 'ProductType'),
+            'Lineage': _get(record, 'Lineage', default='MIXED'),
+            'ProductBrand': _get(record, 'ProductBrand', 'Product Brand'),
+            'Product Brand': _get(record, 'Product Brand', 'ProductBrand'),
+            'Vendor': _get(record, 'Vendor', 'Vendor/Supplier*'),
+            'Product Strain': _get(record, 'Product Strain'),
+            'ProductStrain': _get(record, 'ProductStrain', 'Product Strain'),
+            'Price': _get(record, 'Price'),
+            'DOH': _get(record, 'DOH'),
+            'DOH Compliant (Yes/No)': _get(record, 'DOH Compliant (Yes/No)'),
+            'Weight*': _get(record, 'Weight*', default='1'),
+            'Units': _get(record, 'Units', default='g'),
+            'WeightUnits': _get(record, 'WeightUnits', 'CombinedWeight'),
+            'CombinedWeight': _get(record, 'CombinedWeight'),
+            'Description': _get(record, 'Description'),
+            'DescAndWeight': _get(record, 'DescAndWeight'),
+            'THC test result': _get(record, 'THC test result'),
+            'CBD test result': _get(record, 'CBD test result'),
+            'Test result unit (% or mg)': _get(record, 'Test result unit (% or mg)', default='%'),
+            'Ratio': _get(record, 'Ratio'),
+            'JointRatio': _get(record, 'JointRatio'),
+            'Ratio_or_THC_CBD': _get(record, 'Ratio_or_THC_CBD'),
         }
-        optimized.append(optimized_record)
+        for record in records
+    ]
     
     optimization_time = time.time() - start_time
     logger.info(f"⚡ Optimized {len(records)} records in {optimization_time:.3f}s")
