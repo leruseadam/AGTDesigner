@@ -12156,21 +12156,16 @@ const TagManager = {
                         // Timeouts usually mean server is slow, not transient errors
                         // This provides instant fallback to cached data for faster UX
                         if (!cacheUsedForDisplay) {
-                            const cachedTags = this.hydrateAvailableTagsFromCache();
+                            // CRITICAL: Use loadAvailableTagsFromCache (returns tags array) not hydrateAvailableTagsFromCache (returns boolean)
+                            const cachedTags = this.loadAvailableTagsFromCache();
                             if (cachedTags && cachedTags.length > 0) {
                                 console.log(`⚡ TIMEOUT CACHE FALLBACK: Using ${cachedTags.length} cached tags immediately`);
                                 verboseLog('✅ Using cached tags immediately after timeout');
                                 // CRITICAL FIX: Reset flag immediately when using cache to prevent stuck loading
                                 this._fetchingAvailableTags = false;
-                                // Render cached tags immediately
-                                this.state.tags = [...cachedTags];
-                                this.state.originalTags = [...cachedTags];
-                                this.state.hydratedFromCache = true;
+                                // Hydrate from cache to properly set up state
+                                this._hydrateFromCachedTags(cachedTags, false, null);
                                 cacheUsedForDisplay = true;
-                                this._updateAvailableTags(cachedTags, null);
-                                // CRITICAL FIX: Always build filter options from ALL tags (originalTags), not filtered tags
-                                // This ensures all vendors appear in the dropdown even if a vendor filter was previously applied
-                                this.buildFilterOptionsFromTags(this.state.originalTags);
                                 // Hide splash since we have cached tags
                                 if (this.hideActionSplash) {
                                     this.hideActionSplash();
