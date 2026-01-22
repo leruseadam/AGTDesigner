@@ -9103,14 +9103,55 @@ def generate_labels():
             # This ensures DOCX matches what's displayed in the UI and user changes are respected
             if records:
                 # Build UI lineage map from selected tags
+                # Only treat a selected tag's lineage as a USER OVERRIDE if it differs
+                # from the Excel-sourced lineage for that product. This prevents stale
+                # Excel lineage values (that the UI simply reflects) from overriding
+                # authoritative database lineage.
                 ui_lineage_map = {}
+                try:
+                    excel_proc = get_excel_processor()
+                    df = excel_proc.df if excel_proc is not None else None
+                except Exception:
+                    df = None
+
                 for tag in selected_tags_from_request:
-                    if isinstance(tag, dict):
-                        product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
-                        # Use canonical_lineage or currentLineage (what UI displays) as source of truth
-                        ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
-                        if product_name and ui_lineage:
-                            ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
+                    if not isinstance(tag, dict):
+                        continue
+                    product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
+                    # Use canonical_lineage or currentLineage (what UI displays) as source of truth
+                    ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
+                    if not product_name or not ui_lineage:
+                        continue
+
+                    ui_lineage_clean = str(ui_lineage).strip().upper()
+
+                    # If we have the original Excel DF, compare the value in the sheet.
+                    # If the UI lineage equals the Excel sheet's lineage for that product,
+                    # it likely wasn't changed by the user and should not be treated as
+                    # a user override that trumps the database.
+                    treat_as_override = True
+                    try:
+                        if df is not None and 'Product Name*' in df.columns:
+                            # Find matching Excel rows by Product Name* (case-insensitive)
+                            matches = df[df['Product Name*'].astype(str).str.strip().str.lower() == str(product_name).strip().lower()]
+                            if matches is not None and len(matches) > 0:
+                                # Inspect the first matching row's lineage-like columns
+                                row = matches.iloc[0]
+                                excel_lineage = None
+                                for c in ['canonical_lineage', 'currentLineage', 'Lineage', 'lineage']:
+                                    if c in row and pd.notna(row[c]) and str(row[c]).strip() not in ['', 'None', 'nan']:
+                                        excel_lineage = str(row[c]).strip().upper()
+                                        break
+                                # If the Excel lineage is present and exactly equals the UI value,
+                                # then the UI did not change it and we should NOT treat it as an override.
+                                if excel_lineage and excel_lineage == ui_lineage_clean:
+                                    treat_as_override = False
+                    except Exception:
+                        # On any error, default to treating as override to avoid hiding explicit UI edits
+                        treat_as_override = True
+
+                    if treat_as_override:
+                        ui_lineage_map[str(product_name).strip()] = ui_lineage_clean
                 
                 # Apply UI lineage values - ALWAYS override database lineage with user's UI changes
                 # PERFORMANCE: Build case-insensitive map once for O(1) lookups
