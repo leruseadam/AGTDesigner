@@ -14860,6 +14860,18 @@ def get_web_available_tags():
                 logging.info(f"✅ WEB: Using {len(cached_tags)} cached tags ({elapsed:.1f}ms)")
                 # PERFORMANCE: Skip alignment on cache hits - tags were already aligned when cached
                 # Only re-align if lineage was recently updated (handled by has_recent_lineage_update above)
+                # PERFORMANCE: Only re-align cached tags if they're missing lineage (skip if already aligned)
+                store_name_align = get_current_store_name(allow_fallback=False)
+                if store_name_align:
+                    tags_with_lineage = sum(1 for t in cached_tags if t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage'))
+                    needs_alignment = tags_with_lineage < len(cached_tags) * 0.5  # Less than 50% have lineage
+                    if needs_alignment:
+                        logging.info(f"🔄 WEB CACHE: Re-aligning {len(cached_tags)} cached tags ({tags_with_lineage}/{len(cached_tags)} already have lineage)...")
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=True, force_overwrite=False)
+                        logging.info(f"✅ WEB CACHE: Re-alignment complete")
+                    else:
+                        logging.info(f"⚡ WEB CACHE: Skipping re-alignment - {tags_with_lineage}/{len(cached_tags)} tags already have lineage")
+                
                 safe_cached_tags = make_json_safe(cached_tags)
                 response = make_response(jsonify({
                     'tags': safe_cached_tags,
@@ -14876,9 +14888,19 @@ def get_web_available_tags():
         # Excel processor already loaded and validated above - just use it
         # Get tags from Excel
         try:
+            # PERFORMANCE: Skip enrichment for web endpoint to speed up tag loading
+            # Enrichment adds database lineage but is expensive - we'll align lineage separately if needed
+            if hasattr(excel_processor, '_skip_enrichment'):
+                excel_processor._skip_enrichment = True
+                logging.info("⚡ WEB: Skipping database enrichment for faster tag loading")
+            
             logging.info("WEB: Calling excel_processor.get_available_tags() - starting")
             excel_tags = excel_processor.get_available_tags()
             logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
+            
+            # Reset enrichment flag after getting tags
+            if hasattr(excel_processor, '_skip_enrichment'):
+                excel_processor._skip_enrichment = False
             
             # CRITICAL FIX: Only align tags with database lineage if they don't already have it
             # PERFORMANCE: Skip expensive alignment if tags already have canonical_lineage/sovereign_lineage
