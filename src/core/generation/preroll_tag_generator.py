@@ -27,6 +27,8 @@ PREROLL_PATTERN_COMPILED = [
 # Non-alphanumeric for normalization
 NON_ALNUM_RE = re.compile(r'[^a-z0-9-]+')
 import threading
+import os
+import time
 
 
 def _store_preroll_group_in_database(group_key: str, group_id: str, group_items: List[Dict], group_info: Dict):
@@ -247,6 +249,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 vendor_val = r.get('Vendor/Supplier*', '') or r.get('Vendor', '')
                 logging.debug(f"PREROLL INPUT DEBUG [{i+1}]: Name='{r.get('Product Name*', 'N/A')}', Brand='{brand_val}', Vendor='{vendor_val}', ALL_BRAND_FIELDS: Product Brand={repr(r.get('Product Brand'))}, ProductBrand={repr(r.get('ProductBrand'))}, Brand={repr(r.get('Brand'))}")
 
+    start_t = time.time()
+
+    # If environment requests preserve-all, skip grouping and return records unchanged
+    if os.getenv('PREROLL_PRESERVE_ALL', '').lower() in ['1', 'true', 'yes']:
+        logging.info(f"PREROLL: PREROLL_PRESERVE_ALL set - skipping grouping and returning all {len(records)} records")
+        return records
+
     # Filter records by allowed brands if configured
     # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
     # Prepare normalized allowed brand set once to avoid repeated work
@@ -278,7 +287,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                     logging.info(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands: {PREROLL_ALLOWED_BRANDS})")
             
             records = filtered_records
-            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} records to {len(records)} records matching allowed brands: {PREROLL_ALLOWED_BRANDS}")
+            excluded = original_count - len(records)
+            sample_kept = [r.get('Product Name*', r.get('ProductName', '')) for r in records[:5]]
+            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} -> {len(records)} records (excluded {excluded}) matching allowed brands: {PREROLL_ALLOWED_BRANDS}. Sample kept: {sample_kept}")
     else:
         logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is empty or None, allowing all brands (no filtering applied)")
     
@@ -357,7 +368,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
-        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (brand/vendor: '{brand_for_grouping}', total in group: {len(grouped_records[group_key]['records'])})")
+        # Only debug-log group growth when DEBUG enabled to avoid hot loop I/O
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (brand/vendor: '{brand_for_grouping}', total in group: {len(grouped_records[group_key]['records'])})")
     
     # Step 2: Create representative records with group display names
     unique_records = []
@@ -693,6 +706,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     session.modified = True
 
     # Note: Group items are already stored in cache above during grouping
-    logging.info(f"PREROLL: Generated {len(grouped_records_list)} grouped labels (one per vendor per product category)")
+    elapsed = time.time() - start_t
+    logging.info(f"PREROLL: Generated {len(grouped_records_list)} grouped labels (one per vendor per product category) from {original_count} originals in {elapsed:.3f}s")
 
     return grouped_records_list
