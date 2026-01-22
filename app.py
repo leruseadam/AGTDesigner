@@ -452,14 +452,6 @@ try:
 except Exception:  # pragma: no cover
     Compress = None
 
-# SECURITY: CSRF Protection
-try:
-    from flask_wtf.csrf import CSRFProtect
-    CSRF_AVAILABLE = True
-except ImportError:
-    CSRF_AVAILABLE = False
-    logging.warning("Flask-WTF not available - CSRF protection disabled")
-
 # PythonAnywhere-specific configuration
 try:
     from pythonanywhere_config import (
@@ -1686,32 +1678,13 @@ def create_app():
         app.config['SESSION_TYPE'] = 'filesystem'
         app.config['SESSION_FILE_DIR'] = sessions_dir
         app.config['SESSION_PERMANENT'] = True  # Enable session persistence to keep Excel uploads across browser restarts
-        # Avoid signing session cookie as the signer produces a bytes value
-        # which causes `werkzeug.http.dump_cookie` to error when matching
-        # regex patterns against bytes. Use unsigned filesystem sessions
-        # (acceptable for local development) to prevent that TypeError.
-        app.config['SESSION_USE_SIGNER'] = False
+        app.config['SESSION_USE_SIGNER'] = True
         app.config['SESSION_KEY_PREFIX'] = 'labelmaker:'
         app.config['SESSION_FILE_THRESHOLD'] = 500  # Max number of session files
         
         Session(app)
         logging.info(f"Flask-Session initialized with filesystem storage at {sessions_dir}")
         logging.info(f"Session config: TYPE={app.config.get('SESSION_TYPE')}, DIR={app.config.get('SESSION_FILE_DIR')}")
-        # Monkeypatch session save to ensure cookie values are text (not bytes)
-        # Some signer implementations may return bytes; werkzeug expects str.
-        try:
-            original_save = app.session_interface.save_session
-            def _patched_save(app_obj, session_obj, response_obj):
-                try:
-                    if isinstance(session_obj.sid, (bytes, bytearray)):
-                        session_obj.sid = session_obj.sid.decode('utf-8')
-                except Exception:
-                    session_obj.sid = str(session_obj.sid)
-                return original_save(app_obj, session_obj, response_obj)
-            app.session_interface.save_session = _patched_save
-            logging.info('Patched session save to normalize session ID to str')
-        except Exception:
-            logging.exception('Failed to patch session save')
     else:
         logging.warning("Flask-Session not available, using default session handling")
     
@@ -1864,26 +1837,9 @@ def create_app():
     upload_folder = os.path.join(current_dir, 'uploads')
     os.makedirs(upload_folder, exist_ok=True)
     app.config['UPLOAD_FOLDER'] = upload_folder
-    # SECURITY: Require secret key from environment variable in production
-    # Generate a secure random key for development if not set
-    secret_key = os.environ.get('SECRET_KEY')
-    if not secret_key:
-        import secrets
-        secret_key = secrets.token_hex(32)
-        logging.warning("⚠️ SECURITY WARNING: SECRET_KEY not set in environment. Using randomly generated key (sessions will not persist across restarts).")
-        logging.warning("⚠️ Set SECRET_KEY environment variable for production deployments.")
-    app.secret_key = secret_key
-    
-    # SECURITY: Enable CSRF protection for POST requests
-    if CSRF_AVAILABLE:
-        csrf = CSRFProtect(app)
-        # Configure CSRF to work with AJAX requests
-        # CSRF tokens will be available via {{ csrf_token() }} in templates
-        # For AJAX, include token in X-CSRFToken header or as csrf_token in form data
-        app.config['WTF_CSRF_TIME_LIMIT'] = None  # No time limit for CSRF tokens
-        logging.info("✅ CSRF protection enabled")
-    else:
-        logging.warning("⚠️ CSRF protection not available - install Flask-WTF for production security")
+    # Use a consistent secret key for production to maintain sessions across restarts
+    # In production, this should be set via environment variable
+    app.secret_key = os.environ.get('SECRET_KEY', 'label-maker-secret-key-2024-production')
 
     # Enable gzip compression for JSON and text responses to reduce bandwidth/latency
     if Compress is not None:
@@ -1940,13 +1896,9 @@ def add_performance_headers(response):
             else:
                 # 2 minutes for other API responses
                 response.headers['Cache-Control'] = 'private, max-age=120, must-revalidate'
-    # SECURITY: Security headers
+    # Security headers
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    # Content-Security-Policy: Allow same-origin and inline scripts/styles for compatibility
-    # Note: This is permissive for compatibility - tighten in production if possible
-    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
     # Add timing header for debugging
     if hasattr(request, '_start_time'):
         elapsed = (time.time() - request._start_time) * 1000
@@ -2851,21 +2803,7 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
     # Ensure we have a proper display name
     if 'displayName' not in enhanced_tag or not enhanced_tag['displayName']:
         product_name = enhanced_tag.get(get_canonical_field('Product Name*'), enhanced_tag.get(get_canonical_field('ProductName'), ''))
-        # Prefer Product Brand for non-classic product types; classic types keep Vendor as the primary
-        try:
-            from src.core.constants import CLASSIC_TYPES
-            product_type_val = (enhanced_tag.get(get_canonical_field('Product Type*')) or enhanced_tag.get('ProductType') or '')
-            product_type_norm = str(product_type_val).lower() if product_type_val else ''
-            is_classic = product_type_norm in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_norm for ct in CLASSIC_TYPES)
-        except Exception:
-            # Fallback: if we can't determine, preserve existing behavior
-            is_classic = True
-
-        if not is_classic:
-            vendor = enhanced_tag.get(get_canonical_field('Product Brand'), enhanced_tag.get(get_canonical_field('Vendor'), ''))
-        else:
-            vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
-
+        vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
         if product_name and vendor:
             enhanced_tag['displayName'] = f"{product_name} by {vendor}"
         elif product_name:
@@ -7404,12 +7342,6 @@ def _enforce_nonclassic_lineage_rules(tags):
     from src.core.constants import CLASSIC_TYPES
     
     fixed_count = 0
-    # Try to get product DB for lineage checks; if unavailable, fall back to using tags only
-    try:
-        store_name_for_check = get_current_store_name()
-        product_db_for_check = get_product_database(store_name_for_check)
-    except Exception:
-        product_db_for_check = None
     for tag in tags:
         if not isinstance(tag, dict):
             continue
@@ -7445,31 +7377,16 @@ def _enforce_nonclassic_lineage_rules(tags):
         # Only fix if current lineage is not MIXED or CBD
         valid_nonclassic_lineages = ['MIXED', 'CBD', 'CBD_BLEND', 'THC']  # THC is treated as MIXED
         if current_lineage_upper not in valid_nonclassic_lineages:
-            # Before forcing, check database — if DB has lineage for this product, DO NOT overwrite
-            product_name_for_check = tag.get('Product Name*') or tag.get('ProductName')
-            db_has_lineage_for_product = False
-            try:
-                if product_db_for_check and product_name_for_check:
-                    db_line = product_db_for_check.get_product_lineage(product_name_for_check, bypass_cache=True)
-                    if db_line and str(db_line).strip().upper() not in ['', 'NONE', 'NULL', 'NAN']:
-                        db_has_lineage_for_product = True
-            except Exception:
-                # If DB check fails, don't block enforcement (fail open)
-                db_has_lineage_for_product = False
-
-            if db_has_lineage_for_product:
-                logging.debug(f"⏭️ NON-CLASSIC LINEAGE: DB has lineage for '{product_name_for_check}', skipping Excel-based enforcement")
-            else:
-                # Force to correct lineage based on Product Strain
-                tag['Lineage'] = correct_lineage
-                tag['Lineage*'] = correct_lineage
-                tag['currentLineage'] = correct_lineage
-                tag['canonical_lineage'] = correct_lineage
-                tag['lineage'] = correct_lineage.lower()
-                
-                product_name = tag.get('Product Name*', 'unknown')
-                logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}' (DB missing)")
-                fixed_count += 1
+            # Force to correct lineage based on Product Strain
+            tag['Lineage'] = correct_lineage
+            tag['Lineage*'] = correct_lineage
+            tag['currentLineage'] = correct_lineage
+            tag['canonical_lineage'] = correct_lineage
+            tag['lineage'] = correct_lineage.lower()
+            
+            product_name = tag.get('Product Name*', 'unknown')
+            logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}'")
+            fixed_count += 1
         elif current_lineage_upper == 'THC':
             # THC is an abbreviation for MIXED - normalize it
             tag['Lineage'] = 'MIXED'
@@ -7520,52 +7437,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         if not product_names:
             logging.debug("⚡ No products need lineage alignment")
             return aligned_tags
-
-
-        def _cached_tags_missing_db_sovereign(tags, store_name, sample_limit: int = 200) -> bool:
-            """
-            Detect whether cached `tags` are missing sovereign lineage values that exist in the database.
-            Returns True if at least one product in the sampled set has a sovereign/canonical lineage
-            in the database while the cached tag lacks database lineage fields.
-            """
-            try:
-                product_db = get_product_database(store_name)
-                if not product_db:
-                    return False
-
-                names_to_check = []
-                for tag in tags:
-                    if not isinstance(tag, dict):
-                        continue
-                    name = tag.get('Product Name*') or tag.get('ProductName')
-                    if not name:
-                        continue
-                    # If tag already has DB lineage fields or sovereign_lineage, skip it
-                    if tag.get('sovereign_lineage') or tag.get('canonical_lineage') or tag.get('currentLineage'):
-                        continue
-                    names_to_check.append(name)
-                    if len(names_to_check) >= sample_limit:
-                        break
-
-                if not names_to_check:
-                    return False
-
-                # Check each name using bypass_cache to ensure fresh DB result
-                for name in names_to_check:
-                    try:
-                        db_line = product_db.get_product_lineage(name, bypass_cache=True)
-                        if db_line and str(db_line).strip().upper() not in ['', 'NONE', 'NULL', 'NAN']:
-                            # Database has a lineage for this product while cached tag lacked it
-                            logging.info(f"CACHE STALE CHECK: DB has lineage for '{name}' but cached tag lacks it")
-                            return True
-                    except Exception:
-                        # Ignore per-item errors and continue
-                        continue
-
-                return False
-            except Exception as e:
-                logging.warning(f"Error during cached tags stale check: {e}")
-                return False
         
         lineage_map = {}
         conn = product_db._get_connection()
@@ -7668,12 +7539,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         # PERFORMANCE: DOH and Brand data is already included in lineage_map from the first query
         # No need for a separate query - just use lineage_map for all enrichment
         # The first query already fetches product_brand and doh fields
-
+        
         # Apply lineage to tags
         aligned_count = 0
         # Import CLASSIC_TYPES for validation
         from src.core.constants import CLASSIC_TYPES
-
+        
         # CRITICAL FIX: Initialize DOH/Brand fields on ALL tags FIRST (before any matching)
         # This ensures fields exist even if tag doesn't match in lineage_map
         for tag in aligned_tags:
@@ -7694,69 +7565,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 tag['ProductBrand'] = ''
             if 'productBrand' not in tag:
                 tag['productBrand'] = ''
-
-        # PERFORMANCE OPTIMIZATION: Batch strain lookup to eliminate N+1 queries
-        # Collect all Product Strain values first, then do ONE batch query
-        strain_names_to_lookup = set()
-        tags_needing_strain_lookup = []
-        for tag in aligned_tags:
-            if not isinstance(tag, dict):
-                continue
-            name = tag.get('Product Name*')
-            if not name:
-                continue
-            # Check if this tag needs strain lookup (missing or incomplete lineage_info)
-            lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
-            if not lineage_info or (isinstance(lineage_info, dict) and not lineage_info.get('strain_canonical')):
-                product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
-                if product_strain:
-                    strain_names_to_lookup.add(product_strain)
-                    tags_needing_strain_lookup.append((tag, name, product_strain, lineage_info))
-
-        # Do ONE batch query for all strains (instead of N queries)
-        strain_info_batch = {}
-        if strain_names_to_lookup:
-            try:
-                strain_info_batch = product_db.get_strain_info_batch(list(strain_names_to_lookup))
-                logging.debug(f"✅ BATCH STRAIN LOOKUP: Fetched {len(strain_info_batch)} strains in single query (was {len(strain_names_to_lookup)} individual queries)")
-            except Exception as e:
-                logging.warning(f"❌ BATCH STRAIN LOOKUP failed, falling back to individual lookups: {e}")
-
-        # Apply batch strain results to tags that need it
-        for tag, name, product_strain, existing_lineage_info in tags_needing_strain_lookup:
-            # Look up from batch results using normalized name
-            normalized_strain = product_db._normalize_strain_name(product_strain)
-            strain_info = strain_info_batch.get(normalized_strain)
-
-            if strain_info:
-                canonical_from_strain = strain_info.get('canonical_lineage') or strain_info.get('display_lineage')
-                if canonical_from_strain:
-                    if not existing_lineage_info:
-                        # Create new lineage_info from strain
-                        new_lineage_info = {
-                            'lineage': canonical_from_strain,
-                            'has_sovereign': False,
-                            'product_sovereign': None,
-                            'strain_sovereign': strain_info.get('sovereign_lineage'),
-                            'strain_canonical': canonical_from_strain,
-                            'db_lineage': canonical_from_strain
-                        }
-                        # Add to lineage_map for this tag
-                        lineage_map[name] = new_lineage_info
-                        lineage_map[product_db._normalize_product_name(name)] = new_lineage_info
-                        lineage_map[str(name).lower().strip()] = new_lineage_info
-                        logging.debug(f"✅ BATCH STRAIN: Found canonical_lineage '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
-                    else:
-                        # Update existing lineage_info
-                        old_canonical = existing_lineage_info.get('strain_canonical')
-                        existing_lineage_info['strain_canonical'] = canonical_from_strain
-                        if not existing_lineage_info.get('db_lineage') or (existing_lineage_info.get('db_lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED'):
-                            existing_lineage_info['db_lineage'] = canonical_from_strain
-                        if existing_lineage_info.get('lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED':
-                            existing_lineage_info['lineage'] = canonical_from_strain
-                        if old_canonical != canonical_from_strain:
-                            logging.debug(f"✅ BATCH STRAIN: Updated canonical_lineage from '{old_canonical}' to '{canonical_from_strain}' for product '{name}'")
-
+        
         # Now process tags for lineage and enrichment
         for tag in aligned_tags:
             if not isinstance(tag, dict):
@@ -7767,45 +7576,74 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             # Try exact match first (like docx generation), then normalized, then lowercase
             lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
             
+            # CRITICAL FIX: If lineage_info is missing or strain_canonical is None, try looking up strain by name
+            # This matches DOCX generation which also looks up strains by name (template_processor.py line 1984-1987)
+            if not lineage_info or (isinstance(lineage_info, dict) and not lineage_info.get('strain_canonical')):
+                # Try to get canonical_lineage from strain by Product Strain name (check multiple field name variations)
+                product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
+                if product_strain:
+                    try:
+                        strain_info = product_db.get_strain_info(product_strain)
+                        if strain_info:
+                            canonical_from_strain = strain_info.get('canonical_lineage') or strain_info.get('display_lineage')
+                            if canonical_from_strain:
+                                # Create or update lineage_info with strain canonical_lineage
+                                if not lineage_info:
+                                    lineage_info = {
+                                        'lineage': canonical_from_strain,
+                                        'has_sovereign': False,
+                                        'product_sovereign': None,
+                                        'strain_sovereign': strain_info.get('sovereign_lineage'),
+                                        'strain_canonical': canonical_from_strain,
+                                        'db_lineage': canonical_from_strain
+                                    }
+                                    logging.info(f"✅ STRAIN LOOKUP: Found canonical_lineage '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
+                                else:
+                                    # Update existing lineage_info with strain canonical_lineage
+                                    old_canonical = lineage_info.get('strain_canonical')
+                                    lineage_info['strain_canonical'] = canonical_from_strain
+                                    # Update db_lineage if it's currently MIXED and we have a better value
+                                    if not lineage_info.get('db_lineage') or (lineage_info.get('db_lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED'):
+                                        lineage_info['db_lineage'] = canonical_from_strain
+                                    # Also update lineage if it was MIXED
+                                    if lineage_info.get('lineage', '').upper() == 'MIXED' and canonical_from_strain.upper() != 'MIXED':
+                                        lineage_info['lineage'] = canonical_from_strain
+                                    if old_canonical != canonical_from_strain:
+                                        logging.info(f"✅ STRAIN LOOKUP: Updated canonical_lineage from '{old_canonical}' to '{canonical_from_strain}' for product '{name}' via strain '{product_strain}'")
+                            else:
+                                logging.debug(f"⚠️ STRAIN LOOKUP: Strain '{product_strain}' found but no canonical_lineage for product '{name}'")
+                        else:
+                            logging.debug(f"⚠️ STRAIN LOOKUP: Strain '{product_strain}' not found in database for product '{name}'")
+                    except Exception as e:
+                        logging.warning(f"❌ STRAIN LOOKUP: Could not lookup strain '{product_strain}' for product '{name}': {e}")
+            
             # Check if this is a classic product type
             product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower().strip()
             is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
             
-            # For non-classic types, prefer database lineage. Only derive from Product Strain
-            # when the database has no lineage for this product (new product or missing DB data).
+            # CRITICAL FIX: For non-classic types, ALWAYS set lineage from Product Strain (override database)
+            # Non-classic types should be either MIXED (THC) or CBD based on Product Strain
             if not is_classic:
                 product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
-
-                # Determine whether database already provides lineage info for this tag
-                db_has_lineage = False
-                if isinstance(lineage_info, dict):
-                    # db_lineage or strain_canonical or any sovereign indicates DB has lineage
-                    if lineage_info.get('db_lineage') or lineage_info.get('strain_canonical') or lineage_info.get('product_sovereign') or lineage_info.get('strain_sovereign'):
-                        db_has_lineage = True
-
-                # If DB has lineage, do NOT override it with Excel-derived values
-                if db_has_lineage:
-                    logging.debug(f"⏭️ NON-CLASSIC LINEAGE: Database provides lineage for '{name}', not overriding with Excel/strain-derived value")
-                else:
-                    # Database missing lineage for this product — derive from Product Strain (or default to MIXED)
-                    if product_strain:
-                        strain_upper = product_strain.upper()
-                        has_cbd = any(indicator in strain_upper for indicator in ['CBD', 'HIGH CBD', 'CBG', 'CBN', 'CBC'])
-                        if has_cbd:
-                            derived = 'CBD'
-                        else:
-                            derived = 'MIXED'
+                if product_strain:
+                    # Check if Product Strain contains CBD-related terms
+                    strain_upper = product_strain.upper()
+                    # Check for CBD indicators in Product Strain
+                    has_cbd = any(indicator in strain_upper for indicator in ['CBD', 'HIGH CBD', 'CBG', 'CBN', 'CBC'])
+                    
+                    if has_cbd:
+                        # Set to CBD for non-classic types with CBD in Product Strain
                         lineage_info = {
-                            'lineage': derived,
+                            'lineage': 'CBD',
                             'has_sovereign': False,
                             'product_sovereign': None,
                             'strain_sovereign': None,
                             'strain_canonical': None,
-                            'db_lineage': derived
+                            'db_lineage': 'CBD'
                         }
-                        logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' set to '{derived}' from Product Strain '{product_strain}' (DB missing)")
+                        logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to CBD based on Product Strain '{product_strain}' (overriding database)")
                     else:
-                        # No strain available and DB missing — default to MIXED
+                        # Default to MIXED (THC) for non-classic types without CBD
                         lineage_info = {
                             'lineage': 'MIXED',
                             'has_sovereign': False,
@@ -7814,7 +7652,18 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                             'strain_canonical': None,
                             'db_lineage': 'MIXED'
                         }
-                        logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' defaulted to 'MIXED' (no Product Strain and DB missing)")
+                        logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to MIXED (THC) based on Product Strain '{product_strain}' (overriding database)")
+                else:
+                    # No Product Strain - default to MIXED for non-classic types
+                    lineage_info = {
+                        'lineage': 'MIXED',
+                        'has_sovereign': False,
+                        'product_sovereign': None,
+                        'strain_sovereign': None,
+                        'strain_canonical': None,
+                        'db_lineage': 'MIXED'
+                    }
+                    logging.info(f"✅ NON-CLASSIC LINEAGE: Set '{name}' lineage to MIXED (THC) - no Product Strain")
             
             # Skip tags without lineage_info - we can't enrich them
             if not lineage_info:
@@ -8250,10 +8099,6 @@ def generate_labels():
             logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time)")
             needs_file_load = False
             skip_default_file_load = True  # Skip ALL further file loading operations
-            # If filters are provided, we must ensure database enrichment runs so lineage is populated
-            if filters:
-                excel_processor._skip_enrichment = False
-                logging.info("🔄 FILTERS DETECTED: Overriding _skip_enrichment to enable DB enrichment for lineage")
         else:
             logging.info("📂 No tags in request - using normal file loading")
             needs_file_load = True
@@ -8934,32 +8779,14 @@ def generate_labels():
                                         processed_record['JointRatio'] = joint_ratio_value
                                     
                                     # Map database fields to template fields (using correct field names from database)
-                                    # CRITICAL FIX: Extract vendor from multiple possible field names
-                                    vendor_value = (
-                                        processed_record.get('Vendor/Supplier*') or
-                                        processed_record.get('Vendor') or
-                                        processed_record.get('ProductVendor') or
-                                        processed_record.get('vendor') or
-                                        ''
-                                    )
-                                    # CRITICAL FIX: Extract brand from multiple possible field names
-                                    brand_value = (
-                                        processed_record.get('Product Brand') or
-                                        processed_record.get('ProductBrand') or
-                                        processed_record.get('Brand') or
-                                        processed_record.get('brand') or
-                                        ''
-                                    )
                                     record = {
                                         'Product Name*': processed_record.get('Product Name*', ''),
                                         'ProductName': processed_record.get('Product Name*', ''),  # Add ProductName for Excel processor compatibility
                                         'ProductType': processed_record.get('Product Type*', ''),
                                         'Lineage': docx_lineage,
-                                        'ProductBrand': brand_value,
-                                        'Product Brand': brand_value,  # Add Product Brand for template processor compatibility
-                                        'Brand': brand_value,  # Also set Brand for template processor compatibility
-                                        'Vendor': vendor_value,
-                                        'Vendor/Supplier*': vendor_value,  # Also set Vendor/Supplier* for template processor compatibility
+                                        'ProductBrand': processed_record.get('Product Brand', ''),
+                                        'Product Brand': processed_record.get('Product Brand', ''),  # Add Product Brand for template processor compatibility
+                                        'Vendor': processed_record.get('Vendor/Supplier*', ''),
                                         'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                         'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
                                         'Price': formatted_price,  # Use extracted and formatted price
@@ -9191,55 +9018,14 @@ def generate_labels():
             # This ensures DOCX matches what's displayed in the UI and user changes are respected
             if records:
                 # Build UI lineage map from selected tags
-                # Only treat a selected tag's lineage as a USER OVERRIDE if it differs
-                # from the Excel-sourced lineage for that product. This prevents stale
-                # Excel lineage values (that the UI simply reflects) from overriding
-                # authoritative database lineage.
                 ui_lineage_map = {}
-                try:
-                    excel_proc = get_excel_processor()
-                    df = excel_proc.df if excel_proc is not None else None
-                except Exception:
-                    df = None
-
                 for tag in selected_tags_from_request:
-                    if not isinstance(tag, dict):
-                        continue
-                    product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
-                    # Use canonical_lineage or currentLineage (what UI displays) as source of truth
-                    ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
-                    if not product_name or not ui_lineage:
-                        continue
-
-                    ui_lineage_clean = str(ui_lineage).strip().upper()
-
-                    # If we have the original Excel DF, compare the value in the sheet.
-                    # If the UI lineage equals the Excel sheet's lineage for that product,
-                    # it likely wasn't changed by the user and should not be treated as
-                    # a user override that trumps the database.
-                    treat_as_override = True
-                    try:
-                        if df is not None and 'Product Name*' in df.columns:
-                            # Find matching Excel rows by Product Name* (case-insensitive)
-                            matches = df[df['Product Name*'].astype(str).str.strip().str.lower() == str(product_name).strip().lower()]
-                            if matches is not None and len(matches) > 0:
-                                # Inspect the first matching row's lineage-like columns
-                                row = matches.iloc[0]
-                                excel_lineage = None
-                                for c in ['canonical_lineage', 'currentLineage', 'Lineage', 'lineage']:
-                                    if c in row and pd.notna(row[c]) and str(row[c]).strip() not in ['', 'None', 'nan']:
-                                        excel_lineage = str(row[c]).strip().upper()
-                                        break
-                                # If the Excel lineage is present and exactly equals the UI value,
-                                # then the UI did not change it and we should NOT treat it as an override.
-                                if excel_lineage and excel_lineage == ui_lineage_clean:
-                                    treat_as_override = False
-                    except Exception:
-                        # On any error, default to treating as override to avoid hiding explicit UI edits
-                        treat_as_override = True
-
-                    if treat_as_override:
-                        ui_lineage_map[str(product_name).strip()] = ui_lineage_clean
+                    if isinstance(tag, dict):
+                        product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
+                        # Use canonical_lineage or currentLineage (what UI displays) as source of truth
+                        ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
+                        if product_name and ui_lineage:
+                            ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
                 
                 # Apply UI lineage values - ALWAYS override database lineage with user's UI changes
                 # PERFORMANCE: Build case-insensitive map once for O(1) lookups
@@ -9925,9 +9711,6 @@ def generate_labels():
         tag_count = len(records)
         
         # Get vendor information from the processed records
-        # Defensive defaults to avoid NameError if counting logic is skipped or fails
-        vendor_clean = 'Unknown'
-        product_type_clean = 'Unknown'
         vendor_counts = {}
         product_type_counts = {}
         
@@ -10299,34 +10082,6 @@ def clear_available_tags_cache(reason=None):
         json_matched_cache_key = session.get('json_matched_cache_key')
         if json_matched_cache_key:
             _clear_key(json_matched_cache_key)
-
-        # Also clear any background 'tags_file_*' caches created during pre-processing
-        try:
-            import hashlib
-            session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
-            if session_file_path:
-                # Known cache version used by background pre-cache
-                for ver in ("v2_no_excel_lineage", "v1"):
-                    tkey = f"tags_file_{ver}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
-                    _clear_key(tkey)
-                    # Also attempt deleting without version suffix (legacy)
-                    tkey2 = f"tags_file_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
-                    _clear_key(tkey2)
-        except Exception as e:
-            logging.debug(f"Could not clear tags_file caches: {e}")
-
-        # Clear any in-memory excel processor caches to prevent stale available-tags
-        try:
-            global _excel_processor
-            if _excel_processor is not None:
-                if hasattr(_excel_processor, '_available_tags_cache'):
-                    _excel_processor._available_tags_cache.clear()
-                    logging.info("✅ Cleared _excel_processor._available_tags_cache (in-memory)")
-                if hasattr(_excel_processor, '_filter_options_cache'):
-                    _excel_processor._filter_options_cache.clear()
-                    logging.info("✅ Cleared _excel_processor._filter_options_cache (in-memory)")
-        except Exception as e:
-            logging.debug(f"Error clearing in-memory excel processor caches: {e}")
         
         # Related caches to keep UI in sync
         related_bases = [
@@ -10855,56 +10610,12 @@ def get_available_tags():
         # CRITICAL: Check if lineage was updated BEFORE checking cache
         # If lineage was updated, we must bypass cache to get fresh database lineage
         has_lineage_updates = bool(session.get('lineage_update_timestamp'))
-
-        # If any lineage updates exist, force bypass of cache and attempt to reload the last uploaded file
-        if has_lineage_updates:
-            logging.info("🔔 LINEAGE UPDATE DETECTED: Forcing cache bypass and reloading last uploaded Excel file to avoid stale lineage")
-            try:
-                cache.delete(cache_key)
-            except Exception:
-                pass
-
-            # Force reload of the Excel processor from the session file path if available
-            try:
-                if session_file_path and os.path.exists(session_file_path):
-                    from src.core.data.excel_processor import ExcelProcessor
-                    reloaded_processor = ExcelProcessor(store_name=store_name)
-                    load_ok = False
-                    try:
-                        load_ok = reloaded_processor.load_file(session_file_path)
-                    except Exception as _load_err:
-                        logging.warning(f"LINEAGE RELOAD: load_file failed for {session_file_path}: {_load_err}")
-                    if load_ok and reloaded_processor.df is not None and not reloaded_processor.df.empty:
-                        g.excel_processor = reloaded_processor
-                        reloaded_processor._last_loaded_file = session_file_path
-                        has_excel_data = True
-                        logging.info(f"✅ LINEAGE RELOAD: Successfully reloaded Excel file for fresh lineage: {session_file_path}")
-                    else:
-                        logging.warning(f"⚠️ LINEAGE RELOAD: Could not reload Excel file or file empty: {session_file_path}")
-            except Exception as reload_err:
-                logging.warning(f"LINEAGE RELOAD ERROR: {reload_err}")
+        bypass_cache_for_lineage = has_lineage_updates and nocache
 
         # PERFORMANCE: Allow caching (keyed by file + timestamp) to avoid recomputing tags on every request.
         # CRITICAL: Only check cache AFTER verifying Excel file exists
-        # CRITICAL: Bypass cache if nocache requested or lineage updates detected
-        cached_tags = None if (nocache or has_lineage_updates) else cache.get(cache_key)
-
-        # EXTRA SAFETY: If cached tags exist, ensure they are not missing sovereign_lineage
-        # that exists in the database. If so, invalidate the cache to prevent showing
-        # stale Excel-only lineage to users.
-        if cached_tags:
-            try:
-                # Use current store_name (may be None) - prefer explicit store
-                store_for_check = store_name or get_current_store_name(allow_fallback=False)
-                if store_for_check and _cached_tags_missing_db_sovereign(cached_tags, store_for_check):
-                    logging.info("🧯 Invalidating cached available-tags: missing DB sovereign_lineage detected")
-                    try:
-                        cache.delete(cache_key)
-                    except Exception:
-                        logging.warning("Failed to delete stale available-tags cache key")
-                    cached_tags = None
-            except Exception as stale_check_err:
-                logging.warning(f"Cached tags stale-check failed: {stale_check_err}")
+        # CRITICAL: Bypass cache if lineage was updated and nocache=1
+        cached_tags = None if (nocache or bypass_cache_for_lineage) else cache.get(cache_key)
 
         # Respect nocache fully: only use file cache when nocache is not requested
         if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
@@ -10928,14 +10639,18 @@ def get_available_tags():
                 except Exception:
                     needs_realignment = False
             
-            # ALWAYS re-align cached tags with the database to avoid serving stale lineage
-            try:
-                store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                if store_name_align:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    logging.info("✅ Re-aligned cached tags with database lineage (forced alignment)")
-            except Exception as align_err:
-                logging.warning(f"Could not align cached tags after lineage update or cache hit: {align_err}")
+            if needs_realignment:
+                logging.info(f"🔄 Recent lineage update detected - re-aligning cached tags with database")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
+                        # It must persist to ensure cache uses the correct timestamp-based key
+                        # The timestamp changes the cache key, so old cached tags won't be used
+                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
             
             # CRITICAL FIX: Enrich cached tags with DOH and Brand data (cached tags may be missing these fields)
             # This ensures DOH badges and filters work even when tags come from cache
@@ -11180,17 +10895,23 @@ def get_available_tags():
                 except Exception:
                     pass
             
-            # ALWAYS re-align cached tags with the database on cache hit (slow mode)
-            try:
-                store_name_align = get_current_store_name(allow_fallback=False) or store_name
-                if store_name_align:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    # Mark that we've aligned tags in this session
-                    session['tags_aligned_this_session'] = True
-                    session.modified = True
-                    logging.info("✅ Re-aligned cached tags with database lineage (forced alignment - slow mode)")
-            except Exception as align_err:
-                logging.warning(f"Could not align cached tags on slow-mode cache hit: {align_err}")
+            if needs_realignment:
+                reason = "first request of session" if first_request else "recent lineage update"
+                logging.info(f"🔄 SLOW MODE: Re-aligning cached tags with database ({reason})")
+                try:
+                    store_name_align = get_current_store_name(allow_fallback=False) or store_name
+                    if store_name_align:
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
+                        # Mark that we've aligned tags in this session
+                        session['tags_aligned_this_session'] = True
+                        session.modified = True
+                        # CRITICAL FIX: DO NOT delete lineage_update_timestamp
+                        # It must persist to change the cache key and ensure fresh database lineage
+                        logging.info("✅ Re-aligned cached tags with database lineage (timestamp preserved)")
+                except Exception as align_err:
+                    logging.warning(f"Could not align cached tags after lineage update: {align_err}")
+            else:
+                logging.info(f"⚡ SLOW MODE: No recent lineage update - returning cached tags without re-alignment")
             
             # CRITICAL FIX: Enrich cached tags with DOH and Brand data (same as fast_load path)
             try:
@@ -15141,18 +14862,17 @@ def get_web_available_tags():
             excel_tags = excel_processor.get_available_tags()
             logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
             
-            # Enforce database-as-source-of-truth: always align Excel tags with DB lineage
-            # before returning to the web UI. This ensures Excel data cannot override
-            # database lineage except when DB is missing lineage for the product.
+            # CRITICAL FIX: Always align tags with database lineage to ensure lineage is available
+            # Use the robust _align_tags_with_db_lineage helper function used throughout the codebase
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and excel_tags:
                 try:
-                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage (web fast-path)...")
+                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
                     excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
                     matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
-                    logging.info(f"✅ WEB: Aligned {matched_count} tags with database lineage")
+                    logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
                 except Exception as align_err:
-                    logging.warning(f"WEB: Lineage alignment failed, returning Excel tags: {align_err}")
+                    logging.warning(f"WEB: Lineage alignment failed, using Excel lineage: {align_err}")
                     import traceback
                     logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
@@ -17518,19 +17238,6 @@ def update_database_product(product_id: int):
             if not updates:
                 return jsonify({'success': False, 'error': 'No updatable fields provided'}), 400
 
-            # SECURITY: Validate all column names are in the allowed set to prevent SQL injection
-            # All updates should only contain columns from the validated cols set
-            for update_clause in updates:
-                # Extract column name from update clause (format: "column" = ? or column = ?)
-                import re
-                col_match = re.match(r'^["\']?([^"\']+)["\']?\s*=', update_clause)
-                if col_match:
-                    col_name = col_match.group(1)
-                    # Verify column exists in schema (already validated above, but double-check)
-                    if col_name not in cols and col_name.strip('"\'') not in cols:
-                        logging.warning(f"SECURITY: Attempted to update invalid column: {col_name}")
-                        return jsonify({'success': False, 'error': f'Invalid column name: {col_name}'}), 400
-
             where_clause = 'rowid = ?' if excel_style else 'id = ?'
             params.append(product_id)
 
@@ -19821,36 +19528,9 @@ def proxy_json():
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
-        
-        # SECURITY: Prevent SSRF attacks by validating URL scheme and host
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        
-        # Only allow http and https schemes
-        if parsed.scheme not in ('http', 'https'):
-            return jsonify({'error': 'Only HTTP and HTTPS URLs are allowed'}), 400
-        
-        # SECURITY: Block private/internal IP addresses and localhost
-        hostname = parsed.hostname
-        if not hostname:
-            return jsonify({'error': 'Invalid URL: missing hostname'}), 400
-        
-        # Block localhost and private IP ranges
-        blocked_hosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
-        if hostname.lower() in blocked_hosts:
-            return jsonify({'error': 'Access to localhost/internal addresses is not allowed'}), 400
-        
-        # Block private IP ranges (RFC 1918)
-        try:
-            import ipaddress
-            ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local:
-                return jsonify({'error': 'Access to private/internal IP addresses is not allowed'}), 400
-        except ValueError:
-            # Not an IP address, check if it's a domain
-            # Allow only if it's a valid external domain
-            if hostname.lower() in blocked_hosts or hostname.startswith('192.168.') or hostname.startswith('10.') or hostname.startswith('172.'):
-                return jsonify({'error': 'Access to private/internal addresses is not allowed'}), 400
+            
+        if not url.lower().startswith('http'):
+            return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
         
         import requests
         import json
@@ -20051,13 +19731,9 @@ def clear_upload_status():
         return jsonify({'error': str(e)}), 500
 
 def sanitize_filename(filename):
-    """Sanitize filename for safe download and prevent path traversal attacks."""
+    """Sanitize filename for safe download."""
     import re
     import unicodedata
-    import os
-    
-    # SECURITY: Remove path traversal sequences first
-    filename = filename.replace('..', '').replace('/', '').replace('\\', '')
     
     # Remove or replace problematic characters
     filename = unicodedata.normalize('NFKD', filename)
@@ -20065,24 +19741,13 @@ def sanitize_filename(filename):
     filename = re.sub(r'[^\x00-\x7F]+', '', filename)  # Remove non-ASCII
     filename = filename.strip()
     
-    # SECURITY: Additional path traversal check after normalization
-    if '..' in filename or '/' in filename or '\\' in filename:
-        filename = re.sub(r'\.\.|[/\\]', '', filename)
-    
     # Ensure it's not empty
     if not filename:
         filename = "AGT_File"
     
-    # SECURITY: Remove leading dots and spaces (could be hidden files)
-    filename = filename.lstrip('. ')
-    
     # Limit length
     if len(filename) > 200:
         filename = filename[:200]
-    
-    # SECURITY: Final validation - ensure no path separators
-    if os.sep in filename or (os.altsep and os.altsep in filename):
-        filename = filename.replace(os.sep, '_').replace(os.altsep or '', '_')
     
     return filename
 
@@ -20785,10 +20450,15 @@ def get_initial_data():
         start_time = time.time()
         logging.info(f"⏱️ /api/initial-data request started at {start_time}")
 
-        # PERFORMANCE: Check cache first
+        # PERFORMANCE: Check fast_load flag FIRST to determine cache behavior
+        # If fast_load=0 is explicitly requested, bypass cache to ensure fresh lineage alignment
+        fast_load = request.args.get('fast_load') not in ('0', 'false', 'False')
+        force_fresh_lineage = request.args.get('fast_load') in ('0', 'false', 'False')
+        
+        # PERFORMANCE: Check cache first (but skip if fast_load=0 to ensure correct lineage)
         cache_key = get_session_cache_key('initial_data')
         cached_response = cache.get(cache_key)
-        if cached_response and request.args.get('nocache') != '1':
+        if cached_response and request.args.get('nocache') != '1' and not force_fresh_lineage:
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"⚡ Returning cached initial data (took {elapsed:.0f}ms)")
             response = make_response(jsonify(cached_response))
@@ -20798,13 +20468,14 @@ def get_initial_data():
 
         logging.info("=== INITIAL DATA REQUEST START ===")
         logging.info(f"Initial data request at {datetime.now().strftime('%H:%M:%S')}")
+        if force_fresh_lineage:
+            logging.info("🔄 Fast load disabled (fast_load=0) - forcing fresh lineage alignment")
         
-        # PERFORMANCE: Check fast_load flag FIRST before any expensive operations
         # BALANCED APPROACH: Default to fast_load=True for instant UI, but with smart caching
         # - fast_load=True: Skip lineage alignment on initial load (instant display)
         # - Cached tags are enriched and cached WITH lineage for subsequent loads
         # - Generation endpoint re-enriches selected tags before generating labels
-        fast_load = request.args.get('fast_load') not in ('0', 'false', 'False')
+        # Explicit override: fast_load=0 forces full enrichment (slow but complete)
         # Explicit override: fast_load=0 forces full enrichment (slow but complete)
         
         # PERFORMANCE: For fast_load, check cache and session BEFORE loading any files
@@ -25291,26 +24962,15 @@ def display_preroll_items(group_id):
         # Format: group_key = "group_id|vendor"
         preroll_items = None
         if vendor_filter:
-            # Try raw vendor key first (backwards compatibility)
-            group_key_raw = f"{group_id}|{vendor_filter}"
-            preroll_items = cache.get(f"preroll_group_latest_{group_key_raw}")
-            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key_raw}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
-
-            # If not found, try current session-scoped key
+            group_key = f"{group_id}|{vendor_filter}"
+            # Try session-independent key first (most recent items for this vendor+group)
+            preroll_items = cache.get(f"preroll_group_latest_{group_key}")
+            logging.info(f"PREROLL ROUTE: Cache lookup for vendor-specific 'preroll_group_latest_{group_key}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
+            
+            # If not found, try current session
             if not preroll_items:
                 current_session_id = session.get('session_id', 'default')
-                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key_raw}")
-
-            # If still not found, try normalized vendor key (newer code stores normalized brand_key)
-            if not preroll_items:
-                import re
-                normalized_vendor = re.sub(r'[^a-z0-9]+', '', vendor_filter.lower()) if vendor_filter else ''
-                if normalized_vendor:
-                    group_key_norm = f"{group_id}|{normalized_vendor}"
-                    preroll_items = cache.get(f"preroll_group_latest_{group_key_norm}")
-                    logging.info(f"PREROLL ROUTE: Cache lookup for normalized key 'preroll_group_latest_{group_key_norm}': {preroll_items is not None} (items count: {len(preroll_items) if preroll_items else 0})")
-                    if not preroll_items:
-                        preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key_norm}")
+                preroll_items = cache.get(f"preroll_group_{current_session_id}_{group_key}")
         
         # If vendor-specific lookup failed or no vendor provided, try group_id only (backward compatibility)
         if not preroll_items:

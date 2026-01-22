@@ -2214,22 +2214,22 @@ const TagManager = {
             const tagDoh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || '';
             if (tagDoh && tagDoh.trim()) {
                 const dohTrimmed = tagDoh.trim().toUpperCase();
-                // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE
+                // Normalize DOH values: YES/Y -> DOH, NO/N -> none
                 let normalizedDoh = dohTrimmed;
                 if (dohTrimmed === 'YES' || dohTrimmed === 'Y') {
                     normalizedDoh = 'DOH';
                 } else if (dohTrimmed === 'NO' || dohTrimmed === 'N' || dohTrimmed === 'NONE') {
-                    normalizedDoh = 'NONE';
+                    normalizedDoh = 'none';
                 } else if (dohTrimmed.includes('DOH') || dohTrimmed === 'COMPLIANT') {
                     normalizedDoh = 'DOH';
                 }
-                // Add normalized value (including NONE so users can filter for non-DOH products)
+                // Add normalized value (including none so users can filter for non-DOH products)
                 if (normalizedDoh) {
                     doh.add(normalizedDoh);
                 }
             } else {
-                // If no DOH value, add NONE so users can filter for products without DOH status
-                doh.add('NONE');
+                // If no DOH value, add none so users can filter for products without DOH status
+                doh.add('none');
             }
             if (tag.Ratio) highCbd.add(tag.Ratio);
         });
@@ -2376,6 +2376,13 @@ const TagManager = {
                     if (b === 'High CBD Products') return 1;
                     if (a === 'Non-High CBD Products') return 1;
                     if (b === 'Non-High CBD Products') return -1;
+                }
+                // Special handling for DOH filter - "none" should come after "All" but before other values
+                if (filterType === 'doh') {
+                    if (a === 'none') return 1;
+                    if (b === 'none') return -1;
+                    if (a === 'DOH') return -1;
+                    if (b === 'DOH') return 1;
                 }
                 return a.localeCompare(b);
             });
@@ -2763,19 +2770,22 @@ const TagManager = {
                 
                 if (doh) {
                     const dohTrimmed = doh.trim().toUpperCase();
-                    // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE
+                    // Normalize DOH values: YES/Y -> DOH, NO/N -> none
                     let normalizedDoh = dohTrimmed;
                     if (dohTrimmed === 'YES' || dohTrimmed === 'Y') {
                         normalizedDoh = 'DOH';
                     } else if (dohTrimmed === 'NO' || dohTrimmed === 'N' || dohTrimmed === 'NONE') {
-                        normalizedDoh = 'NONE';
+                        normalizedDoh = 'none';
                     } else if (dohTrimmed.includes('DOH') || dohTrimmed === 'COMPLIANT') {
                         normalizedDoh = 'DOH';
                     }
-                    // Only add non-empty, non-NONE values
-                    if (normalizedDoh && normalizedDoh !== 'NONE' && normalizedDoh !== 'NULL' && normalizedDoh !== 'UNDEFINED') {
+                    // Add normalized value (including none so users can filter for non-DOH products)
+                    if (normalizedDoh && normalizedDoh !== 'NULL' && normalizedDoh !== 'UNDEFINED') {
                         filterOptions.doh.add(normalizedDoh);
                     }
+                } else {
+                    // If no DOH value, add none so users can filter for products without DOH status
+                    filterOptions.doh.add('none');
                 }
                 
                 // High CBD (check product type)
@@ -3698,6 +3708,7 @@ const TagManager = {
             if (dohFilter && dohFilter.trim() !== '' && dohFilter.toLowerCase() !== 'all') {
                 // CRITICAL FIX: Check all possible DOH field names (same as badge rendering)
                 const tagDoh = (tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '').toString().trim().toUpperCase();
+                const filterDohLower = dohFilter.toString().trim().toLowerCase();
                 const filterDoh = dohFilter.toString().trim().toUpperCase();
                 
                 // Normalize DOH values for comparison
@@ -3709,23 +3720,41 @@ const TagManager = {
                     normalizedTagDoh = 'NONE';
                 }
                 
-                // Normalize filter value too
+                // Normalize filter value too (handle both "none" and "NONE")
                 let normalizedFilterDoh = filterDoh;
-                if (filterDoh === 'YES' || filterDoh === 'Y') {
+                if (filterDohLower === 'none') {
+                    // Filter is "none" - match tags with no DOH or NONE/NO
+                    normalizedFilterDoh = 'NONE';
+                } else if (filterDoh === 'YES' || filterDoh === 'Y') {
                     normalizedFilterDoh = 'DOH';
                 } else if (filterDoh === 'NO' || filterDoh === 'N' || filterDoh === 'NONE') {
                     normalizedFilterDoh = 'NONE';
                 }
                 
-                // Check if filter matches (exact match or normalized match)
-                // Also handle case where filter is "DOH" but tag has "YES" or vice versa
-                const matches = normalizedTagDoh === normalizedFilterDoh || 
-                               tagDoh === filterDoh ||
-                               normalizedTagDoh === filterDoh ||
-                               tagDoh === normalizedFilterDoh;
+                // Also normalize tag DOH to handle "none" case
+                if (normalizedTagDoh === 'NONE' || normalizedTagDoh === 'none') {
+                    normalizedTagDoh = 'NONE';
+                }
                 
-                if (!matches) {
-                    return false;
+                // Check if filter matches (exact match or normalized match)
+                // Special case: if filter is "none", match tags with no DOH value or NONE/NO
+                if (filterDohLower === 'none') {
+                    // Match if tag has no DOH value (empty) or has NONE/NO
+                    // Return false only if tag has a DOH value that is NOT NONE
+                    if (tagDoh !== '' && normalizedTagDoh !== 'NONE') {
+                        return false;
+                    }
+                    // Otherwise, tag has no DOH or has NONE - match!
+                } else {
+                    // For other DOH values, use normal matching
+                    const matches = normalizedTagDoh === normalizedFilterDoh || 
+                                   tagDoh === filterDoh ||
+                                   normalizedTagDoh === filterDoh ||
+                                   tagDoh === normalizedFilterDoh;
+                    
+                    if (!matches) {
+                        return false;
+                    }
                 }
             }
             
@@ -14499,9 +14528,9 @@ const TagManager = {
         try {
             // CRITICAL FIX: Load WITH lineage enrichment to ensure dropdowns show correct values
             // Previously used fast_load=1 which skipped lineage, causing empty dropdowns when filtering by product type
-            // Removing fast_load ensures all tags have database lineage from the start
+            // Explicitly pass fast_load=0 to ensure all tags have database lineage from the start
             const response = await Promise.race([
-                fetch('/api/initial-data'),
+                fetch('/api/initial-data?fast_load=0'),
                 timeoutPromise
             ]).catch(err => {
                 // If fetch fails or times out, complete initialization anyway
