@@ -757,10 +757,12 @@ def clear_all_on_startup():
     except Exception as e:
         logging.warning(f"Failed to delete store selections file: {e}")
 
-    # NOTE: Removed aggressive cache.clear() on startup - it was causing slow tag loads
-    # Users will get fresh data when they upload new files or when lineage is updated
-    # The browser-side cache ensures fast page loads while server-side cache is rebuilt
-    logging.info("🔥 STARTUP: Cleared store selections (Flask caches preserved for fast loads)")
+    # CRITICAL: Also clear all caches to prevent wrong tags from previous session
+    try:
+        cache.clear()
+        logging.warning(f"🔥 STARTUP: Cleared all Flask caches - fresh start for all users")
+    except Exception as e:
+        logging.warning(f"Failed to clear cache on startup: {e}")
 
     logging.warning(f"🔥 STARTUP: Cleared all {count} store selections - STORE MODAL WILL SHOW FOR ALL USERS")
 
@@ -1838,11 +1840,6 @@ if CACHE_AVAILABLE:
         'CACHE_DEFAULT_TIMEOUT': 86400
     }
     cache = Cache(app, config=cache_config)
-
-    # NOTE: Removed aggressive cache.clear() on startup - it was causing 30+ second tag loads
-    # Users get fresh data automatically when uploading new files or updating lineage
-    # Browser-side caching provides instant loads while server cache is built in background
-    logging.info("✅ STARTUP: Flask cache initialized (preserved for fast tag loads)")
 else:
     cache = Cache()  # Use dummy cache
 
@@ -2769,38 +2766,17 @@ def _enhance_json_with_excel_data(json_tag, excel_product):
         # Prefer Product Brand for non-classic product types; classic types keep Vendor as the primary
         try:
             from src.core.constants import CLASSIC_TYPES
-            # Normalize the product type using the matcher to avoid brittle substring checks
             product_type_val = (enhanced_tag.get(get_canonical_field('Product Type*')) or enhanced_tag.get('ProductType') or '')
-            # Use the shared mapper to get a canonical product type name
-            try:
-                mapped_type = map_inventory_type_to_product_type(product_type_val, enhanced_tag.get('inventory_category'), enhanced_tag.get(get_canonical_field('Product Name*')))
-            except Exception:
-                mapped_type = product_type_val
-            mapped_norm = str(mapped_type).lower() if mapped_type else ''
-            classic_set = {ct.lower() for ct in CLASSIC_TYPES}
-            is_classic = mapped_norm in classic_set
+            product_type_norm = str(product_type_val).lower() if product_type_val else ''
+            is_classic = product_type_norm in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_norm for ct in CLASSIC_TYPES)
         except Exception:
             # Fallback: if we can't determine, preserve existing behavior
             is_classic = True
 
-        # Robustly pick brand/vendor values from multiple possible keys to avoid alias issues
-        def _first_nonempty(tag, keys):
-            for k in keys:
-                v = tag.get(k)
-                if v and str(v).strip():
-                    return v
-            return ''
-
-        brand_keys = [get_canonical_field('Product Brand'), 'ProductBrand', 'productBrand', 'Brand', 'brand']
-        vendor_keys = [get_canonical_field('Vendor'), 'Vendor', 'vendor', 'vendor_name', 'Vendor/Supplier*', 'Vendor/Supplier']
-
-        brand_val = _first_nonempty(enhanced_tag, brand_keys)
-        vendor_val = _first_nonempty(enhanced_tag, vendor_keys)
-
         if not is_classic:
-            vendor = brand_val or vendor_val or ''
+            vendor = enhanced_tag.get(get_canonical_field('Product Brand'), enhanced_tag.get(get_canonical_field('Vendor'), ''))
         else:
-            vendor = vendor_val or brand_val or ''
+            vendor = enhanced_tag.get(get_canonical_field('Vendor'), enhanced_tag.get(get_canonical_field('Product Brand'), ''))
 
         if product_name and vendor:
             enhanced_tag['displayName'] = f"{product_name} by {vendor}"
@@ -7406,15 +7382,6 @@ def _enforce_nonclassic_lineage_rules(tags):
                 product_name = tag.get('Product Name*', 'unknown')
                 logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}' (DB missing)")
                 fixed_count += 1
-                # Ensure ProductBrand fields prefer the explicit Product Brand (don't fall back to Vendor)
-                product_brand_candidate = (tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or '').strip()
-                if product_brand_candidate:
-                    brand_upper = product_brand_candidate.upper()
-                    tag['ProductBrand'] = brand_upper
-                    tag['Product Brand'] = brand_upper
-                    tag['productBrand'] = brand_upper
-                    # Also set center marker variant used by templates
-                    tag['ProductBrand_Center'] = brand_upper
         elif current_lineage_upper == 'THC':
             # THC is an abbreviation for MIXED - normalize it
             tag['Lineage'] = 'MIXED'
@@ -7423,14 +7390,6 @@ def _enforce_nonclassic_lineage_rules(tags):
             tag['canonical_lineage'] = 'MIXED'
             tag['lineage'] = 'mixed'
             fixed_count += 1
-            # Preserve Product Brand values for non-classic types
-            product_brand_candidate = (tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or '').strip()
-            if product_brand_candidate:
-                brand_upper = product_brand_candidate.upper()
-                tag['ProductBrand'] = brand_upper
-                tag['Product Brand'] = brand_upper
-                tag['productBrand'] = brand_upper
-                tag['ProductBrand_Center'] = brand_upper
         elif current_lineage_upper == 'CBD_BLEND':
             # Normalize CBD_BLEND to CBD
             tag['Lineage'] = 'CBD'
@@ -7439,14 +7398,6 @@ def _enforce_nonclassic_lineage_rules(tags):
             tag['canonical_lineage'] = 'CBD'
             tag['lineage'] = 'cbd'
             fixed_count += 1
-            # Preserve Product Brand values for non-classic types
-            product_brand_candidate = (tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or '').strip()
-            if product_brand_candidate:
-                brand_upper = product_brand_candidate.upper()
-                tag['ProductBrand'] = brand_upper
-                tag['Product Brand'] = brand_upper
-                tag['productBrand'] = brand_upper
-                tag['ProductBrand_Center'] = brand_upper
     
     if fixed_count > 0:
         logging.info(f"✅ NON-CLASSIC LINEAGE ENFORCEMENT: Fixed {fixed_count} non-classic products to have only MIXED or CBD lineage")
@@ -7540,8 +7491,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             placeholders = ','.join(['?' for _ in chunk])
         # EXACT same query as docx generation - but also return individual fields to preserve priority
         # CRITICAL FIX: Also select Product Brand and DOH to enrich tags with brand and DOH data
-            import time
-            start_chunk = time.perf_counter()
             cursor.execute(f'''
                 SELECT p."Product Name*", 
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
@@ -7556,10 +7505,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 WHERE p."Product Name*" IN ({placeholders})
                 ORDER BY p.id DESC
             ''', chunk)
-            rows = cursor.fetchall()
-            elapsed_chunk = (time.perf_counter() - start_chunk) * 1000
-            logging.debug(f"LINEAGE: batch {start}-{start+len(chunk)} queried {len(chunk)} names -> {len(rows)} rows returned in {elapsed_chunk:.0f}ms")
-            for row in rows:
+            for row in cursor.fetchall():
                 db_name = row[0]
                 db_lineage_raw = row[1]
                 product_sovereign_raw = row[2]
@@ -11280,7 +11226,6 @@ def get_available_tags():
                     tag['ProductBrand'] = ''
                 if 'productBrand' not in tag:
                     tag['productBrand'] = ''
-            
             
             safe_cached_tags = make_json_safe(cached_tags)
             elapsed = (time.time() - start_time) * 1000
@@ -15056,31 +15001,31 @@ def get_web_available_tags():
                 response = compress_response(response)
                 return response
         
-        # WEB OPTIMIZATION: Get Excel tags and align with database lineage
-        logging.info("⚡ WEB: Building tags with Excel data + DB lineage alignment...")
-
+        # WEB OPTIMIZATION: Use fast Excel path but always align with database lineage
+        # Database alignment ensures lineage is always available from the database
+        logging.info("🔄 WEB: Building tags with Excel data, aligning with database lineage...")
+        
         # Excel processor already loaded and validated above - just use it
         # Get tags from Excel
         try:
-            start_excel = time.time()
             logging.info("WEB: Calling excel_processor.get_available_tags() - starting")
             excel_tags = excel_processor.get_available_tags()
-            excel_elapsed = (time.time() - start_excel) * 1000
-            logging.info(f"WEB: excel_processor.get_available_tags() returned {len(excel_tags) if excel_tags else 0} tags in {excel_elapsed:.0f}ms")
-
-            # CRITICAL: Align Excel tags with database lineage for correct display
-            # This ensures tags show the database lineage (edited via Lineage Editor)
+            logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
+            
+            # Enforce database-as-source-of-truth: always align Excel tags with DB lineage
+            # before returning to the web UI. This ensures Excel data cannot override
+            # database lineage except when DB is missing lineage for the product.
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and excel_tags:
                 try:
-                    start_align = time.time()
-                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
+                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage (web fast-path)...")
                     excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    align_elapsed = (time.time() - start_align) * 1000
                     matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
-                    logging.info(f"✅ WEB: Aligned {matched_count} tags with DB lineage in {align_elapsed:.0f}ms")
+                    logging.info(f"✅ WEB: Aligned {matched_count} tags with database lineage")
                 except Exception as align_err:
-                    logging.warning(f"WEB: Lineage alignment failed (using Excel lineage): {align_err}")
+                    logging.warning(f"WEB: Lineage alignment failed, returning Excel tags: {align_err}")
+                    import traceback
+                    logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
             
             # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
             simple_tags = []
