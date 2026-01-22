@@ -3791,10 +3791,11 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Improve legibility on gold/yellow highlighted tags */
   .tag-item.high-units .tag-name,
   .tag-item.high-units .tag-text {
-    -webkit-text-stroke: 0.5px rgba(46,204,113,0.7) !important; /* subtle green outline */
+    -webkit-text-stroke: 0.8px rgba(0, 0, 0, 0.8) !important; /* dark outline for visibility on yellow */
     text-shadow:
-      0 1px 3px rgba(0,0,0,0.5) !important,
-      0 0 6px rgba(46,204,113,0.12) !important; /* gentle green glow */
+      0 0 3px rgba(0, 0, 0, 0.9) !important,
+      0 0 6px rgba(0, 0, 0, 0.7) !important,
+      0 1px 4px rgba(0, 0, 0, 0.6) !important;
     color: white !important;
   }
   
