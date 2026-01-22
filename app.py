@@ -11236,69 +11236,10 @@ def get_available_tags():
                     # Fast load mode without updates: Keep Excel lineage temporarily, but alignment will overwrite with DB
                     logging.info(f"⚡ FAST LOAD: Keeping Excel lineage temporarily for {len(simple_tags)} tags (will be overwritten by alignment if DB has sovereign_lineage)")
                     
-                    # CRITICAL FIX: Even in fast_load mode, do a lightweight sovereign_lineage check
-                    # This ensures user edits are applied instantly without waiting for full enrichment
-                    try:
-                        product_db = get_product_database(store_name)
-                        if product_db and simple_tags:
-                            # Quick check: Only query products that have sovereign_lineage (much faster)
-                            product_names = [tag.get('Product Name*') for tag in simple_tags if tag.get('Product Name*')]
-                            if product_names:
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
-                                
-                                # Build lowercase lookup for O(1) matching
-                                excel_lower_map = {name.lower().strip(): name for name in product_names}
-                                
-                                # LIGHTWEIGHT: Only query products with sovereign_lineage (indexed, very fast)
-                                chunk_size = 400
-                                sovereign_map = {}
-                                for chunk_start in range(0, len(product_names), chunk_size):
-                                    chunk = product_names[chunk_start:chunk_start + chunk_size]
-                                    chunk_lower = [name.lower() for name in chunk]
-                                    placeholders = ','.join(['?' for _ in chunk_lower])
-                                    
-                                    # FAST QUERY: Only get products with sovereign_lineage (uses index)
-                                    cursor.execute(f'''
-                                        SELECT p."Product Name*",
-                                               COALESCE(p.sovereign_lineage, s.sovereign_lineage) as sovereign_lineage
-                                        FROM products p
-                                        LEFT JOIN strains s ON p.strain_id = s.id
-                                        WHERE LOWER(p."Product Name*") IN ({placeholders})
-                                        AND (p.sovereign_lineage IS NOT NULL AND p.sovereign_lineage != '' 
-                                             OR s.sovereign_lineage IS NOT NULL AND s.sovereign_lineage != '')
-                                    ''', chunk_lower)
-                                    
-                                    for row in cursor.fetchall():
-                                        db_name = row[0]
-                                        sovereign = row[1]
-                                        if sovereign and str(sovereign).strip():
-                                            clean_sovereign = str(sovereign).strip().upper()
-                                            if clean_sovereign not in ['', 'NONE', 'NULL', 'NAN']:
-                                                sovereign_map[db_name] = clean_sovereign
-                                                # Also map by lowercase for O(1) lookup
-                                                excel_key = db_name.lower().strip()
-                                                if excel_key in excel_lower_map:
-                                                    sovereign_map[excel_lower_map[excel_key]] = clean_sovereign
-                                
-                                # Apply sovereign_lineage to tags instantly (overwrites Excel lineage)
-                                if sovereign_map:
-                                    updated_count = 0
-                                    for tag in simple_tags:
-                                        product_name = tag.get('Product Name*')
-                                        if product_name and product_name in sovereign_map:
-                                            sovereign_lineage = sovereign_map[product_name]
-                                            # CRITICAL: Overwrite Excel lineage with sovereign_lineage
-                                            tag['sovereign_lineage'] = sovereign_lineage
-                                            tag['currentLineage'] = sovereign_lineage
-                                            tag['canonical_lineage'] = sovereign_lineage
-                                            tag['Lineage'] = sovereign_lineage
-                                            tag['Lineage*'] = sovereign_lineage
-                                            tag['lineage'] = sovereign_lineage.lower()
-                                            updated_count += 1
-                                    logging.info(f"⚡ FAST SOVEREIGN CHECK: Applied sovereign_lineage to {updated_count} tags instantly (fast_load mode)")
-                    except Exception as sovereign_err:
-                        logging.warning(f"Lightweight sovereign check failed (non-critical): {sovereign_err}")
+                    # PERFORMANCE FIX: Skip sovereign check in fast_load mode for instant loading
+                    # Sovereign lineage will be applied via background alignment or next request
+                    # This ensures tags load instantly (<100ms) without any database queries
+                    logging.info(f"⚡ FAST LOAD: Skipping sovereign check for instant loading - will apply via background alignment")
 
                 # CRITICAL: Enrich with database lineage after stripping Excel lineage
                 # This populates currentLineage, canonical_lineage from database
@@ -11558,32 +11499,11 @@ def get_available_tags():
                     # CRITICAL FIX: If lineage updates exist, force overwrite to ensure sovereign_lineage overrides Excel
                     force_align = has_lineage_updates or not skip_db_enrichment
                     
-                    # PERFORMANCE: In fast_load mode, if we already applied sovereign_lineage above, 
-                    # we can skip full alignment for tags that already have sovereign_lineage
-                    # But still align tags that don't have sovereign_lineage to get canonical_lineage
+                    # PERFORMANCE: In fast_load mode, skip alignment entirely for instant loading
+                    # Alignment will happen in background or on next request
                     if skip_db_enrichment and not has_lineage_updates:
-                        # Fast load mode: Only align tags missing sovereign_lineage (lightweight)
-                        tags_with_sovereign = sum(1 for t in simple_tags if isinstance(t, dict) and t.get('sovereign_lineage'))
-                        if tags_with_sovereign > 0:
-                            logging.info(f"⚡ FAST LOAD: {tags_with_sovereign} tags already have sovereign_lineage, skipping full alignment for speed")
-                            # Still align tags without sovereign_lineage to get canonical_lineage
-                            tags_needing_alignment = [t for t in simple_tags if isinstance(t, dict) and not t.get('sovereign_lineage')]
-                            if tags_needing_alignment:
-                                logging.info(f"⚡ FAST LOAD: Aligning {len(tags_needing_alignment)} tags without sovereign_lineage...")
-                                aligned_subset = _align_tags_with_db_lineage(tags_needing_alignment, store_name, skip_if_aligned=False, force_overwrite=True)
-                                # Merge aligned tags back into simple_tags
-                                aligned_dict = {t.get('Product Name*'): t for t in aligned_subset if isinstance(t, dict) and t.get('Product Name*')}
-                                for tag in simple_tags:
-                                    if isinstance(tag, dict):
-                                        name = tag.get('Product Name*')
-                                        if name in aligned_dict:
-                                            tag.update(aligned_dict[name])
-                            else:
-                                logging.info(f"⚡ FAST LOAD: All tags have sovereign_lineage, skipping alignment entirely")
-                        else:
-                            # No sovereign_lineage found - do lightweight alignment
-                            logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage (fast_load={fast_load}, lightweight mode)...")
-                            simple_tags = _align_tags_with_db_lineage(simple_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                        # Fast load mode: Skip alignment entirely for instant response
+                        logging.info(f"⚡ FAST LOAD: Skipping alignment for instant loading - tags will be aligned in background")
                     else:
                         # Full alignment mode (lineage updates or not fast_load)
                         logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage (fast_load={fast_load}, force_align={force_align}, has_updates={has_lineage_updates})...")
@@ -14979,14 +14899,16 @@ def get_web_available_tags():
                 # PERFORMANCE: Only re-align cached tags if they're missing lineage (skip if already aligned)
                 store_name_align = get_current_store_name(allow_fallback=False)
                 if store_name_align:
-                    tags_with_lineage = sum(1 for t in cached_tags if t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage'))
-                    needs_alignment = tags_with_lineage < len(cached_tags) * 0.5  # Less than 50% have lineage
+                    # CRITICAL: Check for DATABASE lineage (sovereign_lineage or canonical_lineage), not just Excel lineage
+                    tags_with_db_lineage = sum(1 for t in cached_tags if t.get('sovereign_lineage') or t.get('canonical_lineage'))
+                    needs_alignment = tags_with_db_lineage < len(cached_tags) * 0.5  # Less than 50% have database lineage
                     if needs_alignment:
-                        logging.info(f"🔄 WEB CACHE: Re-aligning {len(cached_tags)} cached tags ({tags_with_lineage}/{len(cached_tags)} already have lineage)...")
-                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=True, force_overwrite=False)
+                        logging.info(f"🔄 WEB CACHE: Re-aligning {len(cached_tags)} cached tags ({tags_with_db_lineage}/{len(cached_tags)} already have database lineage)...")
+                        # CRITICAL: Force overwrite to ensure database lineage replaces Excel lineage
+                        cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
                         logging.info(f"✅ WEB CACHE: Re-alignment complete")
                     else:
-                        logging.info(f"⚡ WEB CACHE: Skipping re-alignment - {tags_with_lineage}/{len(cached_tags)} tags already have lineage")
+                        logging.info(f"⚡ WEB CACHE: Skipping re-alignment - {tags_with_db_lineage}/{len(cached_tags)} tags already have database lineage")
                 
                 safe_cached_tags = make_json_safe(cached_tags)
                 response = make_response(jsonify({
@@ -15040,32 +14962,45 @@ def get_web_available_tags():
                 else:
                     logging.info(f"⚡ WEB: Skipping alignment - {tags_with_lineage}/{len(excel_tags)} tags already have database lineage")
             
-            # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
+            # Normalize all tags - CRITICAL: Preserve database lineage priority (sovereign_lineage > canonical_lineage > Excel)
             simple_tags = []
             for tag in excel_tags:
-                # CRITICAL FIX: Prioritize canonical_lineage from strains table (the "strains sheet")
-                # Priority: canonical_lineage (from strains) > currentLineage > sovereign_lineage > Lineage
+                # CRITICAL FIX: Correct lineage priority - sovereign_lineage (user edits) has HIGHEST priority
+                # Priority: sovereign_lineage (user edits) > canonical_lineage (strains table) > currentLineage > Lineage (Excel)
+                # This matches the DOCX generation logic: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
                 final_lineage = (
-                    tag.get('canonical_lineage') or  # From strains table - this is the "strains sheet" data
+                    tag.get('sovereign_lineage') or  # User-edited lineage - HIGHEST priority
+                    tag.get('canonical_lineage') or  # From strains table - second priority
                     tag.get('currentLineage') or 
-                    tag.get('sovereign_lineage') or
-                    tag.get('Lineage')
+                    tag.get('Lineage')  # Excel lineage - LOWEST priority (only if no database lineage)
                 )
                 
                 if final_lineage and str(final_lineage).strip():
                     lineage_clean = str(final_lineage).strip().upper()
-                    # CRITICAL: Always preserve canonical_lineage from strains table if it exists
-                    if tag.get('canonical_lineage'):
-                        # Database lineage from strains table - preserve canonical_lineage
-                        tag['canonical_lineage'] = lineage_clean  # Keep strains table canonical_lineage
+                    # CRITICAL: Preserve lineage priority - sovereign_lineage > canonical_lineage > Excel
+                    # Always set all fields to the final_lineage value for consistency
+                    # But preserve the source field (sovereign_lineage or canonical_lineage) to maintain priority
+                    
+                    # If sovereign_lineage exists, it's the source (user edits - highest priority)
+                    if tag.get('sovereign_lineage'):
+                        tag['sovereign_lineage'] = lineage_clean  # Preserve user edits
                         tag['currentLineage'] = lineage_clean
-                        tag['Lineage'] = lineage_clean
+                        tag['canonical_lineage'] = lineage_clean  # Also set for consistency
+                        tag['Lineage'] = lineage_clean  # Overwrite Excel lineage
+                        tag['Lineage*'] = lineage_clean
+                        tag['lineage'] = lineage_clean.lower()
+                    # If canonical_lineage exists (from strains table), use it
+                    elif tag.get('canonical_lineage'):
+                        tag['canonical_lineage'] = lineage_clean  # Preserve strains table data
+                        tag['currentLineage'] = lineage_clean
+                        tag['Lineage'] = lineage_clean  # Overwrite Excel lineage
                         tag['Lineage*'] = lineage_clean
                         tag['lineage'] = lineage_clean.lower()
                     else:
-                        # No strains table data - set all fields to the available lineage
+                        # Excel lineage only - normalize all fields
+                        # CRITICAL: Don't set sovereign_lineage or canonical_lineage for Excel-only lineage
+                        # These should only be set by database alignment
                         tag['currentLineage'] = lineage_clean
-                        tag['canonical_lineage'] = lineage_clean  # Set it even if not from strains
                         tag['Lineage'] = lineage_clean
                         tag['Lineage*'] = lineage_clean
                         tag['lineage'] = lineage_clean.lower()
