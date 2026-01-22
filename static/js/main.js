@@ -11993,11 +11993,11 @@ const TagManager = {
             let response;
             let responseData;
             
-            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (45s for large datasets)
+            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (60s for large datasets on web)
             // Desktop/localhost should respond quickly with fast_load=1
-            const maxRetries = isWebClient ? 1 : 2; // Fewer retries for web
-            const maxProcessingRetries = isWebClient ? 1 : 2; // Reduce processing retries
-            const fetchTimeout = 45000; // 45s timeout for large datasets (increased from 30s)
+            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for web (was 1, but timeouts need retries)
+            const maxProcessingRetries = isWebClient ? 2 : 2; // Allow 2 processing retries for web
+            const fetchTimeout = isWebClient ? 60000 : 45000; // 60s timeout for web clients (large datasets), 45s for desktop
             
             let retryCount = 0;
             let processingRetryCount = 0;
