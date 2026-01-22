@@ -11736,7 +11736,7 @@ const TagManager = {
         this._fetchingAvailableTagsStartTime = Date.now();
         
         // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
-        // This prevents infinite loading state
+        // This prevents infinite loading state on reload
         if (this._fetchingTimeout) {
             clearTimeout(this._fetchingTimeout);
         }
@@ -11744,7 +11744,35 @@ const TagManager = {
             if (this._fetchingAvailableTags) {
                 console.warn('⚠️ Tag fetch timeout - resetting flag after 60 seconds');
                 this._fetchingAvailableTags = false;
-                this.hideActionSplash();
+                // CRITICAL: Clear loading UI when timeout occurs
+                if (this.hideActionSplash) {
+                    this.hideActionSplash();
+                }
+                if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                // Show error message if container is still showing loading
+                const availableTagsContainer = document.getElementById('availableTags');
+                if (availableTagsContainer) {
+                    const currentContent = availableTagsContainer.innerHTML;
+                    if (currentContent.includes('Loading tags') || currentContent.includes('spinner')) {
+                        availableTagsContainer.innerHTML = `
+                            <div class="text-center py-4">
+                                <div class="alert alert-warning mx-3">
+                                    <h5 class="alert-heading">Request Timed Out</h5>
+                                    <p class="mb-3">The request to load tags timed out. This may happen if the server is slow or the connection is unstable.</p>
+                                    <button class="btn btn-primary me-2" onclick="TagManager.retryLoadTags()">
+                                        <i class="fas fa-redo"></i> Retry Loading Tags
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="TagManager.forceReloadTags()">
+                                        <i class="fas fa-sync-alt"></i> Force Reload (Clear Cache)
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
             }
         }, 60000); // 60 second safety timeout
         
@@ -12928,10 +12956,14 @@ const TagManager = {
             }
 
             // Try cache as fallback before showing error
-            const cachedTags = this.hydrateAvailableTagsFromCache();
-            if (cachedTags) {
+            // CRITICAL FIX: loadAvailableTagsFromCache returns tags array, not boolean
+            const cachedTags = this.loadAvailableTagsFromCache();
+            if (cachedTags && cachedTags.length > 0) {
                 // CRITICAL: Reset flag when using cache fallback
                 this._fetchingAvailableTags = false;
+                console.log(`⚡ ERROR FALLBACK: Using ${cachedTags.length} cached tags after fetch error`);
+                // Hydrate from cache to properly set up state
+                this._hydrateFromCachedTags(cachedTags, false, null);
                 verboseLog('✅ Using cached tags as fallback after error');
                 return true;
             }
@@ -12950,6 +12982,15 @@ const TagManager = {
             }
 
             // CRITICAL FIX: Show user-friendly error message with retry button
+            // CRITICAL: Always hide loading splash when showing error
+            if (this.hideActionSplash) {
+                this.hideActionSplash();
+            }
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
+            
             const availableTagsContainer = document.getElementById('availableTags');
             if (availableTagsContainer) {
                 const errorMessage = error.message || 'Unknown error';
