@@ -34,7 +34,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Cache resolved default file paths to avoid repeated filesystem scans
-DEFAULT_FILE_CACHE: Dict[str, str] = {}
+# Limited to 50 entries with TTL of 1 hour to prevent unbounded growth
+DEFAULT_FILE_CACHE: Dict[str, Dict[str, Any]] = {}  # {key: {'path': str, 'timestamp': float}}
+DEFAULT_FILE_CACHE_MAX_SIZE = 50
+DEFAULT_FILE_CACHE_TTL = 3600  # 1 hour
+
+def _get_default_file_cache(key: str) -> Optional[str]:
+    """Get cached file path if still valid (exists and not expired)."""
+    if key not in DEFAULT_FILE_CACHE:
+        return None
+    entry = DEFAULT_FILE_CACHE[key]
+    # Check TTL
+    if time.time() - entry.get('timestamp', 0) > DEFAULT_FILE_CACHE_TTL:
+        DEFAULT_FILE_CACHE.pop(key, None)
+        return None
+    # Check file still exists
+    path = entry.get('path')
+    if path and os.path.exists(path):
+        return path
+    DEFAULT_FILE_CACHE.pop(key, None)
+    return None
+
+def _set_default_file_cache(key: str, path: str) -> None:
+    """Set cached file path with timestamp, enforcing size limit."""
+    # Enforce size limit - remove oldest entries if needed
+    if len(DEFAULT_FILE_CACHE) >= DEFAULT_FILE_CACHE_MAX_SIZE:
+        # Remove oldest 10 entries
+        sorted_keys = sorted(DEFAULT_FILE_CACHE.keys(),
+                            key=lambda k: DEFAULT_FILE_CACHE[k].get('timestamp', 0))
+        for old_key in sorted_keys[:10]:
+            DEFAULT_FILE_CACHE.pop(old_key, None)
+    DEFAULT_FILE_CACHE[key] = {'path': path, 'timestamp': time.time()}
 
 # Add at the top of the file (after imports)
 VALID_LINEAGES = [
@@ -563,8 +593,8 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
     
     cache_key = store_name or "__default__"
 
-    # Check cached path first for reliability
-    cached_path = DEFAULT_FILE_CACHE.get(cache_key)
+    # Check cached path first for reliability (uses TTL and size-limited cache)
+    cached_path = _get_default_file_cache(cache_key)
     if cached_path:
         cached_file = Path(cached_path)
         if cached_file.is_file() and cached_file.stat().st_size > 1000:
@@ -575,7 +605,6 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
             return str(cached_file)
         else:
             logger.warning(f"Cached default file missing or invalid, refreshing cache: {cached_path}")
-            DEFAULT_FILE_CACHE.pop(cache_key, None)
 
     if env_upload_dir:
         candidate_locations.append(Path(env_upload_dir))
@@ -713,7 +742,7 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
     # Return the highest priority, most recent file
     best_file_path, best_filename, best_mod_time, best_file_size, best_priority = excel_files[0]
     logger.info(f"Found best Excel file: {best_filename} (modified: {best_mod_time}, size: {best_file_size:,} bytes, priority: {best_priority})")
-    DEFAULT_FILE_CACHE[cache_key] = best_file_path
+    _set_default_file_cache(cache_key, best_file_path)
     return best_file_path
 
 def _complexity(text):
@@ -955,6 +984,7 @@ class ExcelProcessor:
         self._debug_count = 0
         self._store_name = store_name
         self._weight_mode_cache: Dict[str, Optional[Tuple[float, str, float]]] = {}
+        self._weight_mode_cache_max_size = 500  # Limit to prevent unbounded growth
         self._weight_group_column_ready: bool = False
         
         # Memory optimization
@@ -4930,6 +4960,12 @@ class ExcelProcessor:
                         mode_unit = mode_unit.iloc[0] if not mode_unit.empty else ""
                     break
 
+        # Enforce cache size limit to prevent unbounded growth
+        if len(self._weight_mode_cache) >= self._weight_mode_cache_max_size:
+            # Remove oldest 50 entries (FIFO - first added are removed first)
+            keys_to_remove = list(self._weight_mode_cache.keys())[:50]
+            for k in keys_to_remove:
+                self._weight_mode_cache.pop(k, None)
         self._weight_mode_cache[group_key] = (mode_weight, mode_unit, dominance_ratio)
         return self._weight_mode_cache[group_key]
 

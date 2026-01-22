@@ -310,7 +310,7 @@ function createTagRow(tag) {
                         return `
                           <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini"
                                   onchange="TagsTable.handleDohChange(this, '${tagName}')">
-                            <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>
+                            <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>
                             <option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
                             <option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
                           </select>
@@ -321,7 +321,7 @@ function createTagRow(tag) {
                       return `
                         <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini"
                                 onchange="TagsTable.handleDohChange(this, '${tagName}')">
-                          <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>
+                          <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>
                           <option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
                           <option value="THC" ${effectiveDohStatus === 'THC' ? 'selected' : ''}>THC</option>
                           <option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
@@ -645,7 +645,7 @@ class TagsTable {
               
               // All products get normal DOH dropdown
               const dohOptions = [
-                `<option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>`,
+                `<option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>`,
                 `<option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>`,
                 `<option value="THC" ${effectiveDohStatus === 'THC' ? 'selected' : ''}>THC</option>`,
                 `<option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>`

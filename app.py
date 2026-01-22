@@ -452,6 +452,14 @@ try:
 except Exception:  # pragma: no cover
     Compress = None
 
+# SECURITY: CSRF Protection
+try:
+    from flask_wtf.csrf import CSRFProtect
+    CSRF_AVAILABLE = True
+except ImportError:
+    CSRF_AVAILABLE = False
+    logging.warning("Flask-WTF not available - CSRF protection disabled")
+
 # PythonAnywhere-specific configuration
 try:
     from pythonanywhere_config import (
@@ -875,6 +883,55 @@ def start_storage_cleanup_scheduler():
         logging.warning(f"Failed to start cleanup scheduler: {e}")
 
 
+def cleanup_cache_directory(max_age_hours: int = 24):
+    """Remove files in uploads/cache directory older than max_age_hours."""
+    try:
+        if not os.path.exists(CACHE_DIR):
+            return
+        now = time.time()
+        removed = 0
+        for fname in os.listdir(CACHE_DIR):
+            path = os.path.join(CACHE_DIR, fname)
+            if not os.path.isfile(path):
+                continue
+            age_hours = (now - os.path.getmtime(path)) / 3600.0
+            if age_hours > max_age_hours:
+                try:
+                    os.remove(path)
+                    removed += 1
+                except Exception as file_err:
+                    logging.warning(f"Cache cleanup: failed to remove {path}: {file_err}")
+        if removed:
+            logging.info(f"Cache cleanup: removed {removed} old cache file(s) (> {max_age_hours}h)")
+    except Exception as e:
+        logging.warning(f"Cache cleanup: error pruning cache directory: {e}")
+
+
+def cleanup_session_files(max_age_hours: int = 24):
+    """Remove session files older than max_age_hours."""
+    try:
+        sessions_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sessions')
+        if not os.path.exists(sessions_dir):
+            return
+        now = time.time()
+        removed = 0
+        for fname in os.listdir(sessions_dir):
+            path = os.path.join(sessions_dir, fname)
+            if not os.path.isfile(path):
+                continue
+            age_hours = (now - os.path.getmtime(path)) / 3600.0
+            if age_hours > max_age_hours:
+                try:
+                    os.remove(path)
+                    removed += 1
+                except Exception as file_err:
+                    logging.warning(f"Session cleanup: failed to remove {path}: {file_err}")
+        if removed:
+            logging.info(f"Session cleanup: removed {removed} old session file(s) (> {max_age_hours}h)")
+    except Exception as e:
+        logging.warning(f"Session cleanup: error pruning session directory: {e}")
+
+
 def start_daily_upload_cleanup_scheduler(run_hour: int = 0, run_minute: int = 0):
     """Schedule upload cleanup to run once daily at the specified time (default: midnight)."""
     def seconds_until_target():
@@ -889,17 +946,20 @@ def start_daily_upload_cleanup_scheduler(run_hour: int = 0, run_minute: int = 0)
             try:
                 wait_seconds = max(60, seconds_until_target())
                 time.sleep(wait_seconds)
+                # Run all cleanup tasks
                 cleanup_old_uploads()
+                cleanup_cache_directory()
+                cleanup_session_files()
             except Exception as e:
-                logging.warning(f"Daily upload cleanup error: {e}")
+                logging.warning(f"Daily cleanup error: {e}")
                 time.sleep(600)  # Backoff before retrying
 
     try:
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
-        logging.info("Daily upload cleanup scheduler started (runs at midnight server time)")
+        logging.info("Daily cleanup scheduler started (uploads, cache, sessions at midnight)")
     except Exception as e:
-        logging.warning(f"Failed to start daily upload cleanup scheduler: {e}")
+        logging.warning(f"Failed to start daily cleanup scheduler: {e}")
 
 def get_client_ip():
     """Get the client's IP address."""
@@ -1804,9 +1864,26 @@ def create_app():
     upload_folder = os.path.join(current_dir, 'uploads')
     os.makedirs(upload_folder, exist_ok=True)
     app.config['UPLOAD_FOLDER'] = upload_folder
-    # Use a consistent secret key for production to maintain sessions across restarts
-    # In production, this should be set via environment variable
-    app.secret_key = os.environ.get('SECRET_KEY', 'label-maker-secret-key-2024-production')
+    # SECURITY: Require secret key from environment variable in production
+    # Generate a secure random key for development if not set
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        import secrets
+        secret_key = secrets.token_hex(32)
+        logging.warning("⚠️ SECURITY WARNING: SECRET_KEY not set in environment. Using randomly generated key (sessions will not persist across restarts).")
+        logging.warning("⚠️ Set SECRET_KEY environment variable for production deployments.")
+    app.secret_key = secret_key
+    
+    # SECURITY: Enable CSRF protection for POST requests
+    if CSRF_AVAILABLE:
+        csrf = CSRFProtect(app)
+        # Configure CSRF to work with AJAX requests
+        # CSRF tokens will be available via {{ csrf_token() }} in templates
+        # For AJAX, include token in X-CSRFToken header or as csrf_token in form data
+        app.config['WTF_CSRF_TIME_LIMIT'] = None  # No time limit for CSRF tokens
+        logging.info("✅ CSRF protection enabled")
+    else:
+        logging.warning("⚠️ CSRF protection not available - install Flask-WTF for production security")
 
     # Enable gzip compression for JSON and text responses to reduce bandwidth/latency
     if Compress is not None:
@@ -1863,9 +1940,13 @@ def add_performance_headers(response):
             else:
                 # 2 minutes for other API responses
                 response.headers['Cache-Control'] = 'private, max-age=120, must-revalidate'
-    # Security headers
+    # SECURITY: Security headers
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    # Content-Security-Policy: Allow same-origin and inline scripts/styles for compatibility
+    # Note: This is permissive for compatibility - tighten in production if possible
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'"
     # Add timing header for debugging
     if hasattr(request, '_start_time'):
         elapsed = (time.time() - request._start_time) * 1000
@@ -1881,7 +1962,14 @@ if not PYTHONANYWHERE_OPTIMIZATION:
     logging.info("Background cleanup schedulers started")
 else:
     logging.info("⚠️  Background schedulers DISABLED on PythonAnywhere to prevent startup timeout")
-    logging.info("   Run manual cleanup via /api/cleanup endpoint if needed")
+    # Run cleanup once on startup (quick, non-blocking)
+    try:
+        cleanup_old_uploads(max_age_hours=24)  # 24h for PythonAnywhere
+        cleanup_cache_directory(max_age_hours=24)
+        cleanup_session_files(max_age_hours=24)
+        logging.info("✅ Startup cleanup completed (uploads, cache, sessions > 24h)")
+    except Exception as cleanup_err:
+        logging.warning(f"Startup cleanup failed: {cleanup_err}")
 
 @app.before_request
 def start_request_timer():
@@ -17430,6 +17518,19 @@ def update_database_product(product_id: int):
             if not updates:
                 return jsonify({'success': False, 'error': 'No updatable fields provided'}), 400
 
+            # SECURITY: Validate all column names are in the allowed set to prevent SQL injection
+            # All updates should only contain columns from the validated cols set
+            for update_clause in updates:
+                # Extract column name from update clause (format: "column" = ? or column = ?)
+                import re
+                col_match = re.match(r'^["\']?([^"\']+)["\']?\s*=', update_clause)
+                if col_match:
+                    col_name = col_match.group(1)
+                    # Verify column exists in schema (already validated above, but double-check)
+                    if col_name not in cols and col_name.strip('"\'') not in cols:
+                        logging.warning(f"SECURITY: Attempted to update invalid column: {col_name}")
+                        return jsonify({'success': False, 'error': f'Invalid column name: {col_name}'}), 400
+
             where_clause = 'rowid = ?' if excel_style else 'id = ?'
             params.append(product_id)
 
@@ -19720,9 +19821,36 @@ def proxy_json():
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
-            
-        if not url.lower().startswith('http'):
-            return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
+        
+        # SECURITY: Prevent SSRF attacks by validating URL scheme and host
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        
+        # Only allow http and https schemes
+        if parsed.scheme not in ('http', 'https'):
+            return jsonify({'error': 'Only HTTP and HTTPS URLs are allowed'}), 400
+        
+        # SECURITY: Block private/internal IP addresses and localhost
+        hostname = parsed.hostname
+        if not hostname:
+            return jsonify({'error': 'Invalid URL: missing hostname'}), 400
+        
+        # Block localhost and private IP ranges
+        blocked_hosts = ['localhost', '127.0.0.1', '0.0.0.0', '::1']
+        if hostname.lower() in blocked_hosts:
+            return jsonify({'error': 'Access to localhost/internal addresses is not allowed'}), 400
+        
+        # Block private IP ranges (RFC 1918)
+        try:
+            import ipaddress
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                return jsonify({'error': 'Access to private/internal IP addresses is not allowed'}), 400
+        except ValueError:
+            # Not an IP address, check if it's a domain
+            # Allow only if it's a valid external domain
+            if hostname.lower() in blocked_hosts or hostname.startswith('192.168.') or hostname.startswith('10.') or hostname.startswith('172.'):
+                return jsonify({'error': 'Access to private/internal addresses is not allowed'}), 400
         
         import requests
         import json
@@ -19923,9 +20051,13 @@ def clear_upload_status():
         return jsonify({'error': str(e)}), 500
 
 def sanitize_filename(filename):
-    """Sanitize filename for safe download."""
+    """Sanitize filename for safe download and prevent path traversal attacks."""
     import re
     import unicodedata
+    import os
+    
+    # SECURITY: Remove path traversal sequences first
+    filename = filename.replace('..', '').replace('/', '').replace('\\', '')
     
     # Remove or replace problematic characters
     filename = unicodedata.normalize('NFKD', filename)
@@ -19933,13 +20065,24 @@ def sanitize_filename(filename):
     filename = re.sub(r'[^\x00-\x7F]+', '', filename)  # Remove non-ASCII
     filename = filename.strip()
     
+    # SECURITY: Additional path traversal check after normalization
+    if '..' in filename or '/' in filename or '\\' in filename:
+        filename = re.sub(r'\.\.|[/\\]', '', filename)
+    
     # Ensure it's not empty
     if not filename:
         filename = "AGT_File"
     
+    # SECURITY: Remove leading dots and spaces (could be hidden files)
+    filename = filename.lstrip('. ')
+    
     # Limit length
     if len(filename) > 200:
         filename = filename[:200]
+    
+    # SECURITY: Final validation - ensure no path separators
+    if os.sep in filename or (os.altsep and os.altsep in filename):
+        filename = filename.replace(os.sep, '_').replace(os.altsep or '', '_')
     
     return filename
 

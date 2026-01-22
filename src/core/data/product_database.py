@@ -1591,14 +1591,24 @@ class ProductDatabase:
                                 column_data_map[col_name] = clean_value
                     
                     # Only include columns that exist in the database
+                    # SECURITY: Validate column names to prevent SQL injection
                     for col_name, col_value in column_data_map.items():
                         if col_name in available_columns:
+                            # Additional security check: ensure column name doesn't contain SQL injection patterns
+                            if any(char in col_name for char in [';', '--', '/*', '*/', 'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER']):
+                                logger.warning(f"SECURITY: Suspicious column name detected and rejected: {col_name}")
+                                continue
                             columns_to_insert.append(f'"{col_name}"')
                             values_to_insert.append(col_value)
                     
                     # Build the INSERT statement dynamically
                     columns_str = ', '.join(columns_to_insert)
                     placeholders = ', '.join(['?' for _ in values_to_insert])
+                    
+                    # SECURITY: Final validation - ensure we have valid columns
+                    if not columns_to_insert:
+                        logger.error("SECURITY: No valid columns to insert after validation")
+                        return None
                     
                     insert_query = f'INSERT INTO products ({columns_str}) VALUES ({placeholders})'
                     try:
@@ -3284,8 +3294,14 @@ class ProductDatabase:
                 ]
                 
                 # Only add columns that exist in the database
+                # SECURITY: Validate column names to prevent SQL injection
                 for col_name, default_value in column_mappings:
-                    if col_name.strip('"') in existing_columns:
+                    clean_col_name = col_name.strip('"')
+                    if clean_col_name in existing_columns:
+                        # Additional security check: ensure column name doesn't contain SQL injection patterns
+                        if any(char in clean_col_name for char in [';', '--', '/*', '*/', 'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER']):
+                            logger.warning(f"SECURITY: Suspicious column name detected and rejected: {clean_col_name}")
+                            continue
                         updates.append(f'{col_name} = ?')
                         values.append(default_value)
                 
