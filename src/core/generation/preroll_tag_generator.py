@@ -381,9 +381,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
-        # Only debug-log group growth when DEBUG enabled to avoid hot loop I/O
-        if logging.getLogger().isEnabledFor(logging.DEBUG):
-            logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (brand/vendor: '{brand_for_grouping}', total in group: {len(grouped_records[group_key]['records'])})")
     
     # Step 2: Create representative records with group display names
     unique_records = []
@@ -393,11 +390,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         group_info = group_data['group_info']
         group_records_list = group_data['records']
         
-        # Extract the original group_id from group_key (group_key may include vendor)
-        # group_key format: "group_id" or "group_id|vendor"
-        original_group_id = group_info['group_id']
+        if not group_records_list or len(group_records_list) == 0:
+            continue
         
-        # Use the first record as representative
+        original_group_id = group_info['group_id']
+        group_display_name = group_info['display_name']
+        
         representative = group_records_list[0].copy()
         
         # Update ALL fields that might be displayed on the label to show group display name
@@ -430,26 +428,18 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             representative.get('Vendor/Supplier', '') or
             ''
         )
-        # If no vendor found in representative, extract from group_key (format: "group_id|vendor")
         if not vendor and '|' in group_key:
             vendor = group_key.split('|', 1)[1]
-            logging.info(f"PREROLL GROUP REP: Extracted vendor '{vendor}' from group_key for '{group_display_name}'")
-        # If still no vendor, search through all records in the group
         if not vendor:
             for r in group_records_list:
                 v = (r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or r.get('Vendor/Supplier', '') or '')
                 if v and str(v).strip():
                     vendor = str(v).strip()
-                    logging.info(f"PREROLL GROUP REP: Found vendor '{vendor}' from group record for '{group_display_name}'")
                     break
-        # Set vendor on representative record to ensure it's passed to template processor
         if vendor:
             representative['Vendor/Supplier*'] = vendor
             representative['Vendor'] = vendor
             representative['ProductVendor'] = vendor
-            logging.debug(f"PREROLL GROUP REP: Set vendor '{vendor}' on representative for '{group_display_name}'")
-        else:
-            logging.warning(f"PREROLL GROUP REP: No vendor found for group '{group_display_name}' (group_key: {group_key})")
         
         # Keep the price from the first record (or could average/use min/max - using first for now)
         original_price = representative.get('Price', '')
@@ -487,7 +477,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             )
             if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
                 rep_lineage = str(candidate).strip()
-                logging.info(f"PREROLL GROUP REP: Using lineage '{rep_lineage}' for group representative of '{group_display_name}'")
                 break
         representative['Lineage'] = rep_lineage
 
@@ -506,7 +495,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                     potential_brand = by_match.group(1).strip()
                     if potential_brand and potential_brand.lower() not in ['', 'none', 'nan']:
                         rep_brand = potential_brand
-                        logging.info(f"PREROLL GROUP REP: Extracted brand '{rep_brand}' from product name '{product_name_str}' (by X - pattern)")
                         break
 
         # PRIORITY 2: Fall back to Product Brand field if extraction failed
@@ -525,12 +513,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 cand_str = str(candidate).strip()
                 if not cand_str or cand_str.lower() in ['none', 'nan', 'premium cannabis']:
                     continue
-                # Skip if it looks like a vendor (contains LLC, Inc, Co, etc.)
                 if any(suffix in cand_str.upper() for suffix in ['LLC', ' INC', ' CO', 'CORP', 'COMPANY']):
-                    logging.debug(f"PREROLL GROUP REP: Skipping vendor-like brand '{cand_str}' for '{group_display_name}'")
                     continue
                 rep_brand = cand_str
-                logging.info(f"PREROLL GROUP REP: Using Product Brand field '{rep_brand}' for '{group_display_name}'")
                 break
 
         # PRIORITY 3: Final fallback - use vendor as brand if still nothing
@@ -542,26 +527,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             )
             if vendor_fallback and str(vendor_fallback).strip():
                 rep_brand = str(vendor_fallback).strip()
-                logging.info(f"PREROLL GROUP REP: Using vendor '{rep_brand}' as brand fallback for '{group_display_name}'")
 
         if rep_brand:
             representative['Product Brand'] = rep_brand
             representative['ProductBrand'] = rep_brand
             representative['Brand'] = rep_brand
-            logging.info(f"PREROLL GROUP REP: ✅ Set brand '{rep_brand}' on representative for '{group_display_name}'")
-        else:
-            # Log warning with details about what brands were found in records
-            all_brands = []
-            for i, r in enumerate(group_records_list[:5]):
-                brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '') or r.get('brand', '')
-                all_brands.append(f"[{i}]={repr(brand_val)}")
-            logging.warning(f"PREROLL GROUP REP: ⚠️ NO BRAND found for '{group_display_name}'. Sample brand values: {', '.join(all_brands)}")
-            logging.warning(f"PREROLL GROUP REP: ⚠️ Record keys available: {list(group_records_list[0].keys())[:20] if group_records_list else 'N/A'}")
-
-        # Log final representative record summary for debugging
-        final_brand = representative.get('Product Brand', '') or representative.get('ProductBrand', '')
-        final_vendor = representative.get('Vendor/Supplier*', '') or representative.get('Vendor', '')
-        logging.info(f"PREROLL GROUP REP FINAL: '{group_display_name}' -> Brand='{final_brand}', Vendor='{final_vendor}'")
 
         unique_records.append(representative)
         
@@ -668,9 +638,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     grouped_records_list = unique_records
     logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records_list)} product groups (one label per vendor per category)")
     
-    # Verify we have the expected number of groups
     if len(grouped_records_list) != len(grouped_records):
-        logging.error(f"PREROLL GROUPING ERROR: Mismatch! Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
+        logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
     
     # Log sample of generated groups for debugging
     if grouped_records_list:
