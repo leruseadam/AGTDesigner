@@ -8931,8 +8931,26 @@ def generate_labels():
             # This dramatically speeds up generation by avoiding expensive DataFrame update
             # Database enrichment happens after records are built, which is faster
             
-            records = excel_processor.get_selected_records(template_type)
-            logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
+            # CRITICAL FIX: For preroll template, automatically include ALL preroll products
+            # This ensures all preroll groups are created, not just selected ones
+            if template_type == 'preroll':
+                logging.info("🔄 PREROLL TEMPLATE: Auto-including ALL preroll products (not just selected)")
+                # Get all available tags and filter for preroll products
+                all_tags = excel_processor.get_available_tags(filters=None)
+                preroll_keywords = ['preroll', 'pre-roll', 'infused preroll', 'infused pre-roll', 'blunt']
+                records = []
+                for tag in all_tags:
+                    product_type = str(tag.get('Product Type*', tag.get('ProductType', ''))).lower()
+                    product_name = str(tag.get('Product Name*', tag.get('ProductName', ''))).lower()
+                    description = str(tag.get('Description', '')).lower()
+                    combined = f"{product_type} {product_name} {description}"
+                    # Check if this is a preroll product
+                    if any(keyword in combined for keyword in preroll_keywords):
+                        records.append(tag)
+                logging.info(f"🔄 PREROLL TEMPLATE: Found {len(records)} preroll products from all available tags (auto-included all prerolls)")
+            else:
+                records = excel_processor.get_selected_records(template_type)
+                logging.info(f"🔍 Records returned from get_selected_records: {len(records) if records else 0}")
             
             # PERFORMANCE FIX: Batch enrich Excel records with single database query
             if records and has_database:
