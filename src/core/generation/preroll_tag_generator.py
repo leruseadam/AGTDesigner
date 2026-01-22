@@ -12,6 +12,20 @@ from typing import List, Dict, Any, Optional
 from flask import session
 from flask_caching import Cache
 from src.core.constants import PREROLL_ALLOWED_BRANDS
+# Precompiled regexes to improve performance (avoid repeated compilation in loops)
+# Matches pack patterns like "0.5g x 7 Pack", "1g x 5 Pack", etc.
+PACK_RE = re.compile(r"(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)\s*pack", re.IGNORECASE)
+# Matches "by BrandName -" pattern used to extract brand
+BY_PATTERN = re.compile(r"\sby\s+([^-]+?)(?:\s+-|$)", re.IGNORECASE)
+# Matches weight like "1g" or "0.5g"
+WEIGHT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*g", re.IGNORECASE)
+# Preroll universal patterns (compiled)
+PREROLL_PATTERN_COMPILED = [
+    re.compile(r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)', re.IGNORECASE),
+    re.compile(r'(.+?)(Pre[-‑ ]?Roll.*)', re.IGNORECASE),
+]
+# Non-alphanumeric for normalization
+NON_ALNUM_RE = re.compile(r'[^a-z0-9-]+')
 import threading
 
 
@@ -123,7 +137,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Check for pack sizes (general pattern - check this BEFORE specific 1g x 5 check)
     # Pattern: "0.5g x 7 Pack", "1g x 5 Pack", ".5g x 2 Pack", etc.
-    pack_match = re.search(r'(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)\s*pack', combined, re.IGNORECASE)
+    pack_match = PACK_RE.search(combined)
     if pack_match:
         weight = pack_match.group(1)
         count = pack_match.group(2)
@@ -153,7 +167,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Check for infused prerolls with weight
     if 'infused' in combined and 'pre' in combined and 'roll' in combined:
-        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
+        weight_match = WEIGHT_RE.search(combined)
         if weight_match:
             weight = weight_match.group(1)
             return {
@@ -170,7 +184,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Check for regular prerolls with weight
     if ('pre' in combined and 'roll' in combined) and 'infused' not in combined:
-        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
+        weight_match = WEIGHT_RE.search(combined)
         if weight_match:
             weight = weight_match.group(1)
             return {
@@ -183,16 +197,12 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Default: use truncated description pattern
     # CRITICAL FIX: Check for infused prerolls FIRST before regular prerolls
-    preroll_patterns = [
-        r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',  # Infused prerolls first
-        r'(.+?)(Pre[-‑ ]?Roll.*)',  # Regular prerolls second
-    ]
-    for pattern in preroll_patterns:
-        match = re.search(pattern, description, re.IGNORECASE)
+    for pattern in PREROLL_PATTERN_COMPILED:
+        match = pattern.search(description)
         if match:
             universal_desc = match.group(2).strip().lower()
             # Create a safe group ID from the description
-            group_id = re.sub(r'[^a-z0-9-]+', '-', universal_desc).strip('-')
+            group_id = NON_ALNUM_RE.sub('-', universal_desc).strip('-')
             display_name = universal_desc.replace('pre-roll', 'Pre-Roll').replace('pre roll', 'Pre-Roll')
             # CRITICAL FIX: Ensure "infused" is capitalized and preserved in display name
             if 'infused' in universal_desc:
@@ -229,12 +239,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     """
     # DEBUG: Log brand values in input records
     if records:
-        # Log all keys from first record to understand data structure
-        logging.info(f"PREROLL INPUT DEBUG: First record keys ({len(records[0].keys())} total): {list(records[0].keys())}")
-        for i, r in enumerate(records[:5]):
-            brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '')
-            vendor_val = r.get('Vendor/Supplier*', '') or r.get('Vendor', '')
-            logging.info(f"PREROLL INPUT DEBUG [{i+1}]: Name='{r.get('Product Name*', 'N/A')}', Brand='{brand_val}', Vendor='{vendor_val}', ALL_BRAND_FIELDS: Product Brand={repr(r.get('Product Brand'))}, ProductBrand={repr(r.get('ProductBrand'))}, Brand={repr(r.get('Brand'))}")
+        # Log sample keys and values at DEBUG level to avoid costly string formatting at INFO
+        logging.debug(f"PREROLL INPUT DEBUG: First record keys ({len(records[0].keys())} total): {list(records[0].keys())}")
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            for i, r in enumerate(records[:5]):
+                brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '')
+                vendor_val = r.get('Vendor/Supplier*', '') or r.get('Vendor', '')
+                logging.debug(f"PREROLL INPUT DEBUG [{i+1}]: Name='{r.get('Product Name*', 'N/A')}', Brand='{brand_val}', Vendor='{vendor_val}', ALL_BRAND_FIELDS: Product Brand={repr(r.get('Product Brand'))}, ProductBrand={repr(r.get('ProductBrand'))}, Brand={repr(r.get('Brand'))}")
 
     # Filter records by allowed brands if configured
     # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
@@ -297,7 +308,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # This is used for grouping to avoid duplicates
         brand_for_grouping = ''
         product_name_str = str(product_name).strip()
-        by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name_str, re.IGNORECASE)
+        by_match = BY_PATTERN.search(product_name_str)
         if by_match:
             brand_for_grouping = by_match.group(1).strip()
 
