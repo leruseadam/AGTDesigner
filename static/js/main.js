@@ -8360,8 +8360,15 @@ const TagManager = {
             console.warn(`⚠️ Tag "${displayName}" has no database lineage, using Excel Lineage: ${normalizedLineage}`);
         }
         
-        // Show all lineage options for every product type (no restrictions)
-        let uniqueLineages = window.allLineageOptions || lineageOptions;
+        // CRITICAL FIX: Filter lineage options based on product type
+        // Classic types get SATIVA/INDICA/HYBRID, non-classic get CBD/MIXED only
+        const productTypeForLineage = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+        let uniqueLineages;
+        if (typeof window.getUniqueLineages === 'function' && productTypeForLineage) {
+            uniqueLineages = window.getUniqueLineages(productTypeForLineage);
+        } else {
+            uniqueLineages = window.allLineageOptions || lineageOptions;
+        }
         
         // Convert string array to object array if needed
         if (uniqueLineages.length > 0 && typeof uniqueLineages[0] === 'string') {

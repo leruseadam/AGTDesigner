@@ -113,6 +113,9 @@ const getUniqueLineages = (productType = null) => {
   return ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED','PARA'];
 };
 
+// Export getUniqueLineages globally so main.js can use it to filter lineage dropdowns
+window.getUniqueLineages = getUniqueLineages;
+
 function createTagRow(tag) {
   // Use canonical_lineage, currentLineage, or Lineage in priority order
   let rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';

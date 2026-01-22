@@ -757,12 +757,10 @@ def clear_all_on_startup():
     except Exception as e:
         logging.warning(f"Failed to delete store selections file: {e}")
 
-    # CRITICAL: Also clear all caches to prevent wrong tags from previous session
-    try:
-        cache.clear()
-        logging.warning(f"🔥 STARTUP: Cleared all Flask caches - fresh start for all users")
-    except Exception as e:
-        logging.warning(f"Failed to clear cache on startup: {e}")
+    # NOTE: Removed aggressive cache.clear() on startup - it was causing slow tag loads
+    # Users will get fresh data when they upload new files or when lineage is updated
+    # The browser-side cache ensures fast page loads while server-side cache is rebuilt
+    logging.info("🔥 STARTUP: Cleared store selections (Flask caches preserved for fast loads)")
 
     logging.warning(f"🔥 STARTUP: Cleared all {count} store selections - STORE MODAL WILL SHOW FOR ALL USERS")
 
@@ -1840,6 +1838,11 @@ if CACHE_AVAILABLE:
         'CACHE_DEFAULT_TIMEOUT': 86400
     }
     cache = Cache(app, config=cache_config)
+
+    # NOTE: Removed aggressive cache.clear() on startup - it was causing 30+ second tag loads
+    # Users get fresh data automatically when uploading new files or updating lineage
+    # Browser-side caching provides instant loads while server cache is built in background
+    logging.info("✅ STARTUP: Flask cache initialized (preserved for fast tag loads)")
 else:
     cache = Cache()  # Use dummy cache
 
