@@ -7540,6 +7540,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             placeholders = ','.join(['?' for _ in chunk])
         # EXACT same query as docx generation - but also return individual fields to preserve priority
         # CRITICAL FIX: Also select Product Brand and DOH to enrich tags with brand and DOH data
+            import time
+            start_chunk = time.perf_counter()
             cursor.execute(f'''
                 SELECT p."Product Name*", 
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
@@ -7554,7 +7556,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 WHERE p."Product Name*" IN ({placeholders})
                 ORDER BY p.id DESC
             ''', chunk)
-            for row in cursor.fetchall():
+            rows = cursor.fetchall()
+            elapsed_chunk = (time.perf_counter() - start_chunk) * 1000
+            logging.debug(f"LINEAGE: batch {start}-{start+len(chunk)} queried {len(chunk)} names -> {len(rows)} rows returned in {elapsed_chunk:.0f}ms")
+            for row in rows:
                 db_name = row[0]
                 db_lineage_raw = row[1]
                 product_sovereign_raw = row[2]
@@ -15051,25 +15056,31 @@ def get_web_available_tags():
                 response = compress_response(response)
                 return response
         
-        # WEB OPTIMIZATION: Return Excel tags IMMEDIATELY for fast first load
-        # Skip slow database alignment - tags already have lineage from Excel file
-        logging.info("⚡ WEB: Building tags with Excel data (FAST - skipping DB alignment)...")
+        # WEB OPTIMIZATION: Get Excel tags and align with database lineage
+        logging.info("⚡ WEB: Building tags with Excel data + DB lineage alignment...")
 
         # Excel processor already loaded and validated above - just use it
         # Get tags from Excel
         try:
+            start_excel = time.time()
             logging.info("WEB: Calling excel_processor.get_available_tags() - starting")
             excel_tags = excel_processor.get_available_tags()
-            logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
+            excel_elapsed = (time.time() - start_excel) * 1000
+            logging.info(f"WEB: excel_processor.get_available_tags() returned {len(excel_tags) if excel_tags else 0} tags in {excel_elapsed:.0f}ms")
 
-            # PERFORMANCE FIX: Skip slow database alignment for INSTANT tag loading
-            # Excel tags already have lineage from the Excel file - no need to re-query DB
-            # Database alignment was taking 20-30 seconds and causing timeouts
-            # If user updates lineage, they can use Lineage Editor which updates DB
+            # CRITICAL: Align Excel tags with database lineage for correct display
+            # This ensures tags show the database lineage (edited via Lineage Editor)
             store_name = get_current_store_name(allow_fallback=False)
-            # SKIP ALIGNMENT - it's too slow and causes timeouts on PythonAnywhere
-            # excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, ...)
-            logging.info(f"⚡ WEB: Skipping DB alignment for speed - returning {len(excel_tags) if excel_tags else 0} Excel tags directly")
+            if store_name and excel_tags:
+                try:
+                    start_align = time.time()
+                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage...")
+                    excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                    align_elapsed = (time.time() - start_align) * 1000
+                    matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
+                    logging.info(f"✅ WEB: Aligned {matched_count} tags with DB lineage in {align_elapsed:.0f}ms")
+                except Exception as align_err:
+                    logging.warning(f"WEB: Lineage alignment failed (using Excel lineage): {align_err}")
             
             # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
             simple_tags = []
