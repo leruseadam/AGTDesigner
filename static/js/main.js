@@ -16024,11 +16024,20 @@ const TagManager = {
         console.log('🗑️ clearSelected() called - USER INTENTIONALLY CLEARING TAGS');
         console.log('📍 Call stack:', new Error().stack);
 
-        // Prevent multiple simultaneous calls
+        // CRITICAL FIX: Prevent multiple simultaneous calls - check both state flag and add debounce
         if (this.state.isClearing) {
             verboseLog('⚠️ Clear operation already in progress, ignoring duplicate call');
             return;
         }
+        
+        // CRITICAL FIX: Add debounce to prevent rapid successive calls
+        const now = Date.now();
+        const lastClearTime = this._lastClearTime || 0;
+        if (now - lastClearTime < 1000) { // 1 second debounce
+            verboseLog('⚠️ Clear called too soon after last clear, ignoring (debounce protection)');
+            return;
+        }
+        this._lastClearTime = now;
 
         this.state.isClearing = true;
         this.clearAvailableTagsCache();
@@ -19873,21 +19882,59 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeStickyFilterBar();
 
     // Add event listener for the clear button with retry mechanism
+    // CRITICAL FIX: Track if listener is already attached to prevent duplicates
+    let clearButtonListenerAttached = false;
+    
     function attachClearButtonListener() {
+        // CRITICAL FIX: Prevent multiple attachments
+        if (clearButtonListenerAttached) {
+            verboseLog('Clear button listener already attached, skipping');
+            return true;
+        }
+        
         const clearButton = document.getElementById('clear-filters-btn');
         if (clearButton) {
-            // Remove any existing listeners to prevent duplicates
+            // CRITICAL FIX: Remove onclick attribute to prevent duplicate calls
+            if (clearButton.hasAttribute('onclick')) {
+                clearButton.removeAttribute('onclick');
+                verboseLog('Removed onclick attribute from clear button to prevent duplicate calls');
+            }
+            
+            // CRITICAL FIX: Remove any existing listeners to prevent duplicates
             const newButton = clearButton.cloneNode(true);
+            // Ensure onclick is removed from cloned button too
+            if (newButton.hasAttribute('onclick')) {
+                newButton.removeAttribute('onclick');
+            }
             clearButton.parentNode.replaceChild(newButton, clearButton);
+            
+            // CRITICAL FIX: Prevent multiple simultaneous calls
+            let isClearing = false;
             
             newButton.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
+                
+                // CRITICAL FIX: Prevent duplicate calls
+                if (isClearing) {
+                    verboseLog('Clear operation already in progress, ignoring duplicate click');
+                    return;
+                }
+                
+                isClearing = true;
                 verboseLog('Clear & Reset button clicked');
+                
                 if (window.TagManager && TagManager.clearSelected) {
                     verboseLog('Calling TagManager.clearSelected()');
-                    TagManager.clearSelected();
+                    // Reset flag after a delay to allow operation to complete
+                    setTimeout(() => {
+                        isClearing = false;
+                    }, 2000);
+                    TagManager.clearSelected().finally(() => {
+                        isClearing = false;
+                    });
                 } else {
+                    isClearing = false;
                     console.error('TagManager or clearSelected method not available');
                     // Fallback: try clearAllFilters
                     if (window.TagManager && TagManager.clearAllFilters) {
@@ -19898,6 +19945,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             });
+            
+            clearButtonListenerAttached = true;
             verboseLog('Clear & Reset button event listener attached successfully');
             return true;
         } else {
