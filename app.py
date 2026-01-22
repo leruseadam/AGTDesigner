@@ -9263,6 +9263,21 @@ def generate_labels():
                     logging.info(f"PREROLL INPUT {i+1}: Name={record.get('Product Name*', 'N/A')}, Type={record.get('Product Type*', 'N/A')}, Vendor={record.get('Vendor/Supplier*', 'N/A')}")
             else:
                 logging.error(f"PREROLL: No records passed to grouping function!")
+            
+            # CRITICAL FIX: Enrich records with database lineage BEFORE preroll grouping
+            # This ensures preroll generator gets sovereign_lineage/canonical_lineage fields
+            # so it can properly set lineage on representative records
+            try:
+                store_name = get_current_store_name()
+                product_db = get_product_database(store_name)
+                if product_db and records:
+                    logging.info(f"🔄 PREROLL: Enriching {len(records)} records with database lineage before grouping...")
+                    # Use _align_tags_with_db_lineage to get proper lineage fields
+                    records = _align_tags_with_db_lineage(records, store_name, skip_if_aligned=False, force_overwrite=True)
+                    logging.info(f"✅ PREROLL: Enriched records with database lineage")
+            except Exception as enrich_err:
+                logging.warning(f"PREROLL: Failed to enrich records with database lineage before grouping: {enrich_err}")
+            
             records = generate_preroll_tags(records, cache)
             # Log what came out of grouping
             if records:
