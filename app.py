@@ -7428,14 +7428,22 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         # Copy tags so we don't mutate cached objects
         aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
         
-        # PERFORMANCE: Early exit if skip_if_aligned and tags already have lineage
+        # PERFORMANCE: Early exit if skip_if_aligned and tags already have DATABASE lineage
+        # CRITICAL FIX: Only skip if tags have database lineage (sovereign_lineage or canonical_lineage)
+        # Do NOT skip if tags only have Excel lineage (Lineage field) - Excel lineage must be overwritten
         if skip_if_aligned:
-            # Check if tags already have database lineage fields
-            tags_with_lineage = sum(1 for t in aligned_tags 
-                                   if isinstance(t, dict) and 
-                                   (t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage')))
-            if tags_with_lineage >= len(aligned_tags) * 0.5:  # 50%+ already have lineage
-                logging.debug(f"⚡ Skipping alignment - {tags_with_lineage}/{len(aligned_tags)} tags already have database lineage")
+            # Check if tags already have DATABASE lineage fields (not just Excel Lineage)
+            tags_with_db_lineage = sum(1 for t in aligned_tags 
+                                      if isinstance(t, dict) and 
+                                      (t.get('sovereign_lineage') or t.get('canonical_lineage')))
+            # CRITICAL: Also check if tags have currentLineage that's NOT from Excel
+            # If tag has currentLineage but no sovereign/canonical, it might be Excel lineage
+            tags_with_valid_lineage = sum(1 for t in aligned_tags 
+                                         if isinstance(t, dict) and 
+                                         (t.get('sovereign_lineage') or t.get('canonical_lineage') or 
+                                          (t.get('currentLineage') and not t.get('Lineage'))))  # currentLineage without Lineage = database lineage
+            if tags_with_valid_lineage >= len(aligned_tags) * 0.5:  # 50%+ already have database lineage
+                logging.debug(f"⚡ Skipping alignment - {tags_with_valid_lineage}/{len(aligned_tags)} tags already have database lineage")
                 return aligned_tags
         
         # Collect product names for lookup (always include; alignment now force-overwrites)
@@ -7805,7 +7813,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             else:
                 # Old format (backward compatibility)
                 db_lineage = lineage_info
-                if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')):
+                # CRITICAL FIX: Always overwrite Excel lineage with database lineage, even if force_overwrite=False
+                # Excel lineage should NEVER persist when database has lineage (sovereign_lineage takes priority)
+                if force_overwrite or not (tag.get('canonical_lineage') or tag.get('currentLineage')) or tag.get('Lineage'):
+                    # If tag has Excel Lineage but no database lineage fields, always overwrite
                     tag['Lineage'] = db_lineage
                     tag['Lineage*'] = db_lineage  # CRITICAL: Set Excel column name for UI
                     tag['lineage'] = db_lineage.lower()
@@ -11203,19 +11214,27 @@ def get_available_tags():
                 elif has_lineage_updates:
                     logging.info(f"🔄 LINEAGE UPDATE DETECTED: Forcing database enrichment even with fast_load=1")
 
-                # CRITICAL FIX: Only strip Excel lineage if we're going to enrich with database lineage
-                # If skipping enrichment (fast_load mode), keep Excel lineage as fallback
-                # This ensures tags always have lineage fields populated
+                # CRITICAL FIX: Always strip Excel lineage when we have lineage updates OR when enriching
+                # Excel lineage should NEVER override database sovereign_lineage (user edits)
+                # If skipping enrichment (fast_load mode without updates), we'll still align later which will overwrite Excel
                 if not skip_db_enrichment:
-                    # Strip Excel lineage only when we'll replace it with database lineage
+                    # Strip Excel lineage when we'll replace it with database lineage
                     for tag in simple_tags:
                         tag.pop('Lineage', None)
                         tag.pop('lineage', None)
                         tag.pop('Lineage*', None)
                     logging.info(f"🗑️ STRIPPED Excel Lineage from {len(simple_tags)} tags - will enrich with DATABASE lineage only")
+                elif has_lineage_updates:
+                    # CRITICAL FIX: Even in fast_load mode, if lineage was updated, strip Excel lineage
+                    # This ensures user edits (sovereign_lineage) take priority over Excel
+                    for tag in simple_tags:
+                        tag.pop('Lineage', None)
+                        tag.pop('lineage', None)
+                        tag.pop('Lineage*', None)
+                    logging.info(f"🗑️ STRIPPED Excel Lineage from {len(simple_tags)} tags - lineage updates detected, will use DATABASE lineage only")
                 else:
-                    # Fast load mode: Keep Excel lineage as fallback, but still try to enrich if possible
-                    logging.info(f"⚡ FAST LOAD: Keeping Excel lineage as fallback for {len(simple_tags)} tags")
+                    # Fast load mode without updates: Keep Excel lineage temporarily, but alignment will overwrite with DB
+                    logging.info(f"⚡ FAST LOAD: Keeping Excel lineage temporarily for {len(simple_tags)} tags (will be overwritten by alignment if DB has sovereign_lineage)")
 
                 # CRITICAL: Enrich with database lineage after stripping Excel lineage
                 # This populates currentLineage, canonical_lineage from database
@@ -11465,13 +11484,16 @@ def get_available_tags():
 
             # CRITICAL FIX: Always align tags with database lineage to ensure lineage fields are populated
             # Even in fast_load mode, we need lineage fields for the UI to display dropdowns
+            # CRITICAL: When lineage updates exist, ALWAYS force overwrite to ensure sovereign_lineage takes priority
             # PERFORMANCE: Use lightweight alignment that doesn't require full database queries
             try:
                 if store_name and simple_tags:
                     # CRITICAL: Always align to ensure lineage fields exist, even in fast_load mode
                     # This ensures UI can display lineage dropdowns even when enrichment was skipped
-                    logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage (fast_load={fast_load})...")
-                    simple_tags = _align_tags_with_db_lineage(simple_tags, store_name, skip_if_aligned=skip_db_enrichment, force_overwrite=not skip_db_enrichment)
+                    # CRITICAL FIX: If lineage updates exist, force overwrite to ensure sovereign_lineage overrides Excel
+                    force_align = has_lineage_updates or not skip_db_enrichment
+                    logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage (fast_load={fast_load}, force_align={force_align}, has_updates={has_lineage_updates})...")
+                    simple_tags = _align_tags_with_db_lineage(simple_tags, store_name, skip_if_aligned=skip_db_enrichment and not has_lineage_updates, force_overwrite=force_align)
                     logging.info(f"✅ SIMPLE PATH: Tags aligned with database lineage")
             except Exception as align_err:
                 logging.warning(f"Failed to align simple tags with database: {align_err}")
