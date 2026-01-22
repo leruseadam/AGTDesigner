@@ -7741,6 +7741,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 effective_lineage = _validate_lineage_for_classic(effective_lineage, 'currentLineage')
                 tag['currentLineage'] = effective_lineage
                 # CRITICAL: Always set Lineage* and other fields using effective_lineage (prioritizes sovereign)
+                # CRITICAL FIX: ALWAYS overwrite Excel Lineage when sovereign_lineage exists (user edits take priority)
+                # This ensures UI shows user-edited lineage even if Excel Lineage exists
                 tag['Lineage'] = effective_lineage
                 tag['Lineage*'] = effective_lineage  # CRITICAL: Set Excel column name for UI
                 tag['lineage'] = effective_lineage.lower()

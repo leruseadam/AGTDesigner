@@ -113,12 +113,9 @@ const getUniqueLineages = (productType = null) => {
   return ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','MIXED','PARA'];
 };
 
-// Export getUniqueLineages globally so main.js can use it to filter lineage dropdowns
-window.getUniqueLineages = getUniqueLineages;
-
 function createTagRow(tag) {
-  // Use canonical_lineage, currentLineage, or Lineage in priority order
-  let rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // CRITICAL: Check sovereign_lineage first (user edits), then canonical_lineage, currentLineage, or Lineage
+  let rawLineage = tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -310,7 +307,7 @@ function createTagRow(tag) {
                         return `
                           <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini"
                                   onchange="TagsTable.handleDohChange(this, '${tagName}')">
-                            <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>
+                            <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>
                             <option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
                             <option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
                           </select>
@@ -321,7 +318,7 @@ function createTagRow(tag) {
                       return `
                         <select class="form-select form-select-sm doh-dropdown doh-dropdown-mini"
                                 onchange="TagsTable.handleDohChange(this, '${tagName}')">
-                          <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>
+                          <option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>
                           <option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>
                           <option value="THC" ${effectiveDohStatus === 'THC' ? 'selected' : ''}>THC</option>
                           <option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>
@@ -372,8 +369,8 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // Use canonical_lineage, currentLineage, or Lineage in priority order
-  let rawLineage = tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // CRITICAL: Check sovereign_lineage first (user edits), then canonical_lineage, currentLineage, or Lineage
+  let rawLineage = tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -645,7 +642,7 @@ class TagsTable {
               
               // All products get normal DOH dropdown
               const dohOptions = [
-                `<option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}>None</option>`,
+                `<option value="NONE" ${(!effectiveDohStatus || effectiveDohStatus === 'No' || effectiveDohStatus === 'NONE') ? 'selected' : ''}></option>`,
                 `<option value="DOH" ${effectiveDohStatus === 'DOH' || effectiveDohStatus === 'Yes' ? 'selected' : ''}>DOH</option>`,
                 `<option value="THC" ${effectiveDohStatus === 'THC' ? 'selected' : ''}>THC</option>`,
                 `<option value="CBD" ${effectiveDohStatus === 'CBD' ? 'selected' : ''}>CBD</option>`
