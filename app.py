@@ -9292,10 +9292,18 @@ def generate_labels():
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name)
                 if product_db and records:
-                    logging.info(f"🔄 PREROLL: Enriching {len(records)} records with database lineage before grouping...")
-                    # Use _align_tags_with_db_lineage to get proper lineage fields
-                    records = _align_tags_with_db_lineage(records, store_name, skip_if_aligned=False, force_overwrite=True)
-                    logging.info(f"✅ PREROLL: Enriched records with database lineage")
+                    # PERFORMANCE: Only align if records are missing database lineage
+                    # Check if records already have database lineage (sovereign_lineage or canonical_lineage)
+                    records_with_db_lineage = sum(1 for r in records if isinstance(r, dict) and (r.get('sovereign_lineage') or r.get('canonical_lineage')))
+                    needs_alignment = records_with_db_lineage < len(records) * 0.5  # Less than 50% have database lineage
+                    
+                    if needs_alignment:
+                        logging.info(f"🔄 PREROLL: Enriching {len(records)} records with database lineage before grouping ({records_with_db_lineage}/{len(records)} already have lineage)...")
+                        # Use _align_tags_with_db_lineage to get proper lineage fields
+                        records = _align_tags_with_db_lineage(records, store_name, skip_if_aligned=True, force_overwrite=True)
+                        logging.info(f"✅ PREROLL: Enriched records with database lineage")
+                    else:
+                        logging.info(f"⚡ PREROLL: Skipping alignment - {records_with_db_lineage}/{len(records)} records already have database lineage")
             except Exception as enrich_err:
                 logging.warning(f"PREROLL: Failed to enrich records with database lineage before grouping: {enrich_err}")
             
@@ -9410,10 +9418,11 @@ def generate_labels():
             store_name = get_current_store_name()
             product_db = get_product_database(store_name)
             if product_db and records:
-                # PERFORMANCE: Skip expensive query if 95%+ records already have lineage
-                records_with_lineage = sum(1 for r in records if r.get('Lineage') and r.get('Lineage') not in ['', 'MIXED', 'HYBRID'])
-                if records_with_lineage >= len(records) * 0.95:  # 95%+ already have lineage
-                    logging.info(f"⚡ PERFORMANCE: Skipping force overwrite - {records_with_lineage}/{len(records)} records already have lineage")
+                # PERFORMANCE: Skip expensive query if 95%+ records already have DATABASE lineage (sovereign/canonical)
+                # Don't skip just because they have Excel lineage - we need to overwrite Excel with database
+                records_with_db_lineage = sum(1 for r in records if isinstance(r, dict) and (r.get('sovereign_lineage') or r.get('canonical_lineage')))
+                if records_with_db_lineage >= len(records) * 0.95:  # 95%+ already have database lineage
+                    logging.info(f"⚡ PERFORMANCE: Skipping force overwrite - {records_with_db_lineage}/{len(records)} records already have database lineage")
                 else:
                     logging.info(f"🔄 FORCING DB LINEAGE: Overwriting lineage for {len(records)} records from database...")
                     conn = product_db._get_connection()
@@ -11581,22 +11590,26 @@ def get_available_tags():
         # CRITICAL FIX: Always check if database has lineage overrides
         # Database lineage should ALWAYS take precedence over Excel lineage, not just for 10 minutes
         # This ensures manual lineage changes persist permanently
+        # PERFORMANCE: Skip this check in fast_load mode for instant loading
         force_full_refresh = False
         has_db_lineage = False
 
-        try:
-            # Check if product database has any lineage data (strains with sovereign_lineage)
-            product_db = get_product_database(store_name)
-            if product_db:
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM strains WHERE sovereign_lineage IS NOT NULL AND sovereign_lineage != ''")
-                strain_count = cursor.fetchone()[0]
-                if strain_count > 0:
-                    has_db_lineage = True
-                    logging.info(f"✅ Found {strain_count} strains with database lineage - will use prefer_db mode")
-        except Exception as db_check_err:
-            logging.warning(f"Could not check for database lineage: {db_check_err}")
+        if not fast_load:
+            try:
+                # Check if product database has any lineage data (strains with sovereign_lineage)
+                product_db = get_product_database(store_name)
+                if product_db:
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM strains WHERE sovereign_lineage IS NOT NULL AND sovereign_lineage != ''")
+                    strain_count = cursor.fetchone()[0]
+                    if strain_count > 0:
+                        has_db_lineage = True
+                        logging.info(f"✅ Found {strain_count} strains with database lineage - will use prefer_db mode")
+            except Exception as db_check_err:
+                logging.warning(f"Could not check for database lineage: {db_check_err}")
+        else:
+            logging.info(f"⚡ FAST LOAD: Skipping database lineage check for instant loading")
 
         # Force database lineage if we have any database lineage data
         if has_db_lineage or prefer_db:
