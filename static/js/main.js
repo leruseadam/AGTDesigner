@@ -1590,6 +1590,7 @@ const TagManager = {
 
         // PERFORMANCE: Optimize normalization - batch process for faster execution
         // CRITICAL FIX: Preserve vendor data and user-edited lineage when loading from cache
+        // CRITICAL FIX: Apply MIXED -> HYBRID transformation for classic types when loading from cache
         const tagCount = cachedTags.length;
         for (let i = 0; i < tagCount; i++) {
             const tag = cachedTags[i];
@@ -1607,6 +1608,43 @@ const TagManager = {
                 if (!tag['Price*']) tag['Price*'] = price;
                 if (!tag.Price) tag.Price = price;
                 if (!tag.price) tag.price = price;
+            }
+            
+            // CRITICAL FIX: Apply MIXED -> HYBRID transformation for classic types when loading from cache
+            // This ensures cached tags with invalid MIXED lineage are fixed immediately
+            const productType = tag['Product Type*'] || tag.Type || tag.productType || '';
+            // Use same logic as elsewhere: classic types have 6 lineage options
+            const isClassicType = productType && (typeof window.getUniqueLineages === 'function' 
+                ? window.getUniqueLineages(productType).length === 6 
+                : false);
+            
+            if (isClassicType) {
+                // Get the effective lineage (prioritize sovereign_lineage)
+                let effectiveLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || '';
+                const normalizedLineage = String(effectiveLineage).trim().toUpperCase();
+                
+                // Fix MIXED/THC to HYBRID for classic types
+                // CRITICAL: MIXED is invalid for classic types, so fix it even if it's in sovereign_lineage
+                if (normalizedLineage === 'MIXED' || normalizedLineage === 'THC') {
+                    const fixedLineage = 'HYBRID';
+                    
+                    // Update all lineage fields with the fixed value
+                    tag.sovereign_lineage = fixedLineage;
+                    tag.canonical_lineage = fixedLineage;
+                    tag.currentLineage = fixedLineage;
+                    tag.Lineage = fixedLineage;
+                    tag.lineage = fixedLineage.toLowerCase();
+                } else if (effectiveLineage) {
+                    // Ensure all lineage fields are consistent (use effective lineage)
+                    // Only update non-sovereign fields to preserve user edits
+                    if (!tag.sovereign_lineage) {
+                        tag.sovereign_lineage = effectiveLineage;
+                    }
+                    tag.canonical_lineage = effectiveLineage;
+                    tag.currentLineage = effectiveLineage;
+                    tag.Lineage = effectiveLineage;
+                    tag.lineage = String(effectiveLineage).toLowerCase();
+                }
             }
         }
 
