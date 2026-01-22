@@ -250,6 +250,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 logging.debug(f"PREROLL INPUT DEBUG [{i+1}]: Name='{r.get('Product Name*', 'N/A')}', Brand='{brand_val}', Vendor='{vendor_val}', ALL_BRAND_FIELDS: Product Brand={repr(r.get('Product Brand'))}, ProductBrand={repr(r.get('ProductBrand'))}, Brand={repr(r.get('Brand'))}")
 
     start_t = time.time()
+    
+    # CRITICAL: Track original count BEFORE any filtering
+    original_input_count = len(records)
+    logging.info(f"PREROLL INPUT: Received {original_input_count} records for grouping")
 
     # If environment requests preserve-all, skip grouping and return records unchanged
     if os.getenv('PREROLL_PRESERVE_ALL', '').lower() in ['1', 'true', 'yes']:
@@ -343,7 +347,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 )
                 brand_for_grouping = str(vendor).strip()
 
-        # Group by category AND brand - each brand gets their own group
+        # Group by category AND brand/vendor - each brand/vendor gets their own group
         # Normalize brand into a compact key to avoid duplicate groups caused
         # by minor whitespace/punctuation/casing differences.
         # We'll keep the original `brand_for_grouping` for display, but use
@@ -356,11 +360,20 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             if not brand_key:
                 # Fallback to underscored short form
                 brand_key = brand_for_grouping.lower().replace(' ', '_')
-
+        
+        # CRITICAL FIX: Always include brand/vendor in group_key to ensure separate groups per vendor
+        # Even if brand_key is empty, use a fallback to ensure uniqueness
         if brand_key:
             group_key = f"{group_id}|{brand_key}"
         else:
-            group_key = group_id
+            # Use product name as fallback to ensure uniqueness when no brand/vendor
+            product_name_key = re.sub(r'[^a-z0-9]+', '', product_name_str.lower())[:20]  # Limit length
+            if product_name_key:
+                group_key = f"{group_id}|{product_name_key}"
+            else:
+                # Last resort: use group_id with index to ensure uniqueness
+                group_key = f"{group_id}|unknown_{len(grouped_records)}"
+                logging.warning(f"PREROLL GROUP: Using fallback group_key '{group_key}' for product '{product_name}' (no brand/vendor/name found)")
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
@@ -625,12 +638,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         
         logging.info(f"PREROLL: Stored {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_key: {group_key}, group_id: {original_group_id}) with session-independent key and database")
     
-    original_count = len(records)
+    # Track count after brand filtering (if any)
+    records_after_brand_filter = len(records)
     
     # Verify all records were grouped (every record should be in a group)
     total_grouped = sum(len(group_data['records']) for group_data in grouped_records.values())
-    if total_grouped != original_count:
-        logging.error(f"PREROLL GROUPING ERROR: {original_count} original records but only {total_grouped} were grouped. {original_count - total_grouped} products are MISSING!")
+    if total_grouped != records_after_brand_filter:
+        logging.error(f"PREROLL GROUPING ERROR: {records_after_brand_filter} records after brand filter but only {total_grouped} were grouped. {records_after_brand_filter - total_grouped} products are MISSING!")
         # Log details about which records might be missing
         grouped_product_names = set()
         for group_data in grouped_records.values():
@@ -644,34 +658,19 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         if missing_names:
             logging.error(f"PREROLL GROUPING ERROR: Missing products: {list(missing_names)[:10]}")  # Log first 10 missing
     else:
-        logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped into {len(grouped_records)} groups")
+        logging.info(f"PREROLL GROUPING: All {records_after_brand_filter} records successfully grouped into {len(grouped_records)} groups")
     
-    # Deduplicate final grouped representatives by group_key (includes vendor) to preserve vendor-specific groups
-    # CRITICAL FIX: Use group_key instead of just display name to preserve groups with same name but different vendors
-    deduped = []
-    seen_group_keys = set()
-    for rep in unique_records:
-        # Use group_key to identify unique groups (includes vendor/brand differentiation)
-        group_key = rep.get('_group_key', '')
-        if not group_key:
-            # Fallback: construct key from display name + vendor if group_key missing
-            pname = (rep.get('ProductName') or rep.get('Product Name*') or rep.get('Description') or '').strip()
-            vendor = (rep.get('Vendor/Supplier*') or rep.get('Vendor', '') or '').strip()
-            group_key = f"{re.sub(r'[^a-z0-9]+', '', pname.lower())}|{re.sub(r'[^a-z0-9]+', '', vendor.lower())}" if pname else None
-        
-        if group_key and group_key in seen_group_keys:
-            pname = (rep.get('ProductName') or rep.get('Product Name*') or rep.get('Description') or '').strip()
-            logging.debug(f"PREROLL DEDUP: Skipping duplicate representative '{pname}' (group_key: '{group_key}')")
-            continue
-        if group_key:
-            seen_group_keys.add(group_key)
-        deduped.append(rep)
-
-    grouped_records_list = deduped
-    deduped_count = len(unique_records) - len(deduped)
-    if deduped_count > 0:
-        logging.info(f"PREROLL GROUPING: Deduplicated {deduped_count} duplicate groups, kept {len(grouped_records_list)} unique groups")
-    logging.info(f"PREROLL GROUPING: Grouped {original_count} records into {len(grouped_records_list)} product groups (one label per vendor per category)")
+    # Log summary of grouping
+    logging.info(f"PREROLL GROUPING SUMMARY: Input={original_input_count}, After brand filter={records_after_brand_filter}, Grouped={total_grouped}, Groups created={len(grouped_records)}")
+    
+    # CRITICAL FIX: Remove deduplication - grouping by group_key (which includes vendor) already ensures uniqueness
+    # Each group_key should be unique, so deduplication should not be necessary and may incorrectly remove valid groups
+    grouped_records_list = unique_records
+    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records_list)} product groups (one label per vendor per category)")
+    
+    # Verify we have the expected number of groups
+    if len(grouped_records_list) != len(grouped_records):
+        logging.error(f"PREROLL GROUPING ERROR: Mismatch! Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
     
     # Log sample of generated groups for debugging
     if grouped_records_list:
