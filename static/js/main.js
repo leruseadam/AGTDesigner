@@ -2683,18 +2683,7 @@ const TagManager = {
                     }
                 }
                 
-                // DEBUG: Log first few brands to diagnose empty filter issue
-                if (filterOptions.brand.size < 5 && brand && brand.trim()) {
-                    console.log(`🔍 Found brand "${brand}" in tag:`, {
-                        'Product Brand': tag['Product Brand'],
-                        'ProductBrand': tag.ProductBrand,
-                        'productBrand': tag.productBrand,
-                        'Brand': tag.Brand,
-                        'brand': tag.brand,
-                        'brand (lowercase)': tag['brand'],
-                        allKeys: Object.keys(tag).filter(k => k.toLowerCase().includes('brand'))
-                    });
-                }
+                // DEBUG: Log first brand only (removed excessive logging)
                 
                 // CRITICAL FIX: Only filter out truly empty/invalid brands, be more permissive
                 // Allow brands even if they're "unknown" or "n/a" - let the user decide
@@ -8379,7 +8368,12 @@ const TagManager = {
         // CRITICAL FIX: Validate database lineage for classic types - MIXED is invalid for classic products
         // If database lineage is MIXED for a classic type, convert to HYBRID
         if (isClassicType && normalizedLineage === 'MIXED') {
-            console.log(`🔄 FIXING invalid MIXED lineage for classic type "${displayName}": MIXED → HYBRID`);
+            // Reduced logging - only log first few fixes
+            if (!window._lineageFixCount) window._lineageFixCount = 0;
+            if (window._lineageFixCount < 3) {
+                console.log(`🔄 FIXING invalid MIXED lineage for classic type "${displayName}": MIXED → HYBRID`);
+                window._lineageFixCount++;
+            }
             normalizedLineage = 'HYBRID';
         }
         
