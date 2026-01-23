@@ -1195,8 +1195,16 @@ class TemplateProcessor:
                     chunks.append(chunk)
                 
                 # Log chunking for preroll (debug only)
-                if self.template_type == 'preroll' and self.logger.isEnabledFor(logging.DEBUG):
-                    self.logger.debug(f"PREROLL: {len(records)} records -> {len(chunks)} chunks")
+                if self.template_type == 'preroll':
+                    # CRITICAL: Always log vendor distribution for preroll
+                    preroll_vendors = {}
+                    for r in records:
+                        vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or 'NO_VENDOR'
+                        vendor_str = str(vendor).strip()
+                        preroll_vendors[vendor_str] = preroll_vendors.get(vendor_str, 0) + 1
+                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: Received {len(records)} records with {len(preroll_vendors)} unique vendors: {sorted(preroll_vendors.keys())}")
+                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: Vendor counts: {dict(sorted(preroll_vendors.items(), key=lambda x: x[1], reverse=True))}")
+                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: {len(records)} records -> {len(chunks)} chunks")
                 
                 # Process chunks in parallel for better performance
                 if len(chunks) > 1:

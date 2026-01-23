@@ -8968,6 +8968,14 @@ def generate_labels():
                         # DEBUG: Log how many preroll products were found
                         logging.info(f"🔄 PREROLL TEMPLATE: Found {len(preroll_df)} preroll products in DataFrame (product_type matches: {preroll_mask.sum()}, description matches: {desc_mask.sum()}, name matches: {name_mask.sum()})")
                         
+                        # CRITICAL: Log vendors in DataFrame BEFORE conversion
+                        if not preroll_df.empty and 'Vendor/Supplier*' in preroll_df.columns:
+                            df_vendors = preroll_df['Vendor/Supplier*'].dropna().unique()
+                            logging.info(f"🔄 PREROLL TEMPLATE: Found {len(df_vendors)} unique vendors in DataFrame: {sorted([str(v).strip() for v in df_vendors if str(v).strip()])}")
+                        elif not preroll_df.empty and 'Vendor' in preroll_df.columns:
+                            df_vendors = preroll_df['Vendor'].dropna().unique()
+                            logging.info(f"🔄 PREROLL TEMPLATE: Found {len(df_vendors)} unique vendors in DataFrame: {sorted([str(v).strip() for v in df_vendors if str(v).strip()])}")
+                        
                         if not preroll_df.empty:
                             # Convert DataFrame rows to records (dictionary format)
                             # CRITICAL: Use 'records' orientation to preserve all columns as dict keys
@@ -8978,6 +8986,14 @@ def generate_labels():
                                     if pd.isna(value):
                                         record[key] = ''
                             logging.info(f"🔄 PREROLL TEMPLATE: Found {len(records)} preroll products directly from DataFrame (auto-included all prerolls)")
+                            
+                            # CRITICAL: Log vendors in records AFTER conversion
+                            record_vendors = set()
+                            for r in records:
+                                vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+                                if vendor and str(vendor).strip():
+                                    record_vendors.add(str(vendor).strip())
+                            logging.info(f"🔄 PREROLL TEMPLATE: Found {len(record_vendors)} unique vendors in records: {sorted(list(record_vendors))}")
                             # DEBUG: Log sample records to verify they have the right fields
                             if records:
                                 sample = records[0]
@@ -9413,6 +9429,15 @@ def generate_labels():
                 logging.info(f"PREROLL OUTPUT DEBUG: Group keys: {group_keys[:20]}")  # Log first 20
                 if len(group_keys) != len(set(group_keys)):
                     logging.warning(f"PREROLL OUTPUT WARNING: Found {len(group_keys) - len(set(group_keys))} duplicate group keys!")
+                
+                # CRITICAL: Log ALL vendors in output records to verify they're all present
+                output_vendors = {}
+                for r in records:
+                    vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or 'NO_VENDOR'
+                    vendor_str = str(vendor).strip()
+                    output_vendors[vendor_str] = output_vendors.get(vendor_str, 0) + 1
+                logging.info(f"PREROLL OUTPUT VENDORS: {len(output_vendors)} unique vendors in output records: {sorted(output_vendors.keys())}")
+                logging.info(f"PREROLL OUTPUT VENDOR COUNTS: {dict(sorted(output_vendors.items(), key=lambda x: x[1], reverse=True))}")
             else:
                 logging.error(f"PREROLL OUTPUT: No groups generated!")
                 for i, record in enumerate(records[:3]):
