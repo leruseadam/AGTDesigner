@@ -12361,6 +12361,30 @@ const TagManager = {
             
             // Fast normalize function
             const fastNormalize = (tag) => {
+                // CRITICAL FIX: Check if this is a classic type and fix MIXED/THC BEFORE any other processing
+                const productType = tag['Product Type*'] || tag.Type || tag.productType || '';
+                const isClassicType = productType && (typeof window.getUniqueLineages === 'function' 
+                    ? window.getUniqueLineages(productType).length === 6 
+                    : false);
+                
+                // CRITICAL: Fix MIXED/THC in ANY lineage field for classic types BEFORE normalization
+                if (isClassicType) {
+                    let effectiveLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || '';
+                    const normalizedLineage = String(effectiveLineage).trim().toUpperCase();
+                    
+                    if (normalizedLineage === 'MIXED' || normalizedLineage === 'THC') {
+                        const fixedLineage = 'HYBRID';
+                        // Update ALL lineage fields with the fixed value (including canonical_lineage)
+                        tag.sovereign_lineage = fixedLineage;
+                        tag.canonical_lineage = fixedLineage;  // CRITICAL: Fix canonical_lineage if it was MIXED
+                        tag.currentLineage = fixedLineage;
+                        tag.Lineage = fixedLineage;
+                        tag.lineage = fixedLineage.toLowerCase();
+                        tag['Lineage*'] = fixedLineage;
+                        return tag;  // Return immediately after fixing
+                    }
+                }
+                
                 const sovereignRaw = tag.sovereign_lineage;
                 if (sovereignRaw) {
                     const sovereignStr = String(sovereignRaw).trim();
