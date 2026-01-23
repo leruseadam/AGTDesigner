@@ -1650,16 +1650,9 @@ const TagManager = {
                 if (!tag.price) tag.price = price;
             }
             
-            // CRITICAL FIX: Apply MIXED -> HYBRID transformation for classic types when loading from cache
-            // This ensures cached tags with invalid MIXED lineage are fixed immediately
-            const productType = tag['Product Type*'] || tag.Type || tag.productType || '';
-            // Use same logic as elsewhere: classic types have 6 lineage options
-            const isClassicType = productType && (typeof window.getUniqueLineages === 'function' 
-                ? window.getUniqueLineages(productType).length === 6 
-                : false);
-            // NOTE: Lineage normalization for classic types is now done earlier in the loop
-            // to prevent wrong lineage from showing initially. This section is kept for
-            // backward compatibility but should not be needed if normalization happens first.
+            // NOTE: MIXED -> HYBRID transformation for classic types is now done earlier in the loop
+            // (at line 1604-1634) to prevent wrong lineage from showing initially.
+            // The duplicate productType/isClassicType declarations were removed to fix JS syntax error.
         }
 
         verboseLog(`⚡ INSTANT LOAD: Hydrating ${cachedTags.length} tags from cache`);
