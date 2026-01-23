@@ -35,34 +35,55 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
         title = list_doc.add_heading('Preroll Product Lists', 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
-        # Get session ID and group IDs to retrieve stored preroll groups
+        # Get session ID and group keys to retrieve stored preroll groups
         session_id = session.get('preroll_session_id', session.get('session_id', 'default'))
-        group_ids = session.get('preroll_group_ids', [])
-        
-        # Retrieve all preroll groups from cache using stored group IDs
+        # CRITICAL FIX: Use preroll_group_keys (full unique keys) instead of preroll_group_ids (base category only)
+        # preroll_group_ids only contains base categories like "single", "2-pack" which causes 56 groups to collapse to ~5
+        # preroll_group_keys contains full keys like "single|acme|abc123hash" which preserves all unique groups
+        group_keys = session.get('preroll_group_keys', [])
+
+        # Fallback to old group_ids if group_keys not available (backward compatibility)
+        if not group_keys:
+            group_keys = session.get('preroll_group_ids', [])
+            logging.warning("PREROLL LIST: Using fallback preroll_group_ids instead of preroll_group_keys")
+
+        # Retrieve all preroll groups from cache using stored group keys
         preroll_groups = {}
-        for group_id in group_ids:
-            group_items = cache.get(f"preroll_group_{session_id}_{group_id}")
-            group_info = cache.get(f"preroll_group_info_{session_id}_{group_id}")
+        for group_key in group_keys:
+            # Try session-independent latest key first (preferred)
+            group_items = cache.get(f"preroll_group_latest_{group_key}")
+            group_info = cache.get(f"preroll_group_info_latest_{group_key}")
+
+            # Fallback to session-specific key
+            if not group_items or not group_info:
+                group_items = cache.get(f"preroll_group_{session_id}_{group_key}")
+                group_info = cache.get(f"preroll_group_info_{session_id}_{group_key}")
+
             if group_items and group_info:
-                preroll_groups[group_id] = {
+                preroll_groups[group_key] = {
                     'items': group_items,
                     'info': group_info
                 }
-                logging.info(f"PREROLL LIST: Loaded group '{group_info.get('display_name', group_id)}' with {len(group_items)} items from cache")
+                logging.info(f"PREROLL LIST: Loaded group '{group_info.get('display_name', group_key)}' with {len(group_items)} items from cache")
             else:
-                logging.warning(f"PREROLL LIST: Group '{group_id}' not found in cache (items: {group_items is not None}, info: {group_info is not None})")
+                logging.warning(f"PREROLL LIST: Group '{group_key}' not found in cache (items: {group_items is not None}, info: {group_info is not None})")
         
         if not preroll_groups:
             logging.warning("PREROLL LIST: No preroll groups found in cache")
-            # Try fallback: check records for group IDs
+            # Try fallback: check records for group keys (full unique keys)
             for record in records:
-                group_id = record.get('_group_id')
-                if group_id and group_id not in preroll_groups:
-                    group_items = cache.get(f"preroll_group_{session_id}_{group_id}")
-                    group_info = cache.get(f"preroll_group_info_{session_id}_{group_id}")
+                # Prefer full group_key, fall back to group_id
+                group_key = record.get('_group_key') or record.get('_group_id')
+                if group_key and group_key not in preroll_groups:
+                    # Try latest key first
+                    group_items = cache.get(f"preroll_group_latest_{group_key}")
+                    group_info = cache.get(f"preroll_group_info_latest_{group_key}")
+                    # Fallback to session-specific key
+                    if not group_items or not group_info:
+                        group_items = cache.get(f"preroll_group_{session_id}_{group_key}")
+                        group_info = cache.get(f"preroll_group_info_{session_id}_{group_key}")
                     if group_items and group_info:
-                        preroll_groups[group_id] = {
+                        preroll_groups[group_key] = {
                             'items': group_items,
                             'info': group_info
                         }
