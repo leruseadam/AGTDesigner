@@ -1964,16 +1964,19 @@ class TemplateProcessor:
                 vendor_field_values[key] = f"value={repr(val)}, type={type(val).__name__}, is_na={pd.isna(val) if hasattr(pd, 'isna') else 'N/A'}"
             self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Vendor field values: {vendor_field_values}, Sample record keys: {all_keys_sample}")
         
-        # PREROLL TEMPLATE: Use actual product name from record (already set by preroll_tag_generator)
-        # DO NOT override with generic group_display_name - that would show "Assorted Pre-Roll - 1g x 28 Packs"
-        # instead of the actual product name like "Lime Sorbet by Hustler's Ambition - 1g x 28 Pack"
+        # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
         if self.template_type == 'preroll':
             group_id = record.get('_group_id')
             if group_id:
-                # The preroll_tag_generator already sets the actual product name in the record
-                # Just log for debugging, don't override
-                actual_name = record.get('Product Name*') or record.get('ProductName') or record.get('Description')
-                self.logger.info(f"PREROLL GROUP: Using actual product name '{actual_name}' (group_id: {group_id})")
+                group_info = record.get('_group_info')
+                if group_info and isinstance(group_info, dict):
+                    group_display_name = group_info.get('display_name', '')
+                    if group_display_name:
+                        # Override ProductName, Product Name*, and Description immediately
+                        label_context['ProductName'] = group_display_name
+                        label_context['Product Name*'] = group_display_name
+                        label_context['Description'] = group_display_name
+                        self.logger.info(f"PREROLL GROUP OVERRIDE: Set ProductName/Description to '{group_display_name}' (group_id: {group_id})")
         
         has_cbd_blend_strain = False
         cbd_signal_tokens = ['CBD', 'CBG', 'CBN', 'CBC']

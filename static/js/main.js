@@ -12848,24 +12848,36 @@ const TagManager = {
                             const freshTags = data.tags || data;
                             if (Array.isArray(freshTags) && freshTags.length > 0) {
                                 // Update lineage in current tags from database
+                                // CRITICAL FIX: Check sovereign_lineage FIRST (highest priority)
+                                // Priority: sovereign_lineage > canonical_lineage > currentLineage > Lineage
                                 const lineageMap = new Map();
                                 freshTags.forEach(tag => {
                                     const name = tag['Product Name*'];
-                                    const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage;
+                                    // CRITICAL: Check sovereign_lineage first (user edits have highest priority)
+                                    const dbLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage;
                                     if (name && dbLineage) {
                                         lineageMap.set(name, dbLineage);
                                     }
                                 });
                                 // Apply database lineage to displayed tags
+                                let updatedCount = 0;
                                 this.state.tags.forEach(tag => {
                                     const name = tag['Product Name*'];
                                     if (name && lineageMap.has(name)) {
-                                        tag.canonical_lineage = lineageMap.get(name);
-                                        tag.currentLineage = lineageMap.get(name);
-                                        tag.Lineage = lineageMap.get(name);
-                                        tag.lineage = lineageMap.get(name).toLowerCase();
+                                        const dbLineage = lineageMap.get(name);
+                                        // CRITICAL: Preserve sovereign_lineage if it exists in fresh tags
+                                        const freshTag = freshTags.find(t => t['Product Name*'] === name);
+                                        if (freshTag && freshTag.sovereign_lineage) {
+                                            tag.sovereign_lineage = freshTag.sovereign_lineage;
+                                        }
+                                        tag.canonical_lineage = dbLineage;
+                                        tag.currentLineage = dbLineage;
+                                        tag.Lineage = dbLineage;
+                                        tag.lineage = dbLineage.toLowerCase();
+                                        updatedCount++;
                                     }
                                 });
+                                console.log(`✅ Database lineage applied to ${updatedCount} tags`);
                                 console.log('✅ Database lineage applied to tags');
                                 // Re-render to show lineage colors
                                 this._updateAvailableTags(this.state.tags);
