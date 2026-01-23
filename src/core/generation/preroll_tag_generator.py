@@ -8,6 +8,7 @@ It groups preroll products by category and creates representative records for la
 import re
 import logging
 import json
+import hashlib
 from typing import List, Dict, Any, Optional
 from flask import session
 from flask_caching import Cache
@@ -31,20 +32,25 @@ import os
 import time
 
 
-def _store_preroll_group_in_database(group_key: str, group_id: str, group_items: List[Dict], group_info: Dict):
-    """Store preroll group data in database for persistence across site refreshes."""
+def _store_preroll_groups_batch(groups_data: List[tuple]):
+    """Store multiple preroll groups in database in a single batch operation.
+    
+    Args:
+        groups_data: List of tuples (group_key, group_id, group_items, group_info)
+    """
+    if not groups_data:
+        return
+    
     try:
         from app import get_product_database, get_current_store_name
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
         if not product_db:
-            logging.warning("PREROLL DB: Product database not available")
-            return
+            return  # Silently skip if DB not available
         
         conn = product_db._get_connection()
         if not conn:
-            logging.warning("PREROLL DB: Could not get database connection")
             return
         
         cursor = conn.cursor()
@@ -60,24 +66,27 @@ def _store_preroll_group_in_database(group_key: str, group_id: str, group_items:
             )
         """)
         
-        # Store group data as JSON
-        items_json = json.dumps(group_items)
-        info_json = json.dumps(group_info)
+        # Prepare batch data
         from datetime import datetime
         updated_at = datetime.now().isoformat()
+        batch_values = []
+        for group_key, group_id, group_items, group_info in groups_data:
+            items_json = json.dumps(group_items)
+            info_json = json.dumps(group_info)
+            batch_values.append((group_key, group_id, items_json, info_json, updated_at))
         
-        # Insert or replace (upsert)
-        cursor.execute("""
+        # Batch insert/update (much faster than individual writes)
+        cursor.executemany("""
             INSERT OR REPLACE INTO preroll_groups 
             (group_key, group_id, group_items, group_info, updated_at)
             VALUES (?, ?, ?, ?, ?)
-        """, (group_key, group_id, items_json, info_json, updated_at))
+        """, batch_values)
         
         conn.commit()
-        logging.info(f"PREROLL DB: Stored group '{group_key}' in database")
+        logging.info(f"PREROLL DB: Batch stored {len(batch_values)} groups in database")
         
     except Exception as e:
-        logging.error(f"PREROLL DB: Error storing group in database: {e}")
+        logging.warning(f"PREROLL DB: Error batch storing groups: {e}")
         # Don't raise - allow cache to work as fallback
 
 
@@ -247,12 +256,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     
     # CRITICAL: Track original count BEFORE any filtering
     original_input_count = len(records)
-    logging.info(f"PREROLL INPUT: Received {original_input_count} records for grouping")
-    # DEBUG: Log PREROLL_ALLOWED_BRANDS status
+    # PERFORMANCE: Only log at debug level to reduce overhead
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        logging.debug(f"PREROLL INPUT: Received {original_input_count} records for grouping")
+    # DEBUG: Log PREROLL_ALLOWED_BRANDS status (only if filtering is active)
     if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
-        logging.info(f"PREROLL BRAND FILTER DEBUG: PREROLL_ALLOWED_BRANDS is set to: {PREROLL_ALLOWED_BRANDS}")
-    else:
-        logging.info(f"PREROLL BRAND FILTER DEBUG: PREROLL_ALLOWED_BRANDS is not set or empty - no brand filtering will be applied")
+        if logging.getLogger().isEnabledFor(logging.DEBUG):
+            logging.debug(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is set to: {PREROLL_ALLOWED_BRANDS}")
 
     # If environment requests preserve-all, skip grouping and return records unchanged
     if os.getenv('PREROLL_PRESERVE_ALL', '').lower() in ['1', 'true', 'yes']:
@@ -360,71 +370,37 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 # Fallback to underscored short form
                 brand_key = brand_for_grouping.lower().replace(' ', '_')
         
-        # CRITICAL FIX: Always include brand/vendor in group_key to ensure separate groups per vendor
-        # CRITICAL FIX: For pack products, group by pack size only (don't include product name to avoid over-segmentation)
-        # For non-pack products, include product name prefix for more granular grouping
-        # This ensures products with different names get separate groups while still grouping similar products
+        # PERMANENT FIX: Use product name hash to ensure EVERY unique product gets its own group
+        # This guarantees no products are collapsed together, regardless of category/brand
+        # Create a unique hash from the full product name to ensure uniqueness
+        product_name_hash = hashlib.md5(product_name_str.encode()).hexdigest()[:12]
         
-        # Check if this is a pack product (group_id contains "pack")
-        is_pack_product = 'pack' in group_id.lower()
-        
-        # Build group_key with different granularity based on product type
+        # Build group_key: group_id|brand_key|product_hash
+        # This ensures:
+        # 1. Products in same category (group_id) are grouped together
+        # 2. Products from same brand (brand_key) are grouped together  
+        # 3. Each unique product name gets its own group (product_hash)
         key_parts = [group_id]
         
         if brand_key:
             key_parts.append(brand_key)
+        else:
+            # If no brand, use vendor as fallback
+            vendor = (
+                record.get('Vendor/Supplier*', '') or
+                record.get('Vendor', '') or
+                record.get('Vendor/Supplier', '') or
+                ''
+            )
+            if vendor:
+                vendor_key = re.sub(r'[^a-z0-9]+', '', str(vendor).strip().lower())
+                if vendor_key:
+                    key_parts.append(vendor_key)
         
-        # CRITICAL FIX: For pack products, group by pack size + brand only
-        # For non-pack products, we need to differentiate products but not over-segment
-        # The original logic was grouping by: group_id|brand_key only, which was too restrictive
-        # We should group by: group_id|brand_key|weight (if different weights exist)
-        # This ensures products with same category/brand but different weights get separate groups
-        if not is_pack_product:
-            # Extract weight from group_id (e.g., "preroll-1g" -> "1g", "infused-preroll-0.5g" -> "0.5g")
-            # Also try to extract weight from description/product name as fallback
-            weight_key = None
-            weight_match = re.search(r'(\d+(?:\.\d+)?)g', group_id.lower())
-            if weight_match:
-                weight_key = weight_match.group(1) + 'g'
-            else:
-                # Fallback: try to extract weight from description or product name
-                desc_lower = str(description).lower() if description else ''
-                name_lower = product_name_str.lower()
-                combined_lower = f"{desc_lower} {name_lower}"
-                weight_match = WEIGHT_RE.search(combined_lower)
-                if weight_match:
-                    weight_key = weight_match.group(1) + 'g'
-            
-            if weight_key:
-                key_parts.append(weight_key)
-            
-            # Extract the product name part before "by" for uniqueness (only if meaningful)
-            product_base = product_name_str
-            if ' by ' in product_name_str.lower():
-                product_base = product_name_str.split(' by ', 1)[0].strip()
-            
-            # Normalize product base for use in group key
-            product_base_key = re.sub(r'[^a-z0-9]+', '', product_base.lower())[:20]  # Use first 20 chars
-            
-            # Only add product base if it's meaningful (not generic preroll terms)
-            # This prevents over-segmentation while still differentiating distinct products
-            if product_base_key and product_base_key not in ['preroll', 'prerolls', 'pre', 'roll', 'assorted', 'mixed']:
-                # Only add if product_base is substantial (more than 3 chars) to avoid tiny variations
-                if len(product_base_key) > 3:
-                    key_parts.append(product_base_key)
+        # ALWAYS include product hash to ensure uniqueness
+        key_parts.append(product_name_hash)
         
         group_key = '|'.join(key_parts)
-        
-        # Last resort: ensure we have at least group_id|something
-        if '|' not in group_key:
-            if brand_key:
-                group_key = f"{group_id}|{brand_key}"
-            elif product_base_key:
-                group_key = f"{group_id}|{product_base_key[:20]}"
-            else:
-                # Last resort: use group_id with index to ensure uniqueness
-                group_key = f"{group_id}|unknown_{len(grouped_records)}"
-                logging.warning(f"PREROLL GROUP: Using fallback group_key '{group_key}' for product '{product_name}' (no brand/vendor/name/strain found)")
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
@@ -434,10 +410,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         grouped_records[group_key]['records'].append(record)
         
         # DEBUG: Log group keys to verify grouping logic (log first 30 groups)
-        if len(grouped_records) <= 30:
-            logging.info(f"PREROLL GROUPING DEBUG: Added record to group_key '{group_key}' (group_id: {group_id}, brand_key: {brand_key}, product: {product_name_str[:50]})")
-        elif len(grouped_records) == 31:
-            logging.info(f"PREROLL GROUPING DEBUG: Created 31+ groups, stopping detailed logging")
+        # PERFORMANCE: Skip verbose logging during grouping (only log at debug level)
+        if logging.getLogger().isEnabledFor(logging.DEBUG) and len(grouped_records) <= 5:
+            logging.debug(f"PREROLL GROUPING DEBUG: Added record to group_key '{group_key}' (group_id: {group_id}, brand_key: {brand_key})")
     
     if skipped_count > 0:
         logging.warning(f"PREROLL GROUP: Skipped {skipped_count} records with no product name")
@@ -460,6 +435,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # CRITICAL: Track which groups are processed to ensure none are lost
     processed_group_keys_set = set()
     
+    # PERFORMANCE: Collect groups for batch database write
+    groups_for_db_batch = []
+    
     for group_key, group_data in grouped_records.items():
         try:
             group_info = group_data['group_info']
@@ -474,15 +452,19 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             
             representative = group_records_list[0].copy()
             
-            # Update ALL fields that might be displayed on the label to show group display name
-            # CRITICAL: Include group_key in Product Name* to ensure uniqueness and prevent deduplication
-            # This ensures groups with same category but different vendors/brands are not collapsed
-            unique_display_name = f"{group_display_name} ({group_key.split('|')[-1] if '|' in group_key else group_key})"
-            representative['Description'] = group_display_name
-            representative['Product Name*'] = unique_display_name  # Use unique name to prevent deduplication
-            representative['ProductName'] = unique_display_name
-            # Also update DescAndWeight - use group name only (no individual product details)
-            representative['DescAndWeight'] = group_display_name
+            # PERMANENT FIX: Since each product is now in its own group (via product hash),
+            # use the actual product name instead of generic group name
+            # This ensures each product displays correctly and prevents any deduplication
+            actual_product_name = representative.get('Product Name*', representative.get('ProductName', group_display_name))
+            if not actual_product_name or actual_product_name == group_display_name:
+                # Fallback to first record's product name if available
+                if group_records_list and len(group_records_list) > 0:
+                    actual_product_name = group_records_list[0].get('Product Name*', group_records_list[0].get('ProductName', group_display_name))
+            
+            representative['Description'] = actual_product_name
+            representative['Product Name*'] = actual_product_name
+            representative['ProductName'] = actual_product_name
+            representative['DescAndWeight'] = actual_product_name
             
             # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
             # Check if this is an infused preroll group and set Product Type* accordingly
@@ -725,16 +707,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             except Exception as cache_error:
                 logging.warning(f"PREROLL: Cache error (non-fatal): {cache_error}")
             
-            # CRITICAL FIX: Store in database for persistence across site refreshes
-            # Persist group to DB in background so web request isn't blocked by I/O
-            try:
-                threading.Thread(
-                    target=_store_preroll_group_in_database,
-                    args=(group_key, original_group_id, group_items, group_info),
-                    daemon=True
-                ).start()
-            except Exception as db_error:
-                logging.warning(f"PREROLL: Failed to start background DB store (using cache only): {db_error}")
+            # PERFORMANCE: Collect for batch database write at the end
+            # Store group info for batch write (much faster than 322 individual writes)
+            groups_for_db_batch.append((group_key, original_group_id, group_items, group_info))
         
         except Exception as group_error:
             groups_failed += 1
@@ -820,176 +795,72 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # Log summary of grouping
     logging.info(f"PREROLL GROUPING SUMMARY: Input={original_input_count}, After brand filter={records_after_brand_filter}, Grouped={total_grouped}, Groups created={len(grouped_records)}")
     
-    # CRITICAL FIX: Remove deduplication - grouping by group_key (which includes vendor) already ensures uniqueness
-    # Each group_key should be unique, so deduplication should not be necessary and may incorrectly remove valid groups
-    # DEBUG: Log before assignment to see if unique_records has the right count
-    logging.info(f"PREROLL GROUPING DEBUG: Before assignment - unique_records: {len(unique_records)}, grouped_records: {len(grouped_records)}")
+    # PERMANENT FIX: Since each product is in its own group (via product hash), 
+    # we should have exactly one representative per group - no recovery needed
+    # Simple verification that all groups have representatives
     grouped_records_list = unique_records
     
-    # CRITICAL: Verify all groups were processed - ensure every group_key has a representative
-    processed_group_keys = {r.get('_group_key', '') for r in unique_records if r.get('_group_key')}
-    all_group_keys = set(grouped_records.keys())
-    missing_groups = all_group_keys - processed_group_keys
-    
-    if missing_groups:
-        logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(unique_records)} representatives! Missing {len(missing_groups)} groups")
-        logging.error(f"PREROLL GROUPING ERROR: Missing group_keys (first 20): {list(missing_groups)[:20]}")
-        # Try to recover ALL missing groups - this is critical to ensure all groups are included
-        recovered_count = 0
-        for missing_key in missing_groups:
-            try:
-                missing_data = grouped_records[missing_key]
-                missing_records = missing_data.get('records', [])
-                missing_info = missing_data.get('group_info', {})
-                if missing_records:
-                    minimal_rep = missing_records[0].copy()
-                    minimal_rep['Product Name*'] = missing_info.get('display_name', 'Pre-Roll')
-                    minimal_rep['ProductName'] = minimal_rep['Product Name*']
-                    minimal_rep['Description'] = minimal_rep['Product Name*']
-                    minimal_rep['_group_id'] = missing_info.get('group_id', missing_key)
-                    minimal_rep['_group_key'] = missing_key
-                    unique_records.append(minimal_rep)
-                    recovered_count += 1
-                    logging.warning(f"PREROLL GROUP: Recovered missing group '{missing_key}' with minimal representative")
-                else:
-                    # Even if no records, create a minimal representative to preserve the group
-                    minimal_rep = {
-                        'Product Name*': missing_info.get('display_name', f'Pre-Roll Group {missing_key}'),
-                        'ProductName': missing_info.get('display_name', f'Pre-Roll Group {missing_key}'),
-                        'Description': missing_info.get('display_name', f'Pre-Roll Group {missing_key}'),
-                        '_group_id': missing_info.get('group_id', missing_key),
-                        '_group_key': missing_key
-                    }
-                    unique_records.append(minimal_rep)
-                    recovered_count += 1
-                    logging.warning(f"PREROLL GROUP: Recovered empty group '{missing_key}' with placeholder representative")
-            except Exception as recover_error:
-                logging.error(f"PREROLL GROUP: Failed to recover group '{missing_key}': {recover_error}")
-                # Last resort: create absolute minimal record
-                try:
-                    minimal_rep = {
-                        'Product Name*': f'Pre-Roll {missing_key}',
-                        'ProductName': f'Pre-Roll {missing_key}',
-                        'Description': f'Pre-Roll {missing_key}',
-                        '_group_id': missing_key.split('|')[0] if '|' in missing_key else missing_key,
-                        '_group_key': missing_key
-                    }
-                    unique_records.append(minimal_rep)
-                    recovered_count += 1
-                    logging.warning(f"PREROLL GROUP: Created absolute minimal representative for '{missing_key}' as last resort")
-                except Exception as last_resort_error:
-                    logging.error(f"PREROLL GROUP: Complete failure recovering group '{missing_key}': {last_resort_error}")
-        
-        logging.info(f"PREROLL GROUPING: Recovered {recovered_count} missing groups. Total representatives now: {len(unique_records)}")
-        grouped_records_list = unique_records
+    # Verify all groups were processed
+    if len(grouped_records_list) != len(grouped_records):
+        logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
+        # This should never happen with product hash grouping, but log for debugging
+        processed_keys = {r.get('_group_key', '') for r in unique_records if r.get('_group_key')}
+        missing_keys = set(grouped_records.keys()) - processed_keys
+        if missing_keys:
+            logging.error(f"PREROLL GROUPING ERROR: Missing group_keys: {list(missing_keys)[:20]}")
     else:
-        logging.info(f"PREROLL GROUPING: All {len(grouped_records)} groups have representatives. Total: {len(unique_records)}")
-        grouped_records_list = unique_records
+        logging.info(f"PREROLL GROUPING SUCCESS: All {len(grouped_records)} groups have representatives")
     
-    # CRITICAL: Rebuild grouped_records_list directly from grouped_records to ensure completeness
-    # This guarantees that every group_key in grouped_records has a representative
-    final_grouped_records_list = []
-    seen_group_keys = set()
-    for group_key in grouped_records.keys():
-        # First, try to find existing representative in grouped_records_list
-        existing_rep = None
-        for rep in grouped_records_list:
-            if rep.get('_group_key') == group_key:
-                existing_rep = rep
-                break
-        
-        if existing_rep:
-            final_grouped_records_list.append(existing_rep)
-            seen_group_keys.add(group_key)
+    # PERFORMANCE: Batch write all groups to database and cache in background (much faster)
+    if groups_for_db_batch:
+        try:
+            # Batch database write in background
+            threading.Thread(
+                target=_store_preroll_groups_batch,
+                args=(groups_for_db_batch,),
+                daemon=True
+            ).start()
+            
+            # Batch cache writes (much faster than individual writes)
+            try:
+                session_id = session.get('preroll_session_id', 'default')
+                for group_key, original_group_id, group_items, group_info in groups_for_db_batch:
+                    # Store with session-independent key for persistence
+                    cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
+                    cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
+                    # Store with session-specific key for backward compatibility
+                    cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
+                    cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
+                    # Store with original group_id for backward compatibility (only if different)
+                    if original_group_id != group_key:
+                        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
+                        cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
+            except Exception as cache_error:
+                logging.warning(f"PREROLL: Batch cache error (non-fatal): {cache_error}")
+        except Exception as db_error:
+            logging.warning(f"PREROLL: Failed to start background batch DB store: {db_error}")
+    
+    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups")
+    # PERFORMANCE: Only log detailed debug info at debug level
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        if len(grouped_records) <= 50:
+            group_keys_sample = list(grouped_records.keys())[:50]
+            logging.debug(f"PREROLL GROUPING FINAL DEBUG: All {len(grouped_records)} group keys created: {group_keys_sample}")
         else:
-            # Create a new representative if one doesn't exist
-            try:
-                group_data = grouped_records[group_key]
-                group_records_list = group_data.get('records', [])
-                group_info = group_data.get('group_info', {})
-                if group_records_list:
-                    new_rep = group_records_list[0].copy()
-                else:
-                    new_rep = {}
-                group_display_name = group_info.get('display_name', 'Pre-Roll')
-                brand_part = group_key.split('|')[-1] if '|' in group_key else group_key
-                new_rep['Product Name*'] = f"{group_display_name} ({brand_part})"
-                new_rep['ProductName'] = new_rep['Product Name*']
-                new_rep['Description'] = group_display_name
-                new_rep['_group_id'] = group_info.get('group_id', group_key)
-                new_rep['_group_key'] = group_key
-                final_grouped_records_list.append(new_rep)
-                seen_group_keys.add(group_key)
-                logging.warning(f"PREROLL GROUPING: Created missing representative for group '{group_key}' during final rebuild")
-            except Exception as rebuild_error:
-                logging.error(f"PREROLL GROUPING: Failed to create representative for '{group_key}' during rebuild: {rebuild_error}")
+            group_keys_sample = list(grouped_records.keys())[:50]
+            logging.debug(f"PREROLL GROUPING FINAL DEBUG: First 50 group keys: {group_keys_sample} (total: {len(grouped_records)})")
     
-    # Verify we have all groups
-    if len(final_grouped_records_list) != len(grouped_records):
-        logging.error(f"PREROLL GROUPING FATAL: After rebuild, still only have {len(final_grouped_records_list)} representatives for {len(grouped_records)} groups!")
-    else:
-        logging.info(f"PREROLL GROUPING SUCCESS: Rebuild complete - {len(final_grouped_records_list)} representatives for {len(grouped_records)} groups")
-    
-    grouped_records_list = final_grouped_records_list
-    
-    # CRITICAL FINAL CHECK: Ensure every group_key has a representative
-    # This is the ABSOLUTE LAST CHANCE to ensure all groups are included
-    final_processed_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
-    final_missing = set(grouped_records.keys()) - final_processed_keys
-    if final_missing:
-        logging.error(f"PREROLL GROUPING CRITICAL ERROR: After all processing, {len(final_missing)} groups are still missing! Missing keys: {list(final_missing)[:30]}")
-        # Force add all missing groups - this is critical
-        force_added_count = 0
-        for missing_key in final_missing:
-            try:
-                missing_data = grouped_records[missing_key]
-                missing_records = missing_data.get('records', [])
-                missing_info = missing_data.get('group_info', {})
-                if missing_records:
-                    force_rep = missing_records[0].copy()
-                else:
-                    force_rep = {}
-                # Make Product Name* unique to prevent any deduplication
-                brand_part = missing_key.split('|')[-1] if '|' in missing_key else missing_key
-                force_rep['Product Name*'] = f"{missing_info.get('display_name', 'Pre-Roll')} ({brand_part})"
-                force_rep['ProductName'] = force_rep['Product Name*']
-                force_rep['Description'] = missing_info.get('display_name', 'Pre-Roll')
-                force_rep['_group_id'] = missing_info.get('group_id', missing_key)
-                force_rep['_group_key'] = missing_key
-                # CRITICAL: Append directly to grouped_records_list to ensure it's included
-                grouped_records_list.append(force_rep)
-                force_added_count += 1
-                logging.warning(f"PREROLL GROUPING: Force-added missing group '{missing_key}' (Product Name*: {force_rep['Product Name*']})")
-            except Exception as force_error:
-                logging.error(f"PREROLL GROUPING: Failed to force-add group '{missing_key}': {force_error}")
-        logging.info(f"PREROLL GROUPING: After force-adding {force_added_count} missing groups, total is now {len(grouped_records_list)} (expected: {len(grouped_records)})")
-        
-        # FINAL VERIFICATION: Check again after force-adding
-        final_check_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
-        still_missing = set(grouped_records.keys()) - final_check_keys
-        if still_missing:
-            logging.error(f"PREROLL GROUPING FATAL ERROR: After force-adding, {len(still_missing)} groups are STILL missing! This should never happen. Missing: {list(still_missing)[:10]}")
-        else:
-            logging.info(f"PREROLL GROUPING SUCCESS: All {len(grouped_records)} groups now have representatives!")
-    
-    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups (one label per group_key)")
-    # DEBUG: Log group keys for first 50 groups to help debug
-    if len(grouped_records) <= 50:
-        group_keys_sample = list(grouped_records.keys())[:50]
-        logging.info(f"PREROLL GROUPING FINAL DEBUG: All {len(grouped_records)} group keys created: {group_keys_sample}")
-    else:
-        group_keys_sample = list(grouped_records.keys())[:50]
-        logging.info(f"PREROLL GROUPING FINAL DEBUG: First 50 group keys: {group_keys_sample} (total: {len(grouped_records)})")
-    # DEBUG: Log if we're losing groups
+    # Only log warnings/errors (not info for normal cases)
     if len(grouped_records_list) < len(grouped_records):
         logging.warning(f"PREROLL GROUPING WARNING: Lost {len(grouped_records) - len(grouped_records_list)} groups during processing!")
     elif len(grouped_records_list) > len(grouped_records):
         logging.warning(f"PREROLL GROUPING WARNING: Created {len(grouped_records_list) - len(grouped_records)} extra groups (unexpected)!")
     
-    # CRITICAL DEBUG: Log group counts by type to understand grouping
-    pack_groups = sum(1 for k in grouped_records.keys() if 'pack' in k.lower())
-    non_pack_groups = len(grouped_records) - pack_groups
-    logging.info(f"PREROLL GROUPING STATS: {pack_groups} pack groups, {non_pack_groups} non-pack groups (total: {len(grouped_records)})")
+    # PERFORMANCE: Skip stats logging unless at debug level
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        pack_groups = sum(1 for k in grouped_records.keys() if 'pack' in k.lower())
+        non_pack_groups = len(grouped_records) - pack_groups
+        logging.debug(f"PREROLL GROUPING STATS: {pack_groups} pack groups, {non_pack_groups} non-pack groups (total: {len(grouped_records)})")
     
     # Log summary only (reduce logging overhead)
     if grouped_records_list and logging.getLogger().isEnabledFor(logging.DEBUG):
