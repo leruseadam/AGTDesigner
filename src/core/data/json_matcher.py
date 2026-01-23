@@ -1991,6 +1991,22 @@ class JSONMatcher:
             cache_name = normalize_product_name(cache_name_raw)
             json_strain = str(json_item.get("strain_name", "")).lower().strip()
             cache_strain = str(cache_item.get("strain", "")).lower().strip()
+            # Lexical similarity gate: if JSON and cache names share almost no tokens
+            # and fuzzy similarity is low, bail out early to avoid false positives.
+            try:
+                json_tokens = set(re.findall(r"\w+", json_name))
+                cache_tokens = set(re.findall(r"\w+", cache_name))
+                if json_tokens and cache_tokens:
+                    intersection = json_tokens.intersection(cache_tokens)
+                    overlap_ratio = len(intersection) / max(len(json_tokens), len(cache_tokens))
+                    fuzzy_score = fuzz.token_set_ratio(json_name, cache_name)
+                    # If overlap is very small AND fuzzy score is low, return very low score
+                    if overlap_ratio < 0.12 and fuzzy_score < 60:
+                        logging.debug(f"Low lexical similarity: overlap={overlap_ratio:.2f}, fuzzy={fuzzy_score} -> rejecting")
+                        return 0.05
+            except Exception:
+                # If anything goes wrong, continue with existing scoring
+                pass
             
             # Extract vendors for strict vendor matching
             json_vendor = None
