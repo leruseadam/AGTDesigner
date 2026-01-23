@@ -12,89 +12,23 @@ from typing import List, Dict, Any, Optional
 from flask import session
 from flask_caching import Cache
 from src.core.constants import PREROLL_ALLOWED_BRANDS
-# Precompiled regexes to improve performance (avoid repeated compilation in loops)
-# Matches pack patterns like "0.5g x 7 Pack", "1g x 5 Pack", etc.
-# Allow leading-dot decimals like '.5g' as well as '0.5g' and '1g'
-# Primary pack/weight regexes. We'll try multiple patterns to catch variants
-# Examples matched: "0.5g x 7 Pack", "1g x 5 Pack", ".5g x 2 Pack", "10 x .5g", "10x .5 g", "-10 x .5g"
-PACK_PATTERNS = [
-    re.compile(r"(\d+(?:\.\d+)?|(?:\.\d+))\s*g\s*[x×]\s*(\d+)\s*(?:pack)?", re.IGNORECASE),
-    re.compile(r"(\d+)\s*[x×]\s*(\d+(?:\.\d+)?|(?:\.\d+))\s*g\s*(?:pack)?", re.IGNORECASE),
-    re.compile(r"(?:-|\b)(\d+)\s*[x×]\s*(\.?\d+(?:\.\d+)?)\s*g", re.IGNORECASE),
-]
-# Matches "by BrandName -" pattern used to extract brand
-BY_PATTERN = re.compile(r"\sby\s+([^-]+?)(?:\s+-|$)", re.IGNORECASE)
-# Matches weight like "1g" or "0.5g"
-WEIGHT_RE = re.compile(r"(\d+(?:\.\d+)?|(?:\.\d+))\s*g", re.IGNORECASE)
-# Preroll universal patterns (compiled)
-PREROLL_PATTERN_COMPILED = [
-    re.compile(r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)', re.IGNORECASE),
-    re.compile(r'(.+?)(Pre[-‑ ]?Roll.*)', re.IGNORECASE),
-]
-
-# Broaden patterns to catch infused blunts, palm blunts and generic blunt mentions
-PREROLL_PATTERN_COMPILED.extend([
-    re.compile(r'(.+?)(Infused\s+Blunt.*)', re.IGNORECASE),
-    re.compile(r'(.+?)(Palm\s+Blunt.*)', re.IGNORECASE),
-    re.compile(r'(.+?)(Blunt.*)', re.IGNORECASE),
-    re.compile(r'(.+?)(Firecracker.*)', re.IGNORECASE),
-    re.compile(r'(.+?)(Snickerdoobie.*)', re.IGNORECASE),
-])
-# Non-alphanumeric for normalization
-NON_ALNUM_RE = re.compile(r'[^a-z0-9-]+')
 import threading
-import os
-import time
 
 
-def _normalize_vendor_key(raw: str) -> str:
-    """Normalize vendor/brand strings into a compact alphanumeric key."""
-    if not raw:
-        return ''
-    s = str(raw).strip().lower()
-    # Normalize ampersands and common separators
-    s = s.replace('&', ' and ')
-    s = re.sub(r"\s+by\s+", ' ', s)
-    # Remove leading 'the'
-    s = re.sub(r'^the\s+', '', s)
-    # Remove common corporate suffixes and noise words
-    s = re.sub(r'\b(llc|inc|co|corp|corporation|ltd|incorporated|holdings|wholesale|distro|distribution|distributors|technologies|llp|pvt|pvt\.?|company)\b', '', s)
-    # Collapse whitespace
-    s = re.sub(r'\s+', ' ', s).strip()
-
-    # Replace remaining non-alphanumeric with hyphens to preserve token boundaries
-    s = re.sub(r'[^a-z0-9]+', '-', s)
-
-    # Collapse multiple hyphens and trim
-    s = re.sub(r'-{2,}', '-', s).strip('-')
-
-    # If normalization produced an empty key (rare), fall back to compact letters
-    if not s:
-        fallback = re.sub(r'[^a-z0-9]+', '', str(raw).strip().lower())
-        return fallback
-
-    return s
-
-
-def _store_preroll_groups_batch(groups_data: List[tuple]):
-    """Store multiple preroll groups in database in a single batch operation.
-    
-    Args:
-        groups_data: List of tuples (group_key, group_id, group_items, group_info)
-    """
-    if not groups_data:
-        return
-    
+def _store_preroll_group_in_database(group_key: str, group_id: str, group_items: List[Dict], group_info: Dict):
+    """Store preroll group data in database for persistence across site refreshes."""
     try:
         from app import get_product_database, get_current_store_name
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
         if not product_db:
-            return  # Silently skip if DB not available
+            logging.warning("PREROLL DB: Product database not available")
+            return
         
         conn = product_db._get_connection()
         if not conn:
+            logging.warning("PREROLL DB: Could not get database connection")
             return
         
         cursor = conn.cursor()
@@ -110,28 +44,24 @@ def _store_preroll_groups_batch(groups_data: List[tuple]):
             )
         """)
         
-        # Prepare batch data
+        # Store group data as JSON
+        items_json = json.dumps(group_items)
+        info_json = json.dumps(group_info)
         from datetime import datetime
         updated_at = datetime.now().isoformat()
-        batch_values = []
-        for group_key, group_id, group_items, group_info in groups_data:
-            items_json = json.dumps(group_items)
-            info_json = json.dumps(group_info)
-            batch_values.append((group_key, group_id, items_json, info_json, updated_at))
         
-        # Batch insert/update (much faster than individual writes)
-        cursor.executemany("""
+        # Insert or replace (upsert)
+        cursor.execute("""
             INSERT OR REPLACE INTO preroll_groups 
             (group_key, group_id, group_items, group_info, updated_at)
             VALUES (?, ?, ?, ?, ?)
-        """, batch_values)
+        """, (group_key, group_id, items_json, info_json, updated_at))
         
         conn.commit()
-        if logging.getLogger().isEnabledFor(logging.DEBUG):
-            logging.debug(f"PREROLL DB: Stored {len(batch_values)} groups")
+        logging.info(f"PREROLL DB: Stored group '{group_key}' in database")
         
     except Exception as e:
-        logging.warning(f"PREROLL DB: Error batch storing groups: {e}")
+        logging.error(f"PREROLL DB: Error storing group in database: {e}")
         # Don't raise - allow cache to work as fallback
 
 
@@ -183,19 +113,6 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     name_lower = str(product_name).lower()
     combined = f"{desc_lower} {name_lower}"
     
-    # Quick paraphernalia / non-consumable filter to avoid grouping items like trays/papers
-    paraphernalia_keywords = [
-        r'rolling tray', r'rolling papers', r'rolling paper', r'raw classic',
-        r'grinder', r'paraphernalia', r'rechargeable', r'cartridge battery', r'rolling tray-'
-    ]
-    for kw in paraphernalia_keywords:
-        if re.search(kw, combined, re.IGNORECASE):
-            return {
-                'group_id': 'other',
-                'display_name': 'Assorted Pre-Rolls',
-                'category': 'Other'
-            }
-
     # Check for flavored blunts
     if 'flavored blunt' in combined or 'flavoured blunt' in combined:
         return {
@@ -204,49 +121,26 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             'category': 'Flavored Blunts'
         }
     
-    # Check for pack sizes (general pattern - multiple common formats)
-    for pat in PACK_PATTERNS:
-        m = pat.search(combined)
-        if m:
-            g1 = m.group(1)
-            g2 = m.group(2) if m.lastindex >= 2 else None
-            weight = None
-            count = None
-            # Try to interpret groups: one pattern yields (weight, count), others (count, weight)
-            try:
-                # prefer weight=float, count=int
-                f1 = float(g1)
-                i2 = int(g2) if g2 is not None else None
-                weight = g1
-                count = str(i2) if i2 is not None else None
-            except Exception:
-                try:
-                    i1 = int(g1)
-                    f2 = float(g2) if g2 is not None else None
-                    count = str(i1)
-                    weight = str(f2) if f2 is not None else None
-                except Exception:
-                    # fallback: assign as seen
-                    weight = g1
-                    count = g2
-
-            if weight:
-                # Normalize weight display (handle .5g -> 0.5g)
-                if str(weight).startswith('.'):
-                    weight_display = '0' + str(weight)
-                else:
-                    weight_display = str(weight)
-            else:
-                weight_display = ''
-
-            if not count:
-                count = '1'
-
-            return {
-                'group_id': f'{weight_display}g-{count}pack',
-                'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
-                'category': f'{weight_display}g x {count} Packs'
-            }
+    # Check for pack sizes (general pattern - check this BEFORE specific 1g x 5 check)
+    # Pattern: "0.5g x 7 Pack", "1g x 5 Pack", ".5g x 2 Pack", etc.
+    pack_match = re.search(r'(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)\s*pack', combined, re.IGNORECASE)
+    if pack_match:
+        weight = pack_match.group(1)
+        count = pack_match.group(2)
+        # Normalize weight display (handle .5g -> 0.5g, but keep 0.5g as 0.5g)
+        if weight.startswith('.'):
+            # ".5" -> "0.5"
+            weight_display = '0' + weight
+        else:
+            # "0.5" stays "0.5", "1" stays "1"
+            weight_display = weight
+        # Include the word "Pre-Roll" in the display name so grouped
+        # pack labels clearly indicate they are prerolls.
+        return {
+            'group_id': f'{weight}g-{count}pack',
+            'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
+            'category': f'{weight_display}g x {count} Packs'
+        }
     
     # Check specifically for 1g x 5 packs (more specific, should be caught by above but keeping for safety)
     if re.search(r'1g\s*x\s*5\s*pack', combined, re.IGNORECASE) or '1g x 5 pack' in combined.lower() or '1 g x 5 pack' in combined.lower():
@@ -256,26 +150,10 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             'display_name': 'Assorted Pre-Roll - 1g x 5 Packs',
             'category': '1g x 5 Packs'
         }
-    # Targeted synonyms for infused prerolls that aren't always written as 'infused pre-roll'
-    if re.search(r'firecracker|snickerdoobie', combined, re.IGNORECASE):
-        weight_match = WEIGHT_RE.search(combined)
-        if weight_match:
-            weight = weight_match.group(1)
-            return {
-                'group_id': f'infused-preroll-{weight}g',
-                'display_name': f'Infused Pre-Roll - {weight}g',
-                'category': f'Infused Pre-Roll - {weight}g'
-            }
-        else:
-            return {
-                'group_id': 'infused-preroll',
-                'display_name': 'Infused Pre-Roll',
-                'category': 'Infused Pre-Roll'
-            }
     
-    # Check for infused prerolls with weight (allow 'infused' + 'pre-roll' OR 'infused' + 'blunt/palm')
-    if 'infused' in combined and (( 'pre' in combined and 'roll' in combined) or 'blunt' in combined or 'palm' in combined):
-        weight_match = WEIGHT_RE.search(combined)
+    # Check for infused prerolls with weight
+    if 'infused' in combined and 'pre' in combined and 'roll' in combined:
+        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
         if weight_match:
             weight = weight_match.group(1)
             return {
@@ -292,7 +170,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Check for regular prerolls with weight
     if ('pre' in combined and 'roll' in combined) and 'infused' not in combined:
-        weight_match = WEIGHT_RE.search(combined)
+        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
         if weight_match:
             weight = weight_match.group(1)
             return {
@@ -305,12 +183,16 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Default: use truncated description pattern
     # CRITICAL FIX: Check for infused prerolls FIRST before regular prerolls
-    for pattern in PREROLL_PATTERN_COMPILED:
-        match = pattern.search(description)
+    preroll_patterns = [
+        r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',  # Infused prerolls first
+        r'(.+?)(Pre[-‑ ]?Roll.*)',  # Regular prerolls second
+    ]
+    for pattern in preroll_patterns:
+        match = re.search(pattern, description, re.IGNORECASE)
         if match:
             universal_desc = match.group(2).strip().lower()
             # Create a safe group ID from the description
-            group_id = NON_ALNUM_RE.sub('-', universal_desc).strip('-')
+            group_id = re.sub(r'[^a-z0-9-]+', '-', universal_desc).strip('-')
             display_name = universal_desc.replace('pre-roll', 'Pre-Roll').replace('pre roll', 'Pre-Roll')
             # CRITICAL FIX: Ensure "infused" is capitalized and preserved in display name
             if 'infused' in universal_desc:
@@ -336,389 +218,23 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
 
 def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[Dict[str, Any]]:
     """
-    Generate preroll tags by grouping products by category **and vendor**.
-    This wrapper now uses a simplified, deterministic implementation that
-    guarantees one representative per vendor/category group and never drops
-    groups once they are created.
+    Generate preroll tags by grouping products by category.
+
+    Args:
+        records: List of product records to group
+        cache: Flask cache instance for storing group data
+
+    Returns:
+        List of grouped representative records (one per category)
     """
-    return _generate_preroll_tags_simple(records, cache)
-
-
-def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -> List[Dict[str, Any]]:
-    """
-    Simple, deterministic preroll grouping:
-    - Group key = (group_id from identify_preroll_product_group, vendor/brand key)
-    - One representative per group
-    - Full group_items cached for QR/product list
-    """
-    start_t = time.time()
-    original_input_count = len(records)
-
-    # Optional brand filter (normally disabled because PREROLL_ALLOWED_BRANDS is empty)
-    allowed_brands_lower: Optional[set] = None
-    if PREROLL_ALLOWED_BRANDS:
-        allowed_brands_lower = {
-            str(b).strip().lower()
-            for b in PREROLL_ALLOWED_BRANDS
-            if b and str(b).strip()
-        }
-        if not allowed_brands_lower:
-            allowed_brands_lower = None
-
-    # Step 1: Group records by (group_id, vendor_key)
-    grouped_records: Dict[str, Dict[str, Any]] = {}
-    skipped = 0
-
-    for record in records:
-        product_name = record.get('Product Name*', record.get('ProductName', ''))
-        if not product_name or not str(product_name).strip():
-            skipped += 1
-            continue
-
-        description = record.get('Description', '') or product_name
-        group_info = identify_preroll_product_group(description, product_name)
-        group_id = group_info['group_id']
-
-        # Determine brand/vendor for grouping
-        brand_or_vendor = ''
-        name_str = str(product_name).strip()
-        by_match = BY_PATTERN.search(name_str)
-        if by_match:
-            brand_or_vendor = by_match.group(1).strip()
-
-        if not brand_or_vendor:
-            brand_or_vendor = (
-                record.get('Product Brand') or
-                record.get('ProductBrand') or
-                record.get('Brand') or
-                ''
-            )
-            brand_or_vendor = str(brand_or_vendor).strip()
-
-        if not brand_or_vendor:
-            vendor_field = (
-                record.get('Vendor/Supplier*') or
-                record.get('Vendor') or
-                record.get('Vendor/Supplier') or
-                ''
-            )
-            # Prefer explicit product-type metadata when available (helps with 'Infused Blunt', 'Palm Blunt', etc.)
-            product_type_meta = (
-                record.get('Product Type*', '') or
-                record.get('ProductType', '')
-            )
-
-            group_info = None
-            if product_type_meta and isinstance(product_type_meta, str) and product_type_meta.strip():
-                pt_lower = product_type_meta.strip().lower()
-                # Detect infused prerolls from metadata
-                if 'infused' in pt_lower and 'pre' in pt_lower:
-                    # Try to extract weight from record fields
-                    weight_match = re.search(r"(\d+(?:\.\d+)?)\s*g", f"{record.get('CombinedWeight','')} {record.get('WeightUnits','')} {description} {product_name}", re.IGNORECASE)
-                    if weight_match:
-                        weight = weight_match.group(1)
-                        group_info = {
-                            'group_id': f'infused-preroll-{weight}g',
-                            'display_name': f'Infused Pre-Roll\u2011\u00A0{weight}g',
-                            'category': f'Infused Pre-Roll\u2011\u00A0{weight}g'
-                        }
-                    else:
-                        group_info = {'group_id': 'infused-preroll', 'display_name': 'Infused Pre-Roll', 'category': 'Infused Pre-Roll'}
-                # Detect regular preroll metadata
-                elif 'pre' in pt_lower and 'roll' in pt_lower:
-                    weight_match = re.search(r"(\d+(?:\.\d+)?)\s*g", f"{record.get('CombinedWeight','')} {record.get('WeightUnits','')} {description} {product_name}", re.IGNORECASE)
-                    if weight_match:
-                        weight = weight_match.group(1)
-                        group_info = {
-                            'group_id': f'preroll-{weight}g',
-                            'display_name': f'Pre-Roll\u2011\u00A0{weight}g',
-                            'category': f'Pre-Roll\u2011\u00A0{weight}g'
-                        }
-                    else:
-                        group_info = {'group_id': 'preroll', 'display_name': 'Pre-Roll', 'category': 'Pre-Roll'}
-
-            # Fallback to text-based identification when metadata not helpful
-            if not group_info:
-                group_info = identify_preroll_product_group(description, product_name)
-
-        brand_key = ''
-        if brand_or_vendor:
-            raw = str(brand_or_vendor).strip().lower()
-            brand_key = re.sub(r'[^a-z0-9]+', '', raw) or raw.replace(' ', '_')
-
-        key_parts = [group_id]
-        if brand_key:
-            key_parts.append(brand_key)
-        group_key = '|'.join(key_parts)
-
-        if group_key not in grouped_records:
-            grouped_records[group_key] = {
-                'records': [],
-                'group_info': group_info,
-                'display_vendor': brand_or_vendor,
-            }
-        grouped_records[group_key]['records'].append(record)
-
-    if skipped:
-        logging.warning(f"PREROLL: Skipped {skipped} records with no product name")
-
-    if not grouped_records:
-        logging.info("PREROLL: No groups created – returning original records")
-        return records
-
-    # Step 2: Build representatives and cache group_items
-    grouped_records_list: List[Dict[str, Any]] = []
-    groups_for_db_batch: List[tuple] = []
-    session_id = session.get('preroll_session_id', 'default')
-
-    for group_key, group_data in grouped_records.items():
-        group_records_list = group_data['records']
-        group_info = group_data['group_info']
-        original_group_id = group_info['group_id']
-        group_display_name = group_info['display_name']
-
-        rep = group_records_list[0].copy()
-
-        # Vendor
-        vendor = ''
-        for r in group_records_list:
-            v = (
-                r.get('Vendor/Supplier*') or
-                r.get('Vendor') or
-                r.get('Vendor/Supplier') or
-                ''
-            )
-            if v and str(v).strip().lower() not in ['none', 'nan']:
-                vendor = str(v).strip()
-                break
-        if vendor:
-            rep['Vendor/Supplier*'] = vendor
-            rep['Vendor'] = vendor
-            rep['ProductVendor'] = vendor
-
-        # Product type
-        if 'infused' in group_display_name.lower() or original_group_id.startswith('infused-preroll'):
-            rep['Product Type*'] = 'Infused Pre-Roll'
-            rep['ProductType'] = 'infused pre-roll'
-        else:
-            rep['Product Type*'] = 'Pre-Roll'
-            rep['ProductType'] = 'pre-roll'
-
-        # Unique Product Name* per vendor/category
-        brand_suffix = group_data.get('display_vendor') or vendor
-        if brand_suffix:
-            unique_display = f"{group_display_name} ({brand_suffix})"
-        else:
-            unique_display = group_display_name
-        rep['Description'] = group_display_name
-        rep['Product Name*'] = unique_display
-        rep['ProductName'] = unique_display
-        rep['DescAndWeight'] = group_display_name
-
-        # Price normalization
-        price_val = rep.get('Price', '')
-        if price_val and str(price_val).strip():
-            s = str(price_val).strip()
-            if not s.startswith('$'):
-                try:
-                    num = float(s.replace('$', '').replace(',', ''))
-                    rep['Price'] = f"${int(num)}" if num.is_integer() else f"${num:.2f}".rstrip('0').rstrip('.')
-                except Exception:
-                    rep['Price'] = f"${s}"
-
-        # Grouping metadata
-        rep['_group_id'] = original_group_id
-        rep['_group_info'] = group_info
-        rep['_group_key'] = group_key
-
-        # Lineage (sovereign > canonical > Excel)
-        rep_sovereign = None
-        rep_canonical = None
-        rep_lineage = ''
-        for r in group_records_list:
-            if not rep_sovereign:
-                s_val = r.get('sovereign_lineage')
-                if s_val and str(s_val).strip().lower() not in ['none', 'nan']:
-                    rep_sovereign = str(s_val).strip()
-            if not rep_canonical:
-                c_val = r.get('canonical_lineage')
-                if c_val and str(c_val).strip().lower() not in ['none', 'nan']:
-                    rep_canonical = str(c_val).strip()
-        if rep_sovereign:
-            rep_lineage = rep_sovereign
-        elif rep_canonical:
-            rep_lineage = rep_canonical
-        else:
-            for r in group_records_list:
-                cand = (
-                    r.get('proprietary_lineage') or
-                    r.get('proprietaryLineage') or
-                    r.get('currentLineage') or
-                    r.get('Lineage') or
-                    r.get('lineage')
-                )
-                if cand and str(cand).strip().lower() not in ['none', 'nan']:
-                    rep_lineage = str(cand).strip()
-                    break
-
-        if rep_lineage:
-            from src.core.constants import CLASSIC_TYPES
-            rep_upper = str(rep_lineage).strip().upper()
-            product_type = rep.get('Product Type*', '').lower()
-            is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else True
-            display_lineage = rep_upper
-            if is_classic and rep_upper in ('MIXED', 'THC'):
-                display_lineage = 'HYBRID'
-            rep['Lineage'] = display_lineage
-            rep['Lineage*'] = display_lineage
-            rep['lineage'] = display_lineage.lower()
-            rep['currentLineage'] = display_lineage
-
-            if rep_sovereign:
-                rep['sovereign_lineage'] = rep_sovereign.upper()
-                if rep_canonical:
-                    rep['canonical_lineage'] = rep_canonical.upper()
-            elif rep_canonical:
-                rep['canonical_lineage'] = rep_canonical.upper()
-            else:
-                rep['canonical_lineage'] = display_lineage
-
-        # Brand on representative
-        rep_brand = ''
-        for r in group_records_list:
-            pname = r.get('Product Name*') or r.get('ProductName') or ''
-            if pname:
-                m = BY_PATTERN.search(str(pname))
-                if m:
-                    cand = m.group(1).strip()
-                    if cand and cand.lower() not in ['none', 'nan']:
-                        rep_brand = cand
-                        break
-        if not rep_brand:
-            for r in group_records_list:
-                cand = (
-                    r.get('Product Brand') or
-                    r.get('ProductBrand') or
-                    r.get('Brand') or
-                    ''
-                )
-                cand = str(cand).strip()
-                if cand and cand.lower() not in ['none', 'nan', 'premium cannabis']:
-                    rep_brand = cand
-                    break
-        if not rep_brand and vendor:
-            rep_brand = vendor
-        if rep_brand:
-            rep['Product Brand'] = rep_brand
-            rep['ProductBrand'] = rep_brand
-            rep['Brand'] = rep_brand
-
-        # Build group_items for QR/product list
-        group_items: List[Dict[str, Any]] = []
-        for r in group_records_list:
-            if allowed_brands_lower:
-                b = (
-                    r.get('Product Brand') or
-                    r.get('ProductBrand') or
-                    r.get('Brand') or
-                    ''
-                )
-                if str(b).strip().lower() not in allowed_brands_lower:
-                    continue
-
-            doh_raw = r.get('DOH') or r.get('DOH Compliant (Yes/No)', '')
-            doh_str = str(doh_raw).strip().upper() if doh_raw is not None else ''
-            if doh_str in ['YES', 'Y', 'TRUE', '1', 'DOH', 'COMPLIANT']:
-                doh_display = 'YES'
-            elif doh_str in ['NO', 'N', 'FALSE', '0']:
-                doh_display = 'NO'
-            else:
-                doh_display = doh_str or ''
-
-            group_items.append({
-                'product_name': r.get('Product Name*', r.get('ProductName', '')),
-                'description': r.get('Description', ''),
-                'price': r.get('Price', ''),
-                'weight': r.get('CombinedWeight', r.get('WeightUnits', '')),
-                'vendor': r.get('Vendor', r.get('Vendor/Supplier*', '')),
-                'brand': r.get('Product Brand', r.get('ProductBrand', '')),
-                'strain': r.get('Product Strain', ''),
-                'lineage': r.get('Lineage', ''),
-                'doh': doh_display,
-            })
-
-        groups_for_db_batch.append((group_key, original_group_id, group_items, group_info))
-        grouped_records_list.append(rep)
-
-    # Batch store groups to DB/cache (best-effort, non-blocking)
-    if groups_for_db_batch:
-        try:
-            threading.Thread(
-                target=_store_preroll_groups_batch,
-                args=(groups_for_db_batch,),
-                daemon=True,
-            ).start()
-        except Exception:
-            pass
-
-        try:
-            for group_key, original_group_id, group_items, group_info in groups_for_db_batch:
-                cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
-                cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
-                cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
-                cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
-                if original_group_id != group_key:
-                    cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
-                    cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
-        except Exception:
-            pass
-
-    # Persist originals for QR/product list generation
-    try:
-        group_keys = [rep.get('_group_key') for rep in grouped_records_list if rep.get('_group_key')]
-        _merge_original_group_items(cache, group_keys)
-    except Exception:
-        pass
-
-    elapsed = time.time() - start_t
-    logging.info(f"PREROLL: Grouped {original_input_count} records into {len(grouped_records_list)} vendor/category groups in {elapsed:.2f}s")
-    return grouped_records_list
-    start_t = time.time()
-
-    # CRITICAL: Track original count BEFORE any filtering
-    original_input_count = len(records)
-    # ALWAYS log input count at INFO level for debugging
-    logging.info(f"PREROLL INPUT: Received {original_input_count} records for grouping")
-    
-    # CRITICAL: Track ALL unique vendors in input BEFORE any filtering (for final comparison)
-    input_vendors = set()
-    input_vendor_counts = {}
-    
-    # Log sample product names and vendors to verify input
+    # DEBUG: Log brand values in input records
     if records:
-        sample_names = [r.get('Product Name*', r.get('ProductName', 'N/A')) for r in records[:5]]
-        sample_vendors = [r.get('Vendor/Supplier*', r.get('Vendor', 'N/A')) for r in records[:5]]
-        logging.info(f"PREROLL INPUT SAMPLE: First 5 products - Names: {sample_names}")
-        logging.info(f"PREROLL INPUT SAMPLE: First 5 products - Vendors: {sample_vendors}")
-        
-        # CRITICAL: Log ALL unique vendors in input to track which vendors are being processed
-        for r in records:
-            vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
-            if vendor and str(vendor).strip():
-                vendor_str = str(vendor).strip()
-                input_vendors.add(vendor_str)
-                input_vendor_counts[vendor_str] = input_vendor_counts.get(vendor_str, 0) + 1
-        logging.info(f"PREROLL INPUT: Found {len(input_vendors)} unique vendors in input: {sorted(list(input_vendors))}")
-        logging.info(f"PREROLL INPUT: Vendor product counts: {dict(sorted(input_vendor_counts.items(), key=lambda x: x[1], reverse=True))}")
-    # DEBUG: Log PREROLL_ALLOWED_BRANDS status (only if filtering is active)
-    if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
-        if logging.getLogger().isEnabledFor(logging.DEBUG):
-            logging.debug(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is set to: {PREROLL_ALLOWED_BRANDS}")
-
-    # If environment requests preserve-all, skip grouping and return records unchanged
-    if os.getenv('PREROLL_PRESERVE_ALL', '').lower() in ['1', 'true', 'yes']:
-        logging.info(f"PREROLL: PREROLL_PRESERVE_ALL set - skipping grouping and returning all {len(records)} records")
-        return records
+        # Log all keys from first record to understand data structure
+        logging.info(f"PREROLL INPUT DEBUG: First record keys ({len(records[0].keys())} total): {list(records[0].keys())}")
+        for i, r in enumerate(records[:5]):
+            brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '')
+            vendor_val = r.get('Vendor/Supplier*', '') or r.get('Vendor', '')
+            logging.info(f"PREROLL INPUT DEBUG [{i+1}]: Name='{r.get('Product Name*', 'N/A')}', Brand='{brand_val}', Vendor='{vendor_val}', ALL_BRAND_FIELDS: Product Brand={repr(r.get('Product Brand'))}, ProductBrand={repr(r.get('ProductBrand'))}, Brand={repr(r.get('Brand'))}")
 
     # Filter records by allowed brands if configured
     # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
@@ -731,66 +247,29 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
         
         if not allowed_brands_lower:
             # If after normalization we have no valid brands, skip filtering
-            if logging.getLogger().isEnabledFor(logging.DEBUG):
-                logging.debug(f"PREROLL: BRAND FILTER skipped (no valid brands)")
+            logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is set but contains no valid brands, skipping filter (allowing all brands)")
         else:
             filtered_records = []
             for record in records:
-                # CRITICAL FIX: Use same brand extraction logic as grouping
-                # This ensures products with brands in product names are included
-                # even if Product Brand field is empty
-                brand = ''
-                product_name = record.get('Product Name*', record.get('ProductName', ''))
-                
-                # PRIORITY 1: Extract brand from product name using "by BrandName -" pattern
-                if product_name:
-                    product_name_str = str(product_name).strip()
-                    by_match = BY_PATTERN.search(product_name_str)
-                    if by_match:
-                        brand = by_match.group(1).strip()
-                
-                # PRIORITY 2: Fall back to explicit Product Brand fields
-                if not brand:
-                    brand = (
-                        record.get('Product Brand', '') or
-                        record.get('ProductBrand', '') or
-                        record.get('Brand', '') or
-                        ''
-                    )
-                    brand = str(brand).strip()
-                
-                # PRIORITY 3: Fall back to vendor if still no brand
-                if not brand:
-                    vendor = (
-                        record.get('Vendor/Supplier*', '') or
-                        record.get('Vendor', '') or
-                        record.get('Vendor/Supplier', '') or
-                        ''
-                    )
-                    brand = str(vendor).strip()
-                
-                brand_lower = brand.lower() if brand else ''
+                # Get brand from various possible fields
+                brand = (
+                    record.get('Product Brand', '') or
+                    record.get('ProductBrand', '') or
+                    record.get('Brand', '') or
+                    ''
+                )
+                brand_lower = str(brand).strip().lower()
                 
                 # Check if brand is in allowed list
                 if brand_lower in allowed_brands_lower:
                     filtered_records.append(record)
-                elif logging.getLogger().isEnabledFor(logging.DEBUG):
-                    logging.debug(f"PREROLL BRAND FILTER: Excluding product '{product_name}' with brand '{brand}'")
+                else:
+                    logging.info(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' (not in allowed brands: {PREROLL_ALLOWED_BRANDS})")
             
             records = filtered_records
-            excluded = original_count - len(records)
-            sample_kept = [r.get('Product Name*', r.get('ProductName', '')) for r in records[:5]]
-            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} -> {len(records)} records (excluded {excluded})")
-            
-            # Log vendors after filtering
-            if excluded > 0:
-                vendors_after_filter = set()
-                for r in records:
-                    vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
-                    if vendor:
-                        vendors_after_filter.add(str(vendor).strip())
-                logging.info(f"PREROLL BRAND FILTER: Vendors remaining after filter: {sorted(list(vendors_after_filter))}")
-    # Skip logging when no filter is applied (common case)
+            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} records to {len(records)} records matching allowed brands: {PREROLL_ALLOWED_BRANDS}")
+    else:
+        logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is empty or None, allowing all brands (no filtering applied)")
     
     # NOTE: We'll populate session['preroll_original_records'] after grouping
     # so that the QR page references the full cached group items (not just
@@ -800,61 +279,25 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
     
     # Step 1: Identify product groups and group records
     grouped_records = {}
-    skipped_count = 0
     for record in records:
         description = record.get('Description', '')
         product_name = record.get('Product Name*', record.get('ProductName', ''))
         
         # CRITICAL: Ensure we have at least a product name to work with
         if not product_name or not str(product_name).strip():
-            skipped_count += 1
+            logging.warning(f"PREROLL GROUP: Skipping record with no product name: {record}")
             continue
         
         # Identify the product group
-        # Prefer explicit Product Type when available to avoid false negatives
-        product_type_field = (
-            record.get('Product Type*', '') or
-            record.get('ProductType', '') or
-            ''
-        )
-        product_type_lower = str(product_type_field).strip().lower()
-
-        group_info = None
-        if product_type_lower:
-            # If Product Type explicitly indicates a preroll, create a heuristic group
-            if 'pre' in product_type_lower and 'roll' in product_type_lower or 'preroll' in product_type_lower:
-                # Try to extract weight from description or name
-                weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', f"{description} {product_name}")
-                if weight_match:
-                    weight = weight_match.group(1)
-                    if 'infused' in product_type_lower:
-                        group_info = {
-                            'group_id': f'infused-preroll-{weight}g',
-                            'display_name': f'Infused Pre-Roll\u2011\u00A0{weight}g',
-                            'category': f'Infused Pre-Roll\u2011\u00A0{weight}g'
-                        }
-                    else:
-                        group_info = {
-                            'group_id': f'preroll-{weight}g',
-                            'display_name': f'Pre-Roll\u2011\u00A0{weight}g',
-                            'category': f'Pre-Roll\u2011\u00A0{weight}g'
-                        }
-                else:
-                    # No weight found - use generic preroll group
-                    if 'infused' in product_type_lower:
-                        group_info = {'group_id': 'infused-preroll', 'display_name': 'Infused Pre-Roll', 'category': 'Infused Pre-Roll'}
-                    else:
-                        group_info = {'group_id': 'preroll', 'display_name': 'Pre-Roll', 'category': 'Pre-Roll'}
-
-        if group_info is None:
-            group_info = identify_preroll_product_group(description, product_name)
+        group_info = identify_preroll_product_group(description, product_name)
         group_id = group_info['group_id']
+        logging.debug(f"PREROLL GROUP: Product '{product_name}' -> Group: '{group_info['display_name']}' (group_id: {group_id})")
         
         # Extract brand from product name using "by BrandName -" pattern
         # This is used for grouping to avoid duplicates
         brand_for_grouping = ''
         product_name_str = str(product_name).strip()
-        by_match = BY_PATTERN.search(product_name_str)
+        by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name_str, re.IGNORECASE)
         if by_match:
             brand_for_grouping = by_match.group(1).strip()
 
@@ -878,7 +321,7 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
                 )
                 brand_for_grouping = str(vendor).strip()
 
-        # Group by category AND brand/vendor - each brand/vendor gets their own group
+        # Group by category AND brand - each brand gets their own group
         # Normalize brand into a compact key to avoid duplicate groups caused
         # by minor whitespace/punctuation/casing differences.
         # We'll keep the original `brand_for_grouping` for display, but use
@@ -886,29 +329,16 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
         brand_key = ''
         if brand_for_grouping:
             brand_for_grouping = str(brand_for_grouping).strip()
-            # Normalize brand/vendor into a compact key
-            brand_key = _normalize_vendor_key(brand_for_grouping)
-        
-        # REVERT TO ORIGINAL: group_id|brand_key only (one per category per vendor = ~56 groups)
-        # This is how it "used to work fine" - product hash caused 322 groups and downstream issues
-        key_parts = [group_id]
+            # Normalize: lowercase, remove non-alphanumeric characters
+            brand_key = re.sub(r'[^a-z0-9]+', '', brand_for_grouping.lower())
+            if not brand_key:
+                # Fallback to underscored short form
+                brand_key = brand_for_grouping.lower().replace(' ', '_')
+
         if brand_key:
-            key_parts.append(brand_key)
+            group_key = f"{group_id}|{brand_key}"
         else:
-            vendor = (
-                record.get('Vendor/Supplier*', '') or
-                record.get('Vendor', '') or
-                record.get('Vendor/Supplier', '') or
-                ''
-            )
-            if vendor:
-                vendor_key = _normalize_vendor_key(vendor)
-                if vendor_key:
-                    key_parts.append(vendor_key)
-        
-        group_key = '|'.join(key_parts)
-        if '|' not in group_key:
-            group_key = f"{group_id}|unknown_{len(grouped_records)}"
+            group_key = group_id
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
@@ -916,406 +346,267 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
                 'group_info': group_info
             }
         grouped_records[group_key]['records'].append(record)
-        
-        # DEBUG: Log group keys to verify grouping logic (log first 30 groups)
-        # PERFORMANCE: Skip verbose logging during grouping (only log at debug level)
-        if logging.getLogger().isEnabledFor(logging.DEBUG) and len(grouped_records) <= 5:
-            logging.debug(f"PREROLL GROUPING DEBUG: Added record to group_key '{group_key}' (group_id: {group_id}, brand_key: {brand_key})")
+        logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (brand/vendor: '{brand_for_grouping}', total in group: {len(grouped_records[group_key]['records'])})")
     
-    if skipped_count > 0:
-        logging.warning(f"PREROLL GROUP: Skipped {skipped_count} records with no product name")
-
-    # CRITICAL: Log grouping results
-    logging.info(f"PREROLL GROUPING COMPLETE: {original_input_count} input records -> {len(grouped_records)} unique groups")
-    
-    # Log unique vendors/brands found in groups for debugging
-    vendors_in_groups = set()
-    brands_in_groups = set()
-    vendor_group_counts = {}  # Track how many groups each vendor has
-    for group_key, group_data in grouped_records.items():
-        for record in group_data['records']:
-            vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '') or ''
-            brand = record.get('Product Brand', '') or record.get('ProductBrand', '') or ''
-            if vendor:
-                vendor_str = str(vendor).strip()
-                vendors_in_groups.add(vendor_str)
-                vendor_group_counts[vendor_str] = vendor_group_counts.get(vendor_str, 0) + 1
-            if brand:
-                brands_in_groups.add(str(brand).strip())
-    logging.info(f"PREROLL GROUPING: Found {len(vendors_in_groups)} unique vendors in groups: {sorted(list(vendors_in_groups))}")
-    logging.info(f"PREROLL GROUPING: Vendor group counts: {dict(sorted(vendor_group_counts.items(), key=lambda x: x[1], reverse=True))}")
-
     # Step 2: Create representative records with group display names
     unique_records = []
     session_id = session.get('session_id', 'default')
-    groups_processed = 0
-    groups_failed = 0
     
-    logging.info(f"PREROLL GROUPING: Processing {len(grouped_records)} groups to create representatives...")
-    # DEBUG: Log all group keys to see what groups were created
-    if len(grouped_records) <= 30:  # Only log if reasonable number of groups
-        group_keys_list = list(grouped_records.keys())
-        logging.info(f"PREROLL GROUPING DEBUG: Created {len(group_keys_list)} groups with keys: {group_keys_list}")
-    else:
-        # Log first 30 and last 10 for large batches
-        group_keys_list = list(grouped_records.keys())
-        logging.info(f"PREROLL GROUPING DEBUG: Created {len(group_keys_list)} groups. First 30: {group_keys_list[:30]}, Last 10: {group_keys_list[-10:]}")
-    
-    # CRITICAL: Track which groups are processed to ensure none are lost
-    processed_group_keys_set = set()
-    
-    # PERFORMANCE: Collect groups for batch database write
-    groups_for_db_batch = []
-    
-    # CRITICAL: Log progress for large batches
-    total_groups = len(grouped_records)
-    logging.info(f"PREROLL GROUPING: Starting to process {total_groups} groups to create representatives...")
-    
-    for idx, (group_key, group_data) in enumerate(grouped_records.items(), 1):
-        try:
-            group_info = group_data['group_info']
-            group_records_list = group_data['records']
-            
-            if not group_records_list or len(group_records_list) == 0:
-                logging.warning(f"PREROLL GROUP: Skipping empty group '{group_key}'")
-                continue
-            
-            original_group_id = group_info['group_id']
-            group_display_name = group_info['display_name']
-            
-            representative = group_records_list[0].copy()
-            
-            # Use group display name (e.g. "Pre-Roll - 1g", "Assorted Pre-Roll - 0.5g x 14 Packs")
-            # Make Product Name* unique per group_key (append brand) so downstream never deduplicates
-            # different vendors' same-category groups (e.g. "Pre-Roll - 1g" from Phat Panda vs Hustler's)
-            brand_suffix = group_key.split('|')[-1] if '|' in group_key else ''
-            unique_display = f"{group_display_name} ({brand_suffix})" if brand_suffix else group_display_name
-            representative['Description'] = group_display_name
-            representative['Product Name*'] = unique_display
-            representative['ProductName'] = unique_display
-            representative['DescAndWeight'] = group_display_name
-            
-            # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
-            # Check if this is an infused preroll group and set Product Type* accordingly
-            if 'infused' in group_display_name.lower() or original_group_id.startswith('infused-preroll'):
-                representative['Product Type*'] = 'Infused Pre-Roll'
-                representative['ProductType'] = 'infused pre-roll'
-            else:
-                # For regular prerolls, ensure Product Type* is set correctly
-                if 'pre' in group_display_name.lower() and 'roll' in group_display_name.lower():
-                    representative['Product Type*'] = 'Pre-Roll'
-                    representative['ProductType'] = 'pre-roll'
-            
-            # CRITICAL FIX: Preserve vendor information in the representative record
-            # This ensures each vendor's label shows their vendor name
-            # ALWAYS get vendor from actual records in the group (not from group_key which has normalized brand_key)
-            vendor = ''
+    for group_key, group_data in grouped_records.items():
+        group_info = group_data['group_info']
+        group_records_list = group_data['records']
+        
+        # Extract the original group_id from group_key (group_key may include vendor)
+        # group_key format: "group_id" or "group_id|vendor"
+        original_group_id = group_info['group_id']
+        
+        # Use the first record as representative
+        representative = group_records_list[0].copy()
+        
+        # Update ALL fields that might be displayed on the label to show group display name
+        group_display_name = group_info['display_name']
+        representative['Description'] = group_display_name
+        representative['Product Name*'] = group_display_name
+        representative['ProductName'] = group_display_name
+        # Also update DescAndWeight - use group name only (no individual product details)
+        representative['DescAndWeight'] = group_display_name
+        
+        # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
+        # Check if this is an infused preroll group and set Product Type* accordingly
+        if 'infused' in group_display_name.lower() or original_group_id.startswith('infused-preroll'):
+            representative['Product Type*'] = 'Infused Pre-Roll'
+            representative['ProductType'] = 'infused pre-roll'
+            logging.debug(f"PREROLL GROUP REP: Set Product Type* to 'Infused Pre-Roll' for infused preroll group '{group_display_name}'")
+        else:
+            # For regular prerolls, ensure Product Type* is set correctly
+            if 'pre' in group_display_name.lower() and 'roll' in group_display_name.lower():
+                representative['Product Type*'] = 'Pre-Roll'
+                representative['ProductType'] = 'pre-roll'
+                logging.debug(f"PREROLL GROUP REP: Set Product Type* to 'Pre-Roll' for regular preroll group '{group_display_name}'")
+        
+        # CRITICAL FIX: Preserve vendor information in the representative record
+        # This ensures each vendor's label shows their vendor name
+        # First try to get vendor from the representative record
+        vendor = (
+            representative.get('Vendor/Supplier*', '') or
+            representative.get('Vendor', '') or
+            representative.get('Vendor/Supplier', '') or
+            ''
+        )
+        # If no vendor found in representative, extract from group_key (format: "group_id|vendor")
+        if not vendor and '|' in group_key:
+            vendor = group_key.split('|', 1)[1]
+            logging.info(f"PREROLL GROUP REP: Extracted vendor '{vendor}' from group_key for '{group_display_name}'")
+        # If still no vendor, search through all records in the group
+        if not vendor:
             for r in group_records_list:
                 v = (r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or r.get('Vendor/Supplier', '') or '')
-                if v and str(v).strip() and str(v).strip().lower() not in ['none', 'nan', '']:
+                if v and str(v).strip():
                     vendor = str(v).strip()
+                    logging.info(f"PREROLL GROUP REP: Found vendor '{vendor}' from group record for '{group_display_name}'")
                     break
-            
-            # Fallback: try representative record itself
-            if not vendor:
-                vendor = (
-                    representative.get('Vendor/Supplier*', '') or
-                    representative.get('Vendor', '') or
-                    representative.get('Vendor/Supplier', '') or
+        # Set vendor on representative record to ensure it's passed to template processor
+        if vendor:
+            representative['Vendor/Supplier*'] = vendor
+            representative['Vendor'] = vendor
+            representative['ProductVendor'] = vendor
+            logging.debug(f"PREROLL GROUP REP: Set vendor '{vendor}' on representative for '{group_display_name}'")
+        else:
+            logging.warning(f"PREROLL GROUP REP: No vendor found for group '{group_display_name}' (group_key: {group_key})")
+        
+        # Keep the price from the first record (or could average/use min/max - using first for now)
+        original_price = representative.get('Price', '')
+        # Ensure price is formatted correctly
+        if original_price and str(original_price).strip():
+            if not str(original_price).startswith('$'):
+                try:
+                    price_val = float(str(original_price).replace('$', '').replace(',', '').strip())
+                    if price_val.is_integer():
+                        representative['Price'] = f"${int(price_val)}"
+                    else:
+                        representative['Price'] = f"${price_val:.2f}".rstrip('0').rstrip('.')
+                except:
+                    representative['Price'] = f"${original_price}" if not str(original_price).startswith('$') else str(original_price)
+        
+        # Store group_id and group_info for QR code generation
+        # Use the original group_id (without vendor) for cache keys to maintain compatibility
+        representative['_group_id'] = original_group_id
+        representative['_group_info'] = group_info
+        # Store the full group_key (with vendor) for reference
+        representative['_group_key'] = group_key
+
+        # Ensure representative preserves a sensible Lineage value
+        # Prefer proprietary/sovereign lineage fields first (owner-managed),
+        # then fall back to canonical or generic Lineage fields.
+        rep_lineage = ''
+        for r in group_records_list:
+            candidate = (
+                r.get('sovereign_lineage') or
+                r.get('proprietary_lineage') or
+                r.get('proprietaryLineage') or
+                r.get('canonical_lineage') or
+                r.get('Lineage') or
+                r.get('lineage')
+            )
+            if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
+                rep_lineage = str(candidate).strip()
+                logging.info(f"PREROLL GROUP REP: Using lineage '{rep_lineage}' for group representative of '{group_display_name}'")
+                break
+        representative['Lineage'] = rep_lineage
+
+        # Ensure representative preserves a sensible Brand value
+        # PRIORITY 1: Extract brand from product name using "by BrandName -" pattern
+        # This is the most reliable source since product names follow the pattern:
+        # "Product Description by BrandName - Size"
+        rep_brand = ''
+        for r in group_records_list:
+            product_name = r.get('Product Name*', '') or r.get('ProductName', '') or r.get('Description', '')
+            if product_name:
+                product_name_str = str(product_name).strip()
+                # Pattern: "... by BrandName - ..." or "... by BrandName" (case insensitive)
+                by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name_str, re.IGNORECASE)
+                if by_match:
+                    potential_brand = by_match.group(1).strip()
+                    if potential_brand and potential_brand.lower() not in ['', 'none', 'nan']:
+                        rep_brand = potential_brand
+                        logging.info(f"PREROLL GROUP REP: Extracted brand '{rep_brand}' from product name '{product_name_str}' (by X - pattern)")
+                        break
+
+        # PRIORITY 2: Fall back to Product Brand field if extraction failed
+        # Note: The Product Brand field often contains vendor names, so extraction is preferred
+        if not rep_brand:
+            default_brand = 'PREMIUM CANNABIS'
+            for r in group_records_list:
+                candidate = (
+                    r.get('Product Brand') or
+                    r.get('ProductBrand') or
+                    r.get('Brand') or
+                    r.get('brand')
+                )
+                if not candidate:
+                    continue
+                cand_str = str(candidate).strip()
+                if not cand_str or cand_str.lower() in ['none', 'nan', 'premium cannabis']:
+                    continue
+                # Skip if it looks like a vendor (contains LLC, Inc, Co, etc.)
+                if any(suffix in cand_str.upper() for suffix in ['LLC', ' INC', ' CO', 'CORP', 'COMPANY']):
+                    logging.debug(f"PREROLL GROUP REP: Skipping vendor-like brand '{cand_str}' for '{group_display_name}'")
+                    continue
+                rep_brand = cand_str
+                logging.info(f"PREROLL GROUP REP: Using Product Brand field '{rep_brand}' for '{group_display_name}'")
+                break
+
+        # PRIORITY 3: Final fallback - use vendor as brand if still nothing
+        if not rep_brand:
+            vendor_fallback = (
+                representative.get('Vendor/Supplier*', '') or
+                representative.get('Vendor', '') or
+                representative.get('ProductVendor', '')
+            )
+            if vendor_fallback and str(vendor_fallback).strip():
+                rep_brand = str(vendor_fallback).strip()
+                logging.info(f"PREROLL GROUP REP: Using vendor '{rep_brand}' as brand fallback for '{group_display_name}'")
+
+        if rep_brand:
+            representative['Product Brand'] = rep_brand
+            representative['ProductBrand'] = rep_brand
+            representative['Brand'] = rep_brand
+            logging.info(f"PREROLL GROUP REP: ✅ Set brand '{rep_brand}' on representative for '{group_display_name}'")
+        else:
+            # Log warning with details about what brands were found in records
+            all_brands = []
+            for i, r in enumerate(group_records_list[:5]):
+                brand_val = r.get('Product Brand', '') or r.get('ProductBrand', '') or r.get('Brand', '') or r.get('brand', '')
+                all_brands.append(f"[{i}]={repr(brand_val)}")
+            logging.warning(f"PREROLL GROUP REP: ⚠️ NO BRAND found for '{group_display_name}'. Sample brand values: {', '.join(all_brands)}")
+            logging.warning(f"PREROLL GROUP REP: ⚠️ Record keys available: {list(group_records_list[0].keys())[:20] if group_records_list else 'N/A'}")
+
+        # Log final representative record summary for debugging
+        final_brand = representative.get('Product Brand', '') or representative.get('ProductBrand', '')
+        final_vendor = representative.get('Vendor/Supplier*', '') or representative.get('Vendor', '')
+        logging.info(f"PREROLL GROUP REP FINAL: '{group_display_name}' -> Brand='{final_brand}', Vendor='{final_vendor}'")
+
+        unique_records.append(representative)
+        
+        # Store items for this group in cache (for QR code page) - use ALL original records
+        # But filter by allowed brands if configured
+        group_items = []
+        for record in group_records_list:
+            # Filter by allowed brands if configured
+            # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
+            if allowed_brands_lower:
+                brand = (
+                    record.get('Product Brand', '') or
+                    record.get('ProductBrand', '') or
+                    record.get('Brand', '') or
                     ''
                 )
-                vendor = str(vendor).strip() if vendor else ''
-            
-            # CRITICAL: Always set vendor fields if we found one
-            if vendor:
-                representative['Vendor/Supplier*'] = vendor
-                representative['Vendor'] = vendor
-                representative['ProductVendor'] = vendor
-                logging.debug(f"PREROLL: Set vendor '{vendor}' for group '{group_key}'")
-            else:
-                logging.warning(f"PREROLL: No vendor found for group '{group_key}' - group may not display correctly")
-            
-            # Keep the price from the first record (or could average/use min/max - using first for now)
-            original_price = representative.get('Price', '')
-            # Ensure price is formatted correctly
-            if original_price and str(original_price).strip():
-                if not str(original_price).startswith('$'):
-                    try:
-                        price_val = float(str(original_price).replace('$', '').replace(',', '').strip())
-                        if price_val.is_integer():
-                            representative['Price'] = f"${int(price_val)}"
-                        else:
-                            representative['Price'] = f"${price_val:.2f}".rstrip('0').rstrip('.')
-                    except:
-                        representative['Price'] = f"${original_price}" if not str(original_price).startswith('$') else str(original_price)
-            
-            # Store group_id and group_info for QR code generation
-            # Use the original group_id (without vendor) for cache keys to maintain compatibility
-            representative['_group_id'] = original_group_id
-            representative['_group_info'] = group_info
-            # Store the full group_key (with vendor) for reference
-            representative['_group_key'] = group_key
-
-            # Ensure representative preserves a sensible Lineage value
-            # Prefer proprietary/sovereign lineage fields first (owner-managed),
-            # then fall back to canonical or generic Lineage fields.
-            # CRITICAL: Collect BOTH sovereign and canonical from all records, don't break early
-            rep_lineage = ''
-            rep_sovereign = None
-            rep_canonical = None
-            
-            # First pass: Collect sovereign and canonical lineage from all records
-            for r in group_records_list:
-                # Check sovereign_lineage (user edits - highest priority)
-                if not rep_sovereign:
-                    candidate_sovereign = r.get('sovereign_lineage')
-                    if candidate_sovereign and str(candidate_sovereign).strip() and str(candidate_sovereign).strip().lower() not in ['none', 'nan', '']:
-                        rep_sovereign = str(candidate_sovereign).strip()
+                brand_lower = str(brand).strip().lower()
                 
-                # Check canonical_lineage (from strains table)
-                if not rep_canonical:
-                    candidate_canonical = r.get('canonical_lineage')
-                    if candidate_canonical and str(candidate_canonical).strip() and str(candidate_canonical).strip().lower() not in ['none', 'nan', '']:
-                        rep_canonical = str(candidate_canonical).strip()
+                if brand_lower not in allowed_brands_lower:
+                    logging.debug(f"PREROLL GROUP CACHE: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}' from cache (not in allowed brands)")
+                    continue
             
-            # Second pass: Use priority logic to determine final lineage
-            # Priority: sovereign_lineage > canonical_lineage > Excel lineage fields
-            if rep_sovereign:
-                rep_lineage = rep_sovereign
-            elif rep_canonical:
-                rep_lineage = rep_canonical
-            else:
-                # Fall back to other lineage fields from Excel
-                for r in group_records_list:
-                    candidate = (
-                        r.get('proprietary_lineage') or
-                        r.get('proprietaryLineage') or
-                        r.get('currentLineage') or
-                        r.get('Lineage') or
-                        r.get('lineage')
-                    )
-                    if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
-                        rep_lineage = str(candidate).strip()
-                        break
-            
-            # CRITICAL FIX: Preserve original sovereign and canonical values (don't normalize them)
-            # Only normalize the final display lineage (Lineage field) for classic types
-            if rep_lineage:
-                rep_lineage_upper = str(rep_lineage).strip().upper()
-                
-                # Check if this is a classic product type (prerolls are always classic)
-                product_type = representative.get('Product Type*', '').lower()
-                from src.core.constants import CLASSIC_TYPES
-                is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else True  # Default to True for prerolls
-                
-                # Normalize display lineage for classic types (MIXED -> HYBRID)
-                # BUT preserve original sovereign/canonical values
-                display_lineage = rep_lineage_upper
-                if is_classic_type and (rep_lineage_upper == 'MIXED' or rep_lineage_upper == 'THC'):
-                    logging.debug(f"PREROLL: Normalizing MIXED/THC display lineage to HYBRID for classic type '{product_type}'")
-                    display_lineage = 'HYBRID'
-                
-                # Set display lineage fields (normalized)
-                representative['Lineage'] = display_lineage
-                representative['Lineage*'] = display_lineage
-                representative['lineage'] = display_lineage.lower()
-                representative['currentLineage'] = display_lineage
-                
-                # CRITICAL: Preserve original sovereign and canonical values (don't normalize them)
-                # These are used by template processor in priority order
-                if rep_sovereign:
-                    # Preserve original sovereign_lineage (user edits - highest priority)
-                    representative['sovereign_lineage'] = str(rep_sovereign).strip().upper()
-                    # Preserve canonical_lineage if it exists (don't overwrite with sovereign)
-                    if rep_canonical:
-                        representative['canonical_lineage'] = str(rep_canonical).strip().upper()
-                    # Don't set canonical_lineage if we only have sovereign (let template processor handle it)
-                elif rep_canonical:
-                    # Preserve original canonical_lineage from database
-                    representative['canonical_lineage'] = str(rep_canonical).strip().upper()
-                    # Don't set sovereign_lineage if it wasn't in source
+            # Normalize DOH/DOH-compliant field so lists and QR views can display
+            # a clean YES/NO status.
+            doh_raw = record.get('DOH') or record.get('DOH Compliant (Yes/No)', '')
+            doh_str = str(doh_raw).strip() if doh_raw is not None else ''
+            doh_display = ''
+            if doh_str:
+                upper = doh_str.upper()
+                if upper in ['YES', 'Y', 'TRUE', '1']:
+                    doh_display = 'YES'
+                elif upper in ['NO', 'N', 'FALSE', '0']:
+                    doh_display = 'NO'
                 else:
-                    # Excel lineage only - set canonical_lineage to match (normalized)
-                    representative['canonical_lineage'] = display_lineage
+                    doh_display = doh_str
 
-            # Ensure representative preserves a sensible Brand value
-            # PRIORITY 1: Extract brand from product name using "by BrandName -" pattern
-            # This is the most reliable source since product names follow the pattern:
-            # "Product Description by BrandName - Size"
-            rep_brand = ''
-            for r in group_records_list:
-                product_name = r.get('Product Name*', '') or r.get('ProductName', '') or r.get('Description', '')
-                if product_name:
-                    product_name_str = str(product_name).strip()
-                    # Pattern: "... by BrandName - ..." or "... by BrandName" (case insensitive)
-                    by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name_str, re.IGNORECASE)
-                    if by_match:
-                        potential_brand = by_match.group(1).strip()
-                        if potential_brand and potential_brand.lower() not in ['', 'none', 'nan']:
-                            rep_brand = potential_brand
-                            break
-
-            # PRIORITY 2: Fall back to Product Brand field if extraction failed
-            # Note: The Product Brand field often contains vendor names, so extraction is preferred
-            if not rep_brand:
-                for r in group_records_list:
-                    candidate = (
-                        r.get('Product Brand') or
-                        r.get('ProductBrand') or
-                        r.get('Brand') or
-                        r.get('brand')
-                    )
-                    if not candidate:
-                        continue
-                    cand_str = str(candidate).strip()
-                    if not cand_str or cand_str.lower() in ['none', 'nan', 'premium cannabis']:
-                        continue
-                    if any(suffix in cand_str.upper() for suffix in ['LLC', ' INC', ' CO', 'CORP', 'COMPANY']):
-                        continue
-                    rep_brand = cand_str
-                    break
-
-            # PRIORITY 3: Final fallback - use vendor as brand if still nothing
-            if not rep_brand:
-                vendor_fallback = (
-                    representative.get('Vendor/Supplier*', '') or
-                    representative.get('Vendor', '') or
-                    representative.get('ProductVendor', '')
-                )
-                if vendor_fallback and str(vendor_fallback).strip():
-                    rep_brand = str(vendor_fallback).strip()
-
-            if rep_brand:
-                representative['Product Brand'] = rep_brand
-                representative['ProductBrand'] = rep_brand
-                representative['Brand'] = rep_brand
-
-            unique_records.append(representative)
-            processed_group_keys_set.add(group_key)
-            groups_processed += 1
-            
-            # Store items for this group in cache (for QR code page) - use ALL original records
-            # But filter by allowed brands if configured
-            group_items = []
-            for record in group_records_list:
-                # Filter by allowed brands if configured
-                # CRITICAL FIX: Only filter if PREROLL_ALLOWED_BRANDS is not None and not empty
-                if allowed_brands_lower:
-                    brand = (
-                        record.get('Product Brand', '') or
-                        record.get('ProductBrand', '') or
-                        record.get('Brand', '') or
-                        ''
-                    )
-                    brand_lower = str(brand).strip().lower()
-                    
-                    if brand_lower not in allowed_brands_lower:
-                        continue
-                
-                # Normalize DOH/DOH-compliant field so lists and QR views can display
-                # a clean YES/NO status.
-                doh_raw = record.get('DOH') or record.get('DOH Compliant (Yes/No)', '')
-                doh_str = str(doh_raw).strip() if doh_raw is not None else ''
-                doh_display = ''
-                if doh_str:
-                    upper = doh_str.upper()
-                    if upper in ['YES', 'Y', 'TRUE', '1']:
-                        doh_display = 'YES'
-                    elif upper in ['NO', 'N', 'FALSE', '0']:
-                        doh_display = 'NO'
-                    else:
-                        doh_display = doh_str
-
-                item = {
-                    'product_name': record.get('Product Name*', record.get('ProductName', '')),
-                    'description': record.get('Description', ''),
-                    'price': record.get('Price', ''),
-                    'weight': record.get('CombinedWeight', record.get('WeightUnits', '')),
-                    'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
-                    'brand': record.get('Product Brand', record.get('ProductBrand', '')),
-                    'strain': record.get('Product Strain', ''),
-                    'lineage': record.get('Lineage', ''),
-                    'doh': doh_display,
-                }
-                group_items.append(item)
-            
-            # PERFORMANCE: Collect for batch database and cache writes at the end
-            # Store group info for batch write (much faster than 322 individual writes)
-            groups_for_db_batch.append((group_key, original_group_id, group_items, group_info))
+            item = {
+                'product_name': record.get('Product Name*', record.get('ProductName', '')),
+                'description': record.get('Description', ''),
+                'price': record.get('Price', ''),
+                'weight': record.get('CombinedWeight', record.get('WeightUnits', '')),
+                'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
+                'brand': record.get('Product Brand', record.get('ProductBrand', '')),
+                'strain': record.get('Product Strain', ''),
+                'lineage': record.get('Lineage', ''),
+                'doh': doh_display,
+            }
+            group_items.append(item)
+        logging.info(f"PREROLL GROUP: Storing {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_id: {original_group_id}, vendor: {vendor})")
         
-        except Exception as group_error:
-            groups_failed += 1
-            logging.error(f"PREROLL GROUP ERROR: Failed to process group '{group_key}': {group_error}")
-            import traceback
-            logging.error(f"PREROLL GROUP ERROR: Traceback: {traceback.format_exc()}")
-            # Still try to create a minimal representative to avoid losing the group
-            try:
-                group_data = grouped_records.get(group_key)
-                if group_data:
-                    group_records_list = group_data.get('records', [])
-                    group_info = group_data.get('group_info', {})
-                    if group_records_list and len(group_records_list) > 0:
-                        minimal_rep = group_records_list[0].copy()
-                        group_display_name = group_info.get('display_name', 'Pre-Roll')
-                        original_group_id = group_info.get('group_id', group_key)
-                        minimal_rep['Product Name*'] = group_display_name
-                        minimal_rep['ProductName'] = minimal_rep['Product Name*']
-                        minimal_rep['Description'] = minimal_rep['Product Name*']
-                        minimal_rep['_group_id'] = original_group_id
-                        minimal_rep['_group_key'] = group_key
-                        unique_records.append(minimal_rep)
-                        processed_group_keys_set.add(group_key)
-                        groups_processed += 1
-                        logging.warning(f"PREROLL GROUP: Created minimal representative for group '{group_key}' after error")
-                    else:
-                        logging.error(f"PREROLL GROUP ERROR: Group '{group_key}' has no records to create representative from")
-                else:
-                    logging.error(f"PREROLL GROUP ERROR: Group '{group_key}' not found in grouped_records")
-            except Exception as fallback_error:
-                logging.error(f"PREROLL GROUP: Failed to create even minimal representative for '{group_key}': {fallback_error}")
-                # Last resort: create a completely minimal record to ensure the group isn't lost
-                try:
-                    minimal_rep = {
-                        'Product Name*': f'Pre-Roll Group {group_key}',
-                        'ProductName': f'Pre-Roll Group {group_key}',
-                        'Description': f'Pre-Roll Group {group_key}',
-                        '_group_id': group_key.split('|')[0] if '|' in group_key else group_key,
-                        '_group_key': group_key
-                    }
-                    unique_records.append(minimal_rep)
-                    groups_processed += 1
-                    logging.warning(f"PREROLL GROUP: Created absolute minimal representative for group '{group_key}' as last resort")
-                except Exception as last_resort_error:
-                    logging.error(f"PREROLL GROUP: Complete failure for group '{group_key}': {last_resort_error}")
+        # Store group items in cache using the full group_key (includes vendor) to avoid collisions
+        # This ensures each vendor's products are stored separately even if they have the same category
+        cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
+        # CRITICAL FIX: Also store with session-independent key so QR codes work across sessions
+        # Use group_key (with vendor) to ensure vendor-specific QR codes work correctly
+        cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
+        # Also store with original group_id for backward compatibility (may overwrite, but that's OK for QR codes)
+        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
+        # Also store group info for display purposes
+        cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
+        cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
+        cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
+        
+        # CRITICAL FIX: Store in database for persistence across site refreshes
+        # Persist group to DB in background so web request isn't blocked by I/O
+        try:
+            threading.Thread(
+                target=_store_preroll_group_in_database,
+                args=(group_key, original_group_id, group_items, group_info),
+                daemon=True
+            ).start()
+        except Exception as db_error:
+            logging.warning(f"PREROLL: Failed to start background DB store (using cache only): {db_error}")
+        
+        logging.info(f"PREROLL: Stored {len(group_items)} items for group '{group_info.get('display_name', original_group_id)}' (group_key: {group_key}, group_id: {original_group_id}) with session-independent key and database")
     
-    if groups_failed > 0:
-        logging.warning(f"PREROLL GROUPING: {groups_failed} groups failed during processing, {groups_processed} groups successfully processed")
-    else:
-        logging.info(f"PREROLL GROUPING: All {groups_processed} groups successfully processed")
-    
-    # CRITICAL: Verify we processed all groups
-    if groups_processed + groups_failed != total_groups:
-        logging.error(f"PREROLL GROUPING CRITICAL: Expected to process {total_groups} groups but only processed {groups_processed + groups_failed} (processed: {groups_processed}, failed: {groups_failed})")
-        missing_from_processing = set(grouped_records.keys()) - processed_group_keys_set
-        if missing_from_processing:
-            logging.error(f"PREROLL GROUPING CRITICAL: {len(missing_from_processing)} groups were never processed! Missing keys: {sorted(list(missing_from_processing))[:30]}")
-    
-    # CRITICAL DEBUG: Log the actual count of unique_records vs grouped_records
-    if logging.getLogger().isEnabledFor(logging.DEBUG):
-        logging.debug(f"PREROLL: {len(unique_records)} unique records, {len(grouped_records)} groups, {groups_processed} processed")
-    
-    # Check if any groups were not processed in the loop
-    unprocessed_groups = set(grouped_records.keys()) - processed_group_keys_set
-    if unprocessed_groups:
-        logging.error(f"PREROLL GROUPING ERROR: {len(unprocessed_groups)} groups were NOT processed in the loop! Unprocessed keys (first 20): {list(unprocessed_groups)[:20]}")
-    
-    # Track count after brand filtering (if any)
-    records_after_brand_filter = len(records)
+    original_count = len(records)
     
     # Verify all records were grouped (every record should be in a group)
     total_grouped = sum(len(group_data['records']) for group_data in grouped_records.values())
-    if total_grouped != records_after_brand_filter:
-        logging.error(f"PREROLL GROUPING ERROR: {records_after_brand_filter} records after brand filter but only {total_grouped} were grouped. {records_after_brand_filter - total_grouped} products are MISSING!")
+    if total_grouped != original_count:
+        logging.error(f"PREROLL GROUPING ERROR: {original_count} original records but only {total_grouped} were grouped. {original_count - total_grouped} products are MISSING!")
         # Log details about which records might be missing
         grouped_product_names = set()
         for group_data in grouped_records.values():
@@ -1329,199 +620,23 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
         if missing_names:
             logging.error(f"PREROLL GROUPING ERROR: Missing products: {list(missing_names)[:10]}")  # Log first 10 missing
     else:
-        if logging.getLogger().isEnabledFor(logging.DEBUG):
-            logging.debug(f"PREROLL: All {records_after_brand_filter} records grouped into {len(grouped_records)} groups")
+        logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped into {len(grouped_records)} groups")
     
-    # Log summary of grouping
-    logging.info(f"PREROLL GROUPING SUMMARY: Input={original_input_count}, After brand filter={records_after_brand_filter}, Grouped={total_grouped}, Groups created={len(grouped_records)}")
-    
-    # CRITICAL: Rebuild grouped_records_list directly from grouped_records in key order.
-    # This guarantees every group_key has exactly one representative and preserves order.
-    rep_by_key = {r.get('_group_key'): r for r in unique_records if r.get('_group_key')}
-    final_grouped_records_list = []
-    
-    # CRITICAL FIX: Ensure ALL groups get representatives - iterate through ALL grouped_records
-    # and create a representative for each one, using existing rep if available or creating fallback
-    for group_key in grouped_records.keys():
-        rep = rep_by_key.get(group_key)
-        if rep:
-            # Use existing representative, but ensure vendor is set
-            if not rep.get('Vendor/Supplier*') and not rep.get('Vendor'):
-                group_data = grouped_records.get(group_key)
-                if group_data:
-                    for r in group_data.get('records', []):
-                        vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
-                        if vendor and str(vendor).strip():
-                            rep['Vendor/Supplier*'] = str(vendor).strip()
-                            rep['Vendor'] = str(vendor).strip()
-                            rep['ProductVendor'] = str(vendor).strip()
-                            break
-            final_grouped_records_list.append(rep)
-        else:
-            # Create fallback representative - this should never happen if loop above worked
-            group_data = grouped_records.get(group_key)
-            if group_data:
-                group_records_list = group_data.get('records', [])
-                group_info = group_data.get('group_info', {})
-                if group_records_list:
-                    new_rep = group_records_list[0].copy()
-                    # Get vendor from records
-                    vendor = ''
-                    for r in group_records_list:
-                        v = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
-                        if v and str(v).strip():
-                            vendor = str(v).strip()
-                            break
-                    if vendor:
-                        new_rep['Vendor/Supplier*'] = vendor
-                        new_rep['Vendor'] = vendor
-                        new_rep['ProductVendor'] = vendor
-                    
-                    group_display_name = group_info.get('display_name', 'Pre-Roll')
-                    brand_suffix = group_key.split('|')[-1] if '|' in group_key else ''
-                    unique_display = f"{group_display_name} ({brand_suffix})" if brand_suffix else group_display_name
-                    new_rep['Product Name*'] = unique_display
-                    new_rep['ProductName'] = unique_display
-                    new_rep['Description'] = group_display_name
-                    new_rep['DescAndWeight'] = group_display_name
-                    new_rep['_group_id'] = group_info.get('group_id', group_key)
-                    new_rep['_group_key'] = group_key
-                    final_grouped_records_list.append(new_rep)
-    
-    grouped_records_list = final_grouped_records_list
-    
-    # CRITICAL: Verify we have representatives for ALL groups
-    if len(grouped_records_list) != len(grouped_records):
-        # This should never happen - if it does, we have a serious bug
-        # Create minimal representatives for any missing groups as last resort
-        existing_keys = {r.get('_group_key') for r in grouped_records_list if r.get('_group_key')}
-        missing_keys = set(grouped_records.keys()) - existing_keys
-        for missing_key in missing_keys:
-            group_data = grouped_records.get(missing_key)
-            if group_data:
-                group_info = group_data.get('group_info', {})
-                minimal_rep = {
-                    'Product Name*': group_info.get('display_name', 'Pre-Roll'),
-                    'ProductName': group_info.get('display_name', 'Pre-Roll'),
-                    'Description': group_info.get('display_name', 'Pre-Roll'),
-                    '_group_id': group_info.get('group_id', missing_key),
-                    '_group_key': missing_key
-                }
-                # Try to get vendor
-                for r in group_data.get('records', []):
-                    vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
-                    if vendor:
-                        minimal_rep['Vendor/Supplier*'] = vendor
-                        minimal_rep['Vendor'] = vendor
-                        break
-                grouped_records_list.append(minimal_rep)
-    
-    # CRITICAL: Log final vendor distribution
-    final_vendors = {}
-    for rep in grouped_records_list:
-        vendor = rep.get('Vendor/Supplier*', '') or rep.get('Vendor', '') or 'NO_VENDOR'
-        final_vendors[vendor] = final_vendors.get(vendor, 0) + 1
-    logging.info(f"PREROLL FINAL VENDOR DISTRIBUTION: {len(final_vendors)} unique vendors with representatives: {dict(sorted(final_vendors.items(), key=lambda x: x[1], reverse=True))}")
-    
-    # Verify all groups were processed
-    if len(grouped_records_list) != len(grouped_records):
-        logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
-        processed_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
-        missing_keys = set(grouped_records.keys()) - processed_keys
-        if missing_keys:
-            logging.error(f"PREROLL GROUPING ERROR: Missing group_keys ({len(missing_keys)} total): {sorted(list(missing_keys))}")
-            # Log vendors for missing groups to help identify which vendors are being lost
-            missing_vendors = set()
-            for missing_key in missing_keys:
-                group_data = grouped_records.get(missing_key)
-                if group_data:
-                    for record in group_data.get('records', []):
-                        vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '') or ''
-                        if vendor:
-                            missing_vendors.add(str(vendor).strip())
-            if missing_vendors:
-                logging.error(f"PREROLL GROUPING ERROR: Missing vendors from lost groups: {sorted(list(missing_vendors))}")
-    else:
-        logging.info(f"PREROLL: All {len(grouped_records)} groups have representatives")
-    
-    # PERFORMANCE: Batch write all groups to database and cache in background (much faster)
-    if groups_for_db_batch:
-        try:
-            # Batch database write in background
-            threading.Thread(
-                target=_store_preroll_groups_batch,
-                args=(groups_for_db_batch,),
-                daemon=True
-            ).start()
-            
-            # Batch cache writes (much faster than individual writes)
-            try:
-                session_id = session.get('preroll_session_id', 'default')
-                for group_key, original_group_id, group_items, group_info in groups_for_db_batch:
-                    # Store with session-independent key for persistence
-                    cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
-                    cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
-                    # Store with session-specific key for backward compatibility
-                    cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
-                    cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
-                    # Store with original group_id for backward compatibility (only if different)
-                    if original_group_id != group_key:
-                        cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
-                        cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
-            except Exception as cache_error:
-                logging.warning(f"PREROLL: Batch cache error (non-fatal): {cache_error}")
-        except Exception as db_error:
-            logging.warning(f"PREROLL: Failed to start background batch DB store: {db_error}")
-    
-    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups")
-    # PERFORMANCE: Only log detailed debug info at debug level
-    if logging.getLogger().isEnabledFor(logging.DEBUG):
-        if len(grouped_records) <= 50:
-            group_keys_sample = list(grouped_records.keys())[:50]
-            logging.debug(f"PREROLL GROUPING FINAL DEBUG: All {len(grouped_records)} group keys created: {group_keys_sample}")
-        else:
-            group_keys_sample = list(grouped_records.keys())[:50]
-            logging.debug(f"PREROLL GROUPING FINAL DEBUG: First 50 group keys: {group_keys_sample} (total: {len(grouped_records)})")
-    
-    # CRITICAL: Always log if groups are lost - this is a serious issue
-    if len(grouped_records_list) < len(grouped_records):
-        lost_count = len(grouped_records) - len(grouped_records_list)
-        logging.error(f"PREROLL CRITICAL: Lost {lost_count} groups during processing! Expected {len(grouped_records)} but only have {len(grouped_records_list)} representatives!")
-        # Log which groups are missing
-        returned_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
-        all_keys = set(grouped_records.keys())
-        missing_keys = all_keys - returned_keys
-        if missing_keys:
-            logging.error(f"PREROLL CRITICAL: Missing group_keys ({len(missing_keys)} total): {sorted(list(missing_keys))}")
-            # Log vendors for missing groups
-            missing_vendors = set()
-            for missing_key in missing_keys:
-                group_data = grouped_records.get(missing_key)
-                if group_data:
-                    for record in group_data.get('records', []):
-                        vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '') or ''
-                        if vendor:
-                            missing_vendors.add(str(vendor).strip())
-            if missing_vendors:
-                logging.error(f"PREROLL CRITICAL: Missing vendors from lost groups: {sorted(list(missing_vendors))}")
-    elif len(grouped_records_list) > len(grouped_records):
-        logging.warning(f"PREROLL: Created {len(grouped_records_list) - len(grouped_records)} extra groups (unexpected)!")
-    else:
-        logging.info(f"PREROLL: Successfully created representatives for all {len(grouped_records)} groups")
-    
-    # PERFORMANCE: Skip stats logging unless at debug level
-    if logging.getLogger().isEnabledFor(logging.DEBUG):
-        pack_groups = sum(1 for k in grouped_records.keys() if 'pack' in k.lower())
-        non_pack_groups = len(grouped_records) - pack_groups
-        logging.debug(f"PREROLL GROUPING STATS: {pack_groups} pack groups, {non_pack_groups} non-pack groups (total: {len(grouped_records)})")
-    
-    # Log summary only (reduce logging overhead)
-    if grouped_records_list and logging.getLogger().isEnabledFor(logging.DEBUG):
-        sample_groups = grouped_records_list[:3]
-        for i, rep in enumerate(sample_groups):
-            pname = rep.get('Product Name*', rep.get('ProductName', 'N/A'))
-            vendor = rep.get('Vendor/Supplier*', rep.get('Vendor', 'N/A'))
-            logging.debug(f"PREROLL GROUP [{i+1}]: '{pname}' | Vendor: '{vendor}'")
+    # Deduplicate final grouped representatives by normalized display name
+    deduped = []
+    seen_names = set()
+    for rep in unique_records:
+        pname = (rep.get('ProductName') or rep.get('Product Name*') or rep.get('Description') or '').strip()
+        pname_key = re.sub(r'[^a-z0-9]+', '', pname.lower()) if pname else None
+        if pname_key and pname_key in seen_names:
+            logging.debug(f"PREROLL DEDUP: Skipping duplicate representative '{pname}'")
+            continue
+        if pname_key:
+            seen_names.add(pname_key)
+        deduped.append(rep)
+
+    grouped_records_list = deduped
+    logging.info(f"PREROLL GROUPING: Grouped {original_count} records into {len(grouped_records_list)} product groups (one label per vendor per category)")
     
     # Store group IDs in session for later retrieval when creating list document
     # Store both group_keys (with vendor) and original group_ids for compatibility
@@ -1567,37 +682,6 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
     session.modified = True
 
     # Note: Group items are already stored in cache above during grouping
-    elapsed = time.time() - start_t
-    # CRITICAL: Final verification before returning
-    final_count = len(grouped_records_list)
-    expected_count = len(grouped_records)
-    if final_count != expected_count:
-        logging.error(f"PREROLL CRITICAL ERROR: Returning {final_count} groups but {expected_count} were created! Missing {expected_count - final_count} groups!")
-        # Log missing group_keys
-        returned_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
-        all_keys = set(grouped_records.keys())
-        missing = all_keys - returned_keys
-        if missing:
-            logging.error(f"PREROLL CRITICAL ERROR: Missing group_keys (first 30): {list(missing)[:30]}")
-    else:
-        logging.info(f"PREROLL SUCCESS: Returning all {final_count} groups as expected")
-    
-    # CRITICAL: Compare input vendors vs output vendors to identify missing vendors
-    output_vendors = set()
-    for rep in grouped_records_list:
-        vendor = rep.get('Vendor/Supplier*', '') or rep.get('Vendor', '') or ''
-        if vendor:
-            output_vendors.add(str(vendor).strip())
-    
-    # Compare input vendors (tracked at start) vs output vendors
-    if input_vendors:
-        missing_vendors = input_vendors - output_vendors
-        if missing_vendors:
-            logging.warning(f"PREROLL VENDOR WARNING: {len(missing_vendors)} vendors in input but NOT in output: {sorted(list(missing_vendors))}")
-        else:
-            logging.info(f"PREROLL VENDOR SUCCESS: All {len(input_vendors)} input vendors have representatives in output")
-    
-    logging.info(f"PREROLL: Generated {final_count} grouped labels from {original_input_count} originals in {elapsed:.3f}s")
-    logging.info(f"PREROLL FINAL: Output contains {len(output_vendors)} unique vendors: {sorted(list(output_vendors))}")
+    logging.info(f"PREROLL: Generated {len(grouped_records_list)} grouped labels (one per vendor per product category)")
 
     return grouped_records_list

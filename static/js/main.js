@@ -1465,10 +1465,12 @@ const TagManager = {
                     'Product Type*': tag['Product Type*'],
                     'Weight*': tag['Weight*'],
                     'Price*': tag['Price*'],
-                    'Lineage*': tag['Lineage*'] || tag.Lineage || tag.canonical_lineage || tag.currentLineage,
-                    canonical_lineage: tag.canonical_lineage || tag.currentLineage,
-                    currentLineage: tag.currentLineage || tag.canonical_lineage,
-                    Lineage: tag.Lineage || tag.canonical_lineage || tag.currentLineage,
+                    // CRITICAL FIX: Preserve sovereign_lineage (user edits) - it was being dropped!
+                    sovereign_lineage: tag.sovereign_lineage,
+                    'Lineage*': tag['Lineage*'] || tag.sovereign_lineage || tag.Lineage || tag.canonical_lineage || tag.currentLineage,
+                    canonical_lineage: tag.canonical_lineage || tag.sovereign_lineage || tag.currentLineage,
+                    currentLineage: tag.currentLineage || tag.sovereign_lineage || tag.canonical_lineage,
+                    Lineage: tag.Lineage || tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage,
                     'DOH': doh || tag['DOH'] || '', // CRITICAL: Preserve DOH
                     'doh': doh || tag['doh'] || '', // CRITICAL: Preserve doh
                     'DOH Compliant (Yes/No)': doh || tag['DOH Compliant (Yes/No)'] || '', // CRITICAL: Preserve DOH Compliant (Yes/No)
@@ -1518,6 +1520,7 @@ const TagManager = {
             if (sampleTag) {
                 verboseLog('💾 Saving to cache - sample tag lineage:', {
                     name: sampleTag['Product Name*'],
+                    sovereign_lineage: sampleTag.sovereign_lineage,  // CRITICAL: Log user edits
                     canonical_lineage: sampleTag.canonical_lineage,
                     currentLineage: sampleTag.currentLineage,
                     Lineage: sampleTag.Lineage
