@@ -15114,12 +15114,25 @@ def get_web_available_tags():
                     logging.info(f"⚡ WEB: Skipping alignment - {tags_with_db_lineage}/{len(excel_tags)} tags already have database lineage")
             
             # Normalize all tags - CRITICAL: Preserve database lineage priority (sovereign_lineage > canonical_lineage > Excel)
-            # PERFORMANCE: Only normalize lineage if tag actually has lineage data (skip empty tags)
+            # PERFORMANCE: Skip normalization if tags already have all lineage fields correctly set
             simple_tags = []
             for tag in excel_tags:
                 if not isinstance(tag, dict):
                     simple_tags.append(tag)
                     continue
+                
+                # PERFORMANCE: Skip normalization if tag already has database lineage with all fields set correctly
+                has_sovereign = tag.get('sovereign_lineage')
+                has_canonical = tag.get('canonical_lineage')
+                if has_sovereign or has_canonical:
+                    # Tag has database lineage - check if all fields are already set correctly
+                    db_lineage = (has_sovereign or has_canonical).upper().strip()
+                    if (tag.get('currentLineage', '').upper().strip() == db_lineage and 
+                        tag.get('Lineage', '').upper().strip() == db_lineage):
+                        # All fields already match database lineage - skip normalization
+                        simple_tags.append(tag)
+                        continue
+                
                 # CRITICAL FIX: Correct lineage priority - sovereign_lineage (user edits) has HIGHEST priority
                 # Priority: sovereign_lineage (user edits) > canonical_lineage (strains table) > currentLineage > Lineage (Excel)
                 # This matches the DOCX generation logic: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
