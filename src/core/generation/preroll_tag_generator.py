@@ -8,7 +8,6 @@ It groups preroll products by category and creates representative records for la
 import re
 import logging
 import json
-import hashlib
 from typing import List, Dict, Any, Optional
 from flask import session
 from flask_caching import Cache
@@ -369,22 +368,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 # Fallback to underscored short form
                 brand_key = brand_for_grouping.lower().replace(' ', '_')
         
-        # PERMANENT FIX: Use product name hash to ensure EVERY unique product gets its own group
-        # This guarantees no products are collapsed together, regardless of category/brand
-        # Create a unique hash from the full product name to ensure uniqueness
-        product_name_hash = hashlib.md5(product_name_str.encode()).hexdigest()[:12]
-        
-        # Build group_key: group_id|brand_key|product_hash
-        # This ensures:
-        # 1. Products in same category (group_id) are grouped together
-        # 2. Products from same brand (brand_key) are grouped together  
-        # 3. Each unique product name gets its own group (product_hash)
+        # REVERT TO ORIGINAL: group_id|brand_key only (one per category per vendor = ~56 groups)
+        # This is how it "used to work fine" - product hash caused 322 groups and downstream issues
         key_parts = [group_id]
-        
         if brand_key:
             key_parts.append(brand_key)
         else:
-            # If no brand, use vendor as fallback
             vendor = (
                 record.get('Vendor/Supplier*', '') or
                 record.get('Vendor', '') or
@@ -396,10 +385,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 if vendor_key:
                     key_parts.append(vendor_key)
         
-        # ALWAYS include product hash to ensure uniqueness
-        key_parts.append(product_name_hash)
-        
         group_key = '|'.join(key_parts)
+        if '|' not in group_key:
+            group_key = f"{group_id}|unknown_{len(grouped_records)}"
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
@@ -454,19 +442,15 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             
             representative = group_records_list[0].copy()
             
-            # PERMANENT FIX: Since each product is now in its own group (via product hash),
-            # use the actual product name instead of generic group name
-            # This ensures each product displays correctly and prevents any deduplication
-            actual_product_name = representative.get('Product Name*', representative.get('ProductName', group_display_name))
-            if not actual_product_name or actual_product_name == group_display_name:
-                # Fallback to first record's product name if available
-                if group_records_list and len(group_records_list) > 0:
-                    actual_product_name = group_records_list[0].get('Product Name*', group_records_list[0].get('ProductName', group_display_name))
-            
-            representative['Description'] = actual_product_name
-            representative['Product Name*'] = actual_product_name
-            representative['ProductName'] = actual_product_name
-            representative['DescAndWeight'] = actual_product_name
+            # Use group display name (e.g. "Pre-Roll - 1g", "Assorted Pre-Roll - 0.5g x 14 Packs")
+            # Make Product Name* unique per group_key (append brand) so downstream never deduplicates
+            # different vendors' same-category groups (e.g. "Pre-Roll - 1g" from Phat Panda vs Hustler's)
+            brand_suffix = group_key.split('|')[-1] if '|' in group_key else ''
+            unique_display = f"{group_display_name} ({brand_suffix})" if brand_suffix else group_display_name
+            representative['Description'] = group_display_name
+            representative['Product Name*'] = unique_display
+            representative['ProductName'] = unique_display
+            representative['DescAndWeight'] = group_display_name
             
             # CRITICAL FIX: Preserve Product Type* for infused prerolls to ensure filtering works correctly
             # Check if this is an infused preroll group and set Product Type* accordingly
@@ -779,46 +763,36 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # Log summary of grouping
     logging.info(f"PREROLL GROUPING SUMMARY: Input={original_input_count}, After brand filter={records_after_brand_filter}, Grouped={total_grouped}, Groups created={len(grouped_records)}")
     
-    # CRITICAL: Rebuild grouped_records_list directly from grouped_records to ensure ALL groups are included
-    # This guarantees that every group_key in grouped_records has a representative, preventing any loss
+    # CRITICAL: Rebuild grouped_records_list directly from grouped_records in key order.
+    # This guarantees every group_key has exactly one representative and preserves order.
+    rep_by_key = {r.get('_group_key'): r for r in unique_records if r.get('_group_key')}
     final_grouped_records_list = []
-    seen_group_keys = set()
-    
-    # First, add all existing representatives
-    for rep in unique_records:
-        rep_group_key = rep.get('_group_key', '')
-        if rep_group_key and rep_group_key in grouped_records:
-            final_grouped_records_list.append(rep)
-            seen_group_keys.add(rep_group_key)
-    
-    # Then, ensure every group_key has a representative (add missing ones)
     for group_key in grouped_records.keys():
-        if group_key not in seen_group_keys:
-            try:
-                group_data = grouped_records[group_key]
-                group_records_list = group_data.get('records', [])
-                group_info = group_data.get('group_info', {})
-                
-                if group_records_list and len(group_records_list) > 0:
-                    new_rep = group_records_list[0].copy()
-                else:
-                    new_rep = {}
-                
-                # Use actual product name
-                actual_product_name = new_rep.get('Product Name*', new_rep.get('ProductName', group_info.get('display_name', 'Pre-Roll')))
-                new_rep['Product Name*'] = actual_product_name
-                new_rep['ProductName'] = actual_product_name
-                new_rep['Description'] = actual_product_name
-                new_rep['DescAndWeight'] = actual_product_name
-                new_rep['_group_id'] = group_info.get('group_id', group_key)
-                new_rep['_group_key'] = group_key
-                
-                final_grouped_records_list.append(new_rep)
-                seen_group_keys.add(group_key)
-                logging.warning(f"PREROLL GROUPING: Added missing representative for group '{group_key}'")
-            except Exception as add_error:
-                logging.error(f"PREROLL GROUPING: Failed to add representative for '{group_key}': {add_error}")
-    
+        rep = rep_by_key.get(group_key)
+        if rep:
+            final_grouped_records_list.append(rep)
+            continue
+        try:
+            group_data = grouped_records[group_key]
+            group_records_list = group_data.get('records', [])
+            group_info = group_data.get('group_info', {})
+            if group_records_list:
+                new_rep = group_records_list[0].copy()
+            else:
+                new_rep = {}
+            group_display_name = group_info.get('display_name', 'Pre-Roll')
+            brand_suffix = group_key.split('|')[-1] if '|' in group_key else ''
+            unique_display = f"{group_display_name} ({brand_suffix})" if brand_suffix else group_display_name
+            new_rep['Product Name*'] = unique_display
+            new_rep['ProductName'] = unique_display
+            new_rep['Description'] = group_display_name
+            new_rep['DescAndWeight'] = group_display_name
+            new_rep['_group_id'] = group_info.get('group_id', group_key)
+            new_rep['_group_key'] = group_key
+            final_grouped_records_list.append(new_rep)
+            logging.warning(f"PREROLL GROUPING: Added missing representative for group '{group_key}'")
+        except Exception as add_error:
+            logging.error(f"PREROLL GROUPING: Failed to add representative for '{group_key}': {add_error}")
     grouped_records_list = final_grouped_records_list
     
     # Verify all groups were processed
@@ -949,6 +923,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     else:
         logging.info(f"PREROLL SUCCESS: Returning all {final_count} groups as expected")
     
-    logging.info(f"PREROLL: Generated {final_count} grouped labels from {original_count} originals in {elapsed:.3f}s")
+    logging.info(f"PREROLL: Generated {final_count} grouped labels from {original_input_count} originals in {elapsed:.3f}s")
 
     return grouped_records_list
