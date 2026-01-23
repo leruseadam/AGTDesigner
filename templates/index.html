@@ -9996,17 +9996,51 @@
                             <strong>Brand:</strong> ${match.best_match['Product Brand'] || match.best_match['ProductBrand'] || 'N/A'}<br>
                             <strong>Type:</strong> ${match.best_match['Product Type*'] || match.best_match['ProductType'] || 'N/A'}<br>
                             <strong>Weight:</strong> ${(() => {
-                              // Use WeightWithUnits or WeightUnits if available (already formatted)
-                              if (match.best_match['WeightWithUnits']) return match.best_match['WeightWithUnits'];
-                              if (match.best_match['WeightUnits']) return match.best_match['WeightUnits'];
-                              // Otherwise format Weight* + Units properly (avoid doubling)
-                              const weight = match.best_match['Weight*'] || '';
-                              const units = match.best_match['Units'] || '';
-                              if (!weight) return 'N/A';
-                              // If weight already includes units (e.g., "3.5g"), don't add units again
-                              if (weight.match(/[a-zA-Z]+$/)) return weight;
-                              // Otherwise append units
-                              return weight + units;
+                              // Priority 1: Use pre-formatted weight fields (already have units, no duplication)
+                              if (match.best_match['WeightWithUnits']) {
+                                return String(match.best_match['WeightWithUnits']).trim();
+                              }
+                              if (match.best_match['WeightUnits']) {
+                                return String(match.best_match['WeightUnits']).trim();
+                              }
+                              if (match.best_match['CombinedWeight']) {
+                                return String(match.best_match['CombinedWeight']).trim();
+                              }
+                              
+                              // Priority 2: Check if Weight* already includes units
+                              let weight = String(match.best_match['Weight*'] || match.best_match['Weight'] || '').trim();
+                              const units = String(match.best_match['Units'] || '').trim();
+                              
+                              if (!weight || weight === 'N/A' || weight === 'None') return 'N/A';
+                              
+                              // Remove any existing spaces in weight (normalize "3.5 g" to "3.5g")
+                              weight = weight.replace(/\s+/g, '');
+                              
+                              // Check if weight already has units at the end (robust regex)
+                              // Matches patterns like "3.5g", "1.0g", "28g", "3.5oz", etc.
+                              const hasUnits = /^[\d.]+[a-zA-Z]+$/.test(weight);
+                              
+                              if (hasUnits) {
+                                // Weight already has units, return as-is
+                                return weight;
+                              }
+                              
+                              // Weight doesn't have units, append them if available
+                              if (units && units !== 'N/A' && units !== 'None') {
+                                // Make sure we don't duplicate units
+                                const normalizedUnits = units.trim().toLowerCase();
+                                const weightLower = weight.toLowerCase();
+                                
+                                // Check if weight already ends with the same units (case-insensitive)
+                                if (!weightLower.endsWith(normalizedUnits)) {
+                                  return weight + units;
+                                }
+                                // Already has units, return as-is
+                                return weight;
+                              }
+                              
+                              // No units available, return weight as-is
+                              return weight || 'N/A';
                             })()}<br>
                             <strong>Source:</strong> ${match.source || 'Database Priority (100% DB)'}<br>
                             <strong>Confidence:</strong> ${match.match_confidence || (match.best_score ? (typeof match.best_score === 'number' ? `${(match.best_score * 100).toFixed(1)}%` : match.best_score) : 'N/A')}
