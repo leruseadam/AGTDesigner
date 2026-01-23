@@ -9703,35 +9703,41 @@ def generate_labels():
                             try:
                                 conn = product_db._get_connection()
                                 cursor = conn.cursor()
-                                # Use batch query with placeholders and case-insensitive matching
-                                placeholders = ','.join(['?'] * len(products_to_enrich))
-                                # Normalize product names for matching (lowercase, trimmed)
-                                normalized_products = [str(p).strip().lower() for p in products_to_enrich]
-                                # Create reverse lookup: normalized -> original
-                                normalized_to_original = {str(p).strip().lower(): p for p in products_to_enrich}
-                                
+                                unique_products = list(dict.fromkeys(products_to_enrich))
+                                placeholders = ','.join(['?'] * len(unique_products))
+                                # CRITICAL: Use same COALESCE as force-step / _align_tags (sovereign > strain > Lineage)
                                 batch_query = f'''
-                                    SELECT "Product Name*", 
-                                           COALESCE("canonical_lineage", "Lineage") as lineage
-                                    FROM products
-                                    WHERE LOWER(TRIM("Product Name*")) IN ({placeholders})
-                                    ORDER BY id DESC
+                                    SELECT p."Product Name*",
+                                           COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
+                                                    s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                                    FROM products p
+                                    LEFT JOIN strains s1 ON p.strain_id = s1.id
+                                    LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                                    LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                                    WHERE p."Product Name*" IN ({placeholders})
+                                    ORDER BY p.id DESC
                                 '''
-                                cursor.execute(batch_query, normalized_products)
-                                # Build a map with original product names as keys
+                                cursor.execute(batch_query, unique_products)
+                                seen = set()
                                 for row in cursor.fetchall():
                                     pname, lineage = row
-                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
-                                        # Match back to original product name (case-preserved)
-                                        pname_normalized = str(pname).strip().lower()
-                                        if pname_normalized in normalized_to_original:
-                                            original_name = normalized_to_original[pname_normalized]
-                                            # Use canonical_lineage if available, otherwise fall back to Lineage
-                                            product_lineage_map[original_name] = str(lineage).strip().upper()
+                                    if not pname or pname in seen:
+                                        continue
+                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
+                                        lin_upper = str(lineage).strip().upper()
+                                        product_lineage_map[pname] = lin_upper
+                                        product_lineage_map[pname.lower().strip()] = lin_upper
+                                        try:
+                                            norm = product_db._normalize_product_name(pname)
+                                            if norm:
+                                                product_lineage_map[norm] = lin_upper
+                                        except Exception:
+                                            pass
+                                        seen.add(pname)
                             except Exception as batch_err:
                                 logging.warning(f"Batch product lineage query failed: {batch_err}")
                         
-                        # Batch query strain lineages
+                        # Batch query strain lineages (sovereign > display > canonical)
                         strain_lineage_map = {}
                         if strains_to_enrich:
                             try:
@@ -9740,15 +9746,15 @@ def generate_labels():
                                 strain_list = list(strains_to_enrich)
                                 placeholders = ','.join(['?'] * len(strain_list))
                                 batch_query = f'''
-                                    SELECT "Strain Name", "display_lineage", "sovereign_lineage", "canonical_lineage"
+                                    SELECT strain_name, sovereign_lineage, display_lineage, canonical_lineage
                                     FROM strains
-                                    WHERE "Strain Name" IN ({placeholders})
+                                    WHERE strain_name IN ({placeholders})
                                 '''
                                 cursor.execute(batch_query, strain_list)
                                 for row in cursor.fetchall():
                                     strain_name = row[0]
                                     lineage = row[1] or row[2] or row[3]
-                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
                                         strain_lineage_map[strain_name] = str(lineage).strip().upper()
                             except Exception as strain_err:
                                 logging.warning(f"Batch strain lineage query failed: {strain_err}")

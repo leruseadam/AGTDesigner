@@ -55,7 +55,9 @@ class FastGenerationEngine:
             name = str(r.get('Product Name*', r.get('ProductName', '')) or '')
             ptype = str(r.get('ProductType', '') or '')
             lineage = str(r.get('Lineage', '') or '')
-            parts.append(f"{name}||{ptype}||{lineage}")
+            # CRITICAL: Include _group_key for preroll templates to ensure unique cache per product
+            group_key = str(r.get('_group_key', '') or '') if template_type == 'preroll' else ''
+            parts.append(f"{name}||{ptype}||{lineage}||{group_key}")
         parts.append(f"TEMPLATE||{template_type}")
         parts.append(f"SCALE||{scale_factor}")
         cache_str = '\n'.join(parts)

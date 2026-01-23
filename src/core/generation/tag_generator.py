@@ -924,27 +924,36 @@ def process_chunk(args):
                 if strain:
                     strain_names.add(strain)
             
-            # Batch query for product lineage
+            # Batch query for product lineage (sovereign > strain > products.Lineage)
             if product_names:
                 try:
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     placeholders = ','.join(['?'] * len(product_names))
                     batch_lineage_query = f'''
-                        SELECT "Product Name*", "Lineage"
-                        FROM products
-                        WHERE "Product Name*" IN ({placeholders})
-                        ORDER BY id DESC
+                        SELECT p."Product Name*",
+                               COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
+                                        s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                        FROM products p
+                        LEFT JOIN strains s1 ON p.strain_id = s1.id
+                        LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                        LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                        WHERE p."Product Name*" IN ({placeholders})
+                        ORDER BY p.id DESC
                     '''
                     cur.execute(batch_lineage_query, product_names)
+                    seen = set()
                     for row_result in cur.fetchall():
                         pname, lineage = row_result
-                        if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
+                        if not pname or pname in seen:
+                            continue
+                        if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
                             product_lineage_cache[pname] = str(lineage).strip().upper()
+                            seen.add(pname)
                 except Exception as batch_err:
                     logger.warning(f"Batch product lineage query failed: {batch_err}")
             
-            # Batch query for strain info
+            # Batch query for strain info (sovereign_lineage > display_lineage > canonical_lineage)
             if strain_names:
                 try:
                     conn = product_db._get_connection()
@@ -952,18 +961,19 @@ def process_chunk(args):
                     strain_list = list(strain_names)
                     placeholders = ','.join(['?'] * len(strain_list))
                     batch_strain_query = f'''
-                        SELECT strain_name, display_lineage, canonical_lineage
+                        SELECT strain_name, sovereign_lineage, display_lineage, canonical_lineage
                         FROM strains
                         WHERE strain_name IN ({placeholders})
                     '''
                     cur.execute(batch_strain_query, strain_list)
                     for row_result in cur.fetchall():
                         sname = row_result[0]
-                        preferred = row_result[1] or row_result[2]
-                        if preferred:
+                        preferred = row_result[1] or row_result[2] or row_result[3]
+                        if preferred and str(preferred).strip().upper() != 'SOVEREIGN':
                             strain_info_cache[sname] = {
-                                'display_lineage': row_result[1],
-                                'canonical_lineage': row_result[2]
+                                'sovereign_lineage': row_result[1],
+                                'display_lineage': row_result[2],
+                                'canonical_lineage': row_result[3]
                             }
                 except Exception as batch_strain_err:
                     logger.warning(f"Batch strain info query failed: {batch_strain_err}")
@@ -1202,14 +1212,16 @@ def process_chunk(args):
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
-                    # 2. Fallback: strain-level canonical_lineage ONLY
+                    # 2. Fallback: strain-level (sovereign_lineage > display_lineage > canonical_lineage)
                     if (not lineage_val or lineage_val in ['MIXED', 'THC', '', None]) and product_strain:
                         strain_info = strain_info_cache.get(product_strain)
                         if strain_info:
-                            canonical = strain_info.get('canonical_lineage')
-                            if canonical and str(canonical).strip() not in ['', 'None', 'nan']:
-                                lineage_val = str(canonical).strip().upper()
-                                logger.info(f"✅ DOCX LINEAGE: Using strain canonical_lineage '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
+                            for key in ('sovereign_lineage', 'display_lineage', 'canonical_lineage'):
+                                canon = strain_info.get(key)
+                                if canon and str(canon).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
+                                    lineage_val = str(canon).strip().upper()
+                                    logger.info(f"✅ DOCX LINEAGE: Using strain {key} '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
+                                    break
                     # 3. Final fallback: HYBRID
                     if not lineage_val or lineage_val in ['MIXED', 'THC', '', None]:
                         lineage_val = 'HYBRID'
