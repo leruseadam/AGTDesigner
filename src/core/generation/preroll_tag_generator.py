@@ -454,7 +454,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         group_keys_list = list(grouped_records.keys())
         logging.info(f"PREROLL GROUPING DEBUG: Created {len(group_keys_list)} groups with keys: {group_keys_list}")
     else:
-        logging.info(f"PREROLL GROUPING DEBUG: Created {len(grouped_records)} groups (too many to log all keys)")
+        group_keys_list = list(grouped_records.keys())
+        logging.info(f"PREROLL GROUPING DEBUG: Created {len(grouped_records)} groups. First 30 keys: {group_keys_list[:30]}")
+    
+    # CRITICAL: Track which groups are processed to ensure none are lost
+    processed_group_keys_set = set()
     
     for group_key, group_data in grouped_records.items():
         try:
@@ -652,6 +656,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 representative['Brand'] = rep_brand
 
             unique_records.append(representative)
+            processed_group_keys_set.add(group_key)
             groups_processed += 1
             
             # Store items for this group in cache (for QR code page) - use ALL original records
@@ -748,9 +753,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                         minimal_rep['Description'] = minimal_rep['Product Name*']
                         minimal_rep['_group_id'] = original_group_id
                         minimal_rep['_group_key'] = group_key
-                        unique_records.append(minimal_rep)
-                        groups_processed += 1
-                        logging.warning(f"PREROLL GROUP: Created minimal representative for group '{group_key}' after error")
+                    unique_records.append(minimal_rep)
+                    processed_group_keys_set.add(group_key)
+                    groups_processed += 1
+                    logging.warning(f"PREROLL GROUP: Created minimal representative for group '{group_key}' after error")
                     else:
                         logging.error(f"PREROLL GROUP ERROR: Group '{group_key}' has no records to create representative from")
                 else:
@@ -779,6 +785,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     
     # CRITICAL DEBUG: Log the actual count of unique_records vs grouped_records
     logging.info(f"PREROLL GROUPING DEBUG: unique_records count: {len(unique_records)}, grouped_records count: {len(grouped_records)}, groups_processed: {groups_processed}")
+    logging.info(f"PREROLL GROUPING DEBUG: processed_group_keys_set size: {len(processed_group_keys_set)}, all_group_keys size: {len(grouped_records)}")
+    
+    # Check if any groups were not processed in the loop
+    unprocessed_groups = set(grouped_records.keys()) - processed_group_keys_set
+    if unprocessed_groups:
+        logging.error(f"PREROLL GROUPING ERROR: {len(unprocessed_groups)} groups were NOT processed in the loop! Unprocessed keys (first 20): {list(unprocessed_groups)[:20]}")
     
     # Track count after brand filtering (if any)
     records_after_brand_filter = len(records)
