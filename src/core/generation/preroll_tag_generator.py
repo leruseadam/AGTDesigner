@@ -475,9 +475,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             representative = group_records_list[0].copy()
             
             # Update ALL fields that might be displayed on the label to show group display name
+            # CRITICAL: Include group_key in Product Name* to ensure uniqueness and prevent deduplication
+            # This ensures groups with same category but different vendors/brands are not collapsed
+            unique_display_name = f"{group_display_name} ({group_key.split('|')[-1] if '|' in group_key else group_key})"
             representative['Description'] = group_display_name
-            representative['Product Name*'] = group_display_name
-            representative['ProductName'] = group_display_name
+            representative['Product Name*'] = unique_display_name  # Use unique name to prevent deduplication
+            representative['ProductName'] = unique_display_name
             # Also update DescAndWeight - use group name only (no individual product details)
             representative['DescAndWeight'] = group_display_name
             
