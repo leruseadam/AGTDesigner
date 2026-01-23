@@ -753,6 +753,9 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     else:
         logging.info(f"PREROLL GROUPING: All {groups_processed} groups successfully processed")
     
+    # CRITICAL DEBUG: Log the actual count of unique_records vs grouped_records
+    logging.info(f"PREROLL GROUPING DEBUG: unique_records count: {len(unique_records)}, grouped_records count: {len(grouped_records)}, groups_processed: {groups_processed}")
+    
     # Track count after brand filtering (if any)
     records_after_brand_filter = len(records)
     
@@ -780,6 +783,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     
     # CRITICAL FIX: Remove deduplication - grouping by group_key (which includes vendor) already ensures uniqueness
     # Each group_key should be unique, so deduplication should not be necessary and may incorrectly remove valid groups
+    # DEBUG: Log before assignment to see if unique_records has the right count
+    logging.info(f"PREROLL GROUPING DEBUG: Before assignment - unique_records: {len(unique_records)}, grouped_records: {len(grouped_records)}")
     grouped_records_list = unique_records
     
     # CRITICAL: Verify all groups were processed
