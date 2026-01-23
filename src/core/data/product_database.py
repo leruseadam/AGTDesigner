@@ -1605,6 +1605,29 @@ class ProductDatabase:
                     columns_str = ', '.join(columns_to_insert)
                     placeholders = ', '.join(['?' for _ in values_to_insert])
                     
+                    # VALIDATION: reject blank/empty normalized names to avoid creating empty entries
+                    if not normalized_name or str(normalized_name).strip() == '':
+                        self._rejected_blank_names += 1
+                        logger.warning(f"Rejected product with blank normalized name: original='{product_name}'")
+                        return None
+
+                    # SAFETY: check for existing product with same normalized name and update instead
+                    try:
+                        cursor.execute('SELECT id FROM products WHERE normalized_name = ? LIMIT 1', (normalized_name,))
+                        existing_row = cursor.fetchone()
+                        if existing_row:
+                            existing_id = existing_row[0]
+                            logger.info(f"Found existing product with same normalized_name='{normalized_name}' (ID: {existing_id}) - updating instead of inserting")
+                            try:
+                                self._update_existing_product(cursor, existing_id, product_data)
+                                conn.commit()
+                                return existing_id
+                            except Exception as upd_err:
+                                logger.warning(f"Failed to update existing product (ID: {existing_id}), will attempt insert: {upd_err}")
+                                conn.rollback()
+                    except Exception as e:
+                        logger.debug(f"Pre-insert existence check failed: {e}")
+
                     # SECURITY: Final validation - ensure we have valid columns
                     if not columns_to_insert:
                         logger.error("SECURITY: No valid columns to insert after validation")
