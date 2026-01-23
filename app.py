@@ -9588,6 +9588,7 @@ def generate_labels():
                             rec['lineage'] = db_lineage.lower()
                             rec['currentLineage'] = db_lineage
                             rec['canonical_lineage'] = db_lineage
+                            rec['sovereign_lineage'] = db_lineage  # DOCX uses sovereign first; value from COALESCE(sovereign,...)
                             if old_lineage != db_lineage:
                                 forced_count += 1
                                 if forced_count <= 5:  # Log first 5 changes
@@ -9766,11 +9767,19 @@ def generate_labels():
                             record = records[idx]
                             db_lineage = None
                             
-                            # Try product-level lineage first (database is source of truth) - O(1) lookup
-                            if product_name in product_lineage_map:
-                                db_lineage = product_lineage_map[product_name]
-                            # Fall back to strain-level lineage - O(1) lookup
-                            elif product_strain and product_strain in strain_lineage_map:
+                            # Try product-level lineage (exact, lowercase, normalized)
+                            if product_name:
+                                db_lineage = (product_lineage_map.get(product_name) or
+                                              product_lineage_map.get(product_name.lower().strip()))
+                                if not db_lineage:
+                                    try:
+                                        norm = product_db._normalize_product_name(product_name)
+                                        if norm:
+                                            db_lineage = product_lineage_map.get(norm)
+                                    except Exception:
+                                        pass
+                            # Fall back to strain-level lineage
+                            if not db_lineage and product_strain and product_strain in strain_lineage_map:
                                 db_lineage = strain_lineage_map[product_strain]
                             
                             # CRITICAL FIX: ALWAYS overwrite with database lineage if it exists
@@ -9778,7 +9787,8 @@ def generate_labels():
                             if db_lineage:
                                 record['Lineage'] = db_lineage
                                 record['lineage'] = db_lineage.lower() if db_lineage else ''
-                                record['canonical_lineage'] = db_lineage  # Also set canonical_lineage for consistency
+                                record['canonical_lineage'] = db_lineage
+                                record['sovereign_lineage'] = db_lineage  # DOCX checks sovereign first
                                 enriched_count += 1
                         
                         if enriched_count > 0:

@@ -248,17 +248,17 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     Returns:
         List of grouped representative records (one per category)
     """
-    # PERFORMANCE: Skip verbose debug logging unless explicitly enabled
-    if records and logging.getLogger().isEnabledFor(logging.DEBUG):
-        logging.debug(f"PREROLL INPUT: {len(records)} records received")
-
     start_t = time.time()
-    
+
     # CRITICAL: Track original count BEFORE any filtering
     original_input_count = len(records)
-    # PERFORMANCE: Only log at debug level to reduce overhead
-    if logging.getLogger().isEnabledFor(logging.DEBUG):
-        logging.debug(f"PREROLL INPUT: Received {original_input_count} records for grouping")
+    # ALWAYS log input count at INFO level for debugging
+    logging.info(f"PREROLL INPUT: Received {original_input_count} records for grouping")
+
+    # Log sample product names to verify input
+    if records:
+        sample_names = [r.get('Product Name*', r.get('ProductName', 'N/A')) for r in records[:5]]
+        logging.info(f"PREROLL INPUT SAMPLE: First 5 product names: {sample_names}")
     # DEBUG: Log PREROLL_ALLOWED_BRANDS status (only if filtering is active)
     if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
         if logging.getLogger().isEnabledFor(logging.DEBUG):
@@ -415,7 +415,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     
     if skipped_count > 0:
         logging.warning(f"PREROLL GROUP: Skipped {skipped_count} records with no product name")
-    
+
+    # CRITICAL: Log grouping results
+    logging.info(f"PREROLL GROUPING COMPLETE: {original_input_count} input records -> {len(grouped_records)} unique groups")
+
     # Step 2: Create representative records with group display names
     unique_records = []
     session_id = session.get('session_id', 'default')
