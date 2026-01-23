@@ -735,18 +735,42 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             logging.error(f"PREROLL GROUP ERROR: Traceback: {traceback.format_exc()}")
             # Still try to create a minimal representative to avoid losing the group
             try:
-                if 'group_records_list' in locals() and group_records_list and len(group_records_list) > 0:
-                    minimal_rep = group_records_list[0].copy()
-                    minimal_rep['Product Name*'] = group_display_name if 'group_display_name' in locals() else 'Pre-Roll'
-                    minimal_rep['ProductName'] = minimal_rep['Product Name*']
-                    minimal_rep['Description'] = minimal_rep['Product Name*']
-                    minimal_rep['_group_id'] = original_group_id if 'original_group_id' in locals() else group_key
-                    minimal_rep['_group_key'] = group_key
-                    unique_records.append(minimal_rep)
-                    groups_processed += 1
-                    logging.warning(f"PREROLL GROUP: Created minimal representative for group '{group_key}' after error")
+                group_data = grouped_records.get(group_key)
+                if group_data:
+                    group_records_list = group_data.get('records', [])
+                    group_info = group_data.get('group_info', {})
+                    if group_records_list and len(group_records_list) > 0:
+                        minimal_rep = group_records_list[0].copy()
+                        group_display_name = group_info.get('display_name', 'Pre-Roll')
+                        original_group_id = group_info.get('group_id', group_key)
+                        minimal_rep['Product Name*'] = group_display_name
+                        minimal_rep['ProductName'] = minimal_rep['Product Name*']
+                        minimal_rep['Description'] = minimal_rep['Product Name*']
+                        minimal_rep['_group_id'] = original_group_id
+                        minimal_rep['_group_key'] = group_key
+                        unique_records.append(minimal_rep)
+                        groups_processed += 1
+                        logging.warning(f"PREROLL GROUP: Created minimal representative for group '{group_key}' after error")
+                    else:
+                        logging.error(f"PREROLL GROUP ERROR: Group '{group_key}' has no records to create representative from")
+                else:
+                    logging.error(f"PREROLL GROUP ERROR: Group '{group_key}' not found in grouped_records")
             except Exception as fallback_error:
                 logging.error(f"PREROLL GROUP: Failed to create even minimal representative for '{group_key}': {fallback_error}")
+                # Last resort: create a completely minimal record to ensure the group isn't lost
+                try:
+                    minimal_rep = {
+                        'Product Name*': f'Pre-Roll Group {group_key}',
+                        'ProductName': f'Pre-Roll Group {group_key}',
+                        'Description': f'Pre-Roll Group {group_key}',
+                        '_group_id': group_key.split('|')[0] if '|' in group_key else group_key,
+                        '_group_key': group_key
+                    }
+                    unique_records.append(minimal_rep)
+                    groups_processed += 1
+                    logging.warning(f"PREROLL GROUP: Created absolute minimal representative for group '{group_key}' as last resort")
+                except Exception as last_resort_error:
+                    logging.error(f"PREROLL GROUP: Complete failure for group '{group_key}': {last_resort_error}")
     
     if groups_failed > 0:
         logging.warning(f"PREROLL GROUPING: {groups_failed} groups failed during processing, {groups_processed} groups successfully processed")
@@ -787,30 +811,64 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     logging.info(f"PREROLL GROUPING DEBUG: Before assignment - unique_records: {len(unique_records)}, grouped_records: {len(grouped_records)}")
     grouped_records_list = unique_records
     
-    # CRITICAL: Verify all groups were processed
-    if len(grouped_records_list) != len(grouped_records):
-        missing_groups = set(grouped_records.keys()) - {r.get('_group_key', '') for r in unique_records}
-        logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
-        if missing_groups:
-            logging.error(f"PREROLL GROUPING ERROR: Missing group_keys: {list(missing_groups)[:10]}")
-        # Try to recover missing groups
+    # CRITICAL: Verify all groups were processed - ensure every group_key has a representative
+    processed_group_keys = {r.get('_group_key', '') for r in unique_records if r.get('_group_key')}
+    all_group_keys = set(grouped_records.keys())
+    missing_groups = all_group_keys - processed_group_keys
+    
+    if missing_groups:
+        logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(unique_records)} representatives! Missing {len(missing_groups)} groups")
+        logging.error(f"PREROLL GROUPING ERROR: Missing group_keys (first 20): {list(missing_groups)[:20]}")
+        # Try to recover ALL missing groups - this is critical to ensure all groups are included
+        recovered_count = 0
         for missing_key in missing_groups:
             try:
                 missing_data = grouped_records[missing_key]
-                missing_records = missing_data['records']
+                missing_records = missing_data.get('records', [])
+                missing_info = missing_data.get('group_info', {})
                 if missing_records:
                     minimal_rep = missing_records[0].copy()
-                    missing_info = missing_data['group_info']
                     minimal_rep['Product Name*'] = missing_info.get('display_name', 'Pre-Roll')
                     minimal_rep['ProductName'] = minimal_rep['Product Name*']
                     minimal_rep['Description'] = minimal_rep['Product Name*']
                     minimal_rep['_group_id'] = missing_info.get('group_id', missing_key)
                     minimal_rep['_group_key'] = missing_key
                     unique_records.append(minimal_rep)
+                    recovered_count += 1
                     logging.warning(f"PREROLL GROUP: Recovered missing group '{missing_key}' with minimal representative")
+                else:
+                    # Even if no records, create a minimal representative to preserve the group
+                    minimal_rep = {
+                        'Product Name*': missing_info.get('display_name', f'Pre-Roll Group {missing_key}'),
+                        'ProductName': missing_info.get('display_name', f'Pre-Roll Group {missing_key}'),
+                        'Description': missing_info.get('display_name', f'Pre-Roll Group {missing_key}'),
+                        '_group_id': missing_info.get('group_id', missing_key),
+                        '_group_key': missing_key
+                    }
+                    unique_records.append(minimal_rep)
+                    recovered_count += 1
+                    logging.warning(f"PREROLL GROUP: Recovered empty group '{missing_key}' with placeholder representative")
             except Exception as recover_error:
                 logging.error(f"PREROLL GROUP: Failed to recover group '{missing_key}': {recover_error}")
+                # Last resort: create absolute minimal record
+                try:
+                    minimal_rep = {
+                        'Product Name*': f'Pre-Roll {missing_key}',
+                        'ProductName': f'Pre-Roll {missing_key}',
+                        'Description': f'Pre-Roll {missing_key}',
+                        '_group_id': missing_key.split('|')[0] if '|' in missing_key else missing_key,
+                        '_group_key': missing_key
+                    }
+                    unique_records.append(minimal_rep)
+                    recovered_count += 1
+                    logging.warning(f"PREROLL GROUP: Created absolute minimal representative for '{missing_key}' as last resort")
+                except Exception as last_resort_error:
+                    logging.error(f"PREROLL GROUP: Complete failure recovering group '{missing_key}': {last_resort_error}")
         
+        logging.info(f"PREROLL GROUPING: Recovered {recovered_count} missing groups. Total representatives now: {len(unique_records)}")
+        grouped_records_list = unique_records
+    else:
+        logging.info(f"PREROLL GROUPING: All {len(grouped_records)} groups have representatives. Total: {len(unique_records)}")
         grouped_records_list = unique_records
     
     logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups (one label per vendor per category)")
