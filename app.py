@@ -19494,18 +19494,10 @@ def json_match_detailed():
         enhanced_matches = json_matcher.fetch_and_match(url)
         logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
         
-        # Sort matched products alphabetically by product name
-        if enhanced_matches:
-            def get_sort_key(product):
-                if isinstance(product, dict):
-                    name = (product.get('Product Name*', '') or 
-                           product.get('ProductName', '') or 
-                           product.get('Description', '') or 
-                           product.get('product_name', ''))
-                    return str(name).lower().strip()
-                return ''
-            enhanced_matches.sort(key=get_sort_key)
-            logging.info(f"✅ Sorted {len(enhanced_matches)} enhanced matches alphabetically")
+        # NOTE: Do NOT reorder `enhanced_matches` here — they are expected to align
+        # with the incoming `json_items` order so each JSON item maps to its
+        # corresponding enhanced match by index. Sorting here caused misaligned
+        # detailed match displays (matches appearing next to different JSON rows).
         
         detailed_matches = []
         high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
@@ -19514,52 +19506,26 @@ def json_match_detailed():
             json_name = str(json_item.get('product_name', ''))
             if not json_name.strip():
                 continue
-
-            # For each JSON item, find the best enhanced match from enhanced_matches
-            best_score = 0.0
-            best_match = None
-            top_candidates = []
-
-            try:
-                for em in enhanced_matches or []:
-                    # Build a cache_item similar to json_matcher expectations
-                    primary_name = (em.get('Description') or em.get('Product Name*') or em.get('ProductName') or '').strip()
-                    cache_item = {
-                        'original_name': primary_name,
-                        'product_name': em.get('Product Name*') or em.get('ProductName') or '',
-                        'description': em.get('Description', ''),
-                        'brand': em.get('Product Brand') or em.get('ProductBrand') or '',
-                        'strain': em.get('Product Strain') or '',
-                        'product_type': em.get('Product Type*') or em.get('ProductType') or '',
-                        'vendor': em.get('Vendor/Supplier*') or em.get('Vendor') or '',
-                        'weight': em.get('Weight*') or em.get('Weight') or em.get('CombinedWeight') or '',
-                        'units': em.get('Units') or '',
-                        'lineage': em.get('Lineage') or ''
-                    }
-                    score = json_matcher._calculate_match_score(json_item, cache_item)
-                    top_candidates.append({'excel_name': em.get('Product Name*') or em.get('ProductName') or '', 'score': score, 'excel_data': em})
-                    if score > best_score:
-                        best_score = score
-                        best_match = em
-            except Exception as e:
-                logging.warning(f"Error scoring enhanced matches for JSON item: {e}")
-
-            # Sort top candidates descending
-            top_candidates.sort(key=lambda x: x['score'], reverse=True)
-
+                
+            # Find corresponding enhanced match
+            enhanced_match = None
+            if i < len(enhanced_matches):
+                enhanced_match = enhanced_matches[i]
+            
+            # Create detailed match info using database-priority data
             match_info = {
                 'json_name': json_name,
                 'json_data': json_item,
-                'best_score': best_score,
-                'best_match': best_match,
-                'top_candidates': top_candidates,
-                'is_match': best_match is not None and best_score >= 0.4,
-                'match_reason': 'Database Priority (100% DB data)' if best_match else 'No database match found',
-                'source': best_match.get('Source', 'Database Priority (100% DB)') if best_match else 'No match',
-                'data_source': best_match.get('Data_Source', 'Database') if best_match else 'None',
-                'match_confidence': best_match.get('Match_Confidence', str(best_score)) if best_match else str(best_score)
+                'best_score': 0.95 if enhanced_match else 0.0,  # High confidence for database matches
+                'best_match': enhanced_match,
+                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if enhanced_match else [],
+                'is_match': enhanced_match is not None,
+                'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
+                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
+                'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
+                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if enhanced_match else '0.0'
             }
-
+            
             detailed_matches.append(match_info)
             
         logging.info(f"DATABASE PRIORITY: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} high-confidence database-enhanced products")
