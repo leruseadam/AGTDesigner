@@ -11835,19 +11835,21 @@ const TagManager = {
                     </div>
                 `;
             }
-        } else if (!storeConfirmed) {
-            // Store not confirmed - don't show loading, let store modal show
-            verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
-        } else if (storeConfirmed && hasExistingTags) {
-            // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
-            this.showActionSplash('Refreshing tags...');
-            // Also show loading indicator in container if it exists
-            // BUT don't grey out on initial page load - only on refresh
-            if (availableTagsContainer && this._hasLoadedOnce) {
-                const existingContent = availableTagsContainer.innerHTML;
-                // Add a loading overlay or indicator
-                availableTagsContainer.style.opacity = '0.6';
-                availableTagsContainer.style.pointerEvents = 'none';
+        } else if (!this._suppressActionSplash) {
+            if (!storeConfirmed) {
+                // Store not confirmed - don't show loading, let store modal show
+                verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
+            } else if (storeConfirmed && hasExistingTags) {
+                // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
+                this.showActionSplash('Refreshing tags...');
+                // Also show loading indicator in container if it exists
+                // BUT don't grey out on initial page load - only on refresh
+                if (availableTagsContainer && this._hasLoadedOnce) {
+                    const existingContent = availableTagsContainer.innerHTML;
+                    // Add a loading overlay or indicator
+                    availableTagsContainer.style.opacity = '0.6';
+                    availableTagsContainer.style.pointerEvents = 'none';
+                }
             }
         }
         // If cache exists and no existing tags, skip splash for instant load
@@ -12293,8 +12295,11 @@ const TagManager = {
                             const delayMs = 2000;
                             verboseLog(`⏳ Background load in progress (retry ${this._backgroundProcessingRetries}/${maxBgRetries}) – retrying in ${delayMs}ms`);
                             setTimeout(() => {
-                                // Fire-and-forget; flag will prevent duplicate overlaps
-                                this.fetchAndUpdateAvailableTags().catch(e => console.warn('Background retry failed:', e));
+                                // Fire-and-forget background retry; suppress duplicate splash
+                                this._suppressActionSplash = true;
+                                this.fetchAndUpdateAvailableTags()
+                                    .catch(e => console.warn('Background retry failed:', e))
+                                    .finally(() => { this._suppressActionSplash = false; });
                             }, delayMs);
                             // Keep splash visible; don't overwrite UI with message
                             return false;
@@ -13684,13 +13689,16 @@ const TagManager = {
             if (isPostUpload && this._skipEnrichment) {
                 console.log('⚡ Enriching tags in background...');
                 this._skipEnrichment = false;
-                // Enrich tags in background without blocking UI
+                // Enrich tags in background without blocking UI or showing duplicate splash
                 setTimeout(async () => {
                     try {
+                        this._suppressActionSplash = true;
                         await this.fetchAndUpdateAvailableTags();
                         console.log('✅ Background tag enrichment complete');
                     } catch (err) {
                         console.warn('Background enrichment failed:', err);
+                    } finally {
+                        this._suppressActionSplash = false;
                     }
                 }, 100);
             }
@@ -13965,9 +13973,12 @@ const TagManager = {
                 const hasTags = this.state.tags && this.state.tags.length > 0;
                 const hasRenderedTags = document.getElementById('availableTags')?.querySelectorAll('.tag-item').length > 0;
                 if (!hasTags && !hasRenderedTags) {
-                    console.warn('⚠️ Tags not loaded after checkForExistingData, attempting direct fetch...');
+                    console.warn('⚠️ Tags not loaded after checkForExistingData, attempting direct fetch (background, suppress splash)...');
+                    this._suppressActionSplash = true;
                     this.fetchAndUpdateAvailableTags().catch(e => {
                         console.error('Direct fetch after checkForExistingData failed:', e);
+                    }).finally(() => {
+                        this._suppressActionSplash = false;
                     });
                 }
             }, 2000);
@@ -14645,8 +14656,11 @@ const TagManager = {
                 // This ensures fast page loads while still getting fresh database lineage
                 if (needsBackgroundRefresh) {
                     console.log('🔄 Background: Refreshing tags for fresh database lineage...');
+                    this._suppressActionSplash = true;
                     this.fetchAndUpdateAvailableTags(true).catch(err => {
                         console.warn('Background tag refresh error (non-critical):', err);
+                    }).finally(() => {
+                        this._suppressActionSplash = false;
                     });
                 }
             }).catch(err => {
@@ -16121,7 +16135,8 @@ const TagManager = {
         this._lastClearTime = now;
 
         this.state.isClearing = true;
-        this.clearAvailableTagsCache();
+        // PERFORMANCE: Do NOT clear the available-tags cache here.
+        // Keeping cache allows much faster subsequent reloads after clear.
         
         // CRITICAL FIX: Get button references before try block so they're accessible in catch
         const clearBtn = document.getElementById('clearFiltersBtn');
@@ -16286,6 +16301,19 @@ const TagManager = {
                 window.Toast.show('success', 'Cleared and reset successfully', { duration: 2000 });
             }
             
+            // If there is no JSON-matched data active, we can stop here for a
+            // much faster "simple clear" that only touches the UI/client state.
+            // Backend JSON clear / toggle + full tag refresh are only needed
+            // when JSON Match mode has actually been used.
+            const hasJsonMatchedInTags = Array.isArray(this.state.tags) &&
+                this.state.tags.some(tag => tag && (tag.Source === 'JSON Match' || (tag.Source && tag.Source.includes('Educated Guess'))));
+            const hasJsonMatchedInOriginal = Array.isArray(this.state.originalTags) &&
+                this.state.originalTags.some(tag => tag && (tag.Source === 'JSON Match' || (tag.Source && tag.Source.includes('Educated Guess'))));
+            if (!hasJsonMatchedInTags && !hasJsonMatchedInOriginal) {
+                verboseLog('No JSON-matched data detected – skipping backend JSON clear/toggle and tag refresh for faster clear.');
+                return;
+            }
+            
             // CRITICAL FIX: Add timeout to fetch operations to prevent hanging
             const fetchWithTimeout = (url, options, timeout = 5000) => {
                 return Promise.race([
@@ -16316,11 +16344,12 @@ const TagManager = {
                 // CRITICAL FIX: Clear rate limiting to allow immediate fetch after clear/reset
                 this._lastFetchTime = 0;
 
-                // Now refresh tags
-                verboseLog('Refreshing available tags with full Excel data...');
+                // Now refresh tags (in background, without showing extra splash)
+                verboseLog('Refreshing available tags with full Excel data (background after clear)...');
                 if (this.fetchAndUpdateAvailableTags) {
                     try {
                         // CRITICAL FIX: Add timeout to prevent infinite hang
+                        this._suppressActionSplash = true;
                         const fetchPromise = this.fetchAndUpdateAvailableTags();
                         const timeoutPromise = new Promise((_, reject) =>
                             setTimeout(() => {
@@ -16330,7 +16359,7 @@ const TagManager = {
                                 reject(new Error('Tag refresh timeout after clear/reset'));
                             }, 15000)
                         );
-
+                        
                         await Promise.race([fetchPromise, timeoutPromise]);
                         console.log('✅ Tags refreshed successfully after clear/reset');
                     } catch (fetchError) {
@@ -16344,6 +16373,8 @@ const TagManager = {
                         if (window.Toast && window.Toast.show) {
                             window.Toast.show('warning', 'Tags may not have refreshed. Try reloading the page.', { duration: 3000 });
                         }
+                    } finally {
+                        this._suppressActionSplash = false;
                     }
                 }
             };
