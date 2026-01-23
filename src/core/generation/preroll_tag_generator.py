@@ -381,9 +381,21 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # This ensures products with same category/brand but different weights get separate groups
         if not is_pack_product:
             # Extract weight from group_id (e.g., "preroll-1g" -> "1g", "infused-preroll-0.5g" -> "0.5g")
+            # Also try to extract weight from description/product name as fallback
+            weight_key = None
             weight_match = re.search(r'(\d+(?:\.\d+)?)g', group_id.lower())
             if weight_match:
                 weight_key = weight_match.group(1) + 'g'
+            else:
+                # Fallback: try to extract weight from description or product name
+                desc_lower = str(description).lower() if description else ''
+                name_lower = product_name_str.lower()
+                combined_lower = f"{desc_lower} {name_lower}"
+                weight_match = WEIGHT_RE.search(combined_lower)
+                if weight_match:
+                    weight_key = weight_match.group(1) + 'g'
+            
+            if weight_key:
                 key_parts.append(weight_key)
             
             # Extract the product name part before "by" for uniqueness (only if meaningful)
