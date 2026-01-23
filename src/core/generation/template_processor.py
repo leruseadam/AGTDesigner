@@ -1155,7 +1155,8 @@ class TemplateProcessor:
             else:
                 # Ensure chunk size respects fixed page capacity for templates like mini/inventory
                 self.chunk_size = self.chunk_size or len(records)
-                self.logger.info(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"Processing {len(records)} records for template '{self.template_type}' (chunk_size={self.chunk_size})")
                 self.start_time = time.time()
                 self.chunk_count = 0
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
@@ -1193,18 +1194,16 @@ class TemplateProcessor:
                     chunk = records[start:start + chunk_size]
                     chunks.append(chunk)
                 
-                # CRITICAL: Log chunking for preroll to debug
-                if self.template_type == 'preroll':
-                    self.logger.info(f"🔍 PREROLL CHUNKING: {len(records)} records -> {len(chunks)} chunks (chunk_size={chunk_size})")
-                    for i, chunk in enumerate(chunks):
-                        chunk_names = [r.get('Product Name*', r.get('ProductName', 'N/A')) for r in chunk[:3]]
-                        self.logger.info(f"🔍 PREROLL CHUNK {i+1}/{len(chunks)}: {len(chunk)} records, first 3: {chunk_names}")
+                # Log chunking for preroll (debug only)
+                if self.template_type == 'preroll' and self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"PREROLL: {len(records)} records -> {len(chunks)} chunks")
                 
                 # Process chunks in parallel for better performance
                 if len(chunks) > 1:
                     from concurrent.futures import ThreadPoolExecutor, as_completed
                     
-                    self.logger.info(f"⚡ PARALLEL PROCESSING: Processing {len(chunks)} chunks concurrently")
+                    if self.logger.isEnabledFor(logging.DEBUG):
+                        self.logger.debug(f"Parallel processing: {len(chunks)} chunks")
                     chunk_docs = [None] * len(chunks)  # Preserve order
                     
                     with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
@@ -1229,12 +1228,11 @@ class TemplateProcessor:
                     # Filter out None results and preserve order
                     valid_docs = [doc for doc in chunk_docs if doc is not None]
                     documents.extend(valid_docs)
-                    if self.template_type == 'preroll':
-                        self.logger.info(f"🔍 PREROLL: Processed {len(valid_docs)}/{len(chunks)} chunks successfully")
                 else:
                     # Single chunk - process normally
                     self.chunk_count = 1
-                    self.logger.info(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
+                    if self.logger.isEnabledFor(logging.DEBUG):
+                        self.logger.debug(f"Processing single chunk: {len(records)} records")
                     try:
                         chunk_doc = self._process_chunk(records)
                         if chunk_doc is not None:
@@ -1247,12 +1245,8 @@ class TemplateProcessor:
                         # Don't add None to documents - let it fail gracefully
             
             if not documents: 
-                self.logger.error(f"❌ PREROLL ERROR: No documents generated! Expected {len(chunks) if 'chunks' in locals() else 1} document(s)")
+                self.logger.error(f"No documents generated! Expected {len(chunks) if 'chunks' in locals() else 1} document(s)")
                 return None
-            
-            # CRITICAL: Log document count for preroll
-            if self.template_type == 'preroll':
-                self.logger.info(f"🔍 PREROLL DOCUMENTS: Generated {len(documents)} document(s) from {len(records)} records")
             
             if len(documents) == 1: 
                 return documents[0]
@@ -1286,11 +1280,9 @@ class TemplateProcessor:
         from docx import Document
         from io import BytesIO
         
-        # DEBUG_CHUNK_SIZE_TRACKING: Log actual chunk sizes
-        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Processing chunk with {len(chunk)} records")
-        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Expected all {len(chunk)} records in this chunk for template '{self.template_type}'")
-        # After rendering, log the number of labels actually created
-        self.logger.info(f"🔍 LABEL RENDER: Actually rendered {len(chunk)} labels in this chunk.")
+        # Log chunk processing (debug only)
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(f"Processing chunk with {len(chunk)} records for template '{self.template_type}'")
         
         chunk_start_time = time.time()
         
@@ -1312,10 +1304,8 @@ class TemplateProcessor:
                 elif self.template_type == 'double':
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
                 elif self.template_type in ['mini', 'preroll']:
-                    # CRITICAL: Preroll uses same 4x5 grid as mini - expand to fit all records in chunk
+                    # Preroll uses same 4x5 grid as mini - expand to fit all records in chunk
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
-                    if self.template_type == 'preroll':
-                        self.logger.info(f"🔍 PREROLL: Expanded template to 4x5 grid for {num_products} records in chunk")
                 
                 # Cache the expansion (create a copy since BytesIO is consumed)
                 if hasattr(self._expanded_template_buffer, 'getvalue'):
@@ -1327,12 +1317,9 @@ class TemplateProcessor:
             
             doc = DocxTemplate(self._expanded_template_buffer)
             
-            # Debug: Log the order of records in this chunk (only for small chunks to reduce logging overhead)
-            if len(chunk) <= 10:
-                chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
-                self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
-            else:
-                self.logger.info(f"Processing chunk with {len(chunk)} records")
+            # Log chunk processing (debug only)
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(f"Processing chunk with {len(chunk)} records")
             
             # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
             # This reduces 200+ queries for 100 products to just 3-4 queries total
@@ -1460,12 +1447,10 @@ class TemplateProcessor:
             # Build context for each record in the chunk
             context = {}
             
-            # CRITICAL: For preroll, use ALL records in chunk (template expands to fit)
+            # For preroll, use ALL records in chunk (template expands to fit)
             # For other fixed-grid templates, pad to required_labels
             if self.template_type == 'preroll':
                 required_labels = len(chunk)  # Use all records - template expands to 4x5 grid per chunk
-                if self.template_type == 'preroll':
-                    self.logger.info(f"🔍 PREROLL: Building context for ALL {len(chunk)} records in chunk (template expands to fit)")
             elif self.template_type == 'mini':
                 required_labels = 20  # Fixed grid: 4x5 = 20 labels
             elif self.template_type == 'double':
@@ -1488,21 +1473,10 @@ class TemplateProcessor:
                     label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
                                                                product_lineage_cache, strain_info_cache, joint_ratio_cache)
                 context[f'Label{i+1}'] = label_context
-                # Debug logging to check field values and order (only for first few labels to reduce overhead)
-                if i < 3:
+                # Debug logging (debug level only)
+                if i < 3 and self.logger.isEnabledFor(logging.DEBUG):
                     product_name = record.get('ProductName', 'Unknown')
-                    product_type = record.get('ProductType', '') or record.get('Product Type*', '')
-                    product_vendor = label_context.get('ProductVendor', 'NOT_FOUND')
-                    # Unwrap vendor to see actual value
-                    if product_vendor != 'NOT_FOUND' and 'PRODUCTVENDOR_START' in str(product_vendor):
-                        try:
-                            vendor_value = unwrap_marker(product_vendor, 'PRODUCTVENDOR')
-                            product_vendor = f"'{vendor_value}' (wrapped)"
-                        except:
-                            pass
-                    # Also check vendor from record directly
-                    vendor_from_record_debug = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor') or 'NOT_IN_RECORD'
-                    self.logger.info(f"🔍 CONTEXT DEBUG Label{i+1} -> {product_name} (type: {product_type}) - ProductVendor in context: {product_vendor}, Vendor in record: '{vendor_from_record_debug}', _vendor_from_record: '{label_context.get('_vendor_from_record', 'NOT_SET')}'")
+                    self.logger.debug(f"Label{i+1}: {product_name}")
             
             # For fixed-grid templates (mini, double, inventory), pad with empty labels
             # For preroll, template expands to fit all records, so no padding needed
@@ -1510,9 +1484,8 @@ class TemplateProcessor:
                 empty_label_context = self._get_empty_label_context()
                 for i in range(len(chunk) + 1, required_labels + 1):
                     context[f'Label{i}'] = empty_label_context
-                self.logger.info(f"🔧 FIXED GRID: Created {len(chunk)} product labels + {required_labels - len(chunk)} empty labels = {required_labels} total for {self.template_type} template")
-            elif self.template_type == 'preroll':
-                self.logger.info(f"🔧 PREROLL: Created {len(chunk)} product labels (template expands to fit, no padding)")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"Fixed grid: {len(chunk)} product labels + {required_labels - len(chunk)} empty = {required_labels} total")
             else:
                 # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
                 # This saves printer ink by not generating empty cells
@@ -2680,15 +2653,15 @@ class TemplateProcessor:
                     if result and result[0] and str(result[0]).strip() not in ['', 'None', 'nan']:
                         doh_value = str(result[0]).strip()
                         label_context['DOH'] = doh_value
-                        self.logger.info(f"🔍 DOH RETRIEVED FROM DB: '{product_name}' - DOH: '{doh_value}'")
+                        if self.logger.isEnabledFor(logging.DEBUG):
+                            self.logger.debug(f"DOH from DB: '{product_name}' -> '{doh_value}'")
             except Exception as db_err:
                 self.logger.warning(f"Could not retrieve DOH from database: {db_err}")
 
         # CRITICAL DEBUG: Log DOH field processing with all possible sources
-        self.logger.info(f"🔍 DOH DOCX GENERATION: Product '{product_name}' - DOH field: '{doh_value}' from record")
-        self.logger.info(f"🔍 DOH DOCX GENERATION: Using only canonical DOH field: '{label_context.get('DOH', '')}'")
-        self.logger.info(f"🔍 DOH DOCX GENERATION: Record Source: '{record.get('Source', 'N/A')}'")
-        self.logger.info(f"🔍 DOH DOCX GENERATION: First 20 field keys in record: {list(record.keys())[:20]}")
+        # DOH processing - only log at debug level
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug(f"DOH: '{product_name}' -> '{doh_value}'")
 
         # Handle different DOH values: YES (legacy), DOH, THC, CBD
         doh_upper = str(doh_value).strip().upper() if doh_value else ''
@@ -2701,7 +2674,8 @@ class TemplateProcessor:
             # Also clear other DOH-related fields
             label_context['DOH Compliant (Yes/No)'] = ''
             label_context['doh'] = ''
-            self.logger.info(f"✅ DOH DOCX GENERATION: Explicitly clearing DOH for '{product_name}' - value: '{doh_value}' (NO/NONE/FALSE) - NO IMAGE WILL BE ADDED")
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(f"DOH: '{product_name}' - cleared (value: '{doh_value}')")
         elif doh_upper in ['YES', 'DOH', 'THC', 'CBD']:
             product_type = (label_context.get('ProductType') or
                           label_context.get('Product Type*') or
@@ -2717,17 +2691,20 @@ class TemplateProcessor:
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
                 label_context['DOH_TEXT'] = ''  # Clear any text content
-                self.logger.info(f"✅ DOH DOCX GENERATION: Created DOH image for '{product_name}' with value '{doh_upper}' - IMAGE WILL BE ADDED: {image_path}")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"DOH: '{product_name}' - added image ({doh_upper})")
             else:
                 label_context['DOH'] = ''
                 label_context['DOH_TEXT'] = ''
-                self.logger.info(f"⚠️ DOH DOCX GENERATION: No image path found for '{product_name}' - NO IMAGE WILL BE ADDED")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"DOH: '{product_name}' - no image path")
         else:
             # For any DOH value other than "YES"/"DOH"/"THC"/"CBD", leave it blank (don't display text)
             # This ensures DOH="no" or DOH="none" results in blank space, not text
             label_context['DOH'] = ''
             label_context['DOH_TEXT'] = ''
-            self.logger.info(f"✅ DOH DOCX GENERATION: Clearing DOH for '{product_name}' - value: '{doh_value}' (not DOH/THC/CBD/YES) - NO IMAGE WILL BE ADDED")
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(f"DOH: '{product_name}' - cleared (value: '{doh_value}')")
         
         # CRITICAL: Lineage and ProductVendor logic for classic types
         # This implements the same logic that was in tag_generator
@@ -2743,7 +2720,8 @@ class TemplateProcessor:
             extracted_brand = by_match.group(1).strip()
             if extracted_brand and extracted_brand.lower() not in ['', 'none', 'nan']:
                 product_brand = extracted_brand
-                self.logger.info(f"✅ BRAND EXTRACTED from product name: '{product_brand}' for '{product_name}'")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(f"Brand extracted: '{product_brand}' from '{product_name}'")
 
         # Fallback to Product Brand field only if extraction failed
         if not product_brand:

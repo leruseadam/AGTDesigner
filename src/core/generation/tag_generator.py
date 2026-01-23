@@ -905,7 +905,7 @@ def process_chunk(args):
     # For other templates, limit to num_labels to avoid empty slots
     if orientation == "preroll":
         actual_num_labels = len(chunk)  # Use all records - template will expand to 4x5 grid per chunk
-        logger.debug(f"🔧 PREROLL: Using all {actual_num_labels} records in chunk (template expands to fit)")
+        # Preroll uses all records - no logging needed
     else:
         actual_num_labels = min(len(chunk), num_labels)
     
@@ -1000,13 +1000,9 @@ def process_chunk(args):
             doh_compliant = ''
             doh_lower = ''
             
-            logger.info(f"🔍 DOH RAW VALUES for '{product_name}':")
-            logger.info(f"  row.get('DOH'): '{doh_raw}'")
-            logger.info(f"  row.get('DOH Compliant (Yes/No)'): '{doh_compliant}'")
-            logger.info(f"  row.get('doh'): '{doh_lower}'")
-            
             doh_value = (doh_raw).upper()
-            logger.info(f"🔍 DOH PROCESSING: Product '{product_name}' - Combined value: '{doh_value}'")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"DOH: '{product_name}' -> '{doh_value}'")
             product_type = str(row.get("Product Type*", "")).strip().lower()
             if DEBUG_ENABLED:
                 logger.debug(f"Product type: {product_type}")
@@ -1038,7 +1034,8 @@ def process_chunk(args):
                     if DEBUG_ENABLED:
                         logger.debug(f"Using DOH image: {doh_image_path}")
                     label_data["DOH"] = InlineImage(tpl, doh_image_path, width=image_width)
-                    logger.info(f"✅ DOH DECISION: Product '{product_name}' - Added DOH.png")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"DOH: '{product_name}' - Added image")
                 if DEBUG_ENABLED:
                     logger.debug(f"Created DOH image with width: {image_width}")
             else:
