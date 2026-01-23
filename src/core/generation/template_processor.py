@@ -1132,25 +1132,35 @@ class TemplateProcessor:
                 duplicate_count = 0
                 
                 for record in records:
-                    # Create a unique key based on product name, price, and weight
-                    product_name = record.get('ProductName', 'Unknown')
-                    price = record.get('Price', '')
-                    weight = record.get('Weight', '') or record.get('NetWeight', '')
-                    vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
-
-                    # CRITICAL FIX: For preroll templates, include _group_key in dedup key
-                    # This prevents false deduplication when different products have same display name
-                    group_key = record.get('_group_key', '') if self.template_type == 'preroll' else ''
-
-                    # Create deduplication key
-                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}|{group_key}".lower().strip()
+                    # CRITICAL FIX: For preroll templates, use _group_key as PRIMARY differentiator
+                    # Since each product has a unique group_key (via product hash), this prevents ALL false deduplication
+                    if self.template_type == 'preroll':
+                        group_key = record.get('_group_key', '')
+                        if group_key:
+                            # For prerolls, group_key is the PRIMARY key - each unique group_key = unique product
+                            dedup_key = group_key
+                        else:
+                            # Fallback if _group_key is missing (shouldn't happen, but be safe)
+                            product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                            price = record.get('Price', '')
+                            weight = record.get('Weight', '') or record.get('NetWeight', '')
+                            vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+                            dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
+                    else:
+                        # For non-preroll templates, use standard deduplication
+                        product_name = record.get('ProductName', 'Unknown')
+                        price = record.get('Price', '')
+                        weight = record.get('Weight', '') or record.get('NetWeight', '')
+                        vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+                        dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
 
                     if dedup_key not in seen_products:
                         seen_products.add(dedup_key)
                         unique_records.append(record)
                     else:
                         duplicate_count += 1
-                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                        product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                        self.logger.warning(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (group_key: {record.get('_group_key', 'N/A')})")
                 
                 if duplicate_count > 0:
                     self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
@@ -1177,23 +1187,35 @@ class TemplateProcessor:
                 duplicate_count = 0
 
                 for record in records:
-                    product_name = record.get('ProductName', 'Unknown')
-                    price = record.get('Price', '')
-                    weight = record.get('Weight', '') or record.get('NetWeight', '')
-                    vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
-
-                    # CRITICAL FIX: For preroll templates, include _group_key in dedup key
-                    # This prevents false deduplication when different products have same display name
-                    group_key = record.get('_group_key', '') if self.template_type == 'preroll' else ''
-
-                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}|{group_key}".lower().strip()
+                    # CRITICAL FIX: For preroll templates, use _group_key as PRIMARY differentiator
+                    # Since each product has a unique group_key (via product hash), this prevents ALL false deduplication
+                    if self.template_type == 'preroll':
+                        group_key = record.get('_group_key', '')
+                        if group_key:
+                            # For prerolls, group_key is the PRIMARY key - each unique group_key = unique product
+                            dedup_key = group_key
+                        else:
+                            # Fallback if _group_key is missing (shouldn't happen, but be safe)
+                            product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                            price = record.get('Price', '')
+                            weight = record.get('Weight', '') or record.get('NetWeight', '')
+                            vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+                            dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
+                    else:
+                        # For non-preroll templates, use standard deduplication
+                        product_name = record.get('ProductName', 'Unknown')
+                        price = record.get('Price', '')
+                        weight = record.get('Weight', '') or record.get('NetWeight', '')
+                        vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+                        dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
 
                     if dedup_key not in seen_products:
                         seen_products.add(dedup_key)
                         unique_records.append(record)
                     else:
                         duplicate_count += 1
-                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                        product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                        self.logger.warning(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (group_key: {record.get('_group_key', 'N/A')})")
 
                 if duplicate_count > 0:
                     self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
@@ -1395,20 +1417,28 @@ class TemplateProcessor:
                                 if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_vendor_cache[pname] = str(vendor).strip()
                             
-                            # Load lineage data (Lineage, canonical_lineage)
+                            # Load lineage data: sovereign_lineage > strain lineage > products.Lineage
+                            # CRITICAL: Use same COALESCE as app _align_tags_with_db_lineage and force-step
                             batch_lineage_query = f'''
-                                SELECT "Product Name*", "Lineage", canonical_lineage
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
+                                SELECT p."Product Name*",
+                                       COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
+                                                s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                                FROM products p
+                                LEFT JOIN strains s1 ON p.strain_id = s1.id
+                                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                                WHERE p."Product Name*" IN ({placeholders})
+                                ORDER BY p.id DESC
                             '''
                             cursor.execute(batch_lineage_query, product_names)
+                            seen = set()
                             for row_result in cursor.fetchall():
-                                pname, lineage, canon_lineage = row_result
-                                # Priority: Lineage > canonical_lineage
-                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(lineage).strip()
-                                elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_lineage_cache[pname] = str(canon_lineage).strip()
+                                pname, lineage = row_result
+                                if not pname or pname in seen:
+                                    continue
+                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
+                                    product_lineage_cache[pname] = str(lineage).strip().upper()
+                                    seen.add(pname)
                             
                             # Load JointRatio data
                             batch_joint_ratio_query = f'''
@@ -1424,23 +1454,24 @@ class TemplateProcessor:
                                 if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     joint_ratio_cache[pname] = str(joint_ratio).strip()
                             
-                            # Batch load strain info
+                            # Batch load strain info (sovereign_lineage > display_lineage > canonical_lineage)
                             if strain_names:
                                 strain_placeholders = ','.join(['?'] * len(strain_names))
                                 batch_strain_query = f'''
-                                    SELECT strain_name, display_lineage, canonical_lineage
+                                    SELECT strain_name, sovereign_lineage, display_lineage, canonical_lineage
                                     FROM strains
                                     WHERE strain_name IN ({strain_placeholders})
                                 '''
                                 cursor.execute(batch_strain_query, list(strain_names))
                                 for row_result in cursor.fetchall():
-                                    strain_name, display_lineage, canon_lineage = row_result
+                                    strain_name, sov_lineage, display_lineage, canon_lineage = row_result
                                     strain_info = {}
-                                    # Priority: display_lineage > canonical_lineage
-                                    if display_lineage and str(display_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['display_lineage'] = str(display_lineage).strip()
-                                    elif canon_lineage and str(canon_lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                        strain_info['canonical_lineage'] = str(canon_lineage).strip()
+                                    preferred = None
+                                    for val, key in [(sov_lineage, 'sovereign_lineage'), (display_lineage, 'display_lineage'), (canon_lineage, 'canonical_lineage')]:
+                                        if val and str(val).strip() not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
+                                            strain_info[key] = str(val).strip()
+                                            if preferred is None:
+                                                preferred = str(val).strip()
                                     if strain_info:
                                         strain_info_cache[strain_name] = strain_info
                         except Exception as batch_err:

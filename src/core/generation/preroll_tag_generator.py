@@ -932,6 +932,20 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
 
     # Note: Group items are already stored in cache above during grouping
     elapsed = time.time() - start_t
-    logging.info(f"PREROLL: Generated {len(grouped_records_list)} grouped labels (one per vendor per product category) from {original_count} originals in {elapsed:.3f}s")
+    # CRITICAL: Final verification before returning
+    final_count = len(grouped_records_list)
+    expected_count = len(grouped_records)
+    if final_count != expected_count:
+        logging.error(f"PREROLL CRITICAL ERROR: Returning {final_count} groups but {expected_count} were created! Missing {expected_count - final_count} groups!")
+        # Log missing group_keys
+        returned_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
+        all_keys = set(grouped_records.keys())
+        missing = all_keys - returned_keys
+        if missing:
+            logging.error(f"PREROLL CRITICAL ERROR: Missing group_keys (first 30): {list(missing)[:30]}")
+    else:
+        logging.info(f"PREROLL SUCCESS: Returning all {final_count} groups as expected")
+    
+    logging.info(f"PREROLL: Generated {final_count} grouped labels from {original_count} originals in {elapsed:.3f}s")
 
     return grouped_records_list
