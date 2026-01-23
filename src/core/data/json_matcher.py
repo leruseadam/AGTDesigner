@@ -7769,8 +7769,8 @@ class JSONMatcher:
         strain_variations = {
             'og': 'og kush',
             'kush': 'og kush',
-            'blue': 'blue dream',
-            'dream': 'blue dream',
+            # NOTE: removed aggressive single-token mappings for 'blue' and 'dream'
+            # to avoid biasing matches toward 'Blue Dream' for unrelated products.
             'sour': 'sour diesel',
             'diesel': 'sour diesel',
             'wedding': 'wedding cake',
