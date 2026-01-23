@@ -1008,11 +1008,31 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             group_keys_sample = list(grouped_records.keys())[:50]
             logging.debug(f"PREROLL GROUPING FINAL DEBUG: First 50 group keys: {group_keys_sample} (total: {len(grouped_records)})")
     
-    # Only log warnings/errors (not info for normal cases)
+    # CRITICAL: Always log if groups are lost - this is a serious issue
     if len(grouped_records_list) < len(grouped_records):
-        logging.warning(f"PREROLL: Lost {len(grouped_records) - len(grouped_records_list)} groups during processing!")
+        lost_count = len(grouped_records) - len(grouped_records_list)
+        logging.error(f"PREROLL CRITICAL: Lost {lost_count} groups during processing! Expected {len(grouped_records)} but only have {len(grouped_records_list)} representatives!")
+        # Log which groups are missing
+        returned_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
+        all_keys = set(grouped_records.keys())
+        missing_keys = all_keys - returned_keys
+        if missing_keys:
+            logging.error(f"PREROLL CRITICAL: Missing group_keys ({len(missing_keys)} total): {sorted(list(missing_keys))}")
+            # Log vendors for missing groups
+            missing_vendors = set()
+            for missing_key in missing_keys:
+                group_data = grouped_records.get(missing_key)
+                if group_data:
+                    for record in group_data.get('records', []):
+                        vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '') or ''
+                        if vendor:
+                            missing_vendors.add(str(vendor).strip())
+            if missing_vendors:
+                logging.error(f"PREROLL CRITICAL: Missing vendors from lost groups: {sorted(list(missing_vendors))}")
     elif len(grouped_records_list) > len(grouped_records):
         logging.warning(f"PREROLL: Created {len(grouped_records_list) - len(grouped_records)} extra groups (unexpected)!")
+    else:
+        logging.info(f"PREROLL: Successfully created representatives for all {len(grouped_records)} groups")
     
     # PERFORMANCE: Skip stats logging unless at debug level
     if logging.getLogger().isEnabledFor(logging.DEBUG):
