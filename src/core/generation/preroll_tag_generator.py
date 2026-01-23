@@ -255,12 +255,26 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # ALWAYS log input count at INFO level for debugging
     logging.info(f"PREROLL INPUT: Received {original_input_count} records for grouping")
     
+    # CRITICAL: Track ALL unique vendors in input BEFORE any filtering (for final comparison)
+    input_vendors = set()
+    input_vendor_counts = {}
+    
     # Log sample product names and vendors to verify input
     if records:
         sample_names = [r.get('Product Name*', r.get('ProductName', 'N/A')) for r in records[:5]]
         sample_vendors = [r.get('Vendor/Supplier*', r.get('Vendor', 'N/A')) for r in records[:5]]
         logging.info(f"PREROLL INPUT SAMPLE: First 5 products - Names: {sample_names}")
         logging.info(f"PREROLL INPUT SAMPLE: First 5 products - Vendors: {sample_vendors}")
+        
+        # CRITICAL: Log ALL unique vendors in input to track which vendors are being processed
+        for r in records:
+            vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+            if vendor and str(vendor).strip():
+                vendor_str = str(vendor).strip()
+                input_vendors.add(vendor_str)
+                input_vendor_counts[vendor_str] = input_vendor_counts.get(vendor_str, 0) + 1
+        logging.info(f"PREROLL INPUT: Found {len(input_vendors)} unique vendors in input: {sorted(list(input_vendors))}")
+        logging.info(f"PREROLL INPUT: Vendor product counts: {dict(sorted(input_vendor_counts.items(), key=lambda x: x[1], reverse=True))}")
     # DEBUG: Log PREROLL_ALLOWED_BRANDS status (only if filtering is active)
     if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
         if logging.getLogger().isEnabledFor(logging.DEBUG):
@@ -332,6 +346,15 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             excluded = original_count - len(records)
             sample_kept = [r.get('Product Name*', r.get('ProductName', '')) for r in records[:5]]
             logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} -> {len(records)} records (excluded {excluded})")
+            
+            # Log vendors after filtering
+            if excluded > 0:
+                vendors_after_filter = set()
+                for r in records:
+                    vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+                    if vendor:
+                        vendors_after_filter.add(str(vendor).strip())
+                logging.info(f"PREROLL BRAND FILTER: Vendors remaining after filter: {sorted(list(vendors_after_filter))}")
     # Skip logging when no filter is applied (common case)
     
     # NOTE: We'll populate session['preroll_original_records'] after grouping
@@ -440,17 +463,19 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # Log unique vendors/brands found in groups for debugging
     vendors_in_groups = set()
     brands_in_groups = set()
+    vendor_group_counts = {}  # Track how many groups each vendor has
     for group_key, group_data in grouped_records.items():
         for record in group_data['records']:
             vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '') or ''
             brand = record.get('Product Brand', '') or record.get('ProductBrand', '') or ''
             if vendor:
-                vendors_in_groups.add(str(vendor).strip())
+                vendor_str = str(vendor).strip()
+                vendors_in_groups.add(vendor_str)
+                vendor_group_counts[vendor_str] = vendor_group_counts.get(vendor_str, 0) + 1
             if brand:
                 brands_in_groups.add(str(brand).strip())
-    logging.info(f"PREROLL GROUPING: Found {len(vendors_in_groups)} unique vendors in groups: {sorted(list(vendors_in_groups))[:10]}")
-    if len(vendors_in_groups) > 10:
-        logging.info(f"PREROLL GROUPING: ... and {len(vendors_in_groups) - 10} more vendors")
+    logging.info(f"PREROLL GROUPING: Found {len(vendors_in_groups)} unique vendors in groups: {sorted(list(vendors_in_groups))}")
+    logging.info(f"PREROLL GROUPING: Vendor group counts: {dict(sorted(vendor_group_counts.items(), key=lambda x: x[1], reverse=True))}")
 
     # Step 2: Create representative records with group display names
     unique_records = []
@@ -508,25 +533,32 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             
             # CRITICAL FIX: Preserve vendor information in the representative record
             # This ensures each vendor's label shows their vendor name
-            # First try to get vendor from the representative record
-            vendor = (
-                representative.get('Vendor/Supplier*', '') or
-                representative.get('Vendor', '') or
-                representative.get('Vendor/Supplier', '') or
-                ''
-            )
-            if not vendor and '|' in group_key:
-                vendor = group_key.split('|', 1)[1]
+            # ALWAYS get vendor from actual records in the group (not from group_key which has normalized brand_key)
+            vendor = ''
+            for r in group_records_list:
+                v = (r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or r.get('Vendor/Supplier', '') or '')
+                if v and str(v).strip() and str(v).strip().lower() not in ['none', 'nan', '']:
+                    vendor = str(v).strip()
+                    break
+            
+            # Fallback: try representative record itself
             if not vendor:
-                for r in group_records_list:
-                    v = (r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or r.get('Vendor/Supplier', '') or '')
-                    if v and str(v).strip():
-                        vendor = str(v).strip()
-                        break
+                vendor = (
+                    representative.get('Vendor/Supplier*', '') or
+                    representative.get('Vendor', '') or
+                    representative.get('Vendor/Supplier', '') or
+                    ''
+                )
+                vendor = str(vendor).strip() if vendor else ''
+            
+            # CRITICAL: Always set vendor fields if we found one
             if vendor:
                 representative['Vendor/Supplier*'] = vendor
                 representative['Vendor'] = vendor
                 representative['ProductVendor'] = vendor
+                logging.debug(f"PREROLL: Set vendor '{vendor}' for group '{group_key}'")
+            else:
+                logging.warning(f"PREROLL: No vendor found for group '{group_key}' - group may not display correctly")
             
             # Keep the price from the first record (or could average/use min/max - using first for now)
             original_price = representative.get('Price', '')
@@ -811,9 +843,26 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # This guarantees every group_key has exactly one representative and preserves order.
     rep_by_key = {r.get('_group_key'): r for r in unique_records if r.get('_group_key')}
     final_grouped_records_list = []
+    
+    # CRITICAL DEBUG: Log all group keys and their representatives before rebuilding
+    logging.info(f"PREROLL FINAL REBUILD: Starting with {len(grouped_records)} groups, {len(unique_records)} unique_records, {len(rep_by_key)} representatives by key")
+    
     for group_key in grouped_records.keys():
         rep = rep_by_key.get(group_key)
         if rep:
+            # CRITICAL: Ensure vendor is preserved in the final representative
+            if not rep.get('Vendor/Supplier*') and not rep.get('Vendor'):
+                # Try to get vendor from group records
+                group_data = grouped_records.get(group_key)
+                if group_data:
+                    for r in group_data.get('records', []):
+                        vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+                        if vendor and str(vendor).strip():
+                            rep['Vendor/Supplier*'] = str(vendor).strip()
+                            rep['Vendor'] = str(vendor).strip()
+                            rep['ProductVendor'] = str(vendor).strip()
+                            logging.debug(f"PREROLL: Restored vendor '{vendor}' to representative for group '{group_key}'")
+                            break
             final_grouped_records_list.append(rep)
             continue
         try:
@@ -822,6 +871,18 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             group_info = group_data.get('group_info', {})
             if group_records_list:
                 new_rep = group_records_list[0].copy()
+                # CRITICAL: Preserve vendor in fallback representative
+                vendor = new_rep.get('Vendor/Supplier*', '') or new_rep.get('Vendor', '') or ''
+                if not vendor:
+                    for r in group_records_list:
+                        v = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+                        if v and str(v).strip():
+                            vendor = str(v).strip()
+                            break
+                if vendor:
+                    new_rep['Vendor/Supplier*'] = vendor
+                    new_rep['Vendor'] = vendor
+                    new_rep['ProductVendor'] = vendor
             else:
                 new_rep = {}
             group_display_name = group_info.get('display_name', 'Pre-Roll')
@@ -834,10 +895,17 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             new_rep['_group_id'] = group_info.get('group_id', group_key)
             new_rep['_group_key'] = group_key
             final_grouped_records_list.append(new_rep)
-            logging.warning(f"PREROLL GROUPING: Added missing representative for group '{group_key}'")
+            logging.warning(f"PREROLL GROUPING: Added missing representative for group '{group_key}' (vendor: '{vendor}')")
         except Exception as add_error:
             logging.error(f"PREROLL GROUPING: Failed to add representative for '{group_key}': {add_error}")
     grouped_records_list = final_grouped_records_list
+    
+    # CRITICAL: Log final vendor distribution
+    final_vendors = {}
+    for rep in grouped_records_list:
+        vendor = rep.get('Vendor/Supplier*', '') or rep.get('Vendor', '') or 'NO_VENDOR'
+        final_vendors[vendor] = final_vendors.get(vendor, 0) + 1
+    logging.info(f"PREROLL FINAL VENDOR DISTRIBUTION: {len(final_vendors)} unique vendors with representatives: {dict(sorted(final_vendors.items(), key=lambda x: x[1], reverse=True))}")
     
     # Verify all groups were processed
     if len(grouped_records_list) != len(grouped_records):
@@ -968,6 +1036,22 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     else:
         logging.info(f"PREROLL SUCCESS: Returning all {final_count} groups as expected")
     
+    # CRITICAL: Compare input vendors vs output vendors to identify missing vendors
+    output_vendors = set()
+    for rep in grouped_records_list:
+        vendor = rep.get('Vendor/Supplier*', '') or rep.get('Vendor', '') or ''
+        if vendor:
+            output_vendors.add(str(vendor).strip())
+    
+    # Compare input vendors (tracked at start) vs output vendors
+    if input_vendors:
+        missing_vendors = input_vendors - output_vendors
+        if missing_vendors:
+            logging.warning(f"PREROLL VENDOR WARNING: {len(missing_vendors)} vendors in input but NOT in output: {sorted(list(missing_vendors))}")
+        else:
+            logging.info(f"PREROLL VENDOR SUCCESS: All {len(input_vendors)} input vendors have representatives in output")
+    
     logging.info(f"PREROLL: Generated {final_count} grouped labels from {original_input_count} originals in {elapsed:.3f}s")
+    logging.info(f"PREROLL FINAL: Output contains {len(output_vendors)} unique vendors: {sorted(list(output_vendors))}")
 
     return grouped_records_list
