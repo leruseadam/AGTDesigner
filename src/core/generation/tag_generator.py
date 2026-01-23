@@ -901,8 +901,13 @@ def process_chunk(args):
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")
     
-    # CRITICAL FIX: Only create labels for the products we have, not empty slots
-    actual_num_labels = min(len(chunk), num_labels)
+    # CRITICAL FIX: For preroll, use ALL records in chunk (template expands to fit)
+    # For other templates, limit to num_labels to avoid empty slots
+    if orientation == "preroll":
+        actual_num_labels = len(chunk)  # Use all records - template will expand to 4x5 grid per chunk
+        logger.debug(f"🔧 PREROLL: Using all {actual_num_labels} records in chunk (template expands to fit)")
+    else:
+        actual_num_labels = min(len(chunk), num_labels)
     
     # OPTIMIZATION: Pre-load all lineage and strain data in batch to avoid N+1 queries
     # This reduces 200+ queries for 100 products to just 2-3 queries total
@@ -961,19 +966,18 @@ def process_chunk(args):
                     strain_list = list(strain_names)
                     placeholders = ','.join(['?'] * len(strain_list))
                     batch_strain_query = f'''
-                        SELECT strain_name, sovereign_lineage, display_lineage, canonical_lineage
+                        SELECT strain_name, sovereign_lineage, canonical_lineage
                         FROM strains
                         WHERE strain_name IN ({placeholders})
                     '''
                     cur.execute(batch_strain_query, strain_list)
                     for row_result in cur.fetchall():
                         sname = row_result[0]
-                        preferred = row_result[1] or row_result[2] or row_result[3]
+                        preferred = row_result[1] or row_result[2]
                         if preferred and str(preferred).strip().upper() != 'SOVEREIGN':
                             strain_info_cache[sname] = {
                                 'sovereign_lineage': row_result[1],
-                                'display_lineage': row_result[2],
-                                'canonical_lineage': row_result[3]
+                                'canonical_lineage': row_result[2]
                             }
                 except Exception as batch_strain_err:
                     logger.warning(f"Batch strain info query failed: {batch_strain_err}")
@@ -1212,11 +1216,11 @@ def process_chunk(args):
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
-                    # 2. Fallback: strain-level (sovereign_lineage > display_lineage > canonical_lineage)
+                    # 2. Fallback: strain-level (sovereign_lineage > canonical_lineage)
                     if (not lineage_val or lineage_val in ['MIXED', 'THC', '', None]) and product_strain:
                         strain_info = strain_info_cache.get(product_strain)
                         if strain_info:
-                            for key in ('sovereign_lineage', 'display_lineage', 'canonical_lineage'):
+                            for key in ('sovereign_lineage', 'canonical_lineage'):
                                 canon = strain_info.get(key)
                                 if canon and str(canon).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
                                     lineage_val = str(canon).strip().upper()

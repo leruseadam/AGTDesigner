@@ -1193,6 +1193,13 @@ class TemplateProcessor:
                     chunk = records[start:start + chunk_size]
                     chunks.append(chunk)
                 
+                # CRITICAL: Log chunking for preroll to debug
+                if self.template_type == 'preroll':
+                    self.logger.info(f"🔍 PREROLL CHUNKING: {len(records)} records -> {len(chunks)} chunks (chunk_size={chunk_size})")
+                    for i, chunk in enumerate(chunks):
+                        chunk_names = [r.get('Product Name*', r.get('ProductName', 'N/A')) for r in chunk[:3]]
+                        self.logger.info(f"🔍 PREROLL CHUNK {i+1}/{len(chunks)}: {len(chunk)} records, first 3: {chunk_names}")
+                
                 # Process chunks in parallel for better performance
                 if len(chunks) > 1:
                     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1220,7 +1227,10 @@ class TemplateProcessor:
                                 chunk_docs[idx] = None
                     
                     # Filter out None results and preserve order
-                    documents.extend([doc for doc in chunk_docs if doc is not None])
+                    valid_docs = [doc for doc in chunk_docs if doc is not None]
+                    documents.extend(valid_docs)
+                    if self.template_type == 'preroll':
+                        self.logger.info(f"🔍 PREROLL: Processed {len(valid_docs)}/{len(chunks)} chunks successfully")
                 else:
                     # Single chunk - process normally
                     self.chunk_count = 1
@@ -1237,7 +1247,13 @@ class TemplateProcessor:
                         # Don't add None to documents - let it fail gracefully
             
             if not documents: 
+                self.logger.error(f"❌ PREROLL ERROR: No documents generated! Expected {len(chunks) if 'chunks' in locals() else 1} document(s)")
                 return None
+            
+            # CRITICAL: Log document count for preroll
+            if self.template_type == 'preroll':
+                self.logger.info(f"🔍 PREROLL DOCUMENTS: Generated {len(documents)} document(s) from {len(records)} records")
+            
             if len(documents) == 1: 
                 return documents[0]
             
@@ -1295,8 +1311,11 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
                 elif self.template_type == 'double':
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                elif self.template_type == 'mini':
+                elif self.template_type in ['mini', 'preroll']:
+                    # CRITICAL: Preroll uses same 4x5 grid as mini - expand to fit all records in chunk
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
+                    if self.template_type == 'preroll':
+                        self.logger.info(f"🔍 PREROLL: Expanded template to 4x5 grid for {num_products} records in chunk")
                 
                 # Cache the expansion (create a copy since BytesIO is consumed)
                 if hasattr(self._expanded_template_buffer, 'getvalue'):
@@ -1441,8 +1460,13 @@ class TemplateProcessor:
             # Build context for each record in the chunk
             context = {}
             
-            # Determine required label count based on template type
-            if self.template_type == 'mini' or self.template_type == 'preroll':
+            # CRITICAL: For preroll, use ALL records in chunk (template expands to fit)
+            # For other fixed-grid templates, pad to required_labels
+            if self.template_type == 'preroll':
+                required_labels = len(chunk)  # Use all records - template expands to 4x5 grid per chunk
+                if self.template_type == 'preroll':
+                    self.logger.info(f"🔍 PREROLL: Building context for ALL {len(chunk)} records in chunk (template expands to fit)")
+            elif self.template_type == 'mini':
                 required_labels = 20  # Fixed grid: 4x5 = 20 labels
             elif self.template_type == 'double':
                 required_labels = 12  # Fixed grid: 3x4 = 12 labels
@@ -1480,13 +1504,15 @@ class TemplateProcessor:
                     vendor_from_record_debug = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor') or 'NOT_IN_RECORD'
                     self.logger.info(f"🔍 CONTEXT DEBUG Label{i+1} -> {product_name} (type: {product_type}) - ProductVendor in context: {product_vendor}, Vendor in record: '{vendor_from_record_debug}', _vendor_from_record: '{label_context.get('_vendor_from_record', 'NOT_SET')}'")
             
-            # For fixed-grid templates (mini, preroll, double, inventory), ensure all labels exist
-            # to prevent Jinja template errors when template references missing labels
-            if self.template_type in ['mini', 'preroll', 'double', 'inventory']:
+            # For fixed-grid templates (mini, double, inventory), pad with empty labels
+            # For preroll, template expands to fit all records, so no padding needed
+            if self.template_type in ['mini', 'double', 'inventory']:
                 empty_label_context = self._get_empty_label_context()
                 for i in range(len(chunk) + 1, required_labels + 1):
                     context[f'Label{i}'] = empty_label_context
                 self.logger.info(f"🔧 FIXED GRID: Created {len(chunk)} product labels + {required_labels - len(chunk)} empty labels = {required_labels} total for {self.template_type} template")
+            elif self.template_type == 'preroll':
+                self.logger.info(f"🔧 PREROLL: Created {len(chunk)} product labels (template expands to fit, no padding)")
             else:
                 # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
                 # This saves printer ink by not generating empty cells
