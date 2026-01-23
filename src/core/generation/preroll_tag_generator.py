@@ -776,16 +776,52 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # Log summary of grouping
     logging.info(f"PREROLL GROUPING SUMMARY: Input={original_input_count}, After brand filter={records_after_brand_filter}, Grouped={total_grouped}, Groups created={len(grouped_records)}")
     
-    # PERMANENT FIX: Since each product is in its own group (via product hash), 
-    # we should have exactly one representative per group - no recovery needed
-    # Simple verification that all groups have representatives
-    grouped_records_list = unique_records
+    # CRITICAL: Rebuild grouped_records_list directly from grouped_records to ensure ALL groups are included
+    # This guarantees that every group_key in grouped_records has a representative, preventing any loss
+    final_grouped_records_list = []
+    seen_group_keys = set()
+    
+    # First, add all existing representatives
+    for rep in unique_records:
+        rep_group_key = rep.get('_group_key', '')
+        if rep_group_key and rep_group_key in grouped_records:
+            final_grouped_records_list.append(rep)
+            seen_group_keys.add(rep_group_key)
+    
+    # Then, ensure every group_key has a representative (add missing ones)
+    for group_key in grouped_records.keys():
+        if group_key not in seen_group_keys:
+            try:
+                group_data = grouped_records[group_key]
+                group_records_list = group_data.get('records', [])
+                group_info = group_data.get('group_info', {})
+                
+                if group_records_list and len(group_records_list) > 0:
+                    new_rep = group_records_list[0].copy()
+                else:
+                    new_rep = {}
+                
+                # Use actual product name
+                actual_product_name = new_rep.get('Product Name*', new_rep.get('ProductName', group_info.get('display_name', 'Pre-Roll')))
+                new_rep['Product Name*'] = actual_product_name
+                new_rep['ProductName'] = actual_product_name
+                new_rep['Description'] = actual_product_name
+                new_rep['DescAndWeight'] = actual_product_name
+                new_rep['_group_id'] = group_info.get('group_id', group_key)
+                new_rep['_group_key'] = group_key
+                
+                final_grouped_records_list.append(new_rep)
+                seen_group_keys.add(group_key)
+                logging.warning(f"PREROLL GROUPING: Added missing representative for group '{group_key}'")
+            except Exception as add_error:
+                logging.error(f"PREROLL GROUPING: Failed to add representative for '{group_key}': {add_error}")
+    
+    grouped_records_list = final_grouped_records_list
     
     # Verify all groups were processed
     if len(grouped_records_list) != len(grouped_records):
         logging.error(f"PREROLL GROUPING ERROR: Created {len(grouped_records)} groups but only {len(grouped_records_list)} representatives!")
-        # This should never happen with product hash grouping, but log for debugging
-        processed_keys = {r.get('_group_key', '') for r in unique_records if r.get('_group_key')}
+        processed_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
         missing_keys = set(grouped_records.keys()) - processed_keys
         if missing_keys:
             logging.error(f"PREROLL GROUPING ERROR: Missing group_keys: {list(missing_keys)[:20]}")
