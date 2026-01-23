@@ -1204,7 +1204,29 @@ class TemplateProcessor:
                         preroll_vendors[vendor_str] = preroll_vendors.get(vendor_str, 0) + 1
                     self.logger.info(f"PREROLL TEMPLATE PROCESSOR: Received {len(records)} records with {len(preroll_vendors)} unique vendors: {sorted(preroll_vendors.keys())}")
                     self.logger.info(f"PREROLL TEMPLATE PROCESSOR: Vendor counts: {dict(sorted(preroll_vendors.items(), key=lambda x: x[1], reverse=True))}")
-                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: {len(records)} records -> {len(chunks)} chunks")
+                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: {len(records)} records -> {len(chunks)} chunks (chunk_size={chunk_size})")
+                    
+                    # CRITICAL: Log vendor distribution per chunk to identify missing vendors
+                    for chunk_idx, chunk in enumerate(chunks):
+                        chunk_vendors = {}
+                        for r in chunk:
+                            vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or 'NO_VENDOR'
+                            vendor_str = str(vendor).strip()
+                            chunk_vendors[vendor_str] = chunk_vendors.get(vendor_str, 0) + 1
+                        self.logger.info(f"PREROLL CHUNK {chunk_idx + 1}/{len(chunks)}: {len(chunk)} records, {len(chunk_vendors)} vendors: {sorted(chunk_vendors.keys())}")
+                    
+                    # Verify all vendors are in at least one chunk
+                    all_chunk_vendors = set()
+                    for chunk in chunks:
+                        for r in chunk:
+                            vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+                            if vendor:
+                                all_chunk_vendors.add(str(vendor).strip())
+                    missing_vendors = set(preroll_vendors.keys()) - all_chunk_vendors
+                    if missing_vendors:
+                        self.logger.error(f"PREROLL CRITICAL: {len(missing_vendors)} vendors in input but NOT in any chunk: {sorted(missing_vendors)}")
+                    else:
+                        self.logger.info(f"PREROLL VERIFICATION: All {len(preroll_vendors)} vendors present in chunks")
                 
                 # Process chunks in parallel for better performance
                 if len(chunks) > 1:
@@ -1228,13 +1250,29 @@ class TemplateProcessor:
                                 chunk_doc = future.result()
                                 chunk_docs[idx] = chunk_doc
                                 self.chunk_count += 1
-                                self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
+                                
+                                # CRITICAL: Log chunk completion with vendor info for preroll
+                                if self.template_type == 'preroll' and idx < len(chunks):
+                                    chunk = chunks[idx]
+                                    chunk_vendors = set()
+                                    for r in chunk:
+                                        vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+                                        if vendor:
+                                            chunk_vendors.add(str(vendor).strip())
+                                    self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed with {len(chunk_vendors)} vendors: {sorted(chunk_vendors)}")
+                                else:
+                                    self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
                             except Exception as e:
                                 self.logger.error(f"Error processing chunk {idx + 1}: {e}")
+                                import traceback
+                                self.logger.error(f"Chunk {idx + 1} error traceback: {traceback.format_exc()}")
                                 chunk_docs[idx] = None
                     
                     # Filter out None results and preserve order
                     valid_docs = [doc for doc in chunk_docs if doc is not None]
+                    failed_chunks = len(chunks) - len(valid_docs)
+                    if failed_chunks > 0:
+                        self.logger.error(f"PREROLL CRITICAL: {failed_chunks} chunks failed to process! This may cause missing vendors.")
                     documents.extend(valid_docs)
                 else:
                     # Single chunk - process normally
@@ -2073,53 +2111,69 @@ class TemplateProcessor:
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # Query database directly to avoid sativa hybrid override in get_product_lineage()
+                    # Query database directly using same COALESCE logic as batch query
+                    # CRITICAL FIX: Join with strains table to get strain-level lineage (sovereign_lineage, canonical_lineage)
+                    # This matches the batch query logic at line 1399-1408 for consistency
                     try:
                         conn = product_db._get_connection()
                         cursor = conn.cursor()
-                        # CRITICAL FIX: Query sovereign_lineage FIRST (manual edits have highest priority)
+                        # CRITICAL FIX: Use same COALESCE priority as batch query and _align_tags_with_db_lineage
+                        # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
+                        # Join with strains using multiple strategies (strain_id, normalized_product_strain, Product Strain name)
                         cursor.execute('''
-                            SELECT sovereign_lineage, "Lineage", "canonical_lineage"
-                            FROM products
-                            WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                            ORDER BY id DESC
+                            SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
+                                           s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage,
+                                   p.sovereign_lineage as product_sovereign,
+                                   s1.sovereign_lineage as strain1_sovereign,
+                                   s2.sovereign_lineage as strain2_sovereign,
+                                   s3.sovereign_lineage as strain3_sovereign,
+                                   s1.canonical_lineage as strain1_canonical,
+                                   s2.canonical_lineage as strain2_canonical,
+                                   s3.canonical_lineage as strain3_canonical,
+                                   p."Lineage" as product_lineage
+                            FROM products p
+                            LEFT JOIN strains s1 ON p.strain_id = s1.id
+                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                            WHERE p."Product Name*" = ? OR p.ProductName = ? OR p.normalized_name = ?
+                            ORDER BY p.id DESC
                             LIMIT 1
                         ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
                         result = cursor.fetchone()
-                        # Priority: sovereign_lineage > Lineage > canonical_lineage
                         # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
                         if result:
-                            # Check each field in priority order, rejecting "SOVEREIGN"
-                            for idx, field_name in [(0, 'sovereign_lineage'), (1, 'Lineage'), (2, 'canonical_lineage')]:
-                                if result[idx]:
-                                    lineage_str = str(result[idx]).strip().upper()
-                                    if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
-                                        db_lineage = lineage_str
-                                        self.logger.info(f"🔒 DOCX: Using {field_name} '{db_lineage}' for '{product_name}'")
-                                        break
+                            # COALESCE result is in first column (index 0)
+                            # Check individual fields to determine source for logging
+                            lineage_val = result[0]  # COALESCE result
+                            product_sovereign = result[1]
+                            strain1_sovereign = result[2]
+                            strain2_sovereign = result[3]
+                            strain3_sovereign = result[4]
+                            strain1_canonical = result[5]
+                            strain2_canonical = result[6]
+                            strain3_canonical = result[7]
+                            product_lineage = result[8]
+                            
+                            # Determine source for logging
+                            source = 'unknown'
+                            if product_sovereign and str(product_sovereign).strip().upper() not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
+                                source = 'product.sovereign_lineage'
+                            elif strain1_sovereign or strain2_sovereign or strain3_sovereign:
+                                source = 'strain.sovereign_lineage'
+                            elif strain1_canonical or strain2_canonical or strain3_canonical:
+                                source = 'strain.canonical_lineage'
+                            elif product_lineage:
+                                source = 'product.Lineage'
+                            
+                            if lineage_val and str(lineage_val).strip().upper() not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
+                                db_lineage = str(lineage_val).strip().upper()
+                                self.logger.info(f"🔒 DOCX: Using {source} '{db_lineage}' for '{product_name}'")
+                            else:
+                                db_lineage = None
                     except Exception as db_err:
                         self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
                         # Fallback to get_product_lineage if direct query fails
                         db_lineage = product_db.get_product_lineage(product_name)
-                    
-                    # If no product-level lineage, check strain-level lineage
-                    if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
-                        product_strain = record.get('Product Strain', '')
-                        if product_strain:
-                            strain_info = product_db.get_strain_info(product_strain)
-                            if strain_info:
-                                # Get strain lineage, rejecting "SOVEREIGN" as invalid
-                                strain_display = strain_info.get('display_lineage')
-                                strain_sovereign = strain_info.get('sovereign_lineage')
-                                strain_canonical = strain_info.get('canonical_lineage')
-                                
-                                # Filter out "SOVEREIGN" - it's a field name, not a lineage value
-                                valid_lineages = []
-                                for lin in [strain_display, strain_sovereign, strain_canonical]:
-                                    if lin and str(lin).strip().upper() != 'SOVEREIGN':
-                                        valid_lineages.append(str(lin).strip())
-                                
-                                db_lineage = valid_lineages[0] if valid_lineages else None
                     
                     # CRITICAL: Always use database lineage if available, never Excel
                     if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
