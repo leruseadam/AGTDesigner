@@ -15126,9 +15126,10 @@ def get_web_available_tags():
                 has_canonical = tag.get('canonical_lineage')
                 if has_sovereign or has_canonical:
                     # Tag has database lineage - check if all fields are already set correctly
-                    db_lineage = (has_sovereign or has_canonical).upper().strip()
-                    if (tag.get('currentLineage', '').upper().strip() == db_lineage and 
-                        tag.get('Lineage', '').upper().strip() == db_lineage):
+                    db_lineage = str(has_sovereign or has_canonical).strip().upper()
+                    current_lineage = str(tag.get('currentLineage', '')).strip().upper()
+                    excel_lineage = str(tag.get('Lineage', '')).strip().upper()
+                    if current_lineage == db_lineage and excel_lineage == db_lineage:
                         # All fields already match database lineage - skip normalization
                         simple_tags.append(tag)
                         continue
