@@ -9677,7 +9677,7 @@ def generate_labels():
         if records and not has_database:
             _enrichment_needed = True
             try:
-                store_name = session.get('current_store')
+                store_name = get_current_store_name() or session.get('current_store')
                 if store_name:
                     product_db = get_product_database(store_name)
                     if product_db:
@@ -9685,114 +9685,98 @@ def generate_labels():
                         products_to_enrich = []
                         strains_to_enrich = set()
                         enrichment_map = {}  # Maps record index to (product_name, strain_name)
-                    
-                    for idx, record in enumerate(records):
-                        # CRITICAL FIX: ALWAYS enrich ALL records with database lineage to ensure UI matches output
-                        # Database lineage (canonical_lineage/sovereign_lineage) is the source of truth
-                        product_name = record.get('ProductName') or record.get('Product Name*', '')
-                        product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
-                        if product_name:
-                            products_to_enrich.append(product_name)
-                            enrichment_map[idx] = (product_name, product_strain)
-                            if product_strain:
-                                strains_to_enrich.add(product_strain)
-                    
-                    if products_to_enrich or strains_to_enrich:
-                        # Batch query product lineages
-                        product_lineage_map = {}
-                        if products_to_enrich:
-                            try:
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
-                                unique_products = list(dict.fromkeys(products_to_enrich))
-                                placeholders = ','.join(['?'] * len(unique_products))
-                                # CRITICAL: Use same COALESCE as force-step / _align_tags (sovereign > strain > Lineage)
+                        for idx, record in enumerate(records):
+                            # CRITICAL FIX: ALWAYS enrich ALL records with database lineage to ensure UI matches output
+                            product_name = record.get('ProductName') or record.get('Product Name*', '')
+                            product_strain = record.get('Product Strain', '') or record.get('ProductStrain', '')
+                            if product_name:
+                                products_to_enrich.append(product_name)
+                                enrichment_map[idx] = (product_name, product_strain)
+                                if product_strain:
+                                    strains_to_enrich.add(product_strain)
+                        if products_to_enrich or strains_to_enrich:
+                            # Batch query product lineages
+                            product_lineage_map = {}
+                            if products_to_enrich:
+                                try:
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
+                                    unique_products = list(dict.fromkeys(products_to_enrich))
+                                    placeholders = ','.join(['?'] * len(unique_products))
+                                    batch_query = f'''
+                                        SELECT p."Product Name*",
+                                               COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
+                                                        s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                                        FROM products p
+                                        LEFT JOIN strains s1 ON p.strain_id = s1.id
+                                        LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
+                                        LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                                        WHERE p."Product Name*" IN ({placeholders})
+                                        ORDER BY p.id DESC
+                                    '''
+                                    cursor.execute(batch_query, unique_products)
+                                    seen = set()
+                                    for row in cursor.fetchall():
+                                        pname, lineage = row
+                                        if not pname or pname in seen:
+                                            continue
+                                        if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
+                                            lin_upper = str(lineage).strip().upper()
+                                            product_lineage_map[pname] = lin_upper
+                                            product_lineage_map[pname.lower().strip()] = lin_upper
+                                            try:
+                                                norm = product_db._normalize_product_name(pname)
+                                                if norm:
+                                                    product_lineage_map[norm] = lin_upper
+                                            except Exception:
+                                                pass
+                                            seen.add(pname)
+                                except Exception as batch_err:
+                                    logging.warning(f"Batch product lineage query failed: {batch_err}")
+                            strain_lineage_map = {}
+                            if strains_to_enrich:
+                                try:
+                                    conn = product_db._get_connection()
+                                    cursor = conn.cursor()
+                                    strain_list = list(strains_to_enrich)
+                                    placeholders = ','.join(['?'] * len(strain_list))
                                 batch_query = f'''
-                                    SELECT p."Product Name*",
-                                           COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
-                                                    s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
-                                    FROM products p
-                                    LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                    LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                                    LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                                    WHERE p."Product Name*" IN ({placeholders})
-                                    ORDER BY p.id DESC
-                                '''
-                                cursor.execute(batch_query, unique_products)
-                                seen = set()
-                                for row in cursor.fetchall():
-                                    pname, lineage = row
-                                    if not pname or pname in seen:
-                                        continue
-                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
-                                        lin_upper = str(lineage).strip().upper()
-                                        product_lineage_map[pname] = lin_upper
-                                        product_lineage_map[pname.lower().strip()] = lin_upper
-                                        try:
-                                            norm = product_db._normalize_product_name(pname)
-                                            if norm:
-                                                product_lineage_map[norm] = lin_upper
-                                        except Exception:
-                                            pass
-                                        seen.add(pname)
-                            except Exception as batch_err:
-                                logging.warning(f"Batch product lineage query failed: {batch_err}")
-                        
-                        # Batch query strain lineages (sovereign > display > canonical)
-                        strain_lineage_map = {}
-                        if strains_to_enrich:
-                            try:
-                                conn = product_db._get_connection()
-                                cursor = conn.cursor()
-                                strain_list = list(strains_to_enrich)
-                                placeholders = ','.join(['?'] * len(strain_list))
-                                batch_query = f'''
-                                    SELECT strain_name, sovereign_lineage, display_lineage, canonical_lineage
+                                    SELECT strain_name, sovereign_lineage, canonical_lineage
                                     FROM strains
                                     WHERE strain_name IN ({placeholders})
                                 '''
                                 cursor.execute(batch_query, strain_list)
                                 for row in cursor.fetchall():
                                     strain_name = row[0]
-                                    lineage = row[1] or row[2] or row[3]
+                                    lineage = row[1] or row[2]
                                     if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
                                         strain_lineage_map[strain_name] = str(lineage).strip().upper()
-                            except Exception as strain_err:
-                                logging.warning(f"Batch strain lineage query failed: {strain_err}")
-                        
-                        # Apply enriched lineage to records - ALWAYS overwrite with database lineage
-                        # PERFORMANCE: Batch update all records at once, minimal logging
-                        enriched_count = 0
-                        for idx, (product_name, product_strain) in enrichment_map.items():
-                            record = records[idx]
-                            db_lineage = None
-                            
-                            # Try product-level lineage (exact, lowercase, normalized)
-                            if product_name:
-                                db_lineage = (product_lineage_map.get(product_name) or
-                                              product_lineage_map.get(product_name.lower().strip()))
-                                if not db_lineage:
-                                    try:
-                                        norm = product_db._normalize_product_name(product_name)
-                                        if norm:
-                                            db_lineage = product_lineage_map.get(norm)
-                                    except Exception:
-                                        pass
-                            # Fall back to strain-level lineage
-                            if not db_lineage and product_strain and product_strain in strain_lineage_map:
-                                db_lineage = strain_lineage_map[product_strain]
-                            
-                            # CRITICAL FIX: ALWAYS overwrite with database lineage if it exists
-                            # PERFORMANCE: Skip logging in loop, only log summary
-                            if db_lineage:
-                                record['Lineage'] = db_lineage
-                                record['lineage'] = db_lineage.lower() if db_lineage else ''
-                                record['canonical_lineage'] = db_lineage
-                                record['sovereign_lineage'] = db_lineage  # DOCX checks sovereign first
-                                enriched_count += 1
-                        
-                        if enriched_count > 0:
-                            logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
+                                except Exception as strain_err:
+                                    logging.warning(f"Batch strain lineage query failed: {strain_err}")
+                            enriched_count = 0
+                            for idx, (product_name, product_strain) in enrichment_map.items():
+                                record = records[idx]
+                                db_lineage = None
+                                if product_name:
+                                    db_lineage = (product_lineage_map.get(product_name) or
+                                                  product_lineage_map.get(product_name.lower().strip()))
+                                    if not db_lineage:
+                                        try:
+                                            norm = product_db._normalize_product_name(product_name)
+                                            if norm:
+                                                db_lineage = product_lineage_map.get(norm)
+                                        except Exception:
+                                            pass
+                                if not db_lineage and product_strain and product_strain in strain_lineage_map:
+                                    db_lineage = strain_lineage_map[product_strain]
+                                if db_lineage:
+                                    record['Lineage'] = db_lineage
+                                    record['lineage'] = db_lineage.lower() if db_lineage else ''
+                                    record['canonical_lineage'] = db_lineage
+                                    record['sovereign_lineage'] = db_lineage
+                                    enriched_count += 1
+                            if enriched_count > 0:
+                                logging.info(f"✅ Batch enriched {enriched_count}/{len(records)} records with lineage (2 queries instead of {enriched_count})")
             except Exception as enrich_err:
                 logging.error(f"Lineage enrichment failed: {enrich_err}")
         else:

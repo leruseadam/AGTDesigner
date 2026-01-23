@@ -250,11 +250,17 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     """
     start_t = time.time()
 
-    # Track original count BEFORE any filtering
+    # CRITICAL: Track original count BEFORE any filtering
     original_input_count = len(records)
-    # Log input count (debug only)
-    if logging.getLogger().isEnabledFor(logging.DEBUG):
-        logging.debug(f"PREROLL: Received {original_input_count} records for grouping")
+    # ALWAYS log input count at INFO level for debugging
+    logging.info(f"PREROLL INPUT: Received {original_input_count} records for grouping")
+    
+    # Log sample product names and vendors to verify input
+    if records:
+        sample_names = [r.get('Product Name*', r.get('ProductName', 'N/A')) for r in records[:5]]
+        sample_vendors = [r.get('Vendor/Supplier*', r.get('Vendor', 'N/A')) for r in records[:5]]
+        logging.info(f"PREROLL INPUT SAMPLE: First 5 products - Names: {sample_names}")
+        logging.info(f"PREROLL INPUT SAMPLE: First 5 products - Vendors: {sample_vendors}")
     # DEBUG: Log PREROLL_ALLOWED_BRANDS status (only if filtering is active)
     if PREROLL_ALLOWED_BRANDS is not None and len(PREROLL_ALLOWED_BRANDS) > 0:
         if logging.getLogger().isEnabledFor(logging.DEBUG):
@@ -429,8 +435,22 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         logging.warning(f"PREROLL GROUP: Skipped {skipped_count} records with no product name")
 
     # CRITICAL: Log grouping results
-    if logging.getLogger().isEnabledFor(logging.DEBUG):
-        logging.debug(f"PREROLL: {original_input_count} input -> {len(grouped_records)} groups")
+    logging.info(f"PREROLL GROUPING COMPLETE: {original_input_count} input records -> {len(grouped_records)} unique groups")
+    
+    # Log unique vendors/brands found in groups for debugging
+    vendors_in_groups = set()
+    brands_in_groups = set()
+    for group_key, group_data in grouped_records.items():
+        for record in group_data['records']:
+            vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '') or ''
+            brand = record.get('Product Brand', '') or record.get('ProductBrand', '') or ''
+            if vendor:
+                vendors_in_groups.add(str(vendor).strip())
+            if brand:
+                brands_in_groups.add(str(brand).strip())
+    logging.info(f"PREROLL GROUPING: Found {len(vendors_in_groups)} unique vendors in groups: {sorted(list(vendors_in_groups))[:10]}")
+    if len(vendors_in_groups) > 10:
+        logging.info(f"PREROLL GROUPING: ... and {len(vendors_in_groups) - 10} more vendors")
 
     # Step 2: Create representative records with group display names
     unique_records = []
