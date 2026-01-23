@@ -361,18 +361,56 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 brand_key = brand_for_grouping.lower().replace(' ', '_')
         
         # CRITICAL FIX: Always include brand/vendor in group_key to ensure separate groups per vendor
-        # Even if brand_key is empty, use a fallback to ensure uniqueness
+        # CRITICAL FIX: For pack products, group by pack size only (don't include product name to avoid over-segmentation)
+        # For non-pack products, include product name prefix for more granular grouping
+        # This ensures products with different names get separate groups while still grouping similar products
+        
+        # Check if this is a pack product (group_id contains "pack")
+        is_pack_product = 'pack' in group_id.lower()
+        
+        # Extract the product name part before "by" for uniqueness (this is usually the strain/product name)
+        product_base = product_name_str
+        if ' by ' in product_name_str.lower():
+            product_base = product_name_str.split(' by ', 1)[0].strip()
+        
+        # Normalize product base for use in group key
+        product_base_key = re.sub(r'[^a-z0-9]+', '', product_base.lower())[:20]  # Use first 20 chars
+        
+        # Extract strain for additional granularity if available
+        strain = record.get('Product Strain', '') or record.get('Strain', '') or ''
+        strain_key = ''
+        if strain:
+            strain_key = re.sub(r'[^a-z0-9]+', '', str(strain).lower())[:15]
+        
+        # Build group_key with different granularity based on product type
+        key_parts = [group_id]
+        
         if brand_key:
-            group_key = f"{group_id}|{brand_key}"
-        else:
-            # Use product name as fallback to ensure uniqueness when no brand/vendor
-            product_name_key = re.sub(r'[^a-z0-9]+', '', product_name_str.lower())[:20]  # Limit length
-            if product_name_key:
-                group_key = f"{group_id}|{product_name_key}"
+            key_parts.append(brand_key)
+        
+        # For pack products: group by pack size + brand only (don't include product name to group all packs together)
+        # For non-pack products: include product name for more granularity
+        if not is_pack_product:
+            # Add product base for granularity (this differentiates products with same category/brand)
+            if product_base_key and product_base_key not in ['preroll', 'prerolls', 'pre', 'roll']:
+                key_parts.append(product_base_key)
+            
+            # Add strain if available for even more granularity
+            if strain_key:
+                key_parts.append(strain_key)
+        
+        group_key = '|'.join(key_parts)
+        
+        # Last resort: ensure we have at least group_id|something
+        if '|' not in group_key:
+            if brand_key:
+                group_key = f"{group_id}|{brand_key}"
+            elif product_base_key:
+                group_key = f"{group_id}|{product_base_key[:20]}"
             else:
                 # Last resort: use group_id with index to ensure uniqueness
                 group_key = f"{group_id}|unknown_{len(grouped_records)}"
-                logging.warning(f"PREROLL GROUP: Using fallback group_key '{group_key}' for product '{product_name}' (no brand/vendor/name found)")
+                logging.warning(f"PREROLL GROUP: Using fallback group_key '{group_key}' for product '{product_name}' (no brand/vendor/name/strain found)")
         
         if group_key not in grouped_records:
             grouped_records[group_key] = {
@@ -381,9 +419,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             }
         grouped_records[group_key]['records'].append(record)
         
-        # DEBUG: Log first few group keys to verify grouping logic
-        if len(grouped_records) <= 25 and logging.getLogger().isEnabledFor(logging.DEBUG):
-            logging.debug(f"PREROLL GROUPING DEBUG: Added record to group_key '{group_key}' (group_id: {group_id}, brand_key: {brand_key}, product: {product_name_str[:50]})")
+        # DEBUG: Log group keys to verify grouping logic (log first 30 groups)
+        if len(grouped_records) <= 30:
+            logging.info(f"PREROLL GROUPING DEBUG: Added record to group_key '{group_key}' (group_id: {group_id}, brand_key: {brand_key}, product: {product_name_str[:50]})")
+        elif len(grouped_records) == 31:
+            logging.info(f"PREROLL GROUPING DEBUG: Created 31+ groups, stopping detailed logging")
     
     if skipped_count > 0:
         logging.warning(f"PREROLL GROUP: Skipped {skipped_count} records with no product name")
