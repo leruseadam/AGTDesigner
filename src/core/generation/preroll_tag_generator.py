@@ -623,45 +623,45 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                         rep_lineage = str(candidate).strip()
                         break
             
-            # CRITICAL FIX: Normalize lineage for classic product types (MIXED -> HYBRID)
-            # Prerolls are classic types and should never have MIXED lineage
+            # CRITICAL FIX: Preserve original sovereign and canonical values (don't normalize them)
+            # Only normalize the final display lineage (Lineage field) for classic types
             if rep_lineage:
                 rep_lineage_upper = str(rep_lineage).strip().upper()
+                
                 # Check if this is a classic product type (prerolls are always classic)
                 product_type = representative.get('Product Type*', '').lower()
                 from src.core.constants import CLASSIC_TYPES
                 is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else True  # Default to True for prerolls
                 
+                # Normalize display lineage for classic types (MIXED -> HYBRID)
+                # BUT preserve original sovereign/canonical values
+                display_lineage = rep_lineage_upper
                 if is_classic_type and (rep_lineage_upper == 'MIXED' or rep_lineage_upper == 'THC'):
-                    logging.debug(f"PREROLL: Normalizing MIXED/THC lineage to HYBRID for classic type '{product_type}'")
-                    rep_lineage = 'HYBRID'
-                    rep_lineage_upper = 'HYBRID'
-            
-            # CRITICAL FIX: Set ALL lineage fields for consistency (matching DOCX generation priority)
-            # This ensures the representative has all lineage fields populated correctly
-            if rep_lineage:
-                rep_lineage_upper = str(rep_lineage).strip().upper()
-                representative['Lineage'] = rep_lineage_upper
-                representative['Lineage*'] = rep_lineage_upper
-                representative['lineage'] = rep_lineage_upper.lower()
-                representative['currentLineage'] = rep_lineage_upper
+                    logging.debug(f"PREROLL: Normalizing MIXED/THC display lineage to HYBRID for classic type '{product_type}'")
+                    display_lineage = 'HYBRID'
                 
-                # Preserve source fields correctly - don't overwrite canonical with sovereign
+                # Set display lineage fields (normalized)
+                representative['Lineage'] = display_lineage
+                representative['Lineage*'] = display_lineage
+                representative['lineage'] = display_lineage.lower()
+                representative['currentLineage'] = display_lineage
+                
+                # CRITICAL: Preserve original sovereign and canonical values (don't normalize them)
+                # These are used by template processor in priority order
                 if rep_sovereign:
-                    # Sovereign lineage (user edits) - highest priority
-                    representative['sovereign_lineage'] = rep_sovereign.upper()
-                    # Keep canonical_lineage if it exists, otherwise use sovereign
-                    if not rep_canonical:
-                        representative['canonical_lineage'] = rep_sovereign.upper()
-                    else:
-                        representative['canonical_lineage'] = rep_canonical.upper()
+                    # Preserve original sovereign_lineage (user edits - highest priority)
+                    representative['sovereign_lineage'] = str(rep_sovereign).strip().upper()
+                    # Preserve canonical_lineage if it exists (don't overwrite with sovereign)
+                    if rep_canonical:
+                        representative['canonical_lineage'] = str(rep_canonical).strip().upper()
+                    # Don't set canonical_lineage if we only have sovereign (let template processor handle it)
                 elif rep_canonical:
-                    # Canonical lineage from database - preserve it
-                    representative['canonical_lineage'] = rep_canonical.upper()
+                    # Preserve original canonical_lineage from database
+                    representative['canonical_lineage'] = str(rep_canonical).strip().upper()
                     # Don't set sovereign_lineage if it wasn't in source
                 else:
-                    # Excel lineage only - set canonical_lineage to match
-                    representative['canonical_lineage'] = rep_lineage_upper
+                    # Excel lineage only - set canonical_lineage to match (normalized)
+                    representative['canonical_lineage'] = display_lineage
 
             # Ensure representative preserves a sensible Brand value
             # PRIORITY 1: Extract brand from product name using "by BrandName -" pattern
