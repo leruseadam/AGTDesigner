@@ -302,9 +302,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             records = filtered_records
             excluded = original_count - len(records)
             sample_kept = [r.get('Product Name*', r.get('ProductName', '')) for r in records[:5]]
-            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} -> {len(records)} records (excluded {excluded}) matching allowed brands: {PREROLL_ALLOWED_BRANDS}. Sample kept: {sample_kept}")
-    else:
-        logging.info(f"PREROLL BRAND FILTER: PREROLL_ALLOWED_BRANDS is empty or None, allowing all brands (no filtering applied)")
+            logging.info(f"PREROLL BRAND FILTER: Filtered {original_count} -> {len(records)} records (excluded {excluded})")
+    # Skip logging when no filter is applied (common case)
     
     # NOTE: We'll populate session['preroll_original_records'] after grouping
     # so that the QR page references the full cached group items (not just
@@ -689,25 +688,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 }
                 group_items.append(item)
             
-            # PERFORMANCE FIX: Batch cache operations and reduce logging
-            # Store group items in cache using the full group_key (includes vendor) to avoid collisions
-            # This ensures each vendor's products are stored separately even if they have the same category
-            try:
-                # Batch cache operations - only store essential keys
-                cache.set(f"preroll_group_latest_{group_key}", group_items, timeout=86400)
-                cache.set(f"preroll_group_info_latest_{group_key}", group_info, timeout=86400)
-                # Store with session key only if session_id is not 'default' (avoid redundant storage)
-                if session_id != 'default':
-                    cache.set(f"preroll_group_{session_id}_{group_key}", group_items, timeout=86400)
-                    cache.set(f"preroll_group_info_{session_id}_{group_key}", group_info, timeout=86400)
-                # Store with original group_id for backward compatibility (only if different from group_key)
-                if original_group_id != group_key:
-                    cache.set(f"preroll_group_latest_{original_group_id}", group_items, timeout=86400)
-                    cache.set(f"preroll_group_info_latest_{original_group_id}", group_info, timeout=86400)
-            except Exception as cache_error:
-                logging.warning(f"PREROLL: Cache error (non-fatal): {cache_error}")
-            
-            # PERFORMANCE: Collect for batch database write at the end
+            # PERFORMANCE: Collect for batch database and cache writes at the end
             # Store group info for batch write (much faster than 322 individual writes)
             groups_for_db_batch.append((group_key, original_group_id, group_items, group_info))
         
