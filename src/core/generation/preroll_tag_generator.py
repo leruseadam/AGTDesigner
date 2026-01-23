@@ -712,10 +712,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                         minimal_rep['Description'] = minimal_rep['Product Name*']
                         minimal_rep['_group_id'] = original_group_id
                         minimal_rep['_group_key'] = group_key
-                    unique_records.append(minimal_rep)
-                    processed_group_keys_set.add(group_key)
-                    groups_processed += 1
-                    logging.warning(f"PREROLL GROUP: Created minimal representative for group '{group_key}' after error")
+                        unique_records.append(minimal_rep)
+                        processed_group_keys_set.add(group_key)
+                        groups_processed += 1
+                        logging.warning(f"PREROLL GROUP: Created minimal representative for group '{group_key}' after error")
                     else:
                         logging.error(f"PREROLL GROUP ERROR: Group '{group_key}' has no records to create representative from")
                 else:
