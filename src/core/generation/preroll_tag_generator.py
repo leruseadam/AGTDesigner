@@ -388,15 +388,19 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         if brand_key:
             key_parts.append(brand_key)
         
+        # CRITICAL FIX: For non-pack products, only add product name/strain if they're significantly different
+        # Don't over-segment products that should be grouped together (e.g., same strain, different descriptions)
         # For pack products: group by pack size + brand only (don't include product name to group all packs together)
-        # For non-pack products: include product name for more granularity
         if not is_pack_product:
-            # Add product base for granularity (this differentiates products with same category/brand)
-            if product_base_key and product_base_key not in ['preroll', 'prerolls', 'pre', 'roll']:
-                key_parts.append(product_base_key)
+            # Only add product base if it's meaningful (not generic preroll terms)
+            # This prevents over-segmentation while still differentiating distinct products
+            if product_base_key and product_base_key not in ['preroll', 'prerolls', 'pre', 'roll', 'assorted', 'mixed']:
+                # Only add if product_base is substantial (more than 3 chars) to avoid tiny variations
+                if len(product_base_key) > 3:
+                    key_parts.append(product_base_key)
             
-            # Add strain if available for even more granularity
-            if strain_key:
+            # Only add strain if it's available and meaningful (not empty/generic)
+            if strain_key and len(strain_key) > 2:
                 key_parts.append(strain_key)
         
         group_key = '|'.join(key_parts)
@@ -795,18 +799,23 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         grouped_records_list = unique_records
     
     logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups (one label per vendor per category)")
-    # DEBUG: Log group keys for first 30 groups to help debug
-    if len(grouped_records) <= 30:
-        group_keys_sample = list(grouped_records.keys())[:30]
-        logging.info(f"PREROLL GROUPING FINAL DEBUG: Group keys created: {group_keys_sample}")
+    # DEBUG: Log group keys for first 50 groups to help debug
+    if len(grouped_records) <= 50:
+        group_keys_sample = list(grouped_records.keys())[:50]
+        logging.info(f"PREROLL GROUPING FINAL DEBUG: All {len(grouped_records)} group keys created: {group_keys_sample}")
     else:
-        group_keys_sample = list(grouped_records.keys())[:30]
-        logging.info(f"PREROLL GROUPING FINAL DEBUG: First 30 group keys: {group_keys_sample} (total: {len(grouped_records)})")
+        group_keys_sample = list(grouped_records.keys())[:50]
+        logging.info(f"PREROLL GROUPING FINAL DEBUG: First 50 group keys: {group_keys_sample} (total: {len(grouped_records)})")
     # DEBUG: Log if we're losing groups
     if len(grouped_records_list) < len(grouped_records):
         logging.warning(f"PREROLL GROUPING WARNING: Lost {len(grouped_records) - len(grouped_records_list)} groups during processing!")
     elif len(grouped_records_list) > len(grouped_records):
         logging.warning(f"PREROLL GROUPING WARNING: Created {len(grouped_records_list) - len(grouped_records)} extra groups (unexpected)!")
+    
+    # CRITICAL DEBUG: Log group counts by type to understand grouping
+    pack_groups = sum(1 for k in grouped_records.keys() if 'pack' in k.lower())
+    non_pack_groups = len(grouped_records) - pack_groups
+    logging.info(f"PREROLL GROUPING STATS: {pack_groups} pack groups, {non_pack_groups} non-pack groups (total: {len(grouped_records)})")
     
     # Log summary only (reduce logging overhead)
     if grouped_records_list and logging.getLogger().isEnabledFor(logging.DEBUG):
