@@ -622,20 +622,25 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     else:
         logging.info(f"PREROLL GROUPING: All {original_count} records successfully grouped into {len(grouped_records)} groups")
     
-    # Deduplicate final grouped representatives by normalized display name
+    # Deduplicate final grouped representatives by normalized display name AND vendor/group_key
+    # CRITICAL FIX: Include _group_key in dedup key to preserve vendor-specific groups
+    # Without this, "Assorted Pre-Roll - 0.5g x 7 Packs" from different vendors would collapse to just one
     deduped = []
-    seen_names = set()
+    seen_keys = set()
     for rep in unique_records:
         pname = (rep.get('ProductName') or rep.get('Product Name*') or rep.get('Description') or '').strip()
-        pname_key = re.sub(r'[^a-z0-9]+', '', pname.lower()) if pname else None
-        if pname_key and pname_key in seen_names:
-            logging.debug(f"PREROLL DEDUP: Skipping duplicate representative '{pname}'")
+        pname_key = re.sub(r'[^a-z0-9]+', '', pname.lower()) if pname else ''
+        # CRITICAL: Include group_key (which contains vendor) in the dedup key
+        group_key = rep.get('_group_key', '')
+        dedup_key = f"{pname_key}|{group_key}"
+        if dedup_key in seen_keys:
+            logging.debug(f"PREROLL DEDUP: Skipping duplicate representative '{pname}' (group_key: {group_key})")
             continue
-        if pname_key:
-            seen_names.add(pname_key)
+        seen_keys.add(dedup_key)
         deduped.append(rep)
 
     grouped_records_list = deduped
+    logging.info(f"PREROLL DEDUP: {len(unique_records)} unique records -> {len(deduped)} after deduplication (by name+vendor)")
     logging.info(f"PREROLL GROUPING: Grouped {original_count} records into {len(grouped_records_list)} product groups (one label per vendor per category)")
     
     # Store group IDs in session for later retrieval when creating list document
