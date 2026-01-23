@@ -127,17 +127,26 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     if pack_match:
         weight = pack_match.group(1)
         count = pack_match.group(2)
-        # Normalize weight display (handle .5g -> 0.5g, but keep 0.5g as 0.5g)
-        if weight.startswith('.'):
-            # ".5" -> "0.5"
-            weight_display = '0' + weight
-        else:
-            # "0.5" stays "0.5", "1" stays "1"
-            weight_display = weight
+        # Normalize weight display (handle .5g -> 0.5g, preserve leading zero)
+        try:
+            wf = float(weight)
+            # Format: keep integer as "1", decimals as minimal (0.6)
+            if wf.is_integer():
+                weight_display = str(int(wf))
+            else:
+                # Remove trailing zeros, preserve leading zero before decimal
+                weight_display = ('{:.3f}'.format(wf)).rstrip('0').rstrip('.')
+        except Exception:
+            # Fallback to original string but ensure leading zero for '.x'
+            if weight.startswith('.'):
+                weight_display = '0' + weight
+            else:
+                weight_display = weight
         # Include the word "Pre-Roll" in the display name so grouped
         # pack labels clearly indicate they are prerolls.
+        # Use normalized weight_display in group id to avoid duplicates like '0.6g' vs '6g'
         return {
-            'group_id': f'{weight}g-{count}pack',
+            'group_id': f'{weight_display}g-{count}pack',
             'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
             'category': f'{weight_display}g x {count} Packs'
         }
@@ -156,10 +165,18 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
         if weight_match:
             weight = weight_match.group(1)
+            try:
+                wf = float(weight)
+                if wf.is_integer():
+                    weight_display = str(int(wf))
+                else:
+                    weight_display = ('{:.3f}'.format(wf)).rstrip('0').rstrip('.')
+            except Exception:
+                weight_display = weight if not weight.startswith('.') else ('0' + weight)
             return {
-                'group_id': f'infused-preroll-{weight}g',
-                'display_name': f'Infused Pre-Roll - {weight}g',
-                'category': f'Infused Pre-Roll - {weight}g'
+                'group_id': f'infused-preroll-{weight_display}g',
+                'display_name': f'Infused Pre-Roll - {weight_display}g',
+                'category': f'Infused Pre-Roll - {weight_display}g'
             }
         else:
             return {
@@ -173,10 +190,18 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
         if weight_match:
             weight = weight_match.group(1)
+            try:
+                wf = float(weight)
+                if wf.is_integer():
+                    weight_display = str(int(wf))
+                else:
+                    weight_display = ('{:.3f}'.format(wf)).rstrip('0').rstrip('.')
+            except Exception:
+                weight_display = weight if not weight.startswith('.') else ('0' + weight)
             return {
-                'group_id': f'preroll-{weight}g',
-                'display_name': f'Pre-Roll - {weight}g',
-                'category': f'Pre-Roll - {weight}g'
+                'group_id': f'preroll-{weight_display}g',
+                'display_name': f'Pre-Roll - {weight_display}g',
+                'category': f'Pre-Roll - {weight_display}g'
             }
         # If no weight found but it's still a preroll, continue to pattern matching below
         # This ensures prerolls without weights still get grouped
