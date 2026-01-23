@@ -886,7 +886,33 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         logging.info(f"PREROLL GROUPING: All {len(grouped_records)} groups have representatives. Total: {len(unique_records)}")
         grouped_records_list = unique_records
     
-    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups (one label per vendor per category)")
+    # CRITICAL FINAL CHECK: Ensure every group_key has a representative
+    final_processed_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
+    final_missing = set(grouped_records.keys()) - final_processed_keys
+    if final_missing:
+        logging.error(f"PREROLL GROUPING CRITICAL ERROR: After all processing, {len(final_missing)} groups are still missing! Missing keys: {list(final_missing)[:30]}")
+        # Force add all missing groups
+        for missing_key in final_missing:
+            try:
+                missing_data = grouped_records[missing_key]
+                missing_records = missing_data.get('records', [])
+                missing_info = missing_data.get('group_info', {})
+                if missing_records:
+                    force_rep = missing_records[0].copy()
+                else:
+                    force_rep = {}
+                force_rep['Product Name*'] = f"{missing_info.get('display_name', 'Pre-Roll')} ({missing_key.split('|')[-1] if '|' in missing_key else missing_key})"
+                force_rep['ProductName'] = force_rep['Product Name*']
+                force_rep['Description'] = missing_info.get('display_name', 'Pre-Roll')
+                force_rep['_group_id'] = missing_info.get('group_id', missing_key)
+                force_rep['_group_key'] = missing_key
+                grouped_records_list.append(force_rep)
+                logging.warning(f"PREROLL GROUPING: Force-added missing group '{missing_key}'")
+            except Exception as force_error:
+                logging.error(f"PREROLL GROUPING: Failed to force-add group '{missing_key}': {force_error}")
+        logging.info(f"PREROLL GROUPING: After force-adding missing groups, total is now {len(grouped_records_list)}")
+    
+    logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups (one label per group_key)")
     # DEBUG: Log group keys for first 50 groups to help debug
     if len(grouped_records) <= 50:
         group_keys_sample = list(grouped_records.keys())[:50]
