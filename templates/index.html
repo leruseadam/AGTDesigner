@@ -10903,72 +10903,67 @@
   </script>
   
   <!-- JSON Match Modal -->
+  <style>
+    /* Tighter, cleaner JSON modal styles */
+    #jsonMatchModal .modal-body { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); }
+    #jsonMatchModal .input-group .form-control { border-right: 0; }
+    #jsonMatchModal .json-actions { gap: .5rem; }
+    #matchedProductsList { background: rgba(255,255,255,0.03); border-radius: .5rem; }
+    #jsonMatchModal .modal-title svg { vertical-align: -3px; }
+  </style>
+
   <div class="modal fade" id="jsonMatchModal" tabindex="-1" aria-labelledby="jsonMatchModalLabel" inert>
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content">
-        <div class="modal-header border-0">
-          <h5 class="modal-title" id="jsonMatchModalLabel">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">
+        <div class="modal-header border-0 bg-transparent">
+          <h5 class="modal-title d-flex align-items-center" id="jsonMatchModalLabel">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
-            JSON Product Matching
+            <span class="fs-5">JSON Product Matching</span>
           </h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close JSON match modal"></button>
         </div>
-        <div class="modal-body">
-          <div class="mb-4">
-            <h6 class="text-info mb-3">🔗 Match Products from JSON URL</h6>
-            <p class="mb-3">Paste a JSON URL containing inventory transfer data to automatically match and select products from your loaded Excel file.</p>
-            
-            <div class="mb-3">
-              <label for="jsonUrlInput" class="form-label">JSON URL:</label>
-              <input type="url" class="form-control form-control-modern" id="jsonUrlInput" 
-                     placeholder="https://example.com/inventory-transfer.json" 
-                     autocomplete="off" required>
-              <div class="form-text">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
-            </div>
-            
-            <button type="button" class="btn btn-modern2" onclick="performJsonMatch()">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              Quick Match
-            </button>
-            
-            <button type="button" class="btn btn-outline-primary ms-2" onclick="performDetailedJsonMatch()">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-                <path d="M9 11l3 3L22 4"></path>
-                <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"></path>
-              </svg>
-              Detailed Match & Review
-            </button>
-             
-             <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="testStrainSearch()" title="Test strain search API">
-               <i class="bi bi-bug me-1"></i>Test API
-             </button>
-            
+        <div class="modal-body p-4">
+          <div class="row align-items-center mb-3">
+            <div class="col-md-8">
+              <div class="mb-1 text-muted">🔗 Match Products from JSON URL</div>
+              <p class="small text-muted mb-2">Paste a JSON URL containing inventory transfer data to automatically match and select products from your loaded Excel file.</p>
 
-          </div>
-          
-          <div id="jsonMatchResults" class="d-none">
-            <h6 class="text-success mb-3">✅ Matching Results</h6>
-            <div class="alert alert-success">
-              <strong id="matchCount">0</strong> products matched and selected
+              <div class="input-group mb-2">
+                <input type="url" class="form-control form-control-lg" id="jsonUrlInput" placeholder="https://example.com/inventory-transfer.json" autocomplete="off" required>
+                <button class="btn btn-primary btn-lg" type="button" onclick="performJsonMatch()">Quick Match</button>
+                <button class="btn btn-outline-secondary btn-lg" type="button" onclick="performDetailedJsonMatch()">Detailed Review</button>
+              </div>
+              <div class="text-muted small">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
             </div>
-            <div class="mb-3">
-              <label class="form-label">Matched Products:</label>
-              <div id="matchedProductsList" class="border rounded p-3" style="max-height: 500px; overflow-y: auto; background: rgba(255,255,255,0.1);">
-                <!-- Matched products will be listed here -->
+            <div class="col-md-4 text-md-end mt-3 mt-md-0">
+              <div class="d-inline-flex json-actions">
+                <button type="button" class="btn btn-outline-info" onclick="testStrainSearch()" title="Test strain search API"><i class="bi bi-bug me-1"></i>Test API</button>
+                <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
               </div>
             </div>
           </div>
-        </div>
-        <div class="modal-footer border-0">
-          <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
+
+          <div id="jsonMatchResults" class="d-none mt-3">
+            <div class="card shadow-sm">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="mb-0 text-success">✅ Matching Results</h6>
+                  <small class="text-muted">Results update live as matching completes</small>
+                </div>
+                <div class="alert alert-success py-2">
+                  <strong id="matchCount">0</strong> products matched and selected
+                </div>
+                <label class="form-label">Matched Products:</label>
+                <div id="matchedProductsList" class="border rounded p-3" style="max-height: 420px; overflow-y: auto;">
+                  <!-- Matched products will be listed here -->
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
