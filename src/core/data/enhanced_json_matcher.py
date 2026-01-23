@@ -61,9 +61,11 @@ except Exception as _e:
     # Module-level synonyms map to canonicalize common product type tokens
     SYNONYM_MAP = {
         'vaporizer': 'disposable vape',
-        'vape pen': 'vape',
+        'vape pen': 'disposable vape',
         'disposable vape': 'disposable vape',
-        'disposable': 'disposable',
+        'disposable': 'disposable vape',
+        'aio': 'disposable vape',
+        'all in one': 'disposable vape',
     }
 
     def apply_synonyms(text: str) -> str:
@@ -1564,6 +1566,11 @@ class EnhancedJSONMatcher:
             text_syn = apply_synonyms(str(text))
         except Exception:
             text_syn = str(text)
+        # Extra safety replacements for common tokens that should canonicalize
+        try:
+            text_syn = re.sub(r"\b(disposable|aio|all\s+in\s+one)\b", 'disposable vape', text_syn, flags=re.IGNORECASE)
+        except Exception:
+            pass
 
         # Remove special characters, normalize whitespace
         normalized = re.sub(r'[^\w\s-]', '', text_syn.lower())
@@ -1876,18 +1883,37 @@ class EnhancedJSONMatcher:
                     partial_score = fuzz.partial_ratio(json_name, db_name) / 100.0
                     token_set_score = fuzz.token_set_ratio(json_name, db_name) / 100.0
 
-                    # Exact overlap / synonym boost: if normalized token sets overlap fully
+                    # Exact overlap / synonym boost: if normalized token sets overlap strongly
                     norm_json = self._normalize_text(json_name)
                     norm_db = self._normalize_text(db_name)
                     json_tokens = set(re.findall(r"\w+", norm_json))
                     db_tokens = set(re.findall(r"\w+", norm_db))
                     overlap_boost = 0.0
-                    # If one side's tokens are subset of the other, that's a strong indicator
-                    if json_tokens and db_tokens and (json_tokens.issubset(db_tokens) or db_tokens.issubset(json_tokens)):
-                        overlap_boost = 0.25
                     # If normalized strings are identical (including synonyms), treat as near-exact
                     if norm_json == norm_db:
-                        overlap_boost = max(overlap_boost, 0.45)
+                        overlap_boost = max(overlap_boost, 0.5)
+                    # If one side's tokens are subset of the other, that's a strong indicator
+                    if json_tokens and db_tokens and (json_tokens.issubset(db_tokens) or db_tokens.issubset(json_tokens)):
+                        overlap_boost = max(overlap_boost, 0.35)
+                    # Jaccard similarity boost for strong token overlap
+                    if json_tokens and db_tokens:
+                        inter = json_tokens.intersection(db_tokens)
+                        union = json_tokens.union(db_tokens)
+                        jaccard = len(inter) / len(union) if union else 0.0
+                        if jaccard >= 0.8:
+                            overlap_boost = max(overlap_boost, 0.45)
+                        elif jaccard >= 0.6:
+                            overlap_boost = max(overlap_boost, 0.30)
+                    # Domain heuristic: prioritize matches mentioning 'live'+'resin' together
+                    try:
+                        if {'live', 'resin'}.issubset(json_tokens) and {'live', 'resin'}.issubset(db_tokens):
+                            # If both mention live resin and both mention disposable/vape, it's a strong match
+                            if any(tok in json_tokens for tok in ('disposable','vape')) or any(tok in db_tokens for tok in ('disposable','vape')):
+                                overlap_boost = max(overlap_boost, 0.45)
+                            else:
+                                overlap_boost = max(overlap_boost, 0.25)
+                    except Exception:
+                        pass
                     
                     # Weighted combination of different fuzzy metrics
                     final_score = (
