@@ -488,7 +488,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     if len(grouped_records) <= 30:  # Only log if reasonable number of groups
         group_keys_list = list(grouped_records.keys())
         logging.info(f"PREROLL GROUPING DEBUG: Created {len(group_keys_list)} groups with keys: {group_keys_list}")
-    # Group keys logging removed (too verbose)
+    else:
+        # Log first 30 and last 10 for large batches
+        group_keys_list = list(grouped_records.keys())
+        logging.info(f"PREROLL GROUPING DEBUG: Created {len(group_keys_list)} groups. First 30: {group_keys_list[:30]}, Last 10: {group_keys_list[-10:]}")
     
     # CRITICAL: Track which groups are processed to ensure none are lost
     processed_group_keys_set = set()
@@ -496,7 +499,11 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     # PERFORMANCE: Collect groups for batch database write
     groups_for_db_batch = []
     
-    for group_key, group_data in grouped_records.items():
+    # CRITICAL: Log progress for large batches
+    total_groups = len(grouped_records)
+    logging.info(f"PREROLL GROUPING: Starting to process {total_groups} groups to create representatives...")
+    
+    for idx, (group_key, group_data) in enumerate(grouped_records.items(), 1):
         try:
             group_info = group_data['group_info']
             group_records_list = group_data['records']
@@ -719,6 +726,10 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             processed_group_keys_set.add(group_key)
             groups_processed += 1
             
+            # CRITICAL: Log progress for large batches (every 10 groups)
+            if total_groups > 20 and idx % 10 == 0:
+                logging.info(f"PREROLL GROUPING PROGRESS: Processed {idx}/{total_groups} groups ({groups_processed} successful, {groups_failed} failed)")
+            
             # Store items for this group in cache (for QR code page) - use ALL original records
             # But filter by allowed brands if configured
             group_items = []
@@ -818,6 +829,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     else:
         logging.info(f"PREROLL GROUPING: All {groups_processed} groups successfully processed")
     
+    # CRITICAL: Verify we processed all groups
+    if groups_processed + groups_failed != total_groups:
+        logging.error(f"PREROLL GROUPING CRITICAL: Expected to process {total_groups} groups but only processed {groups_processed + groups_failed} (processed: {groups_processed}, failed: {groups_failed})")
+        missing_from_processing = set(grouped_records.keys()) - processed_group_keys_set
+        if missing_from_processing:
+            logging.error(f"PREROLL GROUPING CRITICAL: {len(missing_from_processing)} groups were never processed! Missing keys: {sorted(list(missing_from_processing))[:30]}")
+    
     # CRITICAL DEBUG: Log the actual count of unique_records vs grouped_records
     if logging.getLogger().isEnabledFor(logging.DEBUG):
         logging.debug(f"PREROLL: {len(unique_records)} unique records, {len(grouped_records)} groups, {groups_processed} processed")
@@ -860,6 +878,15 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     
     # CRITICAL DEBUG: Log all group keys and their representatives before rebuilding
     logging.info(f"PREROLL FINAL REBUILD: Starting with {len(grouped_records)} groups, {len(unique_records)} unique_records, {len(rep_by_key)} representatives by key")
+    
+    # CRITICAL: Log which group_keys are in unique_records vs which are in grouped_records
+    unique_record_keys = {r.get('_group_key') for r in unique_records if r.get('_group_key')}
+    all_group_keys = set(grouped_records.keys())
+    missing_from_unique = all_group_keys - unique_record_keys
+    if missing_from_unique:
+        logging.warning(f"PREROLL REBUILD: {len(missing_from_unique)} groups missing from unique_records (will use fallback): {sorted(list(missing_from_unique))[:20]}")
+    else:
+        logging.info(f"PREROLL REBUILD: All {len(all_group_keys)} groups have representatives in unique_records")
     
     for group_key in grouped_records.keys():
         rep = rep_by_key.get(group_key)
@@ -927,10 +954,20 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         processed_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
         missing_keys = set(grouped_records.keys()) - processed_keys
         if missing_keys:
-            logging.error(f"PREROLL GROUPING ERROR: Missing group_keys: {list(missing_keys)[:20]}")
+            logging.error(f"PREROLL GROUPING ERROR: Missing group_keys ({len(missing_keys)} total): {sorted(list(missing_keys))}")
+            # Log vendors for missing groups to help identify which vendors are being lost
+            missing_vendors = set()
+            for missing_key in missing_keys:
+                group_data = grouped_records.get(missing_key)
+                if group_data:
+                    for record in group_data.get('records', []):
+                        vendor = record.get('Vendor/Supplier*', '') or record.get('Vendor', '') or ''
+                        if vendor:
+                            missing_vendors.add(str(vendor).strip())
+            if missing_vendors:
+                logging.error(f"PREROLL GROUPING ERROR: Missing vendors from lost groups: {sorted(list(missing_vendors))}")
     else:
-        if logging.getLogger().isEnabledFor(logging.DEBUG):
-            logging.debug(f"PREROLL: All {len(grouped_records)} groups have representatives")
+        logging.info(f"PREROLL: All {len(grouped_records)} groups have representatives")
     
     # PERFORMANCE: Batch write all groups to database and cache in background (much faster)
     if groups_for_db_batch:
