@@ -348,10 +348,15 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         grouped_records[group_key]['records'].append(record)
         logging.debug(f"PREROLL GROUP: Added product '{product_name}' to group '{group_key}' (brand/vendor: '{brand_for_grouping}', total in group: {len(grouped_records[group_key]['records'])})")
     
+    # Log all groups created in Step 1 for debugging
+    logging.info(f"PREROLL STEP 1 COMPLETE: Created {len(grouped_records)} groups from {len(records)} records")
+    for gk, gd in grouped_records.items():
+        logging.info(f"  GROUP: '{gk}' -> {len(gd['records'])} records, display_name='{gd['group_info'].get('display_name', 'N/A')}'")
+
     # Step 2: Create representative records with group display names
     unique_records = []
     session_id = session.get('session_id', 'default')
-    
+
     for group_key, group_data in grouped_records.items():
         group_info = group_data['group_info']
         group_records_list = group_data['records']
