@@ -795,6 +795,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         grouped_records_list = unique_records
     
     logging.info(f"PREROLL GROUPING FINAL: {original_input_count} input records -> {len(grouped_records)} unique groups -> {len(grouped_records_list)} product groups (one label per vendor per category)")
+    # DEBUG: Log group keys for first 30 groups to help debug
+    if len(grouped_records) <= 30:
+        group_keys_sample = list(grouped_records.keys())[:30]
+        logging.info(f"PREROLL GROUPING FINAL DEBUG: Group keys created: {group_keys_sample}")
+    else:
+        group_keys_sample = list(grouped_records.keys())[:30]
+        logging.info(f"PREROLL GROUPING FINAL DEBUG: First 30 group keys: {group_keys_sample} (total: {len(grouped_records)})")
     # DEBUG: Log if we're losing groups
     if len(grouped_records_list) < len(grouped_records):
         logging.warning(f"PREROLL GROUPING WARNING: Lost {len(grouped_records) - len(grouped_records_list)} groups during processing!")
