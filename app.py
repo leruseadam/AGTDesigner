@@ -15103,7 +15103,9 @@ def get_web_available_tags():
                 if needs_alignment:
                     try:
                         logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage ({tags_with_db_lineage}/{len(excel_tags)} already have database lineage)...")
-                        excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=True, force_overwrite=False)
+                        # CRITICAL: Use force_overwrite=True to ensure database lineage overwrites Excel Lineage
+                        # Even if tags have currentLineage, we need to overwrite Excel Lineage with database lineage
+                        excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=True, force_overwrite=True)
                         matched_count = len([t for t in excel_tags if isinstance(t, dict) and (t.get('canonical_lineage') or t.get('sovereign_lineage'))])
                         logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
                     except Exception as align_err:
@@ -15122,17 +15124,22 @@ def get_web_available_tags():
                     continue
                 
                 # PERFORMANCE: Skip normalization if tag already has database lineage with all fields set correctly
+                # CRITICAL: Only skip if Excel Lineage is already overwritten with database lineage
+                # If Excel Lineage differs from database lineage, we MUST normalize to overwrite it
                 has_sovereign = tag.get('sovereign_lineage')
                 has_canonical = tag.get('canonical_lineage')
                 if has_sovereign or has_canonical:
-                    # Tag has database lineage - check if all fields are already set correctly
+                    # Tag has database lineage - check if Excel Lineage is already overwritten
                     db_lineage = str(has_sovereign or has_canonical).strip().upper()
-                    current_lineage = str(tag.get('currentLineage', '')).strip().upper()
                     excel_lineage = str(tag.get('Lineage', '')).strip().upper()
-                    if current_lineage == db_lineage and excel_lineage == db_lineage:
+                    current_lineage = str(tag.get('currentLineage', '')).strip().upper()
+                    # CRITICAL: Only skip if Excel Lineage matches database lineage (already overwritten)
+                    # If Excel Lineage is different, we need to normalize to overwrite it
+                    if excel_lineage == db_lineage and current_lineage == db_lineage:
                         # All fields already match database lineage - skip normalization
                         simple_tags.append(tag)
                         continue
+                    # If Excel lineage differs, continue to normalization to overwrite it
                 
                 # CRITICAL FIX: Correct lineage priority - sovereign_lineage (user edits) has HIGHEST priority
                 # Priority: sovereign_lineage (user edits) > canonical_lineage (strains table) > currentLineage > Lineage (Excel)
