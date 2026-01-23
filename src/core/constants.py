@@ -131,10 +131,11 @@ VALID_CLASSIC_LINEAGES = {
 
 # Excluded product types and patterns
 EXCLUDED_PRODUCT_TYPES = [
-    "Samples - Educational", 
+    "Samples - Educational",
     "Sample - Vendor",
     "X-DEACTIVATED 1",
-    "X-DEACTIVATED 2"
+    "X-DEACTIVATED 2",
+    "Ounces"  # Not a valid product type - it's a weight unit
 ]
 
 # Product name patterns to exclude

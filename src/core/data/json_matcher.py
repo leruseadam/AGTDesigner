@@ -1017,19 +1017,9 @@ class JSONMatcher:
                     if len(collected) >= 250:
                         return collected
                 
-                # Finally fallback without vendor constraint (keyword first if available)
-                if keywords:
-                    for keyword in keywords:
-                        cursor.execute(
-                            'SELECT * FROM products WHERE LOWER("Product Name*") LIKE ? LIMIT 150',
-                            [f"%{keyword}%"]
-                        )
-                        add_rows(cursor.fetchall())
-                        if len(collected) >= 250:
-                            return collected
-                
-                cursor.execute('SELECT * FROM products LIMIT 250')
-                add_rows(cursor.fetchall())
+                # REMOVED: Dangerous fallback that fetched ANY products without vendor constraint
+                # This was causing wrong matches like "Fried Strawberry Honey Crystal" → "Blue Dream Cured Resin Disposable Vape"
+                # If no vendor-specific matches found, return empty list to prevent cross-vendor contamination
                 return collected
 
             candidates = fetch_candidates()
@@ -1078,9 +1068,10 @@ class JSONMatcher:
                     best_score = score
                     best_match = candidate
 
-            # CRITICAL FIX: If vendor was specified, prioritize matches from that vendor
-            # Only use matches from different vendors if no good match found from the specified vendor
-            if best_match and best_score >= 65:
+            # CRITICAL FIX: Require much higher similarity score to prevent wrong matches
+            # "Fried Strawberry Honey Crystal" should NOT match "Blue Dream Cured Resin Disposable Vape"
+            # Minimum threshold of 75 ensures actual product name similarity
+            if best_match and best_score >= 75:
                 if vendor and vendor_filters:
                     # Check if the best match is from the specified vendor
                     match_vendor = str(best_match.get('Vendor/Supplier*') or best_match.get('Vendor', '') or '').lower().strip()
@@ -1126,8 +1117,8 @@ class JSONMatcher:
                                     best_vendor_score = score
                                     best_vendor_match = candidate
                             
-                            # Use vendor-specific match if it's reasonably good (score >= 40, lowered from 50)
-                            if best_vendor_match and best_vendor_score >= 40:
+                            # Use vendor-specific match only if it's genuinely similar (score >= 70)
+                            if best_vendor_match and best_vendor_score >= 70:
                                 logging.info(f"✅ Found better match from correct vendor (score: {best_vendor_score} vs {best_score})")
                                 best_vendor_match['_similarity_score'] = best_vendor_score
                                 return best_vendor_match
@@ -6485,10 +6476,11 @@ class JSONMatcher:
                     logging.debug(f"✅ KEYWORD MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f})")
                     return best_match, score, "Keyword match"
             
-            # Step 3: Try fuzzy name matching with vendor filtering (more lenient for better coverage)
+            # Step 3: Try fuzzy name matching with vendor filtering
             if json_vendor:
-                # Use more lenient threshold for vendor-based matching to get more matches
-                vendor_threshold = 40 if json_brand else 35  # More lenient for better matching
+                # CRITICAL FIX: Increased threshold to prevent wrong matches
+                # "Fried Strawberry Honey Crystal" should NOT match "Blue Dream Cured Resin Disposable Vape"
+                vendor_threshold = 70 if json_brand else 65  # Require genuine similarity
                 fuzzy_matches = self._find_fuzzy_name_matches(json_name, json_vendor, threshold=vendor_threshold)
                 if fuzzy_matches:
                     best_match = fuzzy_matches[0]
@@ -6525,15 +6517,10 @@ class JSONMatcher:
             else:
                 logging.debug(f"❌ No Cultivera specialized match for '{json_name}'")
             
-            # Step 5b: Fallback to general fuzzy matching without vendor requirements (more lenient threshold)
-            general_fuzzy_matches = self._find_fuzzy_name_matches(json_name, threshold=35)  # More lenient threshold for maximum coverage
-            if general_fuzzy_matches:
-                best_match = general_fuzzy_matches[0]
-                score = general_fuzzy_matches[0]['fuzzy_score'] / 100.0
-                logging.debug(f"✅ GENERAL FUZZY MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f}, threshold: 35)")
-                return best_match, score, "General fuzzy match"
-            else:
-                logging.debug(f"❌ No general fuzzy match for '{json_name}' (threshold: 35)")
+            # Step 5b: DISABLED - General fuzzy matching without vendor is dangerous
+            # This was causing cross-vendor contamination where products match unrelated items
+            # "Fried Strawberry Honey Crystal" was matching "Blue Dream Cured Resin Disposable Vape"
+            logging.debug(f"🚫 DISABLED: General fuzzy matching without vendor to prevent wrong matches")
             
             # Step 5: Try specialized matching for vendors with generic names (like Ceres)
             if json_vendor and json_vendor.lower() in ['ceres', 'ceres gardens', 'ceres gardens inc']:
@@ -6614,15 +6601,9 @@ class JSONMatcher:
             else:
                 logging.debug(f"⚠️ Missing required fields for strain+weight matching (strain: {json_strain}, weight: {json_weight})")
             
-            # Step 9: Final fallback - try general fuzzy matching without vendor requirements
-            general_fuzzy_matches = self._find_fuzzy_name_matches(json_name, threshold=30)  # More lenient threshold for final attempt
-            if general_fuzzy_matches:
-                best_match = general_fuzzy_matches[0]
-                score = general_fuzzy_matches[0]['fuzzy_score'] / 100.0
-                logging.debug(f"✅ GENERAL FUZZY MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f}, threshold: 30)")
-                return best_match, score, "General fuzzy match (final fallback)"
-            else:
-                logging.debug(f"❌ No general fuzzy match for '{json_name}' (threshold: 30)")
+            # Step 9: DISABLED - Final fallback without vendor requirements causes wrong matches
+            # This was the main source of "Fried Strawberry Honey Crystal" → "Blue Dream Cured Resin Disposable Vape" errors
+            logging.debug(f"🚫 DISABLED: Final fallback fuzzy matching to prevent cross-vendor contamination")
             
             # No match found
             logging.debug(f"❌ NO MATCH FOUND: '{json_name}' - tried all matching strategies")

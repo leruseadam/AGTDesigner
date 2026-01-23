@@ -15,7 +15,13 @@ from src.core.constants import PREROLL_ALLOWED_BRANDS
 # Precompiled regexes to improve performance (avoid repeated compilation in loops)
 # Matches pack patterns like "0.5g x 7 Pack", "1g x 5 Pack", etc.
 # Allow leading-dot decimals like '.5g' as well as '0.5g' and '1g'
-PACK_RE = re.compile(r"(\d+(?:\.\d+)?|(?:\.\d+))\s*g\s*[x×]\s*(\d+)\s*pack", re.IGNORECASE)
+# Primary pack/weight regexes. We'll try multiple patterns to catch variants
+# Examples matched: "0.5g x 7 Pack", "1g x 5 Pack", ".5g x 2 Pack", "10 x .5g", "10x .5 g", "-10 x .5g"
+PACK_PATTERNS = [
+    re.compile(r"(\d+(?:\.\d+)?|(?:\.\d+))\s*g\s*[x×]\s*(\d+)\s*(?:pack)?", re.IGNORECASE),
+    re.compile(r"(\d+)\s*[x×]\s*(\d+(?:\.\d+)?|(?:\.\d+))\s*g\s*(?:pack)?", re.IGNORECASE),
+    re.compile(r"(?:-|\b)(\d+)\s*[x×]\s*(\.?\d+(?:\.\d+)?)\s*g", re.IGNORECASE),
+]
 # Matches "by BrandName -" pattern used to extract brand
 BY_PATTERN = re.compile(r"\sby\s+([^-]+?)(?:\s+-|$)", re.IGNORECASE)
 # Matches weight like "1g" or "0.5g"
@@ -46,10 +52,27 @@ def _normalize_vendor_key(raw: str) -> str:
     if not raw:
         return ''
     s = str(raw).strip().lower()
+    # Normalize ampersands and common separators
+    s = s.replace('&', ' and ')
+    s = re.sub(r"\s+by\s+", ' ', s)
+    # Remove leading 'the'
+    s = re.sub(r'^the\s+', '', s)
     # Remove common corporate suffixes and noise words
-    s = re.sub(r'\b(llc|inc|co|corp|corporation|ltd|incorporated|holdings|wholesale|distro|distribution|distributors|technologies)\b', '', s)
-    # Remove non-alphanumeric characters
-    s = re.sub(r'[^a-z0-9]+', '', s)
+    s = re.sub(r'\b(llc|inc|co|corp|corporation|ltd|incorporated|holdings|wholesale|distro|distribution|distributors|technologies|llp|pvt|pvt\.?|company)\b', '', s)
+    # Collapse whitespace
+    s = re.sub(r'\s+', ' ', s).strip()
+
+    # Replace remaining non-alphanumeric with hyphens to preserve token boundaries
+    s = re.sub(r'[^a-z0-9]+', '-', s)
+
+    # Collapse multiple hyphens and trim
+    s = re.sub(r'-{2,}', '-', s).strip('-')
+
+    # If normalization produced an empty key (rare), fall back to compact letters
+    if not s:
+        fallback = re.sub(r'[^a-z0-9]+', '', str(raw).strip().lower())
+        return fallback
+
     return s
 
 
@@ -181,26 +204,49 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             'category': 'Flavored Blunts'
         }
     
-    # Check for pack sizes (general pattern - check this BEFORE specific 1g x 5 check)
-    # Pattern: "0.5g x 7 Pack", "1g x 5 Pack", ".5g x 2 Pack", etc.
-    pack_match = PACK_RE.search(combined)
-    if pack_match:
-        weight = pack_match.group(1)
-        count = pack_match.group(2)
-        # Normalize weight display (handle .5g -> 0.5g, but keep 0.5g as 0.5g)
-        if weight.startswith('.'):
-            # ".5" -> "0.5"
-            weight_display = '0' + weight
-        else:
-            # "0.5" stays "0.5", "1" stays "1"
-            weight_display = weight
-        # Include the word "Pre-Roll" in the display name so grouped
-        # pack labels clearly indicate they are prerolls.
-        return {
-            'group_id': f'{weight}g-{count}pack',
-            'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
-            'category': f'{weight_display}g x {count} Packs'
-        }
+    # Check for pack sizes (general pattern - multiple common formats)
+    for pat in PACK_PATTERNS:
+        m = pat.search(combined)
+        if m:
+            g1 = m.group(1)
+            g2 = m.group(2) if m.lastindex >= 2 else None
+            weight = None
+            count = None
+            # Try to interpret groups: one pattern yields (weight, count), others (count, weight)
+            try:
+                # prefer weight=float, count=int
+                f1 = float(g1)
+                i2 = int(g2) if g2 is not None else None
+                weight = g1
+                count = str(i2) if i2 is not None else None
+            except Exception:
+                try:
+                    i1 = int(g1)
+                    f2 = float(g2) if g2 is not None else None
+                    count = str(i1)
+                    weight = str(f2) if f2 is not None else None
+                except Exception:
+                    # fallback: assign as seen
+                    weight = g1
+                    count = g2
+
+            if weight:
+                # Normalize weight display (handle .5g -> 0.5g)
+                if str(weight).startswith('.'):
+                    weight_display = '0' + str(weight)
+                else:
+                    weight_display = str(weight)
+            else:
+                weight_display = ''
+
+            if not count:
+                count = '1'
+
+            return {
+                'group_id': f'{weight_display}g-{count}pack',
+                'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
+                'category': f'{weight_display}g x {count} Packs'
+            }
     
     # Check specifically for 1g x 5 packs (more specific, should be caught by above but keeping for safety)
     if re.search(r'1g\s*x\s*5\s*pack', combined, re.IGNORECASE) or '1g x 5 pack' in combined.lower() or '1 g x 5 pack' in combined.lower():
