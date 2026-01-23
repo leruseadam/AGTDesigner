@@ -726,10 +726,6 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             processed_group_keys_set.add(group_key)
             groups_processed += 1
             
-            # CRITICAL: Log progress for large batches (every 10 groups)
-            if total_groups > 20 and idx % 10 == 0:
-                logging.info(f"PREROLL GROUPING PROGRESS: Processed {idx}/{total_groups} groups ({groups_processed} successful, {groups_failed} failed)")
-            
             # Store items for this group in cache (for QR code page) - use ALL original records
             # But filter by allowed brands if configured
             group_items = []
@@ -876,24 +872,13 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     rep_by_key = {r.get('_group_key'): r for r in unique_records if r.get('_group_key')}
     final_grouped_records_list = []
     
-    # CRITICAL DEBUG: Log all group keys and their representatives before rebuilding
-    logging.info(f"PREROLL FINAL REBUILD: Starting with {len(grouped_records)} groups, {len(unique_records)} unique_records, {len(rep_by_key)} representatives by key")
-    
-    # CRITICAL: Log which group_keys are in unique_records vs which are in grouped_records
-    unique_record_keys = {r.get('_group_key') for r in unique_records if r.get('_group_key')}
-    all_group_keys = set(grouped_records.keys())
-    missing_from_unique = all_group_keys - unique_record_keys
-    if missing_from_unique:
-        logging.warning(f"PREROLL REBUILD: {len(missing_from_unique)} groups missing from unique_records (will use fallback): {sorted(list(missing_from_unique))[:20]}")
-    else:
-        logging.info(f"PREROLL REBUILD: All {len(all_group_keys)} groups have representatives in unique_records")
-    
+    # CRITICAL FIX: Ensure ALL groups get representatives - iterate through ALL grouped_records
+    # and create a representative for each one, using existing rep if available or creating fallback
     for group_key in grouped_records.keys():
         rep = rep_by_key.get(group_key)
         if rep:
-            # CRITICAL: Ensure vendor is preserved in the final representative
+            # Use existing representative, but ensure vendor is set
             if not rep.get('Vendor/Supplier*') and not rep.get('Vendor'):
-                # Try to get vendor from group records
                 group_data = grouped_records.get(group_key)
                 if group_data:
                     for r in group_data.get('records', []):
@@ -902,44 +887,66 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                             rep['Vendor/Supplier*'] = str(vendor).strip()
                             rep['Vendor'] = str(vendor).strip()
                             rep['ProductVendor'] = str(vendor).strip()
-                            logging.debug(f"PREROLL: Restored vendor '{vendor}' to representative for group '{group_key}'")
                             break
             final_grouped_records_list.append(rep)
-            continue
-        try:
-            group_data = grouped_records[group_key]
-            group_records_list = group_data.get('records', [])
-            group_info = group_data.get('group_info', {})
-            if group_records_list:
-                new_rep = group_records_list[0].copy()
-                # CRITICAL: Preserve vendor in fallback representative
-                vendor = new_rep.get('Vendor/Supplier*', '') or new_rep.get('Vendor', '') or ''
-                if not vendor:
+        else:
+            # Create fallback representative - this should never happen if loop above worked
+            group_data = grouped_records.get(group_key)
+            if group_data:
+                group_records_list = group_data.get('records', [])
+                group_info = group_data.get('group_info', {})
+                if group_records_list:
+                    new_rep = group_records_list[0].copy()
+                    # Get vendor from records
+                    vendor = ''
                     for r in group_records_list:
                         v = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
                         if v and str(v).strip():
                             vendor = str(v).strip()
                             break
-                if vendor:
-                    new_rep['Vendor/Supplier*'] = vendor
-                    new_rep['Vendor'] = vendor
-                    new_rep['ProductVendor'] = vendor
-            else:
-                new_rep = {}
-            group_display_name = group_info.get('display_name', 'Pre-Roll')
-            brand_suffix = group_key.split('|')[-1] if '|' in group_key else ''
-            unique_display = f"{group_display_name} ({brand_suffix})" if brand_suffix else group_display_name
-            new_rep['Product Name*'] = unique_display
-            new_rep['ProductName'] = unique_display
-            new_rep['Description'] = group_display_name
-            new_rep['DescAndWeight'] = group_display_name
-            new_rep['_group_id'] = group_info.get('group_id', group_key)
-            new_rep['_group_key'] = group_key
-            final_grouped_records_list.append(new_rep)
-            logging.warning(f"PREROLL GROUPING: Added missing representative for group '{group_key}' (vendor: '{vendor}')")
-        except Exception as add_error:
-            logging.error(f"PREROLL GROUPING: Failed to add representative for '{group_key}': {add_error}")
+                    if vendor:
+                        new_rep['Vendor/Supplier*'] = vendor
+                        new_rep['Vendor'] = vendor
+                        new_rep['ProductVendor'] = vendor
+                    
+                    group_display_name = group_info.get('display_name', 'Pre-Roll')
+                    brand_suffix = group_key.split('|')[-1] if '|' in group_key else ''
+                    unique_display = f"{group_display_name} ({brand_suffix})" if brand_suffix else group_display_name
+                    new_rep['Product Name*'] = unique_display
+                    new_rep['ProductName'] = unique_display
+                    new_rep['Description'] = group_display_name
+                    new_rep['DescAndWeight'] = group_display_name
+                    new_rep['_group_id'] = group_info.get('group_id', group_key)
+                    new_rep['_group_key'] = group_key
+                    final_grouped_records_list.append(new_rep)
+    
     grouped_records_list = final_grouped_records_list
+    
+    # CRITICAL: Verify we have representatives for ALL groups
+    if len(grouped_records_list) != len(grouped_records):
+        # This should never happen - if it does, we have a serious bug
+        # Create minimal representatives for any missing groups as last resort
+        existing_keys = {r.get('_group_key') for r in grouped_records_list if r.get('_group_key')}
+        missing_keys = set(grouped_records.keys()) - existing_keys
+        for missing_key in missing_keys:
+            group_data = grouped_records.get(missing_key)
+            if group_data:
+                group_info = group_data.get('group_info', {})
+                minimal_rep = {
+                    'Product Name*': group_info.get('display_name', 'Pre-Roll'),
+                    'ProductName': group_info.get('display_name', 'Pre-Roll'),
+                    'Description': group_info.get('display_name', 'Pre-Roll'),
+                    '_group_id': group_info.get('group_id', missing_key),
+                    '_group_key': missing_key
+                }
+                # Try to get vendor
+                for r in group_data.get('records', []):
+                    vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
+                    if vendor:
+                        minimal_rep['Vendor/Supplier*'] = vendor
+                        minimal_rep['Vendor'] = vendor
+                        break
+                grouped_records_list.append(minimal_rep)
     
     # CRITICAL: Log final vendor distribution
     final_vendors = {}
