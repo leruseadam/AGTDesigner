@@ -1965,8 +1965,23 @@ class JSONMatcher:
                 logging.warning(f"Invalid item types in _calculate_match_score: json_item={type(json_item)}, cache_item={type(cache_item)}")
                 return 0.0
                 
-            # Extract core fields for matching - prioritize database descriptions
-            json_name_raw = str(json_item.get("product_name", ""))
+            # Extract core fields for matching - include JSON description alongside product_name
+            # Some JSON feeds provide a separate 'description' field which contains useful
+            # product-identifying text (size, flavor, format). Include it to improve matches.
+            json_name_parts = []
+            if json_item.get('product_name'):
+                json_name_parts.append(str(json_item.get('product_name')).strip())
+            if json_item.get('description'):
+                json_name_parts.append(str(json_item.get('description')).strip())
+            # also include displayName / product_name_alt aliases if present
+            if json_item.get('displayName'):
+                json_name_parts.append(str(json_item.get('displayName')).strip())
+            if json_item.get('product_description'):
+                json_name_parts.append(str(json_item.get('product_description')).strip())
+            json_name_raw = ' '.join([p for p in json_name_parts if p])
+            # Fall back to product_name if nothing else
+            if not json_name_raw:
+                json_name_raw = str(json_item.get('product_name', '')).strip()
             
             # Use database description as primary matching field if available
             cache_description = str(cache_item.get("description", "")).strip()
@@ -1997,7 +2012,7 @@ class JSONMatcher:
             cache_weight = str(cache_item.get("Weight*", cache_item.get("weight", ""))).lower().strip()
             
             # Debug log with description information
-            logging.debug(f"[SCORE] JSON: '{json_name_raw}' (norm: '{json_name}') | Excel: '{cache_name_raw}' (norm: '{cache_name}') | Description: '{cache_description}' | Strain: '{json_strain}' vs '{cache_strain}' | Vendor: '{json_vendor}' vs '{cache_vendor}' | Brand: '{json_brand}' vs '{cache_brand}' | Type: '{json_type}' vs '{cache_type}' | Weight: '{json_weight}' vs '{cache_weight}'")
+            logging.debug(f"[SCORE] JSON (raw): '{json_name_raw}' (norm: '{json_name}') | Excel: '{cache_name_raw}' (norm: '{cache_name}') | Description: '{cache_description}' | Strain: '{json_strain}' vs '{cache_strain}' | Vendor: '{json_vendor}' vs '{cache_vendor}' | Brand: '{json_brand}' vs '{cache_brand}' | Type: '{json_type}' vs '{cache_type}' | Weight: '{json_weight}' vs '{cache_weight}'")
             
             # --- BEGIN: Enhanced vendor matching ---
             # If we have vendor information for both, they must match or be very similar
