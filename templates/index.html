@@ -1168,7 +1168,8 @@
               return Promise.resolve([]);
             }
             
-            return fetchWithTimeout('/api/web/available-tags?fast_load=1', 60000).catch(e => { 
+            // CRITICAL FIX: Use main endpoint with full lineage alignment (no web fast_load path)
+            return fetchWithTimeout('/api/available-tags?fast_load=0&nocache=1', 60000).catch(e => { 
               console.error('Available tags failed:', e); 
               return []; 
             });
@@ -6147,7 +6148,7 @@
                   </div>
 
                   <!-- Clear button -->
-                  <button id="clear-filters-btn" class="btn btn-glass btn-control btn-color-red" title="Clear selected tags and reset app" onclick="if(window.TagManager && TagManager.clearSelected) { TagManager.clearSelected(); } return false;">
+                  <button id="clear-filters-btn" class="btn btn-glass btn-control btn-color-red" title="Clear selected tags and reset app">
                     <span class="icon-btn">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="3 6 5 6 21 6"></polyline>
@@ -9210,7 +9211,8 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-view').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
-        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
+        // CRITICAL FIX: Use main endpoint with full lineage alignment (no web fast_load path)
+        fetch('/api/available-tags?fast_load=0&nocache=1').then(r => r.json())
       ])
       .then(([stats, view, vendorStats, availableTags]) => {
         const totalProducts = availableTags.length;
@@ -11261,7 +11263,8 @@
         fetch('/api/database-stats').then(r => r.json()),
         fetch('/api/database-vendor-stats').then(r => r.json()),
         fetch('/api/database-analytics').then(r => r.json()).catch(() => ({})),
-        fetch('/api/web/available-tags?fast_load=1').then(r => r.json())
+        // CRITICAL FIX: Use main endpoint with full lineage alignment (no web fast_load path)
+        fetch('/api/available-tags?fast_load=0&nocache=1').then(r => r.json())
       ])
       .then(([stats, vendorStats, analytics, availableTags]) => {
           const totalProducts = availableTags.length;

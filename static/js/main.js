@@ -3819,9 +3819,10 @@ const TagManager = {
             const bgTimeout = 1500; // 1.5s max - keep it short so UI stays responsive
             const timeoutId = setTimeout(() => controller.abort(), bgTimeout);
 
-            // Use web endpoint which will return background-cached tags if present
+            // CRITICAL FIX: Use main endpoint with full lineage alignment instead of web fast-path.
+            // Web fast-path used fast_load=1 which could return Excel/stale lineage.
             const ts = Date.now();
-            fetch(`/api/web/available-tags?t=${ts}&fast_load=1`, {
+            fetch(`/api/available-tags?t=${ts}&fast_load=0&nocache=1`, {
                 signal: controller.signal,
                 cache: 'no-store',
                 headers: {
@@ -17389,10 +17390,12 @@ const TagManager = {
                         }
                     }, fastLoadTimeoutMs);
 
-                    // Use fast_load=1 for instant response, nocache=1 to ensure fresh data from new upload
+                    // CRITICAL FIX: Use fast_load=0 after file upload to ensure correct database lineage
+                    // File upload creates new tags that need proper lineage alignment from the start
+                    // Using fast_load=1 would skip alignment and show Excel lineage, causing the "flash" issue
                     let tagsResponse;
                     try {
-                        tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=1`, {
+                        tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=0`, {
                             signal: tagsController.signal
                         });
                     } catch (fetchError) {
@@ -19346,14 +19349,17 @@ function attachSelectedTagsCheckboxListeners() {
     // Parent checkboxes
     container.querySelectorAll('.select-all-checkbox').forEach(parentCheckbox => {
         parentCheckbox.disabled = false;
-        const newCheckbox = parentCheckbox.cloneNode(true);
-        parentCheckbox.parentNode.replaceChild(newCheckbox, parentCheckbox);
+        
+        // CRITICAL FIX: Remove onclick attribute to prevent duplicate calls (if it exists)
+        if (parentCheckbox.hasAttribute('onclick')) {
+            parentCheckbox.removeAttribute('onclick');
+        }
 
-        newCheckbox.addEventListener('change', function(e) {
+        parentCheckbox.addEventListener('change', function(e) {
             verboseLog('Parent checkbox clicked in selected tags', this);
             const isChecked = e.target.checked;
             // Find the closest section (vendor, brand, product type, or weight)
-            const parentSection = newCheckbox.closest('.vendor-section, .brand-section, .product-type-section, .subcategory-section, .weight-section');
+            const parentSection = parentCheckbox.closest('.vendor-section, .brand-section, .product-type-section, .subcategory-section, .weight-section');
             if (!parentSection) {
                 console.warn('No parent section found for parent checkbox in selected tags', this);
                 return;
@@ -19376,15 +19382,17 @@ function attachSelectedTagsCheckboxListeners() {
                 TagManager.state.tags.find(t => t['Product Name*'] === name)
             ));
         });
-        verboseLog('Attached parent checkbox listener in selected tags', newCheckbox);
+        verboseLog('Attached parent checkbox listener in selected tags', parentCheckbox);
     });
 
     // Child tag checkboxes
     container.querySelectorAll('input[type="checkbox"].tag-checkbox').forEach(checkbox => {
-        const newCheckbox = checkbox.cloneNode(true);
-        checkbox.parentNode.replaceChild(newCheckbox, checkbox);
+        // CRITICAL FIX: Remove onclick attribute to prevent duplicate calls (if it exists)
+        if (checkbox.hasAttribute('onclick')) {
+            checkbox.removeAttribute('onclick');
+        }
 
-        newCheckbox.addEventListener('change', function() {
+        checkbox.addEventListener('change', function() {
             if (this.checked) {
                 TagManager.state.selectedTags.add(this.value);
             } else {
@@ -19974,24 +19982,16 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const clearButton = document.getElementById('clear-filters-btn');
         if (clearButton) {
-            // CRITICAL FIX: Remove onclick attribute to prevent duplicate calls
+            // CRITICAL FIX: Remove onclick attribute to prevent duplicate calls (if it exists)
             if (clearButton.hasAttribute('onclick')) {
                 clearButton.removeAttribute('onclick');
                 verboseLog('Removed onclick attribute from clear button to prevent duplicate calls');
             }
             
-            // CRITICAL FIX: Remove any existing listeners to prevent duplicates
-            const newButton = clearButton.cloneNode(true);
-            // Ensure onclick is removed from cloned button too
-            if (newButton.hasAttribute('onclick')) {
-                newButton.removeAttribute('onclick');
-            }
-            clearButton.parentNode.replaceChild(newButton, clearButton);
-            
             // CRITICAL FIX: Prevent multiple simultaneous calls
             let isClearing = false;
             
-            newButton.addEventListener('click', function(e) {
+            clearButton.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
                 
@@ -20084,12 +20084,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 pointerEvents: window.getComputedStyle(undoButton).pointerEvents
             });
 
-            // Don't clone - just remove old listeners and add new one directly
-            const oldButton = undoButton;
-            oldButton.replaceWith(oldButton.cloneNode(true));
-            const freshButton = document.getElementById('undo-move-btn');
+            // CRITICAL FIX: Remove onclick attribute to prevent duplicate calls (if it exists)
+            if (undoButton.hasAttribute('onclick')) {
+                undoButton.removeAttribute('onclick');
+            }
 
-            freshButton.addEventListener('click', async function(e) {
+            undoButton.addEventListener('click', async function(e) {
                 console.log('🔙🔙🔙 UNDO BUTTON CLICKED - EVENT FIRED! 🔙🔙🔙');
                 e.preventDefault();
                 e.stopPropagation();
@@ -20134,7 +20134,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             }, {capture: false, passive: false});
-            console.log('✅ Undo button event listener attached successfully to fresh button');
+            console.log('✅ Undo button event listener attached successfully');
             verboseLog('Undo button event listener attached successfully');
             return true;
         } else {
@@ -20157,12 +20157,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 pointerEvents: window.getComputedStyle(redoButton).pointerEvents
             });
 
-            // Don't clone - just remove old listeners and add new one directly
-            const oldButton = redoButton;
-            oldButton.replaceWith(oldButton.cloneNode(true));
-            const freshButton = document.getElementById('redo-move-btn');
+            // CRITICAL FIX: Remove onclick attribute to prevent duplicate calls (if it exists)
+            if (redoButton.hasAttribute('onclick')) {
+                redoButton.removeAttribute('onclick');
+            }
 
-            freshButton.addEventListener('click', async function(e) {
+            redoButton.addEventListener('click', async function(e) {
                 console.log('🔁🔁🔁 REDO BUTTON CLICKED - EVENT FIRED! 🔁🔁🔁');
                 e.preventDefault();
                 e.stopPropagation();
@@ -20183,7 +20183,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     alert('Redo functionality is not available. Please try refreshing the page.');
                 }
             }, {capture: false, passive: false});
-            console.log('✅ Redo button event listener attached successfully to fresh button');
+            console.log('✅ Redo button event listener attached successfully');
             verboseLog('Redo button event listener attached successfully');
             return true;
         } else {

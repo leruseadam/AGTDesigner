@@ -305,7 +305,9 @@
                     console.warn('⚠️ /api/available-tags timeout after 30 seconds, falling back...');
                 }, 30000);
                 
-                const quickResponse = await fetch('/api/available-tags?fast_load=1', {
+                // CRITICAL FIX: Use fast_load=0 + nocache=1 so FIRST load always has database-aligned lineage
+                // This avoids Excel/stale lineage and the visible \"flip\" when background alignment runs later.
+                const quickResponse = await fetch('/api/available-tags?fast_load=0&nocache=1', {
                     signal: controller.signal
                 });
                 if (timeoutId) {
