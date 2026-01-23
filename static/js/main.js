@@ -1589,17 +1589,16 @@ const TagManager = {
         }
 
         // PERFORMANCE: Optimize normalization - batch process for faster execution
-        // CRITICAL FIX: Preserve vendor data and user-edited lineage when loading from cache
-        // CRITICAL FIX: Apply MIXED -> HYBRID transformation for classic types when loading from cache
-        // CRITICAL: Normalize ALL tags BEFORE rendering to prevent wrong lineage from showing initially
+        // CRITICAL FIX: Normalize lineage FIRST, before any other processing or rendering
+        // This prevents wrong lineage from showing initially, then changing shortly after
         const tagCount = cachedTags.length;
         for (let i = 0; i < tagCount; i++) {
             const tag = cachedTags[i];
             if (!tag || typeof tag !== 'object') continue;
             
-            // CRITICAL FIX: Normalize lineage BEFORE any rendering happens
+            // CRITICAL FIX: Normalize lineage IMMEDIATELY, before vendor/price preservation
             // Check if this is a classic product type
-            const productType = tag['Product Type*'] || tag.Type || '';
+            const productType = tag['Product Type*'] || tag.Type || tag.productType || '';
             const isClassicType = productType && (typeof window.getUniqueLineages === 'function' 
                 ? window.getUniqueLineages(productType).length === 6 
                 : false);
@@ -1610,7 +1609,7 @@ const TagManager = {
                 const normalizedLineage = String(effectiveLineage).trim().toUpperCase();
                 
                 // CRITICAL: Fix MIXED/THC in ANY lineage field (including canonical_lineage from database)
-                // This ensures database lineage is corrected before rendering
+                // This ensures database lineage is corrected IMMEDIATELY, before any rendering
                 if (normalizedLineage === 'MIXED' || normalizedLineage === 'THC') {
                     const fixedLineage = 'HYBRID';
                     
@@ -1632,7 +1631,7 @@ const TagManager = {
                 }
             }
             
-            // Preserve vendor data (fast check)
+            // Preserve vendor data (after lineage normalization)
             const vendor = tag['Vendor*'] || tag['Vendor'] || tag.vendor || tag['Vendor/Supplier*'] || tag['Product Vendor'] || '';
             if (vendor && vendor.trim() !== '' && vendor.trim().toLowerCase() !== 'unknown') {
                 if (!tag['Vendor*']) tag['Vendor*'] = vendor;
