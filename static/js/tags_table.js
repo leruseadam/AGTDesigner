@@ -115,7 +115,10 @@ const getUniqueLineages = (productType = null) => {
 
 function createTagRow(tag) {
   // CRITICAL: Check sovereign_lineage first (user edits), then canonical_lineage, currentLineage, or Lineage
-  let rawLineage = tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // CRITICAL FIX: Correct lineage priority - matches DOCX generation and backend
+  // Priority: sovereign_lineage (user edits) > canonical_lineage (strains table) > currentLineage > Lineage (Excel)
+  // This ensures database lineage (canonical_lineage) takes priority over Excel lineage
+  let rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
