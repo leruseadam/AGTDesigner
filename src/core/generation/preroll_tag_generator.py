@@ -14,21 +14,43 @@ from flask_caching import Cache
 from src.core.constants import PREROLL_ALLOWED_BRANDS
 # Precompiled regexes to improve performance (avoid repeated compilation in loops)
 # Matches pack patterns like "0.5g x 7 Pack", "1g x 5 Pack", etc.
-PACK_RE = re.compile(r"(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)\s*pack", re.IGNORECASE)
+# Allow leading-dot decimals like '.5g' as well as '0.5g' and '1g'
+PACK_RE = re.compile(r"(\d+(?:\.\d+)?|(?:\.\d+))\s*g\s*[x×]\s*(\d+)\s*pack", re.IGNORECASE)
 # Matches "by BrandName -" pattern used to extract brand
 BY_PATTERN = re.compile(r"\sby\s+([^-]+?)(?:\s+-|$)", re.IGNORECASE)
 # Matches weight like "1g" or "0.5g"
-WEIGHT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*g", re.IGNORECASE)
+WEIGHT_RE = re.compile(r"(\d+(?:\.\d+)?|(?:\.\d+))\s*g", re.IGNORECASE)
 # Preroll universal patterns (compiled)
 PREROLL_PATTERN_COMPILED = [
     re.compile(r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)', re.IGNORECASE),
     re.compile(r'(.+?)(Pre[-‑ ]?Roll.*)', re.IGNORECASE),
 ]
+
+# Broaden patterns to catch infused blunts, palm blunts and generic blunt mentions
+PREROLL_PATTERN_COMPILED.extend([
+    re.compile(r'(.+?)(Infused\s+Blunt.*)', re.IGNORECASE),
+    re.compile(r'(.+?)(Palm\s+Blunt.*)', re.IGNORECASE),
+    re.compile(r'(.+?)(Blunt.*)', re.IGNORECASE),
+    re.compile(r'(.+?)(Firecracker.*)', re.IGNORECASE),
+    re.compile(r'(.+?)(Snickerdoobie.*)', re.IGNORECASE),
+])
 # Non-alphanumeric for normalization
 NON_ALNUM_RE = re.compile(r'[^a-z0-9-]+')
 import threading
 import os
 import time
+
+
+def _normalize_vendor_key(raw: str) -> str:
+    """Normalize vendor/brand strings into a compact alphanumeric key."""
+    if not raw:
+        return ''
+    s = str(raw).strip().lower()
+    # Remove common corporate suffixes and noise words
+    s = re.sub(r'\b(llc|inc|co|corp|corporation|ltd|incorporated|holdings|wholesale|distro|distribution|distributors|technologies)\b', '', s)
+    # Remove non-alphanumeric characters
+    s = re.sub(r'[^a-z0-9]+', '', s)
+    return s
 
 
 def _store_preroll_groups_batch(groups_data: List[tuple]):
@@ -138,6 +160,19 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     name_lower = str(product_name).lower()
     combined = f"{desc_lower} {name_lower}"
     
+    # Quick paraphernalia / non-consumable filter to avoid grouping items like trays/papers
+    paraphernalia_keywords = [
+        r'rolling tray', r'rolling papers', r'rolling paper', r'raw classic',
+        r'grinder', r'paraphernalia', r'rechargeable', r'cartridge battery', r'rolling tray-'
+    ]
+    for kw in paraphernalia_keywords:
+        if re.search(kw, combined, re.IGNORECASE):
+            return {
+                'group_id': 'other',
+                'display_name': 'Assorted Pre-Rolls',
+                'category': 'Other'
+            }
+
     # Check for flavored blunts
     if 'flavored blunt' in combined or 'flavoured blunt' in combined:
         return {
@@ -175,9 +210,25 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             'display_name': 'Assorted Pre-Roll - 1g x 5 Packs',
             'category': '1g x 5 Packs'
         }
+    # Targeted synonyms for infused prerolls that aren't always written as 'infused pre-roll'
+    if re.search(r'firecracker|snickerdoobie', combined, re.IGNORECASE):
+        weight_match = WEIGHT_RE.search(combined)
+        if weight_match:
+            weight = weight_match.group(1)
+            return {
+                'group_id': f'infused-preroll-{weight}g',
+                'display_name': f'Infused Pre-Roll - {weight}g',
+                'category': f'Infused Pre-Roll - {weight}g'
+            }
+        else:
+            return {
+                'group_id': 'infused-preroll',
+                'display_name': 'Infused Pre-Roll',
+                'category': 'Infused Pre-Roll'
+            }
     
-    # Check for infused prerolls with weight
-    if 'infused' in combined and 'pre' in combined and 'roll' in combined:
+    # Check for infused prerolls with weight (allow 'infused' + 'pre-roll' OR 'infused' + 'blunt/palm')
+    if 'infused' in combined and (( 'pre' in combined and 'roll' in combined) or 'blunt' in combined or 'palm' in combined):
         weight_match = WEIGHT_RE.search(combined)
         if weight_match:
             weight = weight_match.group(1)
@@ -305,7 +356,44 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
                 record.get('Vendor/Supplier') or
                 ''
             )
-            brand_or_vendor = str(vendor_field).strip()
+            # Prefer explicit product-type metadata when available (helps with 'Infused Blunt', 'Palm Blunt', etc.)
+            product_type_meta = (
+                record.get('Product Type*', '') or
+                record.get('ProductType', '')
+            )
+
+            group_info = None
+            if product_type_meta and isinstance(product_type_meta, str) and product_type_meta.strip():
+                pt_lower = product_type_meta.strip().lower()
+                # Detect infused prerolls from metadata
+                if 'infused' in pt_lower and 'pre' in pt_lower:
+                    # Try to extract weight from record fields
+                    weight_match = re.search(r"(\d+(?:\.\d+)?)\s*g", f"{record.get('CombinedWeight','')} {record.get('WeightUnits','')} {description} {product_name}", re.IGNORECASE)
+                    if weight_match:
+                        weight = weight_match.group(1)
+                        group_info = {
+                            'group_id': f'infused-preroll-{weight}g',
+                            'display_name': f'Infused Pre-Roll\u2011\u00A0{weight}g',
+                            'category': f'Infused Pre-Roll\u2011\u00A0{weight}g'
+                        }
+                    else:
+                        group_info = {'group_id': 'infused-preroll', 'display_name': 'Infused Pre-Roll', 'category': 'Infused Pre-Roll'}
+                # Detect regular preroll metadata
+                elif 'pre' in pt_lower and 'roll' in pt_lower:
+                    weight_match = re.search(r"(\d+(?:\.\d+)?)\s*g", f"{record.get('CombinedWeight','')} {record.get('WeightUnits','')} {description} {product_name}", re.IGNORECASE)
+                    if weight_match:
+                        weight = weight_match.group(1)
+                        group_info = {
+                            'group_id': f'preroll-{weight}g',
+                            'display_name': f'Pre-Roll\u2011\u00A0{weight}g',
+                            'category': f'Pre-Roll\u2011\u00A0{weight}g'
+                        }
+                    else:
+                        group_info = {'group_id': 'preroll', 'display_name': 'Pre-Roll', 'category': 'Pre-Roll'}
+
+            # Fallback to text-based identification when metadata not helpful
+            if not group_info:
+                group_info = identify_preroll_product_group(description, product_name)
 
         brand_key = ''
         if brand_or_vendor:
@@ -677,7 +765,43 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
             continue
         
         # Identify the product group
-        group_info = identify_preroll_product_group(description, product_name)
+        # Prefer explicit Product Type when available to avoid false negatives
+        product_type_field = (
+            record.get('Product Type*', '') or
+            record.get('ProductType', '') or
+            ''
+        )
+        product_type_lower = str(product_type_field).strip().lower()
+
+        group_info = None
+        if product_type_lower:
+            # If Product Type explicitly indicates a preroll, create a heuristic group
+            if 'pre' in product_type_lower and 'roll' in product_type_lower or 'preroll' in product_type_lower:
+                # Try to extract weight from description or name
+                weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', f"{description} {product_name}")
+                if weight_match:
+                    weight = weight_match.group(1)
+                    if 'infused' in product_type_lower:
+                        group_info = {
+                            'group_id': f'infused-preroll-{weight}g',
+                            'display_name': f'Infused Pre-Roll\u2011\u00A0{weight}g',
+                            'category': f'Infused Pre-Roll\u2011\u00A0{weight}g'
+                        }
+                    else:
+                        group_info = {
+                            'group_id': f'preroll-{weight}g',
+                            'display_name': f'Pre-Roll\u2011\u00A0{weight}g',
+                            'category': f'Pre-Roll\u2011\u00A0{weight}g'
+                        }
+                else:
+                    # No weight found - use generic preroll group
+                    if 'infused' in product_type_lower:
+                        group_info = {'group_id': 'infused-preroll', 'display_name': 'Infused Pre-Roll', 'category': 'Infused Pre-Roll'}
+                    else:
+                        group_info = {'group_id': 'preroll', 'display_name': 'Pre-Roll', 'category': 'Pre-Roll'}
+
+        if group_info is None:
+            group_info = identify_preroll_product_group(description, product_name)
         group_id = group_info['group_id']
         
         # Extract brand from product name using "by BrandName -" pattern
@@ -716,11 +840,8 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
         brand_key = ''
         if brand_for_grouping:
             brand_for_grouping = str(brand_for_grouping).strip()
-            # Normalize: lowercase, remove non-alphanumeric characters
-            brand_key = re.sub(r'[^a-z0-9]+', '', brand_for_grouping.lower())
-            if not brand_key:
-                # Fallback to underscored short form
-                brand_key = brand_for_grouping.lower().replace(' ', '_')
+            # Normalize brand/vendor into a compact key
+            brand_key = _normalize_vendor_key(brand_for_grouping)
         
         # REVERT TO ORIGINAL: group_id|brand_key only (one per category per vendor = ~56 groups)
         # This is how it "used to work fine" - product hash caused 322 groups and downstream issues
@@ -735,7 +856,7 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
                 ''
             )
             if vendor:
-                vendor_key = re.sub(r'[^a-z0-9]+', '', str(vendor).strip().lower())
+                vendor_key = _normalize_vendor_key(vendor)
                 if vendor_key:
                     key_parts.append(vendor_key)
         

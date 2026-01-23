@@ -9765,17 +9765,17 @@ def generate_labels():
                                     cursor = conn.cursor()
                                     strain_list = list(strains_to_enrich)
                                     placeholders = ','.join(['?'] * len(strain_list))
-                                batch_query = f'''
-                                    SELECT strain_name, sovereign_lineage, canonical_lineage
-                                    FROM strains
-                                    WHERE strain_name IN ({placeholders})
-                                '''
-                                cursor.execute(batch_query, strain_list)
-                                for row in cursor.fetchall():
-                                    strain_name = row[0]
-                                    lineage = row[1] or row[2]
-                                    if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
-                                        strain_lineage_map[strain_name] = str(lineage).strip().upper()
+                                    batch_query = f'''
+                                        SELECT strain_name, sovereign_lineage, canonical_lineage
+                                        FROM strains
+                                        WHERE strain_name IN ({placeholders})
+                                    '''
+                                    cursor.execute(batch_query, strain_list)
+                                    for row in cursor.fetchall():
+                                        strain_name = row[0]
+                                        lineage = row[1] or row[2]
+                                        if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
+                                            strain_lineage_map[strain_name] = str(lineage).strip().upper()
                                 except Exception as strain_err:
                                     logging.warning(f"Batch strain lineage query failed: {strain_err}")
                             enriched_count = 0

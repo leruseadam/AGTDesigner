@@ -5625,9 +5625,143 @@
     #jsonMatchModal {
       z-index: 1050 !important;
     }
-    
+
     #jsonMatchModal + .modal-backdrop {
       z-index: 1049 !important;
+    }
+
+    /* JSON Match Modal Styling - Dark text on light background, scrollable */
+    #jsonMatchModal .modal-content,
+    #detailedJsonMatchModal .modal-content {
+      background: rgba(255, 255, 255, 0.98) !important;
+      color: #1a1a2e !important;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #jsonMatchModal .modal-header,
+    #detailedJsonMatchModal .modal-header {
+      background: linear-gradient(135deg, #2d3748, #1a202c) !important;
+      color: white !important;
+      flex-shrink: 0;
+    }
+
+    #jsonMatchModal .modal-title,
+    #detailedJsonMatchModal .modal-title {
+      color: white !important;
+    }
+
+    #jsonMatchModal .modal-body,
+    #detailedJsonMatchModal .modal-body {
+      color: #1a1a2e !important;
+      background: #f8f9fa !important;
+      overflow-y: auto;
+      max-height: calc(90vh - 140px);
+      flex: 1;
+    }
+
+    #jsonMatchModal .modal-body p,
+    #jsonMatchModal .modal-body h6,
+    #jsonMatchModal .modal-body label,
+    #jsonMatchModal .modal-body .form-text,
+    #detailedJsonMatchModal .modal-body p,
+    #detailedJsonMatchModal .modal-body h6,
+    #detailedJsonMatchModal .modal-body label,
+    #detailedJsonMatchModal .modal-body .alert {
+      color: #1a1a2e !important;
+    }
+
+    #jsonMatchModal .modal-body .text-info,
+    #detailedJsonMatchModal .modal-body .text-info {
+      color: #0077b3 !important;
+    }
+
+    #jsonMatchModal .modal-body .text-success,
+    #detailedJsonMatchModal .modal-body .text-success {
+      color: #28a745 !important;
+    }
+
+    #jsonMatchModal .modal-footer,
+    #detailedJsonMatchModal .modal-footer {
+      background: #f1f3f4 !important;
+      border-top: 1px solid #dee2e6 !important;
+      flex-shrink: 0;
+    }
+
+    #jsonMatchModal .btn-close-white,
+    #detailedJsonMatchModal .btn-close-white {
+      filter: none !important;
+    }
+
+    /* Match results list scrollable */
+    #matchedProductsList {
+      background: white !important;
+      color: #1a1a2e !important;
+      border: 1px solid #dee2e6 !important;
+    }
+
+    #matchComparisons {
+      max-height: calc(70vh - 200px);
+      overflow-y: auto;
+    }
+
+    /* Card styling within the modal */
+    #detailedJsonMatchModal .card {
+      background: white !important;
+      color: #1a1a2e !important;
+      border: 1px solid #dee2e6 !important;
+    }
+
+    #detailedJsonMatchModal .card-header {
+      background: #e9ecef !important;
+      color: #1a1a2e !important;
+      border-bottom: 1px solid #dee2e6 !important;
+    }
+
+    #detailedJsonMatchModal .card-body {
+      color: #1a1a2e !important;
+    }
+
+    /* Form controls in JSON match modals - dark text */
+    #jsonMatchModal .form-control,
+    #jsonMatchModal .form-select,
+    #detailedJsonMatchModal .form-control,
+    #detailedJsonMatchModal .form-select {
+      background: white !important;
+      color: #1a1a2e !important;
+      border: 1px solid #ced4da !important;
+    }
+
+    #jsonMatchModal .form-control::placeholder,
+    #detailedJsonMatchModal .form-control::placeholder {
+      color: #6c757d !important;
+    }
+
+    #jsonMatchModal .form-control:focus,
+    #detailedJsonMatchModal .form-control:focus {
+      border-color: #0077b3 !important;
+      box-shadow: 0 0 0 0.2rem rgba(0, 119, 179, 0.25) !important;
+    }
+
+    /* Alert styling in modals */
+    #jsonMatchModal .alert-success,
+    #detailedJsonMatchModal .alert-success {
+      background-color: #d4edda !important;
+      color: #155724 !important;
+      border-color: #c3e6cb !important;
+    }
+
+    #jsonMatchModal .alert-info,
+    #detailedJsonMatchModal .alert-info {
+      background-color: #d1ecf1 !important;
+      color: #0c5460 !important;
+      border-color: #bee5eb !important;
+    }
+
+    /* Spinner text */
+    #detailedMatchLoading p {
+      color: #1a1a2e !important;
     }
     
     /* Store modal backdrop */
@@ -10761,8 +10895,8 @@
   
   <!-- JSON Match Modal -->
   <div class="modal fade" id="jsonMatchModal" tabindex="-1" aria-labelledby="jsonMatchModalLabel" inert>
-    <div class="modal-dialog modal-xl">
-      <div class="modal-content glass-card">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
         <div class="modal-header border-0">
           <h5 class="modal-title" id="jsonMatchModalLabel">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">
@@ -10833,8 +10967,8 @@
 
   <!-- Detailed JSON Match Comparison Modal -->
   <div class="modal fade" id="detailedJsonMatchModal" tabindex="-1" aria-labelledby="detailedJsonMatchModalLabel" inert>
-    <div class="modal-dialog modal-xl">
-      <div class="modal-content glass-card">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
         <div class="modal-header border-0">
           <h5 class="modal-title" id="detailedJsonMatchModalLabel">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">

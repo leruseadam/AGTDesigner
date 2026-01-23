@@ -1231,8 +1231,11 @@ class JSONMatcher:
                 indexed_cache['exact_names'][exact_name] = cache_item
                 
                 if vendor:
-                    vendor_key = f"{vendor.lower()}:{exact_name}"
-                    indexed_cache['vendor_exact_names'][vendor_key] = cache_item
+                    # CRITICAL FIX: Use consistent key format {name}|{vendor} to match lookup in _find_vendor_exact_name_matches
+                    vendor_key = f"{exact_name}|{vendor.lower()}"
+                    if vendor_key not in indexed_cache['vendor_exact_names']:
+                        indexed_cache['vendor_exact_names'][vendor_key] = []
+                    indexed_cache['vendor_exact_names'][vendor_key].append(cache_item)
                     indexed_cache['vendor_groups'][vendor.lower()].append(cache_item)
                 
                 for term in key_terms:
