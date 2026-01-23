@@ -12843,47 +12843,79 @@ const TagManager = {
                     console.log('🔄 Background: Fetching database lineage (fast_load=0)...');
                     const timestamp = Date.now();
                     fetch(`/api/available-tags?t=${timestamp}&fast_load=0&nocache=1`)
-                        .then(res => res.json())
+                        .then(res => {
+                            if (!res.ok) {
+                                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                            }
+                            return res.json();
+                        })
                         .then(data => {
                             const freshTags = data.tags || data;
-                            if (Array.isArray(freshTags) && freshTags.length > 0) {
-                                // Update lineage in current tags from database
-                                // CRITICAL FIX: Check sovereign_lineage FIRST (highest priority)
-                                // Priority: sovereign_lineage > canonical_lineage > currentLineage > Lineage
-                                const lineageMap = new Map();
-                                freshTags.forEach(tag => {
-                                    const name = tag['Product Name*'];
-                                    // CRITICAL: Check sovereign_lineage first (user edits have highest priority)
-                                    const dbLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage;
-                                    if (name && dbLineage) {
-                                        lineageMap.set(name, dbLineage);
+                            if (!Array.isArray(freshTags)) {
+                                console.warn('⚠️ Background lineage fetch: Invalid response format', data);
+                                return;
+                            }
+                            if (freshTags.length === 0) {
+                                console.warn('⚠️ Background lineage fetch: No tags returned');
+                                return;
+                            }
+                            console.log(`📦 Background lineage fetch: Received ${freshTags.length} tags`);
+                            
+                            // Update lineage in current tags from database
+                            // CRITICAL FIX: Check sovereign_lineage FIRST (highest priority)
+                            // Priority: sovereign_lineage > canonical_lineage > currentLineage > Lineage
+                            const lineageMap = new Map();
+                            let tagsWithLineage = 0;
+                            freshTags.forEach(tag => {
+                                const name = tag['Product Name*'];
+                                if (!name) return;
+                                
+                                // CRITICAL: Check sovereign_lineage first (user edits have highest priority)
+                                const dbLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage;
+                                if (dbLineage && String(dbLineage).trim() !== '' && String(dbLineage).trim().toUpperCase() !== 'NONE') {
+                                    lineageMap.set(name, {
+                                        lineage: String(dbLineage).trim().toUpperCase(),
+                                        hasSovereign: !!tag.sovereign_lineage,
+                                        sovereign: tag.sovereign_lineage ? String(tag.sovereign_lineage).trim().toUpperCase() : null
+                                    });
+                                    tagsWithLineage++;
+                                }
+                            });
+                            console.log(`📊 Background lineage fetch: Found lineage for ${tagsWithLineage} tags`);
+                            
+                            // Apply database lineage to displayed tags
+                            let updatedCount = 0;
+                            this.state.tags.forEach(tag => {
+                                const name = tag['Product Name*'];
+                                if (!name) return;
+                                
+                                const lineageInfo = lineageMap.get(name);
+                                if (lineageInfo) {
+                                    const dbLineage = lineageInfo.lineage;
+                                    // CRITICAL: Preserve sovereign_lineage if it exists in fresh tags
+                                    if (lineageInfo.hasSovereign && lineageInfo.sovereign) {
+                                        tag.sovereign_lineage = lineageInfo.sovereign;
                                     }
-                                });
-                                // Apply database lineage to displayed tags
-                                let updatedCount = 0;
-                                this.state.tags.forEach(tag => {
-                                    const name = tag['Product Name*'];
-                                    if (name && lineageMap.has(name)) {
-                                        const dbLineage = lineageMap.get(name);
-                                        // CRITICAL: Preserve sovereign_lineage if it exists in fresh tags
-                                        const freshTag = freshTags.find(t => t['Product Name*'] === name);
-                                        if (freshTag && freshTag.sovereign_lineage) {
-                                            tag.sovereign_lineage = freshTag.sovereign_lineage;
-                                        }
-                                        tag.canonical_lineage = dbLineage;
-                                        tag.currentLineage = dbLineage;
-                                        tag.Lineage = dbLineage;
-                                        tag.lineage = dbLineage.toLowerCase();
-                                        updatedCount++;
-                                    }
-                                });
+                                    tag.canonical_lineage = dbLineage;
+                                    tag.currentLineage = dbLineage;
+                                    tag.Lineage = dbLineage;
+                                    tag.lineage = dbLineage.toLowerCase();
+                                    updatedCount++;
+                                }
+                            });
+                            
+                            if (updatedCount > 0) {
                                 console.log(`✅ Database lineage applied to ${updatedCount} tags`);
-                                console.log('✅ Database lineage applied to tags');
                                 // Re-render to show lineage colors
                                 this._updateAvailableTags(this.state.tags);
+                            } else {
+                                console.warn('⚠️ Background lineage fetch: No tags were updated (possible name mismatch)');
                             }
                         })
-                        .catch(err => console.warn('Background lineage fetch failed (non-critical):', err));
+                        .catch(err => {
+                            console.error('❌ Background lineage fetch failed:', err);
+                            console.error('Error details:', err.message, err.stack);
+                        });
                 }, 1000); // 1 second delay to let UI settle
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);

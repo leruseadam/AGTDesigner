@@ -1137,10 +1137,14 @@ class TemplateProcessor:
                     price = record.get('Price', '')
                     weight = record.get('Weight', '') or record.get('NetWeight', '')
                     vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
-                    
+
+                    # CRITICAL FIX: For preroll templates, include _group_key in dedup key
+                    # This prevents false deduplication when different products have same display name
+                    group_key = record.get('_group_key', '') if self.template_type == 'preroll' else ''
+
                     # Create deduplication key
-                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
-                    
+                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}|{group_key}".lower().strip()
+
                     if dedup_key not in seen_products:
                         seen_products.add(dedup_key)
                         unique_records.append(record)
@@ -1178,7 +1182,11 @@ class TemplateProcessor:
                     weight = record.get('Weight', '') or record.get('NetWeight', '')
                     vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
 
-                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
+                    # CRITICAL FIX: For preroll templates, include _group_key in dedup key
+                    # This prevents false deduplication when different products have same display name
+                    group_key = record.get('_group_key', '') if self.template_type == 'preroll' else ''
+
+                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}|{group_key}".lower().strip()
 
                     if dedup_key not in seen_products:
                         seen_products.add(dedup_key)
