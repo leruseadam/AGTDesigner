@@ -65,6 +65,42 @@ def _store_preroll_group_in_database(group_key: str, group_id: str, group_items:
         # Don't raise - allow cache to work as fallback
 
 
+def _normalize_weight_display(weight: str) -> str:
+    """Normalize a weight string to a canonical display form.
+
+    Examples:
+      '.5' -> '0.5'
+      '0.6' -> '0.6'
+      '1.0' -> '1'
+      '5' -> '5'
+    Preserves minimal decimals (up to 3) and removes trailing zeros.
+    """
+    if weight is None:
+        return ''
+    w = str(weight).strip()
+    if not w:
+        return ''
+    # Remove commas and stray spaces
+    w = w.replace(',', '').strip()
+    # If it starts with a dot, add leading zero
+    if w.startswith('.'):
+        w = '0' + w
+    try:
+        wf = float(w)
+    except Exception:
+        # If parsing fails, return trimmed original (best-effort)
+        return w
+    # If it's an integer like 1.0 -> '1'
+    if wf.is_integer():
+        return str(int(wf))
+    # Keep up to 3 decimal places, but strip trailing zeros
+    s = ('{:.3f}'.format(wf)).rstrip('0').rstrip('.')
+    # Ensure leading zero is present (edge-case)
+    if s.startswith('.'):
+        s = '0' + s
+    return s
+
+
 def _get_preroll_group_from_database(group_key: str = None, group_id: str = None) -> tuple:
     """Retrieve preroll group data from database. Returns (group_items, group_info) or (None, None)."""
     try:
@@ -123,25 +159,12 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Check for pack sizes (general pattern - check this BEFORE specific 1g x 5 check)
     # Pattern: "0.5g x 7 Pack", "1g x 5 Pack", ".5g x 2 Pack", etc.
-    pack_match = re.search(r'(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)\s*pack', combined, re.IGNORECASE)
+    pack_match = re.search(r'(\d*\.?\d+)\s*g\s*x\s*(\d+)\s*pack', combined, re.IGNORECASE)
     if pack_match:
         weight = pack_match.group(1)
         count = pack_match.group(2)
         # Normalize weight display (handle .5g -> 0.5g, preserve leading zero)
-        try:
-            wf = float(weight)
-            # Format: keep integer as "1", decimals as minimal (0.6)
-            if wf.is_integer():
-                weight_display = str(int(wf))
-            else:
-                # Remove trailing zeros, preserve leading zero before decimal
-                weight_display = ('{:.3f}'.format(wf)).rstrip('0').rstrip('.')
-        except Exception:
-            # Fallback to original string but ensure leading zero for '.x'
-            if weight.startswith('.'):
-                weight_display = '0' + weight
-            else:
-                weight_display = weight
+        weight_display = _normalize_weight_display(weight)
         # Include the word "Pre-Roll" in the display name so grouped
         # pack labels clearly indicate they are prerolls.
         # Use normalized weight_display in group id to avoid duplicates like '0.6g' vs '6g'
@@ -162,17 +185,10 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Check for infused prerolls with weight
     if 'infused' in combined and 'pre' in combined and 'roll' in combined:
-        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
+        weight_match = re.search(r'(\d*\.?\d+)\s*g', combined)
         if weight_match:
             weight = weight_match.group(1)
-            try:
-                wf = float(weight)
-                if wf.is_integer():
-                    weight_display = str(int(wf))
-                else:
-                    weight_display = ('{:.3f}'.format(wf)).rstrip('0').rstrip('.')
-            except Exception:
-                weight_display = weight if not weight.startswith('.') else ('0' + weight)
+            weight_display = _normalize_weight_display(weight)
             return {
                 'group_id': f'infused-preroll-{weight_display}g',
                 'display_name': f'Infused Pre-Roll - {weight_display}g',
@@ -187,17 +203,10 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     
     # Check for regular prerolls with weight
     if ('pre' in combined and 'roll' in combined) and 'infused' not in combined:
-        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g', combined)
+        weight_match = re.search(r'(\d*\.?\d+)\s*g', combined)
         if weight_match:
             weight = weight_match.group(1)
-            try:
-                wf = float(weight)
-                if wf.is_integer():
-                    weight_display = str(int(wf))
-                else:
-                    weight_display = ('{:.3f}'.format(wf)).rstrip('0').rstrip('.')
-            except Exception:
-                weight_display = weight if not weight.startswith('.') else ('0' + weight)
+            weight_display = _normalize_weight_display(weight)
             return {
                 'group_id': f'preroll-{weight_display}g',
                 'display_name': f'Pre-Roll - {weight_display}g',
