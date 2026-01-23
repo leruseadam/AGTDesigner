@@ -58,6 +58,24 @@ except Exception as _e:
         cosine = None  # type: ignore
     _SKLEARN_AVAILABLE = False
 
+    # Module-level synonyms map to canonicalize common product type tokens
+    SYNONYM_MAP = {
+        'vaporizer': 'disposable vape',
+        'vape pen': 'vape',
+        'disposable vape': 'disposable vape',
+        'disposable': 'disposable',
+    }
+
+    def apply_synonyms(text: str) -> str:
+        if not text:
+            return text
+        t = ' ' + text.lower() + ' '
+        for k in sorted(SYNONYM_MAP.keys(), key=lambda x: -len(x)):
+            v = SYNONYM_MAP[k]
+            pattern = r'\b' + re.escape(k) + r'\b'
+            t = re.sub(pattern, ' ' + v + ' ', t)
+        return re.sub(r'\s+', ' ', t).strip()
+
 # Product-specific imports
 from .field_mapping import get_canonical_field, get_all_aliases, FIELD_ALIASES
 from .product_database import ProductDatabase
@@ -231,20 +249,57 @@ class ProductTypeSpecificMatcher:
     
     def _get_product_name(self, product: Dict) -> str:
         """Get product name from JSON product, handling different field names"""
-        # Check for Cultivera format first (product_name)
-        name = product.get('product_name', '')
-        if name:
-            return str(name)
-        
-        # Fallback to other common formats
-        name = product.get('inventory_name', '')
-        if name:
-            return str(name)
-            
-        name = product.get('Product Name*', '')
-        if name:
-            return str(name)
-            
+        # Accept many common JSON fields used by different vendors
+        candidates = [
+            'product_name', 'inventory_name', 'name', 'title', 'display_name',
+            'Product Name*', 'ProductName', 'ProductName*', 'inventoryName'
+        ]
+
+        for key in candidates:
+            try:
+                val = product.get(key)
+            except Exception:
+                val = None
+            if val and isinstance(val, str) and val.strip():
+                name = val.strip()
+                # Basic cleanup: remove repeated separators and trailing size tokens
+                # e.g., "Pure Prana Pulse AIO Disposable - Rainbow Belts Live Resin - Hybrid - 1mL"
+                # normalize to a single string for downstream matching
+                # Remove surrounding quotes
+                name = name.strip('"\'')
+                # Replace multiple separators with single dash
+                name = re.sub(r"\s*[-–—]\s*", " - ", name)
+                # Remove extra whitespace
+                name = re.sub(r"\s+", " ", name).strip()
+                # If name contains ' - ' parts, prefer the full name (leave as-is),
+                # but remove trailing size tokens like '1mL', '1g', '0.5g' for cleaner matching
+                name = re.sub(r"\b(\d+(?:\.\d+)?\s*(?:g|mg|ml|mL|oz))\b", "", name, flags=re.IGNORECASE)
+                name = name.strip(' -')
+                return name
+
+    # Simple synonyms map for common equivalences to improve exact/overlap matching
+    SYNONYM_MAP = {
+        'vaporizer': 'disposable vape',
+        'vape pen': 'vape',
+        'disposable vape': 'disposable vape',
+        'disposable': 'disposable',
+        # add more synonyms here as needed
+    }
+
+    def _apply_synonyms(self, text: str) -> str:
+        """Replace known synonyms in text with canonical forms to improve matching."""
+        if not text:
+            return text
+        t = ' ' + text.lower() + ' '
+        # Replace longer keys first to avoid partial overlaps
+        for k in sorted(self.SYNONYM_MAP.keys(), key=lambda x: -len(x)):
+            v = self.SYNONYM_MAP[k]
+            pattern = r'\b' + re.escape(k) + r'\b'
+            t = re.sub(pattern, ' ' + v + ' ', t)
+        # Clean up spaces
+        t = re.sub(r'\s+', ' ', t).strip()
+        return t
+
         return ''
         
     def match_by_type(self, product_type: str, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
@@ -1504,9 +1559,14 @@ class EnhancedJSONMatcher:
         """Cached text normalization"""
         if not text:
             return ""
-        
+        # Apply synonyms first to canonicalize common variants
+        try:
+            text_syn = apply_synonyms(str(text))
+        except Exception:
+            text_syn = str(text)
+
         # Remove special characters, normalize whitespace
-        normalized = re.sub(r'[^\w\s-]', '', str(text).lower())
+        normalized = re.sub(r'[^\w\s-]', '', text_syn.lower())
         normalized = re.sub(r'\s+', ' ', normalized).strip()
         return normalized
     
@@ -1815,6 +1875,19 @@ class EnhancedJSONMatcher:
                     ratio_score = fuzz.ratio(json_name, db_name) / 100.0
                     partial_score = fuzz.partial_ratio(json_name, db_name) / 100.0
                     token_set_score = fuzz.token_set_ratio(json_name, db_name) / 100.0
+
+                    # Exact overlap / synonym boost: if normalized token sets overlap fully
+                    norm_json = self._normalize_text(json_name)
+                    norm_db = self._normalize_text(db_name)
+                    json_tokens = set(re.findall(r"\w+", norm_json))
+                    db_tokens = set(re.findall(r"\w+", norm_db))
+                    overlap_boost = 0.0
+                    # If one side's tokens are subset of the other, that's a strong indicator
+                    if json_tokens and db_tokens and (json_tokens.issubset(db_tokens) or db_tokens.issubset(json_tokens)):
+                        overlap_boost = 0.25
+                    # If normalized strings are identical (including synonyms), treat as near-exact
+                    if norm_json == norm_db:
+                        overlap_boost = max(overlap_boost, 0.45)
                     
                     # Weighted combination of different fuzzy metrics
                     final_score = (
@@ -1823,6 +1896,8 @@ class EnhancedJSONMatcher:
                         partial_score * 0.2 +     # partial_ratio
                         token_set_score * 0.1     # token_set_ratio
                     )
+                    # Apply overlap boost but cap at 1.0
+                    final_score = min(1.0, final_score + overlap_boost)
                     
                     matches.append(MatchResult(
                         score=final_score,
