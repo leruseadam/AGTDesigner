@@ -886,6 +886,52 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         logging.info(f"PREROLL GROUPING: All {len(grouped_records)} groups have representatives. Total: {len(unique_records)}")
         grouped_records_list = unique_records
     
+    # CRITICAL: Rebuild grouped_records_list directly from grouped_records to ensure completeness
+    # This guarantees that every group_key in grouped_records has a representative
+    final_grouped_records_list = []
+    seen_group_keys = set()
+    for group_key in grouped_records.keys():
+        # First, try to find existing representative in grouped_records_list
+        existing_rep = None
+        for rep in grouped_records_list:
+            if rep.get('_group_key') == group_key:
+                existing_rep = rep
+                break
+        
+        if existing_rep:
+            final_grouped_records_list.append(existing_rep)
+            seen_group_keys.add(group_key)
+        else:
+            # Create a new representative if one doesn't exist
+            try:
+                group_data = grouped_records[group_key]
+                group_records_list = group_data.get('records', [])
+                group_info = group_data.get('group_info', {})
+                if group_records_list:
+                    new_rep = group_records_list[0].copy()
+                else:
+                    new_rep = {}
+                group_display_name = group_info.get('display_name', 'Pre-Roll')
+                brand_part = group_key.split('|')[-1] if '|' in group_key else group_key
+                new_rep['Product Name*'] = f"{group_display_name} ({brand_part})"
+                new_rep['ProductName'] = new_rep['Product Name*']
+                new_rep['Description'] = group_display_name
+                new_rep['_group_id'] = group_info.get('group_id', group_key)
+                new_rep['_group_key'] = group_key
+                final_grouped_records_list.append(new_rep)
+                seen_group_keys.add(group_key)
+                logging.warning(f"PREROLL GROUPING: Created missing representative for group '{group_key}' during final rebuild")
+            except Exception as rebuild_error:
+                logging.error(f"PREROLL GROUPING: Failed to create representative for '{group_key}' during rebuild: {rebuild_error}")
+    
+    # Verify we have all groups
+    if len(final_grouped_records_list) != len(grouped_records):
+        logging.error(f"PREROLL GROUPING FATAL: After rebuild, still only have {len(final_grouped_records_list)} representatives for {len(grouped_records)} groups!")
+    else:
+        logging.info(f"PREROLL GROUPING SUCCESS: Rebuild complete - {len(final_grouped_records_list)} representatives for {len(grouped_records)} groups")
+    
+    grouped_records_list = final_grouped_records_list
+    
     # CRITICAL FINAL CHECK: Ensure every group_key has a representative
     # This is the ABSOLUTE LAST CHANCE to ensure all groups are included
     final_processed_keys = {r.get('_group_key', '') for r in grouped_records_list if r.get('_group_key')}
