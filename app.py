@@ -16499,9 +16499,32 @@ def search_products():
                 logging.info(f"After brand filter '{brand_filter}', found {len(filtered_df)} rows")
             
             if product_type_filter and product_type_filter.strip() and product_type_col:
-                type_mask = filtered_df[product_type_col].astype(str).str.lower().str.strip() == product_type_filter.lower().strip()
+                # CRITICAL FIX: Make product type filter tolerant for prerolls/blunts.
+                # Exact equality was excluding many preroll rows whose Product Type* values
+                # are variations like "Infused Pre-Roll", "Pre-Roll - 5 Pack", "Blunt", etc.
+                type_series = filtered_df[product_type_col].astype(str).str.lower().str.strip()
+                filter_val = product_type_filter.lower().strip()
+
+                # If user is filtering for preroll-ish types, use a contains-based mask
+                # so all preroll/blunt variants stay in the result set.
+                if any(token in filter_val for token in ['pre-roll', 'preroll', 'pre roll', 'blunt']):
+                    preroll_patterns = ['pre-roll', 'preroll', 'pre roll', 'blunt']
+                    type_mask = type_series.apply(
+                        lambda v: any(pat in v for pat in preroll_patterns)
+                    )
+                    logging.info(
+                        f"After relaxed preroll/blunt product type filter '{product_type_filter}', "
+                        f"found {len(filtered_df[type_mask])} rows"
+                    )
+                else:
+                    # For non-preroll types, keep the strict equality behavior
+                    type_mask = type_series == filter_val
+                    logging.info(
+                        f"After product type filter '{product_type_filter}', "
+                        f"found {len(filtered_df[type_mask])} rows"
+                    )
+
                 filtered_df = filtered_df[type_mask].copy()
-                logging.info(f"After product type filter '{product_type_filter}', found {len(filtered_df)} rows")
             
             if lineage_filter and lineage_filter.strip() and lineage_col:
                 lineage_mask = filtered_df[lineage_col].astype(str).str.lower().str.strip() == lineage_filter.lower().strip()
