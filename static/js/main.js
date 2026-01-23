@@ -11994,10 +11994,16 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE: Always use fast_load=1 for fast tag loading
-            // Backend will do lightweight lineage alignment even in fast_load mode
-            // This dramatically speeds up initial tag loading while still getting correct lineage
-            const fastLoadParam = '&fast_load=1';
+            // PERFORMANCE vs CORRECTNESS:
+            // - On true "first load" (no existing tags and no cache), we MUST load with full database lineage
+            //   to avoid showing Excel/stale lineage that then "flips" a moment later.
+            // - On subsequent loads (or when cache exists), we can safely use fast_load=1 for speed.
+            //
+            // So:
+            // - First load (no tags, no cache) → fast_load=0  (no flash, correct lineage from the start)
+            // - All other cases               → fast_load=1  (fast, backend does lightweight alignment)
+            const isFirstTrueLoad = !hasExistingTags && !hasCache && !this._hasLoadedOnce;
+            const fastLoadParam = isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries

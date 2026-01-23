@@ -59,6 +59,22 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                 group_items = cache.get(f"preroll_group_{session_id}_{group_key}")
                 group_info = cache.get(f"preroll_group_info_{session_id}_{group_key}")
 
+            # NEW: Fallback to base group_id-only keys if vendor-inclusive key missing
+            # Some environments may only have stored base IDs like "5g-5pack" instead of
+            # full keys like "5g-5pack|firebros". This ensures we still retrieve items.
+            if (not group_items or not group_info) and isinstance(group_key, str):
+                base_id = group_key.split('|')[0]
+                if base_id and base_id != group_key:
+                    base_items = cache.get(f"preroll_group_latest_{base_id}")
+                    base_info = cache.get(f"preroll_group_info_latest_{base_id}")
+                    if base_items and base_info:
+                        logging.info(
+                            f"PREROLL LIST: Fallback loaded base-id group '{base_id}' "
+                            f"for key '{group_key}' with {len(base_items)} items"
+                        )
+                        group_items = base_items
+                        group_info = base_info
+
             if group_items and group_info:
                 preroll_groups[group_key] = {
                     'items': group_items,
