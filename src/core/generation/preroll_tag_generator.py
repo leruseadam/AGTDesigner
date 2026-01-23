@@ -364,10 +364,12 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
 
         # Product type
         if 'infused' in group_display_name.lower() or original_group_id.startswith('infused-preroll'):
+            # Use canonical display and internal type values for infused prerolls
             rep['Product Type*'] = 'Infused Pre-Roll'
             rep['ProductType'] = 'infused pre-roll'
         else:
-            rep['Product Type*'] = 'Pre-Roll'
+            # Use canonical display value 'Pre-roll' to match UI filter options
+            rep['Product Type*'] = 'Pre-roll'
             rep['ProductType'] = 'pre-roll'
 
         # Unique Product Name* per vendor/category
