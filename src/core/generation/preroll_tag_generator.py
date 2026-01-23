@@ -281,20 +281,46 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         else:
             filtered_records = []
             for record in records:
-                # Get brand from various possible fields
-                brand = (
-                    record.get('Product Brand', '') or
-                    record.get('ProductBrand', '') or
-                    record.get('Brand', '') or
-                    ''
-                )
-                brand_lower = str(brand).strip().lower()
+                # CRITICAL FIX: Use same brand extraction logic as grouping
+                # This ensures products with brands in product names are included
+                # even if Product Brand field is empty
+                brand = ''
+                product_name = record.get('Product Name*', record.get('ProductName', ''))
+                
+                # PRIORITY 1: Extract brand from product name using "by BrandName -" pattern
+                if product_name:
+                    product_name_str = str(product_name).strip()
+                    by_match = BY_PATTERN.search(product_name_str)
+                    if by_match:
+                        brand = by_match.group(1).strip()
+                
+                # PRIORITY 2: Fall back to explicit Product Brand fields
+                if not brand:
+                    brand = (
+                        record.get('Product Brand', '') or
+                        record.get('ProductBrand', '') or
+                        record.get('Brand', '') or
+                        ''
+                    )
+                    brand = str(brand).strip()
+                
+                # PRIORITY 3: Fall back to vendor if still no brand
+                if not brand:
+                    vendor = (
+                        record.get('Vendor/Supplier*', '') or
+                        record.get('Vendor', '') or
+                        record.get('Vendor/Supplier', '') or
+                        ''
+                    )
+                    brand = str(vendor).strip()
+                
+                brand_lower = brand.lower() if brand else ''
                 
                 # Check if brand is in allowed list
                 if brand_lower in allowed_brands_lower:
                     filtered_records.append(record)
                 elif logging.getLogger().isEnabledFor(logging.DEBUG):
-                    logging.debug(f"PREROLL BRAND FILTER: Excluding product '{record.get('Product Name*', 'Unknown')}' with brand '{brand}'")
+                    logging.debug(f"PREROLL BRAND FILTER: Excluding product '{product_name}' with brand '{brand}'")
             
             records = filtered_records
             excluded = original_count - len(records)
@@ -417,9 +443,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
     if len(grouped_records) <= 30:  # Only log if reasonable number of groups
         group_keys_list = list(grouped_records.keys())
         logging.info(f"PREROLL GROUPING DEBUG: Created {len(group_keys_list)} groups with keys: {group_keys_list}")
-    else:
-        group_keys_list = list(grouped_records.keys())
-        logging.info(f"PREROLL GROUPING DEBUG: Created {len(grouped_records)} groups. First 30 keys: {group_keys_list[:30]}")
+    # Group keys logging removed (too verbose)
     
     # CRITICAL: Track which groups are processed to ensure none are lost
     processed_group_keys_set = set()
