@@ -15095,26 +15095,31 @@ def get_web_available_tags():
             # This speeds up web endpoint significantly for large datasets
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and excel_tags:
-                # PERFORMANCE: Check if tags already have database lineage before aligning
-                tags_with_lineage = sum(1 for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage') or t.get('currentLineage'))
-                needs_alignment = tags_with_lineage < len(excel_tags) * 0.5  # Less than 50% have lineage
+                # PERFORMANCE: Check if tags already have DATABASE lineage (not just Excel lineage)
+                # Only check for sovereign_lineage and canonical_lineage (database fields), not currentLineage (may be Excel)
+                tags_with_db_lineage = sum(1 for t in excel_tags if isinstance(t, dict) and (t.get('sovereign_lineage') or t.get('canonical_lineage')))
+                needs_alignment = tags_with_db_lineage < len(excel_tags) * 0.5  # Less than 50% have database lineage
                 
                 if needs_alignment:
                     try:
-                        logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage ({tags_with_lineage}/{len(excel_tags)} already have lineage)...")
+                        logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage ({tags_with_db_lineage}/{len(excel_tags)} already have database lineage)...")
                         excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=True, force_overwrite=False)
-                        matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
+                        matched_count = len([t for t in excel_tags if isinstance(t, dict) and (t.get('canonical_lineage') or t.get('sovereign_lineage'))])
                         logging.info(f"✅ WEB: Successfully aligned {matched_count} tags with database lineage")
                     except Exception as align_err:
                         logging.warning(f"WEB: Lineage alignment failed, using existing lineage: {align_err}")
                         import traceback
                         logging.warning(f"WEB: Alignment error traceback: {traceback.format_exc()}")
                 else:
-                    logging.info(f"⚡ WEB: Skipping alignment - {tags_with_lineage}/{len(excel_tags)} tags already have database lineage")
+                    logging.info(f"⚡ WEB: Skipping alignment - {tags_with_db_lineage}/{len(excel_tags)} tags already have database lineage")
             
             # Normalize all tags - CRITICAL: Preserve database lineage priority (sovereign_lineage > canonical_lineage > Excel)
+            # PERFORMANCE: Only normalize lineage if tag actually has lineage data (skip empty tags)
             simple_tags = []
             for tag in excel_tags:
+                if not isinstance(tag, dict):
+                    simple_tags.append(tag)
+                    continue
                 # CRITICAL FIX: Correct lineage priority - sovereign_lineage (user edits) has HIGHEST priority
                 # Priority: sovereign_lineage (user edits) > canonical_lineage (strains table) > currentLineage > Lineage (Excel)
                 # This matches the DOCX generation logic: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
