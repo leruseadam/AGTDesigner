@@ -8948,6 +8948,7 @@ def generate_labels():
                     
                     if product_type_col:
                         # Filter DataFrame for preroll/blunt products
+                        # CRITICAL: Use case-insensitive matching and handle NaN values properly
                         preroll_mask = excel_processor.df[product_type_col].astype(str).str.lower().str.contains('|'.join(preroll_keywords), case=False, na=False, regex=True)
                         
                         # Also check description/product name for preroll keywords
@@ -8963,6 +8964,9 @@ def generate_labels():
                         
                         combined_mask = preroll_mask | desc_mask | name_mask
                         preroll_df = excel_processor.df[combined_mask].copy()
+                        
+                        # DEBUG: Log how many preroll products were found
+                        logging.info(f"🔄 PREROLL TEMPLATE: Found {len(preroll_df)} preroll products in DataFrame (product_type matches: {preroll_mask.sum()}, description matches: {desc_mask.sum()}, name matches: {name_mask.sum()})")
                         
                         if not preroll_df.empty:
                             # Convert DataFrame rows to records (dictionary format)

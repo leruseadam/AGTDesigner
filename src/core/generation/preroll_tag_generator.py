@@ -368,40 +368,38 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # Check if this is a pack product (group_id contains "pack")
         is_pack_product = 'pack' in group_id.lower()
         
-        # Extract the product name part before "by" for uniqueness (this is usually the strain/product name)
-        product_base = product_name_str
-        if ' by ' in product_name_str.lower():
-            product_base = product_name_str.split(' by ', 1)[0].strip()
-        
-        # Normalize product base for use in group key
-        product_base_key = re.sub(r'[^a-z0-9]+', '', product_base.lower())[:20]  # Use first 20 chars
-        
-        # Extract strain for additional granularity if available
-        strain = record.get('Product Strain', '') or record.get('Strain', '') or ''
-        strain_key = ''
-        if strain:
-            strain_key = re.sub(r'[^a-z0-9]+', '', str(strain).lower())[:15]
-        
         # Build group_key with different granularity based on product type
         key_parts = [group_id]
         
         if brand_key:
             key_parts.append(brand_key)
         
-        # CRITICAL FIX: For non-pack products, only add product name/strain if they're significantly different
-        # Don't over-segment products that should be grouped together (e.g., same strain, different descriptions)
-        # For pack products: group by pack size + brand only (don't include product name to group all packs together)
+        # CRITICAL FIX: For pack products, group by pack size + brand only
+        # For non-pack products, we need to differentiate products but not over-segment
+        # The original logic was grouping by: group_id|brand_key only, which was too restrictive
+        # We should group by: group_id|brand_key|weight (if different weights exist)
+        # This ensures products with same category/brand but different weights get separate groups
         if not is_pack_product:
+            # Extract weight from group_id (e.g., "preroll-1g" -> "1g", "infused-preroll-0.5g" -> "0.5g")
+            weight_match = re.search(r'(\d+(?:\.\d+)?)g', group_id.lower())
+            if weight_match:
+                weight_key = weight_match.group(1) + 'g'
+                key_parts.append(weight_key)
+            
+            # Extract the product name part before "by" for uniqueness (only if meaningful)
+            product_base = product_name_str
+            if ' by ' in product_name_str.lower():
+                product_base = product_name_str.split(' by ', 1)[0].strip()
+            
+            # Normalize product base for use in group key
+            product_base_key = re.sub(r'[^a-z0-9]+', '', product_base.lower())[:20]  # Use first 20 chars
+            
             # Only add product base if it's meaningful (not generic preroll terms)
             # This prevents over-segmentation while still differentiating distinct products
             if product_base_key and product_base_key not in ['preroll', 'prerolls', 'pre', 'roll', 'assorted', 'mixed']:
                 # Only add if product_base is substantial (more than 3 chars) to avoid tiny variations
                 if len(product_base_key) > 3:
                     key_parts.append(product_base_key)
-            
-            # Only add strain if it's available and meaningful (not empty/generic)
-            if strain_key and len(strain_key) > 2:
-                key_parts.append(strain_key)
         
         group_key = '|'.join(key_parts)
         
