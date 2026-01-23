@@ -584,26 +584,34 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
             # Ensure representative preserves a sensible Lineage value
             # Prefer proprietary/sovereign lineage fields first (owner-managed),
             # then fall back to canonical or generic Lineage fields.
+            # CRITICAL: Collect BOTH sovereign and canonical from all records, don't break early
             rep_lineage = ''
             rep_sovereign = None
             rep_canonical = None
+            
+            # First pass: Collect sovereign and canonical lineage from all records
             for r in group_records_list:
-                # Check sovereign_lineage first (user edits - highest priority)
-                candidate_sovereign = r.get('sovereign_lineage')
-                if candidate_sovereign and str(candidate_sovereign).strip() and str(candidate_sovereign).strip().lower() not in ['none', 'nan', '']:
-                    rep_sovereign = str(candidate_sovereign).strip()
-                    rep_lineage = rep_sovereign
-                    break
+                # Check sovereign_lineage (user edits - highest priority)
+                if not rep_sovereign:
+                    candidate_sovereign = r.get('sovereign_lineage')
+                    if candidate_sovereign and str(candidate_sovereign).strip() and str(candidate_sovereign).strip().lower() not in ['none', 'nan', '']:
+                        rep_sovereign = str(candidate_sovereign).strip()
                 
                 # Check canonical_lineage (from strains table)
-                candidate_canonical = r.get('canonical_lineage')
-                if candidate_canonical and str(candidate_canonical).strip() and str(candidate_canonical).strip().lower() not in ['none', 'nan', '']:
-                    rep_canonical = str(candidate_canonical).strip()
-                    if not rep_lineage:
-                        rep_lineage = rep_canonical
-                
-                # Fall back to other lineage fields
-                if not rep_lineage:
+                if not rep_canonical:
+                    candidate_canonical = r.get('canonical_lineage')
+                    if candidate_canonical and str(candidate_canonical).strip() and str(candidate_canonical).strip().lower() not in ['none', 'nan', '']:
+                        rep_canonical = str(candidate_canonical).strip()
+            
+            # Second pass: Use priority logic to determine final lineage
+            # Priority: sovereign_lineage > canonical_lineage > Excel lineage fields
+            if rep_sovereign:
+                rep_lineage = rep_sovereign
+            elif rep_canonical:
+                rep_lineage = rep_canonical
+            else:
+                # Fall back to other lineage fields from Excel
+                for r in group_records_list:
                     candidate = (
                         r.get('proprietary_lineage') or
                         r.get('proprietaryLineage') or
@@ -638,11 +646,17 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 representative['lineage'] = rep_lineage_upper.lower()
                 representative['currentLineage'] = rep_lineage_upper
                 
-                # Preserve source fields if they exist
+                # Preserve source fields correctly - don't overwrite canonical with sovereign
                 if rep_sovereign:
+                    # Sovereign lineage (user edits) - highest priority
                     representative['sovereign_lineage'] = rep_sovereign.upper()
-                    representative['canonical_lineage'] = rep_sovereign.upper()  # Also set canonical for consistency
+                    # Keep canonical_lineage if it exists, otherwise use sovereign
+                    if not rep_canonical:
+                        representative['canonical_lineage'] = rep_sovereign.upper()
+                    else:
+                        representative['canonical_lineage'] = rep_canonical.upper()
                 elif rep_canonical:
+                    # Canonical lineage from database - preserve it
                     representative['canonical_lineage'] = rep_canonical.upper()
                     # Don't set sovereign_lineage if it wasn't in source
                 else:
