@@ -1991,8 +1991,10 @@ class JSONMatcher:
             cache_name = normalize_product_name(cache_name_raw)
             json_strain = str(json_item.get("strain_name", "")).lower().strip()
             cache_strain = str(cache_item.get("strain", "")).lower().strip()
-            # Lexical similarity gate: if JSON and cache names share almost no tokens
-            # and fuzzy similarity is low, bail out early to avoid false positives.
+            # Lexical similarity gate: ensure there is at least some meaningful overlap
+            # between JSON name and cache name before proceeding. This prevents cases
+            # where completely different products (e.g., "Blue Dream" vs "Fried Strawberry")
+            # score highly due to incidental short-token overlaps.
             try:
                 json_tokens = set(re.findall(r"\w+", json_name))
                 cache_tokens = set(re.findall(r"\w+", cache_name))
@@ -2000,9 +2002,11 @@ class JSONMatcher:
                     intersection = json_tokens.intersection(cache_tokens)
                     overlap_ratio = len(intersection) / max(len(json_tokens), len(cache_tokens))
                     fuzzy_score = fuzz.token_set_ratio(json_name, cache_name)
-                    # If overlap is very small AND fuzzy score is low, return very low score
-                    if overlap_ratio < 0.12 and fuzzy_score < 60:
-                        logging.debug(f"Low lexical similarity: overlap={overlap_ratio:.2f}, fuzzy={fuzzy_score} -> rejecting")
+                    # Also require at least one shared token longer than 3 characters
+                    shared_long_tokens = {t for t in intersection if len(t) > 3}
+                    # If there are no shared long tokens AND both overlap and fuzzy are low, reject
+                    if (not shared_long_tokens) and (overlap_ratio < 0.18 and fuzzy_score < 72):
+                        logging.debug(f"Low lexical similarity: overlap={overlap_ratio:.2f}, fuzzy={fuzzy_score}, shared_long={shared_long_tokens} -> rejecting")
                         return 0.05
             except Exception:
                 # If anything goes wrong, continue with existing scoring
