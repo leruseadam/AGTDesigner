@@ -546,6 +546,19 @@ def _generate_preroll_tags_simple(records: List[Dict[str, Any]], cache: Cache) -
     except Exception:
         pass
 
+    # CRITICAL FIX: Store group keys in session for product list generation
+    # This was missing - the product list generator reads these to retrieve all groups
+    try:
+        group_keys = [rep.get('_group_key') for rep in grouped_records_list if rep.get('_group_key')]
+        group_ids = [rep.get('_group_id') for rep in grouped_records_list if rep.get('_group_id')]
+        session['preroll_group_keys'] = group_keys
+        session['preroll_group_ids'] = group_ids
+        session['preroll_session_id'] = session_id
+        session.modified = True
+        logging.info(f"PREROLL: Stored {len(group_keys)} group keys in session for product list")
+    except Exception as e:
+        logging.warning(f"PREROLL: Failed to store group keys in session: {e}")
+
     elapsed = time.time() - start_t
     logging.info(f"PREROLL: Grouped {original_input_count} records into {len(grouped_records_list)} vendor/category groups in {elapsed:.2f}s")
     return grouped_records_list
