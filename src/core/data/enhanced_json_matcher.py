@@ -627,13 +627,28 @@ class ProductTypeSpecificMatcher:
         # Extract weight from both products
         json_weight = self._extract_weight(self._get_product_name(json_product))
         db_weight = self._extract_weight(str(db_product.get('Product Name*', '')))
-        
-        if not json_weight or not db_weight:
-            return 0.5  # Unknown weight gets neutral score
-            
-        # Calculate similarity with tolerance
-        weight_diff = abs(json_weight - db_weight) / max(json_weight, db_weight)
-        return max(0, 1.0 - weight_diff)
+        # If neither weight available, neutral
+        if json_weight is None and db_weight is None:
+            return 0.5
+
+        # If JSON provides a weight but DB doesn't, penalize slightly (DB missing)
+        if json_weight is not None and db_weight is None:
+            return 0.4
+
+        # If DB provides a weight but JSON doesn't, remain slightly neutral
+        if json_weight is None and db_weight is not None:
+            return 0.5
+
+        # Both weights present: compare with tolerance. Penalize large mismatches.
+        try:
+            # If one weight is mg-scale and the other is gram-scale, that's a strong mismatch
+            if (json_weight < 0.1 and db_weight > 0.5) or (db_weight < 0.1 and json_weight > 0.5):
+                return 0.1
+
+            weight_diff = abs(json_weight - db_weight) / max(json_weight, db_weight)
+            return max(0, 1.0 - weight_diff)
+        except Exception:
+            return 0.5
         
     def _extract_weight(self, text: str) -> Optional[float]:
         """Extract weight in grams from text"""
@@ -645,6 +660,9 @@ class ProductTypeSpecificMatcher:
                 return mg_val / 1000.0  # convert mg to grams
             except Exception:
                 pass
+
+        # Note: do NOT treat mL as grams globally. Volume (mL) is not reliably equal to grams.
+        # mL will be ignored here for weight extraction; ounces and grams remain handled above.
 
         # Look for patterns like "3.5g", "1/8oz", "1oz", etc.
         weight_patterns = [
