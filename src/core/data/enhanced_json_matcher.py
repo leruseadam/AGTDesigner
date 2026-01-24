@@ -1969,19 +1969,49 @@ class EnhancedJSONMatcher:
                     )
                     # Apply overlap boost but cap at 1.0
                     final_score = min(1.0, final_score + overlap_boost)
+
+                    # Penalize low descriptive-token overlap (ignore generic product words)
+                    generic_tokens = {
+                        'vape','disposable','live','resin','pure','by','hybrid','cartridge',
+                        'pen','ml','g','gram','mg','pack','single','pulse','aio','disposable','vape'
+                    }
+                    try:
+                        # Remove generic tokens for a stricter description similarity check
+                        filtered_json_tokens = {t for t in json_tokens if t not in generic_tokens}
+                        filtered_db_tokens = {t for t in db_tokens if t not in generic_tokens}
+
+                        if filtered_json_tokens and filtered_db_tokens:
+                            inter = filtered_json_tokens.intersection(filtered_db_tokens)
+                            union = filtered_json_tokens.union(filtered_db_tokens)
+                            desc_jaccard = len(inter) / len(union) if union else 0.0
+                        else:
+                            # If one side has no non-generic tokens, fall back to original jaccard
+                            inter = json_tokens.intersection(db_tokens)
+                            union = json_tokens.union(db_tokens)
+                            desc_jaccard = len(inter) / len(union) if union else 0.0
+
+                        # Conservative scaling: if jaccard is low, reduce the score
+                        # multiplier ranges 0.5..1.0 (0.5 when no overlap, 1.0 when perfect overlap)
+                        multiplier = 0.5 + 0.5 * desc_jaccard
+                        final_score = max(0.0, min(1.0, final_score * multiplier))
+                    except Exception:
+                        desc_jaccard = 0.0
                     
+                    match_factors = {
+                        'token_sort': score / 100.0,
+                        'ratio': ratio_score,
+                        'partial': partial_score,
+                        'token_set': token_set_score,
+                        'description_jaccard': desc_jaccard
+                    }
+
                     matches.append(MatchResult(
                         score=final_score,
                         match_data=db_product,
                         strategy_used=MatchStrategy.FUZZY,
                         confidence=final_score * 0.9,  # Slightly lower confidence for fuzzy
                         processing_time=0.0,
-                        match_factors={
-                            'token_sort': score / 100.0,
-                            'ratio': ratio_score,
-                            'partial': partial_score,
-                            'token_set': token_set_score
-                        }
+                        match_factors=match_factors
                     ))
                     
         return sorted(matches, key=lambda x: x.score, reverse=True)
