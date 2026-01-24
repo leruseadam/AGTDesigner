@@ -637,27 +637,49 @@ class ProductTypeSpecificMatcher:
         
     def _extract_weight(self, text: str) -> Optional[float]:
         """Extract weight in grams from text"""
+        # Handle mg (common for edibles) first and return grams
+        mg_match = re.search(r"(\d+(?:\.\d+)?)\s*mg", text, re.IGNORECASE)
+        if mg_match:
+            try:
+                mg_val = float(mg_match.group(1))
+                return mg_val / 1000.0  # convert mg to grams
+            except Exception:
+                pass
+
         # Look for patterns like "3.5g", "1/8oz", "1oz", etc.
         weight_patterns = [
-            r'(\d+(?:\.\d+)?)\s*g(?:ram)?s?',
-            r'(\d+(?:\.\d+)?)\s*oz(?:unce)?s?',
-            r'(\d+)/(\d+)\s*oz',  # Fractions like 1/8oz
+            (r"(\d+(?:\.\d+)?)\s*g(?:ram)?s?", 1.0),
+            (r"(\d+(?:\.\d+)?)\s*oz(?:unce)?s?", 28.35),
+            (r"(\d+)/(\d+)\s*oz", 28.35),  # Fractions like 1/8oz
         ]
-        
-        for pattern in weight_patterns:
+
+        for pattern, multiplier in weight_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                if len(match.groups()) == 1:
-                    weight = float(match.group(1))
-                    if 'oz' in pattern:
-                        weight *= 28.35  # Convert oz to grams
-                    return weight
-                elif len(match.groups()) == 2:  # Fraction
-                    numerator = float(match.group(1))
-                    denominator = float(match.group(2))
-                    weight = (numerator / denominator) * 28.35  # oz to grams
-                    return weight
-        
+                try:
+                    if len(match.groups()) == 1:
+                        weight = float(match.group(1))
+                        weight = weight * multiplier
+                        return weight
+                    elif len(match.groups()) == 2:  # Fraction (numerator/denominator)
+                        numerator = float(match.group(1))
+                        denominator = float(match.group(2))
+                        weight = (numerator / denominator) * multiplier
+                        return weight
+                except Exception:
+                    continue
+
+        # Special-case heuristics: interpret 'single' for edibles as 10mg
+        # This is a conservative, global rule: treat 'single' -> 10mg when no
+        # explicit weight was found. It returns grams (10mg == 0.01g).
+        if re.search(r"\bsingle\b", text, re.IGNORECASE):
+            # Log for diagnostics in case of unexpected matches
+            try:
+                logging.debug(f"_extract_weight: applying 'single'->10mg rule for text='{text}'")
+            except Exception:
+                pass
+            return 10.0 / 1000.0
+
         return None
         
     def _compare_thc_content(self, json_product: Dict, db_product: Dict) -> float:
