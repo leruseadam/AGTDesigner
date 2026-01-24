@@ -275,6 +275,29 @@ class ProductTypeSpecificMatcher:
                 name = re.sub(r"\s+", " ", name).strip()
                 # If name contains ' - ' parts, prefer the full name (leave as-is),
                 # but remove trailing size tokens like '1mL', '1g', '0.5g' for cleaner matching
+                # Before removing size tokens, extract weight and attach to product dict
+                try:
+                    raw_weight_match = re.search(r"\b(\d+(?:\.\d+)?\s*(?:g|mg|ml|mL|oz))\b", val, flags=re.IGNORECASE)
+                except Exception:
+                    raw_weight_match = None
+
+                if raw_weight_match:
+                    try:
+                        extracted = self._extract_weight(raw_weight_match.group(0))
+                        if extracted:
+                            # store grams as CombinedWeight
+                            product['CombinedWeight'] = float(extracted)
+                            product['WeightUnits'] = 'g'
+                            # friendly display: avoid trailing .0 and keep leading zero for <1
+                            if float(extracted).is_integer():
+                                display = f"{int(extracted)}g"
+                            else:
+                                display = ('{:.3f}'.format(extracted)).rstrip('0').rstrip('.') + 'g'
+                            product['WeightWithUnits'] = display
+                    except Exception:
+                        pass
+
+                # remove trailing size tokens for cleaner matching
                 name = re.sub(r"\b(\d+(?:\.\d+)?\s*(?:g|mg|ml|mL|oz))\b", "", name, flags=re.IGNORECASE)
                 name = name.strip(' -')
                 return name

@@ -1320,6 +1320,35 @@ def process_chunk(args):
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
 
+    # Final safety pass: ensure Lineage is populated from DB/cache for any missing values
+    try:
+        for key, label in list(context.items()):
+            if not key.startswith('Label') or not isinstance(label, dict):
+                continue
+            current_lineage = str(label.get('Lineage', '') or '').strip()
+            # Treat empty or generic MIXED as missing for classic types
+            if current_lineage == '' or current_lineage.upper() in ['', 'MIXED']:
+                pname = label.get('ProductName') or ''
+                pstrain = label.get('ProductStrain') or ''
+                db_lineage = None
+                if pname and product_lineage_cache:
+                    db_lineage = product_lineage_cache.get(pname)
+                if not db_lineage and pstrain and strain_info_cache:
+                    strain_info = strain_info_cache.get(pstrain)
+                    if strain_info:
+                        db_lineage = (strain_info.get('sovereign_lineage') or strain_info.get('canonical_lineage'))
+                if db_lineage and str(db_lineage).strip().upper() not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
+                    db_lineage_clean = str(db_lineage).strip().upper()
+                    label['Lineage'] = db_lineage_clean
+                    # keep product brand fields consistent for classic types
+                    label['ProductBrand'] = db_lineage_clean
+                    label['ProductBrand_Center'] = db_lineage_clean
+                    # update context
+                    context[key] = label
+                    logger.info(f"✅ DOCX SAFETY PATCH: Filled lineage from DB for '{pname}' -> '{db_lineage_clean}'")
+    except Exception as safety_err:
+        logger.warning(f"DOCX lineage safety pass failed: {safety_err}")
+
     # Render template
     if DEBUG_ENABLED:
         logger.debug("Rendering template...")

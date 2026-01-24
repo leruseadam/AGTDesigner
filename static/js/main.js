@@ -20790,7 +20790,11 @@ document.addEventListener('forceRefreshSelectedTags', function(event) {
 // JSON Matching Function - Global function for JSON product matching
 window.performJsonMatch = function() {
     const jsonUrlInput = document.getElementById('jsonUrlInput');
-    const matchBtn = document.querySelector('#jsonMatchModal .btn-modern2');
+    // Try multiple selectors for compatibility with different template versions
+    const matchBtn = document.querySelector('#jsonMatchModal .btn-modern2')
+                  || document.querySelector('#jsonMatchModal .btn-primary')
+                  || document.querySelector('#jsonMatchModal .btn-lg')
+                  || document.querySelector('#jsonMatchModal button[type="button"]');
     const resultsDiv = document.getElementById('jsonMatchResults');
     const matchCount = document.getElementById('matchCount');
     const matchedProductsList = document.getElementById('matchedProductsList');
