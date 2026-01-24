@@ -19024,6 +19024,33 @@ def json_match():
             weight_str = re.sub(r'(\d+)\.0+(?=[a-zA-Z\s]|$)', r'\1', weight_str)
             return weight_str
 
+        # Helper: extract a friendly weight string (e.g., '0.5g', '1g', '28.35g' for oz)
+        def extract_weight_str(text):
+            if not text:
+                return None
+            t = str(text)
+            patterns = [
+                (r"(\d+(?:\.\d+)?)\s*(g|gram|grams)\b", lambda v, u: f"{float(v):g}g"),
+                (r"(\d+(?:\.\d+)?)\s*(ml|mL)\b", lambda v, u: f"{float(v):g}mL"),
+                (r"(\d+(?:\.\d+)?)\s*(oz|ounce|ounces)\b", lambda v, u: f"{float(v)*28.35:g}g"),
+                (r"(\d+)/(\d+)\s*oz\b", lambda n, d: f"{(float(n)/float(d))*28.35:g}g"),
+                # Leading-dot decimals like .5g
+                (r"\.(\d+)\s*(g|gram|grams)\b", lambda v, u: f"0.{v}g"),
+            ]
+            for pat, fn in patterns:
+                m = re.search(pat, t, flags=re.IGNORECASE)
+                if m:
+                    try:
+                        if len(m.groups()) == 2:
+                            return fn(m.group(1), m.group(2))
+                        elif len(m.groups()) == 1:
+                            return fn(m.group(1), '')
+                        elif len(m.groups()) == 3:
+                            return fn(m.group(1), m.group(2))
+                    except Exception:
+                        continue
+            return None
+
         # Clean weight values in all matched products
         if matched_products:
             for p in matched_products:
@@ -19038,6 +19065,39 @@ def json_match():
                 # Clean CombinedWeight field
                 if 'CombinedWeight' in p and p['CombinedWeight']:
                     p['CombinedWeight'] = clean_weight(p['CombinedWeight'])
+
+        # Ensure every matched product has a CombinedWeight (or visible fallback)
+        if matched_products:
+            for p in matched_products:
+                try:
+                    if not isinstance(p, dict):
+                        continue
+                    # If CombinedWeight already populated, skip
+                    if p.get('CombinedWeight'):
+                        continue
+                    # Try explicit fields first
+                    for candidate in ('Weight*', 'Weight', 'Quantity*', 'Units'):
+                        if p.get(candidate):
+                            val = str(p.get(candidate)).strip()
+                            w = extract_weight_str(val)
+                            if w:
+                                p['CombinedWeight'] = w
+                                break
+                    if p.get('CombinedWeight'):
+                        continue
+                    # Try parsing from display fields
+                    for text_field in ('displayName', 'Product Name*', 'ProductName', 'Description', 'product_name'):
+                        txt = p.get(text_field)
+                        if txt:
+                            w = extract_weight_str(txt)
+                            if w:
+                                p['CombinedWeight'] = w
+                                break
+                    # Final fallback: mark as unknown so UI/DOCX still shows a value
+                    if not p.get('CombinedWeight'):
+                        p['CombinedWeight'] = 'N/A'
+                except Exception as e:
+                    logging.debug(f"Weight extraction failed for product during JSON match: {e}")
 
         # Initialize matched_names to ensure it's always defined
         # Format: "Product Name - Weight" (e.g., "Biscotti Live Resin Disposable Vape - 1g")
