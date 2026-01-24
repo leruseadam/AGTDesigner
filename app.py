@@ -19072,6 +19072,40 @@ def json_match():
         try:
             total_matches = len(matched_products) if matched_products else 0
 
+            # Ensure JSON matched products respect lineage rules (classic types must not be MIXED)
+            try:
+                product_db_for_lineage = get_product_database(store_name)
+            except Exception:
+                product_db_for_lineage = None
+
+            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+
+            for p in matched_products:
+                try:
+                    p_type = str(p.get('Product Type*', p.get('ProductType', '')) or '').strip().lower()
+                    is_classic = p_type in CLASSIC_TYPES or any(ct in p_type for ct in CLASSIC_TYPES)
+                    if is_classic:
+                        pname = p.get('Product Name*') or p.get('ProductName') or p.get('displayName') or p.get('Description') or ''
+                        pname = str(pname).strip()
+                        db_line = None
+                        if product_db_for_lineage and pname:
+                            try:
+                                db_line = product_db_for_lineage.get_product_lineage(pname)
+                            except Exception:
+                                db_line = None
+                        # Prefer DB lineage when available; otherwise default to HYBRID (never MIXED for classic types)
+                        if db_line and str(db_line).strip().upper() not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
+                            db_line_up = str(db_line).strip().upper()
+                            p['Lineage'] = db_line_up
+                            p['ProductBrand'] = db_line_up
+                            p['ProductBrand_Center'] = db_line_up
+                        else:
+                            p['Lineage'] = 'HYBRID'
+                            p['ProductBrand'] = 'HYBRID'
+                            p['ProductBrand_Center'] = 'HYBRID'
+                except Exception as e:
+                    logging.warning(f"Failed to enforce lineage for JSON matched product: {e}")
+
             if matched_products and excel_processor:
                 logging.info(f"Adding {total_matches} JSON matched products directly to Excel DataFrame")
 
