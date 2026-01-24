@@ -35,6 +35,8 @@ import pandas as pd
 import numpy as np
 from dataclasses import dataclass, field
 from enum import Enum
+import pickle
+from pathlib import Path
 
 # Advanced fuzzy matching libraries
 from fuzzywuzzy import fuzz, process
@@ -283,17 +285,54 @@ class ProductTypeSpecificMatcher:
 
                 if raw_weight_match:
                     try:
-                        extracted = self._extract_weight(raw_weight_match.group(0))
-                        if extracted:
-                            # store grams as CombinedWeight
-                            product['CombinedWeight'] = float(extracted)
-                            product['WeightUnits'] = 'g'
-                            # friendly display: avoid trailing .0 and keep leading zero for <1
-                            if float(extracted).is_integer():
-                                display = f"{int(extracted)}g"
+                        raw = raw_weight_match.group(0)
+                        # If JSON explicitly provides unit_weight/unit_weight_uom prefer that
+                        if product.get('unit_weight') and product.get('unit_weight_uom'):
+                            try:
+                                uw = float(product.get('unit_weight'))
+                                uom = str(product.get('unit_weight_uom')).lower()
+                                if uom == 'g':
+                                    product['CombinedWeight'] = float(uw)
+                                    product['WeightUnits'] = 'g'
+                                    product['WeightWithUnits'] = f"{uw}g"
+                                elif uom == 'mg':
+                                    product['CombinedWeight'] = float(uw) / 1000.0
+                                    product['WeightUnits'] = 'g'
+                                    product['WeightWithUnits'] = f"{uw}mg"
+                                elif uom == 'oz':
+                                    # convert ounces to grams
+                                    product['CombinedWeight'] = float(uw) * 28.35
+                                    product['WeightUnits'] = 'g'
+                                    product['WeightWithUnits'] = f"{uw}oz"
+                                else:
+                                    # unknown unit (e.g., mL) - store raw display but do not convert
+                                    product['WeightWithUnits'] = f"{uw}{uom}"
+                            except Exception:
+                                # fallback to parsing raw text
+                                extracted = self._extract_weight(raw)
+                                if extracted:
+                                    product['CombinedWeight'] = float(extracted)
+                                    product['WeightUnits'] = 'g'
+                                    if float(extracted).is_integer():
+                                        display = f"{int(extracted)}g"
+                                    else:
+                                        display = ('{:.3f}'.format(extracted)).rstrip('0').rstrip('.') + 'g'
+                                    product['WeightWithUnits'] = display
+                        else:
+                            # No explicit unit fields in JSON - try to parse and store where safe
+                            # If raw contains ml, do not convert to grams here; just store WeightWithUnits
+                            if re.search(r"\bml\b", raw, flags=re.IGNORECASE):
+                                product['WeightWithUnits'] = raw.strip()
                             else:
-                                display = ('{:.3f}'.format(extracted)).rstrip('0').rstrip('.') + 'g'
-                            product['WeightWithUnits'] = display
+                                extracted = self._extract_weight(raw)
+                                if extracted:
+                                    product['CombinedWeight'] = float(extracted)
+                                    product['WeightUnits'] = 'g'
+                                    if float(extracted).is_integer():
+                                        display = f"{int(extracted)}g"
+                                    else:
+                                        display = ('{:.3f}'.format(extracted)).rstrip('0').rstrip('.') + 'g'
+                                    product['WeightWithUnits'] = display
                     except Exception:
                         pass
 
@@ -1109,6 +1148,14 @@ class EnhancedJSONMatcher:
         
         # Threading
         self.max_workers = min(32, (multiprocessing.cpu_count() or 1) + 4)
+        # Persistent cache file location
+        try:
+            base = Path(os.getcwd())
+            cache_dir = base / 'uploads' / 'cache'
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            self._persistent_cache_file = cache_dir / 'enhanced_json_sheet_cache.pickle'
+        except Exception:
+            self._persistent_cache_file = None
 
     def _to_json_safe(self, obj):
         """Recursively convert objects to JSON-serializable forms."""
@@ -1494,6 +1541,47 @@ class EnhancedJSONMatcher:
                     logging.info(f"🧬 LINEAGE INFERRED: '{inferred_lineage}' for '{product_name}'")
             
         logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f})")
+
+        # Persist inferred/filled lineage back to ProductDatabase if the original DB product
+        # did not have a lineage value but we were able to fill one from JSON or inference.
+        try:
+            original_lineage = (product_dict.get('Lineage') or '').strip()
+            new_lineage = (db_priority_product.get('Lineage') or '').strip()
+            if not original_lineage and new_lineage:
+                # Attempt to locate the store-specific database and update the product lineage
+                try:
+                    from .product_database import get_database_path, ProductDatabase
+                    import os
+
+                    store_name = 'AGT_Bothell'
+                    if self.excel_processor and hasattr(self.excel_processor, '_store_name'):
+                        store_name = self.excel_processor._store_name
+
+                    db_path = get_database_path(store_name)
+                    if os.path.exists(db_path):
+                        try:
+                            product_db = ProductDatabase(db_path)
+                            # Determine product name for update - prefer DB canonical name
+                            product_name_for_update = product_dict.get('Product Name*') or product_dict.get('ProductName') or product_name
+                            vendor_for_update = product_dict.get('Vendor/Supplier*') or product_dict.get('Vendor') or db_priority_product.get('Vendor') or json_item.get('vendor')
+                            brand_for_update = product_dict.get('Product Brand') or product_dict.get('Brand') or json_item.get('brand')
+
+                            updated = product_db.update_product_lineage(product_name_for_update, new_lineage, vendor_for_update, brand_for_update)
+                            if updated:
+                                logging.info(f"💾 Persisted inferred lineage for '{product_name_for_update}' -> '{new_lineage}' (vendor={vendor_for_update}, brand={brand_for_update})")
+                                db_priority_product['Sovereign_Lineage_Persisted'] = True
+                            else:
+                                logging.warning(f"Could not persist lineage for '{product_name_for_update}' - update reported no rows changed")
+                        except Exception as e:
+                            logging.warning(f"Error persisting lineage to ProductDatabase: {e}")
+                    else:
+                        logging.debug(f"ProductDatabase not found at {db_path}; skipping lineage persistence")
+                except Exception as e:
+                    logging.debug(f"Could not import ProductDatabase utilities to persist lineage: {e}")
+        except Exception:
+            # Fail silently here - do not break matching if persistence fails
+            logging.exception("Unexpected error while attempting to persist inferred lineage")
+
         return db_priority_product
 
     def _select_db_price(self, product: dict) -> str:
@@ -2008,10 +2096,27 @@ class EnhancedJSONMatcher:
                             union = json_tokens.union(db_tokens)
                             desc_jaccard = len(inter) / len(union) if union else 0.0
 
-                        # Conservative scaling: if jaccard is low, reduce the score
-                        # multiplier ranges 0.5..1.0 (0.5 when no overlap, 1.0 when perfect overlap)
-                        multiplier = 0.5 + 0.5 * desc_jaccard
+                        # Conservative scaling: amplify descriptive-token overlap impact
+                        # New multiplier ranges 0.3..1.0 (more aggressive when overlap is high)
+                        multiplier = 0.3 + 0.7 * desc_jaccard
                         final_score = max(0.0, min(1.0, final_score * multiplier))
+
+                        # Penalize extremely low descriptive overlap (these matches are likely generic-token driven)
+                        if desc_jaccard < 0.15:
+                            final_score *= 0.6
+
+                        # Exact non-generic token matches indicate strain/vendor agreement; boost slightly
+                        try:
+                            non_generic_json = {t for t in filtered_json_tokens if t not in generic_tokens and len(t) > 2}
+                            non_generic_db = {t for t in filtered_db_tokens if t not in generic_tokens and len(t) > 2}
+                            exact_matches = len(non_generic_json.intersection(non_generic_db))
+                            if exact_matches > 0:
+                                # small boost per exact token match, capped
+                                boost = min(0.20, 0.06 * exact_matches)
+                                final_score = min(1.0, final_score + boost)
+                                match_factors['exact_non_generic_matches'] = exact_matches
+                        except Exception:
+                            pass
                     except Exception:
                         desc_jaccard = 0.0
                     
@@ -2098,12 +2203,80 @@ class EnhancedJSONMatcher:
         
         # Extract JSON product attributes
         json_price = self._normalize_price(json_product.get('price', json_product.get('cost', '')))
-        json_weight = self._normalize_weight(json_product.get('weight', ''))
+        # Prefer explicit numeric unit_weight/unit_weight_uom when available
+        json_weight = None
+        json_weight_units = None
+        try:
+            if json_product.get('unit_weight') is not None and json_product.get('unit_weight_uom'):
+                uw = float(json_product.get('unit_weight'))
+                uom = str(json_product.get('unit_weight_uom')).lower()
+                if uom == 'g':
+                    json_weight = uw
+                    json_weight_units = 'g'
+                elif uom == 'mg':
+                    json_weight = uw / 1000.0
+                    json_weight_units = 'g'
+                elif uom == 'oz':
+                    json_weight = uw * 28.35
+                    json_weight_units = 'g'
+                else:
+                    # leave as None for mL or unknown units
+                    json_weight = None
+            else:
+                # fallback: try CombinedWeight or WeightWithUnits
+                if json_product.get('CombinedWeight'):
+                    try:
+                        json_weight = float(json_product.get('CombinedWeight'))
+                        json_weight_units = 'g'
+                    except Exception:
+                        # try to extract from WeightWithUnits
+                        wwu = str(json_product.get('WeightWithUnits', ''))
+                        json_weight = self._extract_weight(wwu) if wwu else None
+                else:
+                    wwu = str(json_product.get('WeightWithUnits', ''))
+                    json_weight = self._extract_weight(wwu) if wwu else None
+        except Exception:
+            json_weight = None
         json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
         json_brand = self._normalize_text(json_product.get('brand', ''))
         json_name = self._normalize_text(self._get_product_name(json_product))
         
         # If we don't have enough attributes to match, skip
+        # If weight isn't directly obtainable, try to glean it from description/name
+        json_weight_inferred = False
+        if json_weight is None:
+            # Try multiple textual fields for implicit weight/volume hints
+            for txt in (json_product.get('description') or '', json_product.get('notes') or '', self._get_product_name(json_product)):
+                try:
+                    s = str(txt or '')
+                except Exception:
+                    s = ''
+                if not s:
+                    continue
+                # Detect ml/volume explicitly (we treat ml separately from grams)
+                ml_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:mL|ml|milliliter|milliliters)\b", s, flags=re.IGNORECASE)
+                if ml_match:
+                    try:
+                        json_weight = float(ml_match.group(1))
+                        json_weight_units = 'ml'
+                        json_weight_inferred = True
+                        logging.info(f"🔎 Inferred JSON volume: {json_weight}ml from text for product '{self._get_product_name(json_product)}'")
+                        break
+                    except Exception:
+                        pass
+
+                # Fallback to gram/oz/mg extraction
+                try:
+                    inferred = self._extract_weight(s)
+                except Exception:
+                    inferred = None
+                if inferred:
+                    json_weight = inferred
+                    json_weight_units = 'g'
+                    json_weight_inferred = True
+                    logging.info(f"🔎 Inferred JSON weight: {json_weight}g from text for product '{self._get_product_name(json_product)}'")
+                    break
+
         if not json_price and not json_weight:
             return matches
         
@@ -2116,9 +2289,17 @@ class EnhancedJSONMatcher:
                 db_product.get('Unit Price') or 
                 db_product.get('Wholesale Cost')
             )
-            db_weight = self._normalize_weight(
-                str(db_product.get('Weight*', '') or '') + str(db_product.get('Units', '') or '')
-            )
+            # Normalize database weight to numeric grams when possible
+            db_weight = None
+            try:
+                if db_product.get('CombinedWeight'):
+                    db_weight = float(db_product.get('CombinedWeight'))
+                else:
+                    # try to extract from WeightWithUnits or Weight* + Units
+                    db_wu = (str(db_product.get('WeightWithUnits', '')) or (str(db_product.get('Weight*', '')) + str(db_product.get('Units', ''))))
+                    db_weight = self._extract_weight(db_wu) if db_wu else None
+            except Exception:
+                db_weight = None
             db_vendor = self._normalize_vendor(
                 db_product.get('Vendor/Supplier*', '') or 
                 db_product.get('Vendor', '') or 
@@ -2141,14 +2322,72 @@ class EnhancedJSONMatcher:
                     score += 0.4 * price_similarity
                     match_factors['price_match'] = price_similarity
             
-            # Weight match (important - 30%)
-            if json_weight and db_weight:
-                if json_weight == db_weight:
-                    score += 0.3
-                    match_factors['weight_match'] = 1.0
-                elif json_weight in db_weight or db_weight in json_weight:
-                    score += 0.25
-                    match_factors['weight_match'] = 0.85
+            # Weight match (important - 30%) — prefer numeric agreement when available
+            # Determine DB units (normalized) to compare like-for-like when possible
+            db_units = self._select_units(db_product)
+            try:
+                # If JSON provided/was inferred in ml, compare volumes (ml) rather than converting
+                if json_weight is not None and json_weight_units == 'ml':
+                    # If DB does not have ml units, and JSON weight was inferred, skip this candidate
+                    if db_units != 'ml':
+                        if json_weight_inferred:
+                            match_factors['weight_agreement_penalty'] = 0.0
+                            logging.debug(f"⛔ Skipping candidate due to unit mismatch (json ml vs db {db_units}): json={json_weight}{json_weight_units}")
+                            continue
+                        else:
+                            # Non-inferred JSON ml vs DB non-ml: treat as no match
+                            match_factors['weight_match'] = 0.0
+                    else:
+                        # Both are ml - extract DB volume
+                        db_volume = None
+                        try:
+                            db_volume = self._extract_volume(self._get_product_name(db_product))
+                        except Exception:
+                            db_volume = None
+                        if db_volume is None:
+                            # Try to pull numeric from WeightWithUnits
+                            try:
+                                m = re.search(r"(\d+(?:\.\d+)?)\s*ml", str(db_product.get('WeightWithUnits') or ''), flags=re.IGNORECASE)
+                                if m:
+                                    db_volume = float(m.group(1))
+                            except Exception:
+                                db_volume = None
+
+                        if db_volume is None:
+                            if json_weight_inferred:
+                                logging.debug(f"⛔ Skipping candidate because db volume missing for inferred json ml={json_weight}")
+                                continue
+                            else:
+                                # Neutral fallback
+                                match_factors['weight_match'] = 0.5
+                        else:
+                            rel_diff = abs(json_weight - db_volume) / max(json_weight, db_volume) if max(json_weight, db_volume) > 0 else 1.0
+                            if rel_diff < 0.01:
+                                score += 0.35
+                                match_factors['weight_match'] = 1.0
+                            else:
+                                weight_sim = max(0.0, 1.0 - rel_diff)
+                                score += 0.30 * weight_sim
+                                match_factors['weight_match'] = weight_sim
+
+                elif json_weight is not None and db_weight is not None:
+                    # Both numeric (assumed grams) - standard comparison
+                    if abs(json_weight - db_weight) < 1e-6:
+                        score += 0.35
+                        match_factors['weight_match'] = 1.0
+                    else:
+                        weight_sim = max(0.0, 1.0 - (abs(json_weight - db_weight) / max(json_weight, db_weight)))
+                        score += 0.30 * weight_sim
+                        match_factors['weight_match'] = weight_sim
+                else:
+                    # fallback to string-based comparison for missing numeric weights
+                    db_wstr = str(db_product.get('WeightWithUnits') or db_product.get('CombinedWeight') or '')
+                    js_wstr = str(json_product.get('WeightWithUnits') or json_product.get('CombinedWeight') or '')
+                    if js_wstr and db_wstr and js_wstr == db_wstr:
+                        score += 0.25
+                        match_factors['weight_match'] = 0.9
+            except Exception:
+                pass
             
             # Vendor match (important - 20%)
             if json_vendor and db_vendor:
@@ -2360,6 +2599,98 @@ class EnhancedJSONMatcher:
         self.cache.set(cache_key, products, ttl=3600)
         
         return products
+
+    # Compatibility methods to mirror the older JSONMatcher API used by app.py
+    def _build_sheet_cache(self):
+        """Build a sheet-style cache compatible with the legacy `JSONMatcher`.
+        This allows the rest of the app to call `_build_sheet_cache()` and
+        inspect `_sheet_cache` and `_indexed_cache` as before.
+        """
+        logging.info("EnhancedJSONMatcher: Building sheet cache from database...")
+        try:
+            products = self._get_database_products() or []
+            cache = []
+            indexed_cache = {
+                'exact_names': {},
+                'vendor_exact_names': {},
+                'vendor_groups': defaultdict(list),
+                'key_terms': defaultdict(list),
+                'normalized_names': defaultdict(list)
+            }
+
+            for prod in products:
+                desc = str(prod.get('Product Name*') or prod.get('ProductName') or prod.get('displayName') or '').strip()
+                norm = self._normalize_text(desc)
+                toks = set(re.findall(r"\w+", norm))
+                key_terms = toks.copy()
+                brand = str(prod.get('Product Brand') or '').strip()
+                vendor = str(prod.get('Vendor/Supplier*') or prod.get('Vendor') or '').strip()
+                product_type = str(prod.get('Product Type*') or prod.get('Type') or '').strip()
+                lineage = str(prod.get('Lineage') or '').strip()
+                strain = str(prod.get('Product Strain') or prod.get('Strain') or '').strip()
+
+                cache_item = {
+                    'idx': len(cache),
+                    'original_name': desc,
+                    'norm': norm,
+                    'tokens': toks,
+                    'key_terms': key_terms,
+                    'brand': brand,
+                    'vendor': vendor,
+                    'product_type': product_type,
+                    'lineage': lineage,
+                    'strain': strain,
+                    '_db_product': prod
+                }
+
+                cache.append(cache_item)
+
+                exact_name = desc.lower()
+                indexed_cache['exact_names'][exact_name] = cache_item
+
+                if vendor:
+                    vendor_key = f"{exact_name}|{vendor.lower()}"
+                    indexed_cache['vendor_exact_names'].setdefault(vendor_key, []).append(cache_item)
+                    indexed_cache['vendor_groups'][vendor.lower()].append(cache_item)
+
+                for term in key_terms:
+                    indexed_cache['key_terms'][term].append(cache_item)
+
+                indexed_cache['normalized_names'][norm].append(cache_item)
+
+            self._sheet_cache = cache
+            self._indexed_cache = indexed_cache
+
+            logging.info(f"EnhancedJSONMatcher: Built sheet cache with {len(cache)} entries")
+        except Exception as e:
+            logging.error(f"EnhancedJSONMatcher: Failed to build sheet cache: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            self._sheet_cache = []
+            self._indexed_cache = {}
+
+    def get_sheet_cache_status(self):
+        if self._sheet_cache is None:
+            return "Not built"
+        elif not self._sheet_cache:
+            return "Empty"
+        else:
+            info = f"Built with {len(self._sheet_cache)} entries"
+            try:
+                if self._indexed_cache:
+                    info += f" (indexed: {len(self._indexed_cache.get('exact_names', {}))} exact, {len(self._indexed_cache.get('vendor_groups', {}))} vendors)"
+            except Exception:
+                pass
+            return info
+
+    def rebuild_sheet_cache(self):
+        self._sheet_cache = None
+        self._indexed_cache = None
+        self._build_sheet_cache()
+
+    def rebuild_all_caches(self):
+        self.rebuild_sheet_cache()
+        self.clear_cache()
         
     def _combine_match_results(self, matches1: List[MatchResult], matches2: List[MatchResult], 
                              weights: Tuple[float, float] = (0.5, 0.5)) -> List[MatchResult]:
@@ -2458,14 +2789,64 @@ class EnhancedJSONMatcher:
     def warm_cache(self):
         """Warm up caches for better performance"""
         logging.info("Warming up caches...")
-        
+        # Try loading persisted sheet cache first
+        loaded = False
+        if getattr(self, '_persistent_cache_file', None):
+            try:
+                loaded = self._load_persisted_sheet_cache()
+                if loaded:
+                    logging.info("Loaded persisted sheet cache")
+            except Exception:
+                loaded = False
+
         # Build ML models
         self._build_ml_models()
-        
-        # Pre-load database products
-        self._get_database_products()
-        
+
+        # Pre-load database products and sheet cache if not loaded
+        if not loaded:
+            self._build_sheet_cache()
+            # Attempt to persist sheet cache for future runs
+            try:
+                self._save_persisted_sheet_cache()
+                logging.info("Persisted sheet cache to disk")
+            except Exception as e:
+                logging.warning(f"Could not persist sheet cache: {e}")
+
+        # Ensure product list is loaded into memory cache as well
+        try:
+            self._get_database_products()
+        except Exception:
+            pass
+
         logging.info("Cache warm-up completed")
+
+    def _save_persisted_sheet_cache(self):
+        """Save `_sheet_cache` to disk for faster startup on other machines."""
+        if not getattr(self, '_persistent_cache_file', None):
+            return False
+        try:
+            with open(self._persistent_cache_file, 'wb') as fh:
+                pickle.dump({'sheet_cache': self._sheet_cache, 'indexed_cache': self._indexed_cache}, fh)
+            return True
+        except Exception as e:
+            logging.warning(f"Failed to save persisted sheet cache: {e}")
+            return False
+
+    def _load_persisted_sheet_cache(self) -> bool:
+        """Load a previously persisted sheet cache from disk if available."""
+        if not getattr(self, '_persistent_cache_file', None):
+            return False
+        try:
+            if not self._persistent_cache_file.exists():
+                return False
+            with open(self._persistent_cache_file, 'rb') as fh:
+                data = pickle.load(fh)
+                self._sheet_cache = data.get('sheet_cache')
+                self._indexed_cache = data.get('indexed_cache')
+            return bool(self._sheet_cache)
+        except Exception as e:
+            logging.warning(f"Failed to load persisted sheet cache: {e}")
+            return False
 
     def _extract_vendor(self, name: str) -> str:
         """Extract vendor/brand information from product name."""

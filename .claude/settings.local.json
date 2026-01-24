@@ -50,7 +50,8 @@
       "Bash(vendor\"\\)\n3. Any record in the group\n\nSets vendor on Vendor/Supplier*, Vendor, and ProductVendor fields.\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(for db in /Users/adamcordova/Desktop/labelMaker_ QR copy final/uploads/product_database*.db)",
       "Bash(do)",
-      "Bash(du:*)"
+      "Bash(du:*)",
+      "Bash(git stash:*)"
     ],
     "deny": [],
     "ask": [],

@@ -2629,7 +2629,7 @@ def get_session_excel_processor():
 
 def get_session_json_matcher():
     try:
-        from src.core.data.json_matcher import JSONMatcher
+        from src.core.data.enhanced_json_matcher import EnhancedJSONMatcher
         excel_processor = get_session_excel_processor()
         if excel_processor is None:
             logging.error("Cannot create JSONMatcher: ExcelProcessor is None")
@@ -2637,20 +2637,15 @@ def get_session_json_matcher():
         
         # Use a global JSON matcher instance to persist the cache
         if not hasattr(app, '_json_matcher'):
-            app._json_matcher = JSONMatcher(excel_processor)
-            
-            # CRITICAL FIX: Build cache from database to ensure JSON matching works
+            # Use the EnhancedJSONMatcher for improved matching and weight inference
+            app._json_matcher = EnhancedJSONMatcher(excel_processor)
             try:
-                # Build the sheet cache from database - this will auto-select the best database
-                app._json_matcher._build_cache_from_database()
-                if app._json_matcher._sheet_cache and len(app._json_matcher._sheet_cache) > 0:
-                    logging.info(f"JSON matcher loaded {len(app._json_matcher._sheet_cache)} products from database cache")
-                else:
-                    logging.warning("No products found in JSON matcher cache - JSON matching may not work")
+                # Warm caches and pre-load database products
+                app._json_matcher.warm_cache()
+                logging.info("Enhanced JSON matcher cache warmed and ready")
             except Exception as e:
-                logging.error(f"Error building JSON matcher cache from database: {e}")
-            
-            logging.info("Created new JSONMatcher instance")
+                logging.error(f"Error warming EnhancedJSONMatcher cache: {e}")
+            logging.info("Created new EnhancedJSONMatcher instance")
         else:
             # Update the Excel processor reference in case it changed
             app._json_matcher.excel_processor = excel_processor

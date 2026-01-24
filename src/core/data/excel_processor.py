@@ -786,6 +786,10 @@ def normalize_name(name):
         return ""
     # Lowercase, strip, replace multiple spaces/hyphens, remove non-breaking hyphens, etc.
     name = name.lower().strip()
+    # Normalize synonyms for vaping hardware to improve token overlap matching
+    # e.g., 'vaporizer' (or 'vaporiser') -> 'disposable vape' so both sides share 'disposable'/'vape' tokens
+    name = name.replace('vaporiser', 'disposable vape')
+    name = name.replace('vaporizer', 'disposable vape')
     name = name.replace('\u2011', '-')  # non-breaking hyphen to normal
     name = re.sub(r'[-\s]+', ' ', name)  # collapse hyphens and spaces
     name = re.sub(r'[^\w\s-]', '', name)  # remove non-alphanumeric except hyphen/space
