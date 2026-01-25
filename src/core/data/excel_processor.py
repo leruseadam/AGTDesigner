@@ -39,6 +39,9 @@ DEFAULT_FILE_CACHE: Dict[str, Dict[str, Any]] = {}  # {key: {'path': str, 'times
 DEFAULT_FILE_CACHE_MAX_SIZE = 50
 DEFAULT_FILE_CACHE_TTL = 3600  # 1 hour
 
+# Version for TAGS cache - bump when cache schema changes
+TAGS_CACHE_VERSION = 1
+
 def _get_default_file_cache(key: str) -> Optional[str]:
     """Get cached file path if still valid (exists and not expired)."""
     if key not in DEFAULT_FILE_CACHE:
@@ -5525,25 +5528,18 @@ class ExcelProcessor:
                     self.logger.warning(f"Failed to update strain '{identifier}' in database")
                     return False
             else:
-                # Product name-based update - directly update products table
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-                
-                # Update the lineage for the specific product by name
-                cursor.execute('''
-                    UPDATE products 
-                    SET "Lineage" = ? 
-                    WHERE "Product Name*" = ?
-                ''', (new_lineage, identifier))
-                
-                updated_rows = cursor.rowcount
-                conn.commit()
-                
-                if updated_rows > 0:
-                    self.logger.info(f"Updated lineage for product '{identifier}' to '{new_lineage}' in database ({updated_rows} rows)")
-                    return True
-                else:
-                    self.logger.warning(f"No products found with name '{identifier}' for lineage update")
+                # Product name-based update - use ProductDatabase helper to ensure canonicalization/audit
+                try:
+                    updated = product_db.update_product_lineage(identifier, new_lineage)
+                    if updated:
+                        self.logger.info(f"Updated lineage for product '{identifier}' to '{new_lineage}' in database (safe)")
+                        return True
+                    else:
+                        self.logger.warning(f"No products updated for product name '{identifier}' (safe update skipped or invalid lineage)")
+                        return False
+                except Exception as e:
+                    self.logger.error(f"Error performing safe product lineage update for '{identifier}': {e}")
+                    return False
                     return False
                     
         except Exception as e:

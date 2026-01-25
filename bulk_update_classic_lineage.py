@@ -27,14 +27,15 @@ def main():
 
     updated = 0
     for strain_id, canonical in strain_map.items():
-        # Update all products for this strain
-        cursor.execute('''
-            UPDATE products
-            SET "Lineage" = ?, sovereign_lineage = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE strain_id = ?
-        ''', (canonical, canonical, strain_id))
-        updated += cursor.rowcount
-    conn.commit()
+        # Find affected products and update them safely via ProductDatabase
+        cursor.execute('SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand" FROM products WHERE strain_id = ?', (strain_id,))
+        rows = cursor.fetchall()
+        for pid, pname, vendor, brand in rows:
+            try:
+                if db.update_product_lineage(pname, canonical, vendor=vendor, brand=brand):
+                    updated += 1
+            except Exception as e:
+                print(f"Failed to update product id={pid} ({pname}): {e}")
     print(f"Updated {updated} products to match canonical_lineage for classic types.")
     conn.close()
 

@@ -230,6 +230,20 @@ def make_nonbreaking_hyphens(text):
 
     return text
 
+def make_nonbreaking_weight_units(text):
+    """
+    Replace spaces between numeric values and weight units with a non-breaking space.
+    E.g. '1 g' -> '1\u00A0g', '250mg' -> '250\u00A0mg'
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    # Add non-breaking space between number and unit (mg, g, kg, oz, lb, ml)
+    def _repl(m):
+        return f"{m.group(1)}\u00A0{m.group(2)}"
+    text = re.sub(r"(\d+)\s*(mg|g|kg|oz|lb|lbs|ml)\b", _repl, text, flags=re.IGNORECASE)
+    return text
+
 def replace_placeholder_with_markers(doc, placeholder, marker_value):
     """Replace placeholder text with marked content in a document."""
     for table in doc.tables:

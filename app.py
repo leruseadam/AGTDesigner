@@ -13954,30 +13954,18 @@ def update_lineage():
         except Exception as e:
             logging.error(f"Error updating product lineage: {e}")
         
-        # Step 2: CRITICAL - Update products.sovereign_lineage for ALL matching products
-        # This ensures lineage changes persist for ALL products, whether or not they have strains
-        cursor.execute("""
-            UPDATE products
-            SET sovereign_lineage = ?
-            WHERE \"Product Name*\" = ? OR ProductName = ?
-        """, (new_lineage, tag_name, tag_name))
-        products_sovereign_updated = cursor.rowcount
-        if products_sovereign_updated > 0:
-            logging.info(f"✅ Updated sovereign_lineage for {products_sovereign_updated} product(s)")
-            # CRITICAL: Clear ALL caches to ensure UI shows fresh sovereign lineage
-            # 1. Clear lineage cache (product-level and entire)
+        # Step 2: Clear caches and return response when update succeeded
+        if success:
             try:
                 from src.core.data.product_database import clear_lineage_cache
-                # Clear cache for this specific product
+                # Clear cache for this specific product and entire cache to ensure UI shows fresh sovereign_lineage
                 clear_lineage_cache(tag_name)
-                # Also clear entire cache to ensure all UI endpoints get fresh sovereign_lineage
-                clear_lineage_cache(None)  # None clears entire cache
-                logging.info(f"✅ Cleared lineage cache (product + entire) after sovereign_lineage update for '{tag_name}'")
+                clear_lineage_cache(None)
+                logging.info(f"✅ Cleared lineage cache (product + entire) after lineage update for '{tag_name}'")
             except Exception as cache_err:
                 logging.warning(f"Could not clear lineage cache: {cache_err}")
-            
-            # 2. CRITICAL: Clear session-level caches for available_tags and selected_tags
-            # This ensures the UI fetches fresh data from the database on next request
+        else:
+            logging.warning(f"⚠️ Skipping cache clear because lineage update did not succeed for '{tag_name}'")
             try:
                 clear_available_tags_cache(reason=f"sovereign_lineage updated for {tag_name}")
                 # Also clear selected_tags cache
@@ -14048,6 +14036,17 @@ def update_lineage():
             logging.error(traceback.format_exc())
             strain_rows = []
         
+        # Canonicalize lineage value to prevent invalid entries from the web UI
+        try:
+            from src.core.data.product_database import _canonicalize_lineage_value
+            canonical_new = _canonicalize_lineage_value(new_lineage)
+        except Exception:
+            canonical_new = None
+
+        if not canonical_new:
+            logging.error(f"Invalid lineage value provided via API: '{new_lineage}'")
+            return jsonify({'success': False, 'error': 'Invalid lineage value'}), 400
+
         strains_updated = 0
         for strain_row in strain_rows:
             # Handle both (id, name) tuples and single id values
@@ -14057,39 +14056,54 @@ def update_lineage():
                 strain_id = strain_row[0]
                 strain_name = 'Unknown'
             # Update both sovereign_lineage and canonical_lineage
-            cursor.execute("""
+                cursor.execute("""
                 UPDATE strains 
-                SET sovereign_lineage = ?, canonical_lineage = ?
+                SET sovereign_lineage = ?, canonical_lineage = ?, updated_at = ?
                 WHERE id = ?
-            """, (new_lineage, new_lineage, strain_id))
+            """, (canonical_new, canonical_new, datetime.now().isoformat(), strain_id))
             if cursor.rowcount > 0:
                 strains_updated += 1
-                logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}'")
+                logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{canonical_new}'")
         
         # Step 4: CROSS-PRODUCT-TYPE SYNCING - Update products with same strain across CLASSIC TYPES only
         # This syncs lineage across Flower, Preroll, Concentrate, and Edible (Classic Types only)
         similar_products_updated = 0
         if strains_updated > 0:
             for strain_id, strain_name in strain_rows:
-                # Update products linked to this strain_id (Classic Types only)
+                # Find products linked to this strain_id (Classic Types only) and update via ProductDatabase API
                 cursor.execute("""
-                    UPDATE products
-                    SET Lineage = ?, sovereign_lineage = ?
+                    SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                    FROM products
                     WHERE strain_id = ?
                     AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
-                """, (new_lineage, new_lineage, strain_id))
-                strain_linked_count = cursor.rowcount
+                """, (strain_id,))
+                linked_rows = cursor.fetchall()
+                strain_linked_count = 0
+                for pid, prod_name_db, vendor_db, brand_db in linked_rows:
+                    try:
+                        ok = product_db.update_product_lineage(prod_name_db, canonical_new, vendor_db, brand_db)
+                        if ok:
+                            strain_linked_count += 1
+                    except Exception as e:
+                        logging.warning(f"Failed safe-update lineage for product id={pid} ('{prod_name_db}'): {e}")
 
-                # CRITICAL: Also update products with matching strain name but no strain_id link
-                # This catches products across different Classic Type categories (prerolls, concentrates, etc.)
+                # Also find products that match by Product Strain text but have no strain_id
                 cursor.execute("""
-                    UPDATE products
-                    SET Lineage = ?, sovereign_lineage = ?
+                    SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                    FROM products
                     WHERE LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
                     AND (strain_id IS NULL OR strain_id != ?)
                     AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
-                """, (new_lineage, new_lineage, strain_name, strain_id))
-                name_match_count = cursor.rowcount
+                """, (strain_name, strain_id))
+                name_rows = cursor.fetchall()
+                name_match_count = 0
+                for pid, prod_name_db, vendor_db, brand_db in name_rows:
+                    try:
+                        ok = product_db.update_product_lineage(prod_name_db, canonical_new, vendor_db, brand_db)
+                        if ok:
+                            name_match_count += 1
+                    except Exception as e:
+                        logging.warning(f"Failed safe-update lineage for product id={pid} ('{prod_name_db}'): {e}")
 
                 similar_products_updated = strain_linked_count + name_match_count
                 if similar_products_updated > 0:
@@ -14465,33 +14479,42 @@ def batch_update_lineage():
                                 strain_val = str(info.get('strain_name') or '').strip()
                         except Exception:
                             pass
-                    # Track strain for sovereign update
-                    if strain_val and str(strain_val).strip():
-                        strains_to_update.add((strain_val, new_lineage))
-                    # Execute vendor+strain update when vendor exists
-                    if vendor_val:
-                        if strain_val:
-                            cursor.execute('''
-                                UPDATE products
-                                SET "Lineage" = ?
-                                WHERE "Vendor/Supplier*" = ?
-                                  AND strain_id = (
-                                    SELECT id FROM strains WHERE normalized_name = (
-                                      SELECT normalized_name FROM strains WHERE strain_name = ? LIMIT 1
-                                    )
-                                  )
-                            ''', (new_lineage, vendor_val, strain_val))
-                        else:
-                            # Fallback: vendor + normalized product name
-                            cursor.execute('''
-                                UPDATE products
-                                SET "Lineage" = ?
-                                WHERE "Vendor/Supplier*" = ?
-                                  AND (normalized_name = (
-                                        SELECT normalized_name FROM products WHERE "Product Name*" = ? LIMIT 1
-                                      ) OR "Product Name*" = ?)
-                            ''', (new_lineage, vendor_val, tag_name, tag_name))
-                        total_vendor_updates += cursor.rowcount
+                                        # Track strain for sovereign update
+                                        if strain_val and str(strain_val).strip():
+                                                strains_to_update.add((strain_val, new_lineage))
+                                        # Execute vendor+strain update when vendor exists - do per-row safe updates
+                                        if vendor_val:
+                                                try:
+                                                        if strain_val:
+                                                                cursor.execute('''
+                                                                        SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                                                                        FROM products
+                                                                        WHERE "Vendor/Supplier*" = ?
+                                                                            AND strain_id = (
+                                                                                SELECT id FROM strains WHERE normalized_name = (
+                                                                                    SELECT normalized_name FROM strains WHERE strain_name = ? LIMIT 1
+                                                                                )
+                                                                            )
+                                                                ''', (vendor_val, strain_val))
+                                                        else:
+                                                                cursor.execute('''
+                                                                        SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                                                                        FROM products
+                                                                        WHERE "Vendor/Supplier*" = ?
+                                                                            AND (normalized_name = (
+                                                                                        SELECT normalized_name FROM products WHERE "Product Name*" = ? LIMIT 1
+                                                                                    ) OR "Product Name*" = ?)
+                                                                ''', (vendor_val, tag_name, tag_name))
+
+                                                        rows = cursor.fetchall()
+                                                        for pid, prod_name_db, vendor_db, brand_db in rows:
+                                                                try:
+                                                                        if product_db.update_product_lineage(prod_name_db, new_lineage, vendor_db, brand_db):
+                                                                                total_vendor_updates += 1
+                                                                except Exception as e:
+                                                                        logging.warning(f"Failed to safe-update product id={pid} lineage: {e}")
+                                                except Exception as e:
+                                                        logging.warning(f"Vendor-based lineage update failed (falling back): {e}")
                 conn.commit()
                 # CRITICAL FIX: Force WAL checkpoint to ensure batch lineage changes persist
                 try:
@@ -17428,9 +17451,49 @@ def update_database_product(product_id: int):
             where_clause = 'rowid = ?' if excel_style else 'id = ?'
             params.append(product_id)
 
-            query = f'UPDATE products SET {", ".join(updates)} WHERE {where_clause}'
-            cursor.execute(query, params)
-            conn.commit()
+            # If the update includes lineage, perform a safe per-product lineage update
+            lineage_in_payload = False
+            if any('Lineage' in u or u.strip().startswith('lineage') for u in updates):
+                lineage_in_payload = True
+
+            if lineage_in_payload:
+                # Fetch current product identifiers to perform safe lineage update
+                try:
+                    cursor.execute('SELECT "Product Name*", "Vendor/Supplier*", "Product Brand" FROM products WHERE id = ?', (product_id,))
+                    pinfo = cursor.fetchone()
+                    if pinfo:
+                        prod_name_db = pinfo[0]
+                        vendor_db = pinfo[1] if len(pinfo) > 1 else None
+                        brand_db = pinfo[2] if len(pinfo) > 2 else None
+                        # Extract lineage value from request data (support both excel and modern keys)
+                        new_lineage_val = data.get('Lineage') if 'Lineage' in data else data.get('lineage')
+                        if new_lineage_val is not None:
+                            try:
+                                product_db.update_product_lineage(prod_name_db, new_lineage_val, vendor_db, brand_db)
+                            except Exception as e:
+                                logging.error(f"Failed safe-update lineage for product id={product_id}: {e}")
+                                return jsonify({'success': False, 'error': 'Failed to update lineage safely'}), 500
+                except Exception as e:
+                    logging.error(f"Error while performing safe lineage update for product {product_id}: {e}")
+                    return jsonify({'success': False, 'error': str(e)}), 500
+
+                # Remove lineage updates from the generic updates list so we don't overwrite it below
+                filtered_updates = []
+                filtered_params = []
+                for u, p in zip(updates, params[:-1]):
+                    if 'Lineage' in u or u.strip().startswith('lineage'):
+                        continue
+                    filtered_updates.append(u)
+                    filtered_params.append(p)
+
+                updates = filtered_updates
+                params = filtered_params
+                params.append(product_id)
+
+            if updates:
+                query = f'UPDATE products SET {", ".join(updates)} WHERE {where_clause}'
+                cursor.execute(query, params)
+                conn.commit()
 
         return jsonify({'success': True})
 
@@ -21755,13 +21818,22 @@ def set_strain_lineage():
             
             strain_id = strain_result[0]
             
-            # Update the sovereign lineage (preferred over canonical)
-            cursor.execute('''
-                UPDATE strains 
-                SET sovereign_lineage = ?, 
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ''', (lineage, strain_id))
+            # Canonicalize and validate lineage value
+            try:
+                from src.core.data.product_database import _canonicalize_lineage_value
+                canonical_lineage = _canonicalize_lineage_value(lineage)
+            except Exception:
+                canonical_lineage = None
+
+            if not canonical_lineage:
+                return jsonify({'error': 'Invalid lineage value'}), 400
+
+            # Update the sovereign lineage using ProductDatabase helper to ensure consistency
+            try:
+                product_db.add_or_update_strain(strain_name, canonical_lineage, sovereign=True)
+            except Exception as e:
+                logging.error(f"Error updating strain via ProductDatabase: {e}")
+                return jsonify({'error': 'Failed to update strain lineage'}), 500
             
             # Check if strain_id column exists in products table
             has_strain_id = product_db._products_has_column('strain_id')
@@ -21770,41 +21842,37 @@ def set_strain_lineage():
                 # Update products using strain_id if column exists
                 # Also update products with matching Product Strain for products without strain_id set
                 # CRITICAL: Also set sovereign_lineage on products so they remember manual override
+                # Find affected products and update them safely via ProductDatabase
                 cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?,
-                        sovereign_lineage = ?,
-                        updated_at = CURRENT_TIMESTAMP
+                    SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                    FROM products
                     WHERE strain_id = ?
                        OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
-                ''', (lineage, lineage, strain_id, strain_name))
-                
-                # Get the count of updated products
-                cursor.execute('''
-                    SELECT COUNT(*) 
-                    FROM products 
-                    WHERE strain_id = ? 
-                       OR (strain_id IS NULL AND TRIM(LOWER("Product Strain")) = TRIM(LOWER(?)))
                 ''', (strain_id, strain_name))
-                product_count = cursor.fetchone()[0]
+                rows_to_update = cursor.fetchall()
+                product_count = 0
+                for pid, prod_name_db, vendor_db, brand_db in rows_to_update:
+                    try:
+                        if product_db.update_product_lineage(prod_name_db, canonical_lineage, vendor_db, brand_db):
+                            product_count += 1
+                    except Exception as e:
+                        logging.warning(f"Failed to safe-update product id={pid} lineage: {e}")
             else:
                 # Fallback: Update products using Product Strain column if strain_id doesn't exist
                 # CRITICAL: Also set sovereign_lineage on products so they remember manual override
                 cursor.execute('''
-                    UPDATE products
-                    SET "Lineage" = ?,
-                        sovereign_lineage = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
-                ''', (lineage, lineage, strain_name))
-                
-                # Get the count of updated products
-                cursor.execute('''
-                    SELECT COUNT(*) 
-                    FROM products 
+                    SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                    FROM products
                     WHERE TRIM(LOWER("Product Strain")) = TRIM(LOWER(?))
                 ''', (strain_name,))
-                product_count = cursor.fetchone()[0]
+                rows_to_update = cursor.fetchall()
+                product_count = 0
+                for pid, prod_name_db, vendor_db, brand_db in rows_to_update:
+                    try:
+                        if product_db.update_product_lineage(prod_name_db, canonical_lineage, vendor_db, brand_db):
+                            product_count += 1
+                    except Exception as e:
+                        logging.warning(f"Failed to safe-update product id={pid} lineage: {e}")
             
             conn.commit()
             
@@ -22219,23 +22287,23 @@ def bulk_update_lineage():
                 
                 strain_id = strain_row[0]
                 
-                # Update strain lineage in database
-                cursor.execute('''
-                    UPDATE strains 
-                    SET sovereign_lineage = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                ''', (lineage, strain_id))
-                
-                # Update products in database
-                cursor.execute('''
-                    UPDATE products 
-                    SET lineage = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE strain_id = ?
-                ''', (lineage, strain_id))
-                
-                # Get product count
-                cursor.execute('SELECT COUNT(*) FROM products WHERE strain_id = ?', (strain_id,))
-                product_count = cursor.fetchone()[0]
+                # Update strain lineage safely using ProductDatabase API
+                try:
+                    product_db.add_or_update_strain(strain_name, lineage, sovereign=True)
+                except Exception as e:
+                    results.append({'strain_name': strain_name, 'success': False, 'error': f'Failed to update strain: {e}'})
+                    continue
+
+                # Update products in database safely via ProductDatabase.update_product_lineage
+                cursor.execute('SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand" FROM products WHERE strain_id = ?', (strain_id,))
+                prod_rows = cursor.fetchall()
+                product_count = 0
+                for pid, prod_name_db, vendor_db, brand_db in prod_rows:
+                    try:
+                        if product_db.update_product_lineage(prod_name_db, lineage, vendor_db, brand_db):
+                            product_count += 1
+                    except Exception as e:
+                        logging.warning(f"Failed to safe-update product id={pid} lineage: {e}")
                 
                 # Update products in excel data if available
                 if excel_processor.df is not None:

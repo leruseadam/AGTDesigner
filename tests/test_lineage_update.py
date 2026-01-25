@@ -3,12 +3,14 @@
 Test lineage update mechanism
 Run this to test if updates are working
 """
+import pytest
 import sqlite3
 import sys
 
 db_path = "uploads/product_database_AGT_Bothell.db"
 
-def test_update(product_name, new_lineage):
+@pytest.mark.skip(reason="Script-style maintenance test; skipped in CI")
+def test_update(product_name=None, new_lineage=None):
     """Test updating a product's lineage"""
     print(f"\n{'='*60}")
     print(f"Testing update for: {product_name}")
