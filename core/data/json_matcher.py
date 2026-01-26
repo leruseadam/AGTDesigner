@@ -5642,9 +5642,9 @@ class JSONMatcher:
             
             # CRITICAL FIX: Integrate JSON-matched products with Excel system
             try:
-                # Get the current Excel processor from the session
-                from flask import g
-                if hasattr(g, 'excel_processor') and g.excel_processor:
+                # Only attempt Excel integration when a Flask app context is active
+                from flask import has_app_context, g
+                if has_app_context() and hasattr(g, 'excel_processor') and g.excel_processor:
                     logging.info("Integrating JSON-matched products with Excel system...")
                     integration_success = self.integrate_with_excel_system(g.excel_processor, all_tags)
                     if integration_success:
@@ -5652,7 +5652,7 @@ class JSONMatcher:
                     else:
                         logging.warning("⚠️ Failed to integrate JSON products with Excel system")
                 else:
-                    logging.warning("No Excel processor available in session for integration")
+                    logging.info("Skipping Excel integration: no active Flask application context or no excel_processor")
             except Exception as integration_error:
                 logging.error(f"Error during Excel integration: {integration_error}")
             

@@ -7,6 +7,7 @@ Handles the actual database schema correctly
 import os
 import sys
 import sqlite3
+from src.core.data.product_database import ProductDatabase
 import shutil
 from datetime import datetime
 import glob
@@ -55,8 +56,15 @@ def cleanup_web_database_fixed():
     print(f"📊 Database file size: {db_size:,} bytes ({db_size/1024/1024:.1f} MB)")
     
     try:
-        # Connect to database
-        conn = sqlite3.connect(db_path)
+        # Connect to database (prefer ProductDatabase for the app DB)
+        try:
+            if 'product_database' in db_path:
+                product_db = ProductDatabase(store_name='AGT_Bothell')
+                conn = product_db._get_connection()
+            else:
+                conn = sqlite3.connect(db_path)
+        except Exception:
+            conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
         # Check integrity

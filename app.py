@@ -2177,7 +2177,9 @@ def initialize_excel_processor():
 if not os.environ.get('PYTHONANYWHERE_DOMAIN') and not os.environ.get('PYTHONANYWHERE_SITE'):
     # Only initialize on local development
     try:
-        initialize_excel_processor()
+        # Use the safe, non-blocking initializer at startup to avoid None processor
+        # and heavy file loads during app startup.
+        simple_initialize_excel_processor()
     except Exception as e:
         logging.warning(f"Startup initialization failed (non-fatal): {e}")
 
@@ -7924,8 +7926,8 @@ def _calculate_joint_ratio_for_record(db_record):
     
     # Try to parse pack info from product name (e.g., "0.5g x 2 Pack", "1g x 5", "5pk")
     if product_name:
-        # Pattern 1: "0.5g x 2 Pack" or "1g x 5"
-        match = re.search(r'(\d+\.?\d*)\s*g?\s*x\s*(\d+)(?:\s*pack)?', product_name, re.IGNORECASE)
+        # Pattern 1: "0.5g x 2 Pack" or "1g x 5" or ".5g x 2 Pack"
+        match = re.search(r'((?:\d+(?:\.\d+)?|\.\d+))\s*g?\s*x\s*(\d+)(?:\s*pack)?', product_name, re.IGNORECASE)
         if match:
             joint_weight = match.group(1)
             pack_count = match.group(2)
@@ -7953,9 +7955,9 @@ def _calculate_joint_ratio_for_record(db_record):
                 except (ValueError, TypeError, ZeroDivisionError):
                     pass
         
-        # Pattern 3: Extract weight from name and use it directly (e.g., "Pre-Roll - 5g" or "Pre-Roll 1g")
+        # Pattern 3: Extract weight from name and use it directly (e.g., "Pre-Roll - 5g", "Pre-Roll 1g", or ".5g")
         # This handles cases where the product name has weight but no explicit pack count
-        weight_match = re.search(r'[-\s](\d+\.?\d*)\s*g(?:\s|$)', product_name, re.IGNORECASE)
+        weight_match = re.search(r'[-\s]((?:\d+(?:\.\d+)?|\.\d+))\s*g(?:\s|$)', product_name, re.IGNORECASE)
         if weight_match and not re.search(r'x\s*\d+', product_name):  # Only if no pack format found
             weight_str = weight_match.group(1)
             # Assume it's a single pre-roll at this weight
@@ -14479,42 +14481,42 @@ def batch_update_lineage():
                                 strain_val = str(info.get('strain_name') or '').strip()
                         except Exception:
                             pass
-                                        # Track strain for sovereign update
-                                        if strain_val and str(strain_val).strip():
-                                                strains_to_update.add((strain_val, new_lineage))
-                                        # Execute vendor+strain update when vendor exists - do per-row safe updates
-                                        if vendor_val:
-                                                try:
-                                                        if strain_val:
-                                                                cursor.execute('''
-                                                                        SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
-                                                                        FROM products
-                                                                        WHERE "Vendor/Supplier*" = ?
-                                                                            AND strain_id = (
-                                                                                SELECT id FROM strains WHERE normalized_name = (
-                                                                                    SELECT normalized_name FROM strains WHERE strain_name = ? LIMIT 1
-                                                                                )
-                                                                            )
-                                                                ''', (vendor_val, strain_val))
-                                                        else:
-                                                                cursor.execute('''
-                                                                        SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
-                                                                        FROM products
-                                                                        WHERE "Vendor/Supplier*" = ?
-                                                                            AND (normalized_name = (
-                                                                                        SELECT normalized_name FROM products WHERE "Product Name*" = ? LIMIT 1
-                                                                                    ) OR "Product Name*" = ?)
-                                                                ''', (vendor_val, tag_name, tag_name))
+                    # Track strain for sovereign update
+                    if strain_val and str(strain_val).strip():
+                        strains_to_update.add((strain_val, new_lineage))
+                    # Execute vendor+strain update when vendor exists - do per-row safe updates
+                    if vendor_val:
+                        try:
+                            if strain_val:
+                                cursor.execute('''
+                                        SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                                        FROM products
+                                        WHERE "Vendor/Supplier*" = ?
+                                            AND strain_id = (
+                                                SELECT id FROM strains WHERE normalized_name = (
+                                                    SELECT normalized_name FROM strains WHERE strain_name = ? LIMIT 1
+                                                )
+                                            )
+                                ''', (vendor_val, strain_val))
+                            else:
+                                cursor.execute('''
+                                        SELECT id, "Product Name*", "Vendor/Supplier*", "Product Brand"
+                                        FROM products
+                                        WHERE "Vendor/Supplier*" = ?
+                                            AND (normalized_name = (
+                                                        SELECT normalized_name FROM products WHERE "Product Name*" = ? LIMIT 1
+                                                    ) OR "Product Name*" = ?)
+                                ''', (vendor_val, tag_name, tag_name))
 
-                                                        rows = cursor.fetchall()
-                                                        for pid, prod_name_db, vendor_db, brand_db in rows:
-                                                                try:
-                                                                        if product_db.update_product_lineage(prod_name_db, new_lineage, vendor_db, brand_db):
-                                                                                total_vendor_updates += 1
-                                                                except Exception as e:
-                                                                        logging.warning(f"Failed to safe-update product id={pid} lineage: {e}")
-                                                except Exception as e:
-                                                        logging.warning(f"Vendor-based lineage update failed (falling back): {e}")
+                            rows = cursor.fetchall()
+                            for pid, prod_name_db, vendor_db, brand_db in rows:
+                                try:
+                                    if product_db.update_product_lineage(prod_name_db, new_lineage, vendor_db, brand_db):
+                                        total_vendor_updates += 1
+                                except Exception as e:
+                                    logging.warning(f"Failed to safe-update product id={pid} lineage: {e}")
+                        except Exception as e:
+                            logging.warning(f"Vendor-based lineage update failed (falling back): {e}")
                 conn.commit()
                 # CRITICAL FIX: Force WAL checkpoint to ensure batch lineage changes persist
                 try:
@@ -18978,14 +18980,21 @@ def json_match():
         # On production, database queries can take 2+ minutes per item, making JSON match unusably slow
         is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
 
-        if is_pythonanywhere or PYTHONANYWHERE_OPTIMIZATION:
+        # Allow caller to force database-first matching via request payload: { "force_db": true }
+        force_db = False
+        try:
+            force_db = bool(data.get('force_db', False))
+        except Exception:
+            force_db = False
+
+        if (is_pythonanywhere or PYTHONANYWHERE_OPTIMIZATION) and not force_db:
             # Production: Use fast simplified matching (no database queries)
             logging.info("🚀 PythonAnywhere detected - using simplified matching for fast JSON match")
             matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
             logging.info(f"JSON matching (simplified/fast) returned {len(matched_products) if matched_products else 0} products")
         else:
-            # Local: Use full database-aware matching for better accuracy
-            logging.info("💻 Local environment - using database-first matching for maximum accuracy")
+            # Local or forced: Use full database-aware matching for better accuracy
+            logging.info("💻 Local/forced environment - using database-first matching for maximum accuracy")
             matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
             logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
 
@@ -19624,13 +19633,26 @@ def json_match_detailed():
         import requests
         response = requests.get(url, timeout=30)
         payload = response.json()
-        
+
+        # Extract document-level vendor (used by all items)
+        document_vendor = None
+        if isinstance(payload, dict):
+            document_vendor = (payload.get("from_license_name") or
+                             payload.get("vendor_name") or
+                             payload.get("supplier_name"))
+
         if isinstance(payload, list):
             json_items = payload
         elif isinstance(payload, dict):
             json_items = payload.get("inventory_transfer_items", [])
         else:
             json_items = []
+
+        # Enrich items with document vendor if available
+        if document_vendor:
+            for item in json_items:
+                if isinstance(item, dict) and not item.get('vendor'):
+                    item['vendor'] = document_vendor
             
         # Get available tags
         excel_processor = get_session_excel_processor()

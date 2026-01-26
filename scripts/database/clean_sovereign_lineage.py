@@ -5,11 +5,26 @@ This performs per-row fixes and writes audit entries to `lineage_audit` rather t
 import sqlite3
 from datetime import datetime
 import sys
+"""Script to safely remove 'SOVEREIGN' values from product lineage fields.
+
+This performs per-row fixes and writes audit entries to `lineage_audit` rather than doing a bulk UPDATE.
+"""
+from datetime import datetime
+import sys
 from pathlib import Path
 
-def clean_sovereign_values(db_path):
-    conn = sqlite3.connect(db_path)
+from src.core.data.product_database import ProductDatabase
+
+
+def clean_sovereign_values(db_path=None, store_name='AGT_Bothell'):
+    """Clean per-row SOVEREIGN values using ProductDatabase's connection.
+
+    This preserves the audit trail and operates on the same DB file ProductDatabase expects.
+    """
+    product_db = ProductDatabase(store_name=store_name)
+    conn = product_db._get_connection()
     cursor = conn.cursor()
+
     cursor.execute('''
         SELECT id, "Product Name*", sovereign_lineage, "Lineage", canonical_lineage
         FROM products
@@ -20,7 +35,6 @@ def clean_sovereign_values(db_path):
     rows = cursor.fetchall()
     if not rows:
         print("No 'SOVEREIGN' values found in products")
-        conn.close()
         return
 
     now = datetime.utcnow().isoformat()
@@ -45,10 +59,10 @@ def clean_sovereign_values(db_path):
 
     conn.commit()
     print(f"Cleaned {fixed} product(s) with 'SOVEREIGN' values")
-    conn.close()
+
 
 if __name__ == '__main__':
-    # Default DB path inside uploads directory
+    # Run against the default uploads DB for the repo
     base_dir = Path(__file__).parents[2]
     uploads_dir = base_dir / 'uploads'
     db_file = uploads_dir / 'product_database_AGT_Bothell.db'

@@ -10,6 +10,7 @@ import sqlite3
 import shutil
 from datetime import datetime
 import glob
+from src.core.data.product_database import ProductDatabase
 
 def cleanup_web_database():
     """Clean up the production database on PythonAnywhere"""
@@ -30,8 +31,12 @@ def cleanup_web_database():
     print(f"📊 Database file size: {db_size:,} bytes ({db_size/1024/1024:.1f} MB)")
     
     try:
-        # Connect to database
-        conn = sqlite3.connect(db_path)
+        # Connect to database (prefer ProductDatabase connection)
+        try:
+            product_db = ProductDatabase(store_name='AGT_Bothell')
+            conn = product_db._get_connection()
+        except Exception:
+            conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
         # Check integrity
@@ -103,8 +108,12 @@ def cleanup_web_database():
         final_count = cursor.fetchone()[0]
         print(f"📦 Final product count: {final_count:,} products")
         
-        # Close connection
-        conn.close()
+        # Close connection only if we opened sqlite3 directly
+        try:
+            if 'product_db' not in locals():
+                conn.close()
+        except Exception:
+            pass
         
         # Check final file size
         final_size = os.path.getsize(db_path)
@@ -153,20 +162,20 @@ def cleanup_files():
 
 def main():
     """Main cleanup function"""
-    
+
     print("🚀 Starting comprehensive database cleanup...")
-    
+
     # Change to the correct directory
     if not os.path.exists("uploads"):
         print("❌ Not in the correct directory. Please run from the AGTDesigner directory.")
         return False
-    
+
     # Run database cleanup
     db_success = cleanup_web_database()
-    
+
     # Run file cleanup
     cleanup_files()
-    
+
     if db_success:
         print("\n✅ DATABASE CLEANUP COMPLETE!")
         print("Next steps:")
@@ -175,7 +184,7 @@ def main():
         print("3. Test the application")
     else:
         print("\n❌ Database cleanup failed. Check the error messages above.")
-    
+
     return db_success
 
 if __name__ == "__main__":
