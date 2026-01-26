@@ -2684,6 +2684,41 @@ class JSONMatcher:
                                 else:
                                     # REJECT non-matching vendors to prevent cross-brand contamination
                                     continue  # Skip this candidate entirely
+
+                                # 0.5 STRICT CATEGORY FILTER: prevent matching across incompatible product categories
+                                try:
+                                    excel_type = (cache_item.get('product_type', '') or '').lower().strip()
+                                    json_type_norm = (product_type or '').lower().strip()
+
+                                    def _category_of(t: str) -> str:
+                                        if not t:
+                                            return 'unknown'
+                                        t = t.lower()
+                                        if any(x in t for x in ['edible', 'gummy', 'chocolate', 'cookie', 'chew', 'fruit']):
+                                            return 'edible'
+                                        if any(x in t for x in ['tincture', 'sublingual', 'drop']):
+                                            return 'tincture'
+                                        if any(x in t for x in ['vape', 'cartridge', 'disposable', 'pen']):
+                                            return 'vape'
+                                        if any(x in t for x in ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate', 'sauce']):
+                                            return 'concentrate'
+                                        if any(x in t for x in ['flower', 'bud', 'pre-roll', 'joint', 'preroll']):
+                                            return 'flower'
+                                        if any(x in t for x in ['topical', 'balm', 'lotion', 'cream', 'salve']):
+                                            return 'topical'
+                                        if any(x in t for x in ['capsule', 'pill', 'tablet', 'softgel']):
+                                            return 'capsule'
+                                        return 'unknown'
+
+                                    cat_json = _category_of(json_type_norm)
+                                    cat_excel = _category_of(excel_type)
+
+                                    # If both categories are known and different, skip candidate
+                                    if cat_json != 'unknown' and cat_excel != 'unknown' and cat_json != cat_excel:
+                                        continue
+                                except Exception:
+                                    # On any error, don't block matching - fall back to existing logic
+                                    pass
                             
                             # 2. STRICT word-by-word matching to prevent incorrect matches
                             # Check if key distinguishing words are present
