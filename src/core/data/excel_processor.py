@@ -3612,7 +3612,8 @@ class ExcelProcessor:
                 'Vendor/Supplier*': vendor_value,
                 'Product Brand': safe_get_value(row.get('Product Brand', '')),
                 'ProductBrand': safe_get_value(row.get('Product Brand', '')),
-                'Lineage': safe_get_value(row.get('Lineage', '')),
+                # Preserve original Excel lineage separately; do NOT use it unless product is new
+                'excel_lineage': safe_get_value(row.get('Lineage', '')),
                 'Product Type*': safe_get_value(row.get('Product Type*', '')),
                 'Product Type': safe_get_value(row.get('Product Type*', '')),
                 'Weight*': safe_get_value(raw_weight),
@@ -3676,15 +3677,24 @@ class ExcelProcessor:
                 'weightWithUnits': weight_with_units,
                 'displayName': product_name
             }
+            # DIAGNOSTIC: Detect if Excel file included lineage-like columns that are ignored
+            try:
+                lineage_like_keys = [k for k in row.keys() if k and isinstance(k, str) and ('sovereign' in k.lower() or 'canonical' in k.lower() or 'currentlineage' in k.lower() or k.lower() == 'sovereign_lineage' or 'lineage' in k.lower())]
+                # If there are lineage-like keys other than the standard 'Lineage' column, log them for debugging
+                extra_lineage_keys = [k for k in lineage_like_keys if k not in ('Lineage', 'lineage')]
+                if extra_lineage_keys:
+                    self.logger.debug(f"Excel file contains lineage-like columns that will be ignored for DB-first flow: {extra_lineage_keys}")
+            except Exception:
+                pass
             # --- Filtering logic ---
             product_brand = str(tag['productBrand']).strip().lower()
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
 
-            # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
-            # Excel lineage column and name-based inference are completely ignored
-            # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
-            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
+            # CRITICAL: Excel lineage is preserved in 'excel_lineage' but will be IGNORED
+            # unless the product is new (not present in database). For now, set placeholder
+            # lineage to a neutral default; database alignment will overwrite when available.
+            lineage = 'MIXED'  # Placeholder - replaced by database lineage when available
 
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
@@ -5424,6 +5434,24 @@ class ExcelProcessor:
             else:
                 options[filter_key] = []
         
+        # Normalize lineage variants to canonical values to avoid duplicate-looking entries
+        try:
+            if 'lineage' in options and options['lineage']:
+                normalized = []
+                for lin in options['lineage']:
+                    if not lin:
+                        continue
+                    l = str(lin).strip().upper()
+                    if l in ('CBD_BLEND', 'CBD BLEND'):
+                        l = 'CBD'
+                    if l == 'PARA':
+                        l = 'PARAPHERNALIA'
+                    normalized.append(l)
+                options['lineage'] = sorted(list(set(normalized)))
+        except Exception:
+            # If normalization fails, fall back to original options
+            pass
+
         cached_copy = self._clone_filter_options(options)
         self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
         return self._clone_filter_options(cached_copy)
