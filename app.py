@@ -7352,6 +7352,7 @@ def _enforce_nonclassic_lineage_rules(tags):
         current_lineage_upper = str(current_lineage).strip().upper()
         
         # Only fix if current lineage is not MIXED or CBD
+        # HYBRID is a classic-lineage value and must NOT be accepted for non-classic products
         valid_nonclassic_lineages = ['MIXED', 'CBD', 'CBD_BLEND', 'THC']  # THC is treated as MIXED
         if current_lineage_upper not in valid_nonclassic_lineages:
             # Before forcing, check database — if DB has lineage for this product, DO NOT overwrite
