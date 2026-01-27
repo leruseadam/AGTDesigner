@@ -206,49 +206,35 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
 
             upper_brand = brand_text.upper()
             # Explicit exceptions requested by user
-                SMALL_BRAND_EXCEPTIONS = [
-                    "WASHINGTON BUD COMPANY",
-                    "MT BAKER HOMEGROWN",
-                ]
+            SMALL_BRAND_EXCEPTIONS = [
+                "WASHINGTON BUD COMPANY",
+                "MT BAKER HOMEGROWN",
+            ]
 
-                # Explicit exceptions requested by user
-                if any(exc in upper_brand for exc in SMALL_BRAND_EXCEPTIONS):
-                    final_size = 6.5 * scale_factor
-                    logger.debug(f"Brand exception match: '{brand_text}' -> forcing {final_size}pt")
-                    return Pt(final_size)
-
-                # General rule for '... Cannabis' brands: if the brand ends with
-                # the word 'CANNABIS' and contains more than one word (e.g.
-                # 'Collections Cannabis' or 'Constellation Cannabis'), treat it as
-                # a long name and force the small font size. This replaces ad-hoc
-                # exception entries and covers similar patterns.
-                # Apply cannabis-suffix rule only for preroll templates
-                try:
-                    if orientation.lower() == 'preroll':
-                        import re as _re
-                        m = _re.search(r"\b(\w+)\s+CANNABIS\b", upper_brand)
-                        if m:
-                            first_word = m.group(1)
-                            # Count alphabetic letters in the first word
-                            letter_count = sum(1 for ch in first_word if ch.isalpha())
-                            if letter_count > 7:
-                                final_size = 6.5 * scale_factor
-                                logger.debug(
-                                    f"Preroll brand rule match (first word '{first_word}' letters={letter_count} > 7): '
-                                    {brand_text}' -> forcing {final_size}pt"
-                                )
-                                return Pt(final_size)
-                except Exception:
-                    # Fall back silently if regex/check fails
-                    logger.exception("Error while applying preroll cannabis-suffix brand rule")
-
-            # Heuristic override: brands like 'Collections Cannabis' should be treated
-            # like the Constellation exception (user expectation). If the brand
-            # contains the words COLLECTION(S) and CANNABIS, force small size.
-            if 'COLLECTION' in upper_brand and 'CANNABIS' in upper_brand:
+            if any(exc in upper_brand for exc in SMALL_BRAND_EXCEPTIONS):
                 final_size = 6.5 * scale_factor
-                logger.debug(f"Brand heuristic match (collection cannabis): '{brand_text}' -> forcing {final_size}pt")
+                logger.debug(f"Brand exception match: '{brand_text}' -> forcing {final_size}pt")
                 return Pt(final_size)
+
+            # Apply preroll-only rule for brands matching '<firstword> CANNABIS'
+            # where the first word has more than 7 alphabetic letters.
+            try:
+                if orientation.lower() == 'preroll':
+                    import re as _re
+                    m = _re.search(r"\b(\w+)\s+CANNABIS\b", upper_brand)
+                    if m:
+                        first_word = m.group(1)
+                        # Count alphabetic letters in the first word
+                        letter_count = sum(1 for ch in first_word if ch.isalpha())
+                        if letter_count > 7:
+                            final_size = 6.5 * scale_factor
+                            logger.debug(
+                                f"Preroll brand rule match (first word '{first_word}' letters={letter_count} > 7): '{brand_text}' -> forcing {final_size}pt"
+                            )
+                            return Pt(final_size)
+            except Exception:
+                # Fall back silently if regex/check fails
+                logger.exception("Error while applying preroll cannabis-suffix brand rule")
 
             # Heuristic: if brand has more than 2 words and contains words with 5+ letters,
             # prefer a smaller, highly-readable size (user requested 'should definitely be smaller').
