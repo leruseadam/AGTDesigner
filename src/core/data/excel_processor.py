@@ -3736,8 +3736,14 @@ class ExcelProcessor:
         if not getattr(self, '_skip_enrichment', True):  # Default to True (skip enrichment)
             sorted_tags = self._enrich_tags_with_database_values(sorted_tags)
         else:
-            # Skip enrichment for performance - lineage alignment in app.py will handle database sync
-            logger.debug("⚡ Skipping enrichment for fast tag loading")
+            # Even when full enrichment is skipped for performance, perform a
+            # lightweight lineage-only enrichment so UI always shows database
+            # authoritative lineage values. This batches a small query and only
+            # updates lineage-related fields to minimize cost.
+            try:
+                sorted_tags = self._fast_lineage_enrichment(sorted_tags)
+            except Exception:
+                logger.debug("⚡ fast_lineage_enrichment failed, continuing without it")
         
         # Store enriched tags in cache for future use
         cached_copy = self._clone_tag_results(sorted_tags)
@@ -3771,6 +3777,74 @@ class ExcelProcessor:
         # CRITICAL PERFORMANCE FIX: Skip enrichment if flag is set (for fast loading)
         if getattr(self, '_skip_enrichment', False):
             logger.info("⚡ Skipping database enrichment for fast tag loading")
+            return tags
+
+    def _fast_lineage_enrichment(self, tags: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Lightweight lineage-only enrichment that runs even when full enrichment is skipped.
+
+        This function batches product name lookups and only updates lineage fields
+        (`Lineage`, `currentLineage`, `canonical_lineage`, `lineage`) on the tag
+        when the database has a non-empty value. It is optimized to avoid other
+        expensive enrichments (price, THC, DOH, etc.).
+        """
+        # Quick exit
+        if not tags:
+            return tags
+
+        try:
+            # Try to access product DB via app module like full enrichment does
+            import sys
+            product_db = None
+            if 'app' in sys.modules:
+                app_module = sys.modules['app']
+                if hasattr(app_module, 'get_product_database'):
+                    store_name = None
+                    if hasattr(app_module, 'get_current_store_name'):
+                        store_name = app_module.get_current_store_name()
+                    product_db = app_module.get_product_database(store_name) if store_name else app_module.get_product_database(None)
+            if not product_db:
+                return tags
+
+            # Build list of product names to lookup
+            product_names = [t.get('Product Name*', t.get('ProductName', '')) for t in tags if t.get('Product Name*') or t.get('ProductName')]
+            if not product_names:
+                return tags
+
+            # Batch query
+            db_records = product_db.get_products_by_names(product_names)
+            if not db_records:
+                return tags
+
+            # Map by normalized name
+            db_lookup = {}
+            for r in db_records:
+                pname = r.get('Product Name*') or r.get('ProductName')
+                if pname:
+                    db_lookup[product_db._normalize_product_name(pname)] = r
+
+            # Apply lineage values where present
+            result = []
+            for tag in tags:
+                pname = tag.get('Product Name*', tag.get('ProductName', ''))
+                if not pname:
+                    result.append(tag)
+                    continue
+                norm = product_db._normalize_product_name(pname)
+                dbrec = db_lookup.get(norm)
+                if dbrec:
+                    # prefer canonical_lineage, then currentLineage, then Lineage
+                    val = (dbrec.get('canonical_lineage') or dbrec.get('currentLineage') or dbrec.get('Lineage') or '')
+                    if val and str(val).strip():
+                        v = str(val).strip()
+                        tag['Lineage'] = v
+                        tag['lineage'] = v
+                        tag['canonical_lineage'] = v
+                        tag['currentLineage'] = v
+                result.append(tag)
+
+            return result
+        except Exception:
+            logger.debug('fast_lineage_enrichment: unexpected error')
             return tags
         
         try:
