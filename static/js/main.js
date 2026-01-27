@@ -12248,6 +12248,25 @@ const TagManager = {
             }
             verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
             
+            // If server signals that frontend cache is stale, clear local caches and retry once
+            try {
+                if (responseData && responseData.force_frontend_cache_clear) {
+                    console.warn('⚠️ Server requested frontend cache clear (stale cached payload detected). Clearing local caches and re-fetching...');
+                    try { this.clearAvailableTagsCache(); } catch (e) { console.warn('Failed to clear frontend cache:', e); }
+                    if (!this._frontendCacheClearRetried) {
+                        this._frontendCacheClearRetried = true;
+                        // Short delay to allow storage to clear
+                        await new Promise(resolve => setTimeout(resolve, 120));
+                        // Force reload to bypass any cached browser responses
+                        return this.fetchAndUpdateAvailableTags(true);
+                    } else {
+                        console.warn('Frontend cache clear already retried once; continuing with current response');
+                    }
+                }
+            } catch (e) {
+                console.warn('Error handling server cache-clear flag:', e);
+            }
+
             // Handle both old array format and new object format
             let tags;
             if (Array.isArray(responseData)) {

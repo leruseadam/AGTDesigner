@@ -7725,9 +7725,25 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         }
                         logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' defaulted to 'MIXED' (no Product Strain and DB missing)")
             
-            # Skip tags without lineage_info - we can't enrich them
+            # If no DB/strain lineage_info is available, allow Excel-provided lineage
+            # only as a fallback for NEW products (i.e., when DB has no record).
             if not lineage_info:
-                continue
+                # Prefer explicit `excel_lineage` preserved by ExcelProcessor.
+                excel_lineage = tag.get('excel_lineage') or tag.get('Excel Lineage') or tag.get('Lineage') or tag.get('Lineage*')
+                if excel_lineage:
+                    # Build a minimal lineage_info structure from Excel lineage for fallback use
+                    lineage_info = {
+                        'lineage': excel_lineage,
+                        'has_sovereign': False,
+                        'product_sovereign': None,
+                        'strain_sovereign': None,
+                        'strain_canonical': None,
+                        'db_lineage': excel_lineage
+                    }
+                    logging.info(f"🔁 Using excel_lineage fallback for NEW product '{name}': '{excel_lineage}'")
+                else:
+                    # No DB info and no Excel fallback — skip enrichment
+                    continue
             
             # Helper function to validate lineage for classic types
             def _validate_lineage_for_classic(lineage_val, field_name):
@@ -10539,6 +10555,9 @@ def get_available_tags():
         
         # Check memory before processing - but don't block if we have cached data
         memory_ok = check_memory_limit()
+
+        # Track whether cached payloads were invalidated / look stale for frontend
+        force_frontend_cache_clear = False
         if not memory_ok:
             # Try to return cached data instead of failing
             cache_key = get_session_cache_key('available_tags')
@@ -10559,7 +10578,8 @@ def get_available_tags():
                     'tags': safe_cached_tags,
                     'total_count': len(safe_cached_tags),
                     'source': 'cache-memory-fallback',
-                    'warning': 'Memory usage high, serving cached data'
+                    'warning': 'Memory usage high, serving cached data',
+                    'force_frontend_cache_clear': force_frontend_cache_clear
                 })
             # Only return 503 if we have no cached data
             logging.error("Memory usage too high and no cached data available")
@@ -10600,7 +10620,8 @@ def get_available_tags():
                     return jsonify({
                         'tags': safe_cached_tags,
                         'total_count': len(safe_cached_tags),
-                        'source': 'rate-limited-cache'
+                        'source': 'rate-limited-cache',
+                        'force_frontend_cache_clear': force_frontend_cache_clear
                     })
         
         # Record this request
@@ -10807,11 +10828,32 @@ def get_available_tags():
                 store_for_check = store_name or get_current_store_name(allow_fallback=False)
                 if store_for_check and _cached_tags_missing_db_sovereign(cached_tags, store_for_check):
                     logging.info("🧯 Invalidating cached available-tags: missing DB sovereign_lineage detected")
+                    # Signal frontend to clear its local caches (they may contain stale 'NONE' sovereign_lineage)
+                    try:
+                        force_frontend_cache_clear = True
+                    except Exception:
+                        pass
                     try:
                         cache.delete(cache_key)
                     except Exception:
                         logging.warning("Failed to delete stale available-tags cache key")
                     cached_tags = None
+                else:
+                    # Extra heuristic: if any cached tag contains literal 'NONE' for sovereign_lineage,
+                    # request the frontend to clear stale caches as this often indicates stale payloads.
+                    try:
+                        for _t in cached_tags:
+                            sl = None
+                            try:
+                                sl = _t.get('sovereign_lineage') or _t.get('sovereignLineage')
+                            except Exception:
+                                sl = None
+                            if isinstance(sl, str) and sl.strip().upper() == 'NONE':
+                                logging.info("🧯 Detected 'NONE' sovereign_lineage in cached tags - asking frontend to clear caches")
+                                force_frontend_cache_clear = True
+                                break
+                    except Exception:
+                        pass
             except Exception as stale_check_err:
                 logging.warning(f"Cached tags stale-check failed: {stale_check_err}")
 
@@ -11067,7 +11109,8 @@ def get_available_tags():
                 'tags': safe_cached_tags,
                 'total_count': len(safe_cached_tags),
                 'source': 'cache-fast-load',
-                'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)'
+                'message': f'Loaded {len(safe_cached_tags)} tags from cache (fast load)',
+                'force_frontend_cache_clear': force_frontend_cache_clear
             })
         
         # CRITICAL: Also return cached tags even when fast_load=0, but re-align if lineage updated OR first request of session
@@ -11271,7 +11314,8 @@ def get_available_tags():
                 'tags': safe_cached_tags,
                 'total_count': len(safe_cached_tags),
                 'source': 'cache-slow-mode',
-                'message': f'Loaded {len(safe_cached_tags)} tags from cache (slow mode with lineage check)'
+                'message': f'Loaded {len(safe_cached_tags)} tags from cache (slow mode with lineage check)',
+                'force_frontend_cache_clear': force_frontend_cache_clear
             })
 
         # CRITICAL: Validate that the session file matches the selected store
@@ -11796,7 +11840,8 @@ def get_available_tags():
             return jsonify({
                 'tags': safe_cached_tags,
                 'total_count': len(safe_cached_tags),
-                'source': 'cache-fast'
+                'source': 'cache-fast',
+                'force_frontend_cache_clear': force_frontend_cache_clear
             })
         elif fast_load and cached_tags and has_excel_data:
             logging.warning(f"⚠️ CACHE BUG: cached_tags exists despite has_excel_data=True - clearing and continuing")
@@ -12022,16 +12067,16 @@ def get_available_tags():
                             import traceback
                             logging.warning(traceback.format_exc())
                     else:
-                        # PERFORMANCE: During fast_load, populate lineage from Excel only (no DB query)
-                        # This prevents 5-minute waits in production
+                        # PERFORMANCE: During fast_load we skip the DB enrichment step to remain fast.
+                        # CRITICAL: Do NOT apply Excel-provided lineage into `currentLineage`/`canonical_lineage` here.
+                        # Instead, preserve Excel lineage in `excel_lineage` so later alignment can
+                        # apply it ONLY for new products (DB-missing). This enforces DB-first lineage.
                         for tag in excel_tags:
-                            excel_lineage = tag.get('Lineage')
+                            # Ensure excel_lineage is preserved (it is set earlier by ExcelProcessor)
+                            excel_lineage = tag.get('excel_lineage') or tag.get('Lineage') or tag.get('Lineage*')
                             if excel_lineage and str(excel_lineage).strip():
-                                excel_lineage_clean = str(excel_lineage).strip().upper()
-                                tag['currentLineage'] = excel_lineage_clean
-                                tag['canonical_lineage'] = excel_lineage_clean
-                                tag['lineage'] = excel_lineage_clean.lower()
-                        logging.info(f"⚡ FAST-LOAD: Skipped database enrichment - using Excel lineage only")
+                                tag['excel_lineage'] = str(excel_lineage).strip().upper()
+                        logging.info("⚡ FAST-LOAD: Skipped DB enrichment; preserved Excel lineage as 'excel_lineage' (will NOT override DB)")
 
                     safe_all_tags = make_json_safe(excel_tags) if excel_tags else []
 
@@ -12119,7 +12164,8 @@ def get_available_tags():
                 resp = jsonify({
                     'tags': safe_all_tags,
                     'total_count': len(safe_all_tags),
-                    'source': 'cache-ultrafast'
+                    'source': 'cache-ultrafast',
+                    'force_frontend_cache_clear': force_frontend_cache_clear
                 })
                 try:
                     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -13389,7 +13435,8 @@ def get_available_tags():
                 'tags': cached_tags,
                 'total_count': len(cached_tags),
                 'source': 'cache-error-fallback',
-                'message': 'Served cached tags while recovering from an error.'
+                'message': 'Served cached tags while recovering from an error.',
+                'force_frontend_cache_clear': force_frontend_cache_clear
             })
         
         # EMERGENCY FALLBACK DISABLED: Never load database tags
