@@ -88,7 +88,7 @@ def _load_font_sizing_config():
                     # Preroll template: Copy all settings from mini template (identical font sizing)
                     'description': [(5, 18), (15, 17), (20, 16), (30, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
                     'brand': [(5, 9), (20, 8), (25, 6.5), (float('inf'), 6)],
-                    'price': [(5, 20), (float('inf'), 17)],
+                    'price': [(5, 20), (float('inf'), 15)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
                     'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
@@ -206,13 +206,40 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
 
             upper_brand = brand_text.upper()
             # Explicit exceptions requested by user
-            SMALL_BRAND_EXCEPTIONS = [
-                "WASHINGTON BUD COMPANY",
-                "MT BAKER HOMEGROWN",
-            ]
-            if any(exc in upper_brand for exc in SMALL_BRAND_EXCEPTIONS):
+                SMALL_BRAND_EXCEPTIONS = [
+                    "WASHINGTON BUD COMPANY",
+                    "MT BAKER HOMEGROWN",
+                ]
+
+                # Explicit exceptions requested by user
+                if any(exc in upper_brand for exc in SMALL_BRAND_EXCEPTIONS):
+                    final_size = 6.5 * scale_factor
+                    logger.debug(f"Brand exception match: '{brand_text}' -> forcing {final_size}pt")
+                    return Pt(final_size)
+
+                # General rule for '... Cannabis' brands: if the brand ends with
+                # the word 'CANNABIS' and contains more than one word (e.g.
+                # 'Collections Cannabis' or 'Constellation Cannabis'), treat it as
+                # a long name and force the small font size. This replaces ad-hoc
+                # exception entries and covers similar patterns.
+                # Apply cannabis-suffix rule only for preroll templates
+                try:
+                    if orientation.lower() == 'preroll':
+                        import re as _re
+                        if _re.search(r"\b\w+\s+CANNABIS\b", upper_brand):
+                            final_size = 6.5 * scale_factor
+                            logger.debug(f"Preroll brand rule match ('<word> CANNABIS'): '{brand_text}' -> forcing {final_size}pt")
+                            return Pt(final_size)
+                except Exception:
+                    # Fall back silently if regex check fails
+                    logger.exception("Error while applying preroll cannabis-suffix brand rule")
+
+            # Heuristic override: brands like 'Collections Cannabis' should be treated
+            # like the Constellation exception (user expectation). If the brand
+            # contains the words COLLECTION(S) and CANNABIS, force small size.
+            if 'COLLECTION' in upper_brand and 'CANNABIS' in upper_brand:
                 final_size = 6.5 * scale_factor
-                logger.debug(f"Brand exception match: '{brand_text}' -> forcing {final_size}pt")
+                logger.debug(f"Brand heuristic match (collection cannabis): '{brand_text}' -> forcing {final_size}pt")
                 return Pt(final_size)
 
             # Heuristic: if brand has more than 2 words and contains words with 5+ letters,
