@@ -2761,9 +2761,15 @@ const TagManager = {
                     }
                 }
                 
-                // Lineage
+                // Lineage - normalize and map 'THC' -> 'MIXED' for filtering/display
                 const lineage = tag.Lineage || tag.lineage || '';
-                if (lineage && lineage.trim()) filterOptions.lineage.add(lineage.trim());
+                if (lineage && lineage.trim()) {
+                    let normalizedLineage = (typeof window.normalizeLineageValue !== 'undefined')
+                        ? window.normalizeLineageValue(lineage)
+                        : lineage.toString().trim().toUpperCase();
+                    if (normalizedLineage === 'THC') normalizedLineage = 'MIXED';
+                    filterOptions.lineage.add(normalizedLineage);
+                }
                 
                 // Weight
                 const weight = tag['Weight*'] || tag.Weight || tag.weight || '';
@@ -19467,7 +19473,12 @@ function populateLineageFilterOptions(options) {
   options.forEach(opt => {
     const option = document.createElement('option');
     option.value = opt;
-    const displayName = ABBREVIATED_LINEAGE[opt] || opt;
+        // Normalize option key before mapping to abbreviated display name so
+        // variants like 'THC' and 'MIXED' resolve to the correct abbreviation.
+        const normalizedOpt = (window.normalizeLineageValue && typeof window.normalizeLineageValue === 'function')
+            ? window.normalizeLineageValue(opt)
+            : (opt || '').toString().trim().toUpperCase();
+        const displayName = ABBREVIATED_LINEAGE[normalizedOpt] || ABBREVIATED_LINEAGE[opt] || opt;
     option.textContent = displayName;
     lineageFilter.appendChild(option);
   });

@@ -36,11 +36,9 @@ if (typeof window.normalizeLineageValue === 'undefined') {
     
     const normalized = String(lineage).trim().toUpperCase();
     
-    // CRITICAL: "THC" is an abbreviation for "MIXED"
-    // Convert it to MIXED - valid for non-classic types (edibles), invalid for classic types
-    if (normalized === 'THC') {
-      return 'MIXED'; // Convert THC abbreviation to MIXED
-    }
+    // Keep 'THC' as its own token here. Mapping THC -> MIXED is context-specific
+    // and should be applied only where the product-type (classic vs non-classic)
+    // is known. Do not convert globally here.
     
     // Handle common variations
     if (normalized === 'CBD_BLEND' || normalized === 'CBD BLEND') {
@@ -150,6 +148,14 @@ function createTagRow(tag) {
     } else {
       lineage = 'MIXED';
     }
+  }
+  // Treat explicit 'THC' token as 'MIXED' for non-classic products
+  if (!isClassicType && lineage === 'THC') {
+    lineage = 'MIXED';
+  }
+  // Treat explicit 'THC' token as 'MIXED' for non-classic products
+  if (!isClassicType && lineage === 'THC') {
+    lineage = 'MIXED';
   }
     // CRITICAL FIX: Extract DOH status and normalize it consistently (same as TagsTable.createTagRow)
     const rawDohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '';

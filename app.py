@@ -15276,8 +15276,19 @@ def get_web_filter_options():
                         ''')
                         db_lineages = [str(row[0]).strip().upper() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
                         if db_lineages:
-                            # Replace DataFrame lineage with database lineage
-                            options['lineage'] = sorted(list(set(db_lineages)))
+                            # Normalize common variants so the frontend doesn't show duplicates
+                            normalized = []
+                            for db_lin in db_lineages:
+                                lin = db_lin.strip().upper()
+                                # Normalize CBD variants
+                                if lin in ('CBD_BLEND', 'CBD BLEND'):
+                                    lin = 'CBD'
+                                # Normalize paraphernalia shorthand
+                                if lin == 'PARA':
+                                    lin = 'PARAPHERNALIA'
+                                normalized.append(lin)
+                            # Replace DataFrame lineage with database lineage (deduped)
+                            options['lineage'] = sorted(list(set(normalized)))
                             logging.info(f"✅ Enriched lineage filter options: {len(options['lineage'])} lineages from database (fast query)")
                     except Exception as db_query_err:
                         logging.warning(f"Could not query database for lineage options: {db_query_err}")
@@ -25770,6 +25781,74 @@ def optimize_performance():
         return jsonify({'message': 'Basic optimization completed'})
     except Exception as e:
         logging.error(f"Failed to optimize performance: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/admin/clear-caches', methods=['POST'])
+def admin_clear_caches():
+    """Secure admin endpoint to clear all application caches and cache files.
+
+    Requires environment variable `ADMIN_CLEAR_TOKEN` to be set and the same
+    token provided in the `X-ADMIN-TOKEN` header or JSON body `{ "token": "..." }`.
+    """
+    try:
+        # Authenticate
+        expected = os.environ.get('ADMIN_CLEAR_TOKEN')
+        provided = request.headers.get('X-ADMIN-TOKEN') or (request.get_json(silent=True) or {}).get('token')
+        if not expected or not provided or str(provided) != str(expected):
+            logging.warning('Unauthorized attempt to clear caches')
+            return jsonify({'error': 'unauthorized'}), 403
+
+        # Clear Flask cache
+        try:
+            if hasattr(cache, 'clear'):
+                cache.clear()
+        except Exception as e:
+            logging.warning(f'Failed to clear Flask cache: {e}')
+
+        # Remove files in CACHE_DIR
+        try:
+            if os.path.exists(CACHE_DIR):
+                for fname in os.listdir(CACHE_DIR):
+                    fpath = os.path.join(CACHE_DIR, fname)
+                    try:
+                        if os.path.isfile(fpath):
+                            os.remove(fpath)
+                        else:
+                            # Remove directories recursively
+                            import shutil
+                            shutil.rmtree(fpath)
+                    except Exception as e:
+                        logging.debug(f'Unable to remove cache file {fpath}: {e}')
+        except Exception as e:
+            logging.warning(f'Error clearing cache directory: {e}')
+
+        # Attempt to clear any in-memory dropdown caches if present
+        try:
+            # Common places: excel processor dropdown cache
+            from src.core.data.excel_processor import ExcelProcessor
+            # If session processor exists, try to clear its dropdown cache
+            try:
+                ep = get_session_excel_processor()
+                if ep and hasattr(ep, 'dropdown_cache'):
+                    ep.dropdown_cache = {}
+            except Exception:
+                pass
+        except Exception:
+            # ignore if ExcelProcessor can't be imported
+            pass
+
+        # Force garbage collection
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
+
+        logging.info('Admin cleared caches and cache files')
+        return jsonify({'message': 'caches_cleared'})
+    except Exception as e:
+        logging.error(f'admin_clear_caches failed: {e}')
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

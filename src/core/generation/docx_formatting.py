@@ -38,6 +38,19 @@ def apply_lineage_colors(doc):
     
     try:
         logger.info("Starting lineage color application...")
+        # Fast-path: if the document XML does not contain any lineage-related
+        # keywords, skip the expensive per-cell processing entirely.
+        try:
+            doc_xml_upper = getattr(doc, 'element').xml.upper()
+        except Exception:
+            doc_xml_upper = ''
+
+        if not any(k in doc_xml_upper for k in (
+            'SATIVA', 'INDICA', 'HYBRID', 'CBD', 'PARAPHERNALIA',
+            'PRODUCTSTRAIN', 'LINEAGE_START', 'LINEAGE_END'
+        )):
+            logger.debug("No lineage-related keywords found in document XML; skipping coloring")
+            return doc
         cells_processed = 0
         colors_applied = 0
         

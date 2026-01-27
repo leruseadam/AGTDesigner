@@ -5427,6 +5427,24 @@ class ExcelProcessor:
             else:
                 options[filter_key] = []
         
+        # Normalize lineage variants to canonical values to avoid duplicate-looking entries
+        try:
+            if 'lineage' in options and options['lineage']:
+                normalized = []
+                for lin in options['lineage']:
+                    if not lin:
+                        continue
+                    l = str(lin).strip().upper()
+                    if l in ('CBD_BLEND', 'CBD BLEND'):
+                        l = 'CBD'
+                    if l == 'PARA':
+                        l = 'PARAPHERNALIA'
+                    normalized.append(l)
+                options['lineage'] = sorted(list(set(normalized)))
+        except Exception:
+            # If normalization fails, fall back to original options
+            pass
+
         cached_copy = self._clone_filter_options(options)
         self._store_cache_value(self._filter_options_cache, cache_key, cached_copy)
         return self._clone_filter_options(cached_copy)
