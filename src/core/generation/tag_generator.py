@@ -953,7 +953,9 @@ def process_chunk(args):
                         if not pname or pname in seen:
                             continue
                         if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
-                            product_lineage_cache[pname] = str(lineage).strip().upper()
+                            # Normalize product name key to uppercase stripped form for reliable matching
+                            key = str(pname).strip().upper()
+                            product_lineage_cache[key] = str(lineage).strip().upper()
                             seen.add(pname)
                 except Exception as batch_err:
                     logger.warning(f"Batch product lineage query failed: {batch_err}")
@@ -975,7 +977,9 @@ def process_chunk(args):
                         sname = row_result[0]
                         preferred = row_result[1] or row_result[2]
                         if preferred and str(preferred).strip().upper() != 'SOVEREIGN':
-                            strain_info_cache[sname] = {
+                            # Normalize strain name key for reliable matching
+                            skey = str(sname).strip().upper()
+                            strain_info_cache[skey] = {
                                 'sovereign_lineage': row_result[1],
                                 'canonical_lineage': row_result[2]
                             }
@@ -1210,13 +1214,15 @@ def process_chunk(args):
                     lineage_val = None
                     # 1. Product-level lineage from database
                     if product_name:
-                        db_product_lineage = product_lineage_cache.get(product_name)
+                        lookup_key = str(product_name).strip().upper()
+                        db_product_lineage = product_lineage_cache.get(lookup_key)
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
                     # 2. Fallback: strain-level (sovereign_lineage > canonical_lineage)
                     if (not lineage_val or lineage_val in ['MIXED', 'THC', '', None]) and product_strain:
-                        strain_info = strain_info_cache.get(product_strain)
+                        slookup = str(product_strain).strip().upper()
+                        strain_info = strain_info_cache.get(slookup)
                         if strain_info:
                             for key in ('sovereign_lineage', 'canonical_lineage'):
                                 canon = strain_info.get(key)
