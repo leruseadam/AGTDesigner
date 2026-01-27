@@ -16,11 +16,46 @@ import sqlite3
 import sys
 from typing import List
 
-try:
-    from src.core.constants import CLASSIC_TYPES
-except Exception:
-    # Fallback if run outside project root; user should run from repo root.
-    CLASSIC_TYPES = {"flower", "pre-roll", "infused pre-roll", "preroll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"}
+import ast
+import os
+
+
+def load_classic_types():
+    # Try importing from package first (when running inside virtualenv/project)
+    try:
+        from src.core.constants import CLASSIC_TYPES as CT
+        return CT
+    except Exception:
+        pass
+
+    # Fallback: attempt to locate src/core/constants.py relative to this script
+    here = os.path.dirname(os.path.abspath(__file__))
+    # walk up to repository root (max 5 levels)
+    cur = here
+    for _ in range(6):
+        candidate = os.path.join(cur, 'src', 'core', 'constants.py')
+        if os.path.exists(candidate):
+            try:
+                with open(candidate, 'r', encoding='utf-8') as f:
+                    node = ast.parse(f.read(), filename=candidate)
+                for stmt in node.body:
+                    if isinstance(stmt, ast.Assign):
+                        for target in stmt.targets:
+                            if getattr(target, 'id', None) == 'CLASSIC_TYPES':
+                                # evaluate the assigned value safely
+                                value = ast.literal_eval(stmt.value)
+                                # ensure it's a set
+                                return set(value)
+            except Exception:
+                break
+        # go up one directory
+        cur = os.path.dirname(cur)
+
+    # Last-resort fallback
+    return {"flower", "pre-roll", "infused pre-roll", "preroll", "concentrate", "solventless concentrate", "vape cartridge", "rso/co2 tankers"}
+
+
+CLASSIC_TYPES = load_classic_types()
 
 
 VALID_NONCLASSIC_LINEAGES = {'MIXED', 'CBD', 'CBD_BLEND', 'THC'}
