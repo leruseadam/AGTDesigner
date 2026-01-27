@@ -325,13 +325,25 @@
           window.TagManager.clearCacheAndReload();
         }
 
-        console.log('✅ All caches cleared - reloading page...');
-        alert('Cache cleared successfully! Page will now reload.');
-
-        // Force reload after a brief delay to ensure caches are cleared
-        setTimeout(function() {
-          window.location.reload(true);
-        }, 300);
+        // Also request the backend to clear server-side caches and files
+        try {
+          fetch('/api/performance/cache/clear', { method: 'POST', credentials: 'same-origin' })
+            .then(resp => resp.json().catch(() => ({})))
+            .then(() => {
+              console.log('✅ Server-side caches cleared');
+              alert('Cache cleared successfully! Page will now reload.');
+              setTimeout(function() { window.location.reload(true); }, 300);
+            })
+            .catch(err => {
+              console.warn('Backend cache clear failed:', err);
+              alert('Cache cleared locally, but backend cache clear failed. Page will reload.');
+              setTimeout(function() { window.location.reload(true); }, 300);
+            });
+        } catch (e) {
+          console.warn('Failed to call backend cache clear:', e);
+          alert('Cache cleared locally. Please reload the page.');
+          setTimeout(function() { window.location.reload(true); }, 300);
+        }
 
       } catch (error) {
         console.error('❌ Error clearing caches:', error);

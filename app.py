@@ -25229,15 +25229,81 @@ def cache_stats_route():
 def clear_cache_route():
     """Clear all caches - SIMPLIFIED."""
     try:
-        # Clear Flask cache only (safe operation)
-        if hasattr(cache, 'clear'):
-            cache.clear()
-        
-        # Basic garbage collection
-        import gc
-        gc.collect()
-        
-        return jsonify({'message': 'Basic cache cleared successfully'})
+        # Best-effort comprehensive cache clearing for frontend "Reset Cache" button.
+        #  - Clear Flask/cache backend
+        #  - Clear module-level caches (product DB, json matcher, generation caches)
+        #  - Remove files under CACHE_DIR
+        #  - Trigger garbage collection
+        import gc, importlib, shutil
+        global _product_database, _json_matcher
+
+        # 1) Clear Flask cache if available
+        try:
+            if hasattr(cache, 'clear'):
+                cache.clear()
+        except Exception as e:
+            logging.debug(f'Flask cache.clear() failed: {e}')
+
+        # 2) Reset in-memory singletons so they'll be reloaded on next request
+        try:
+            _product_database = None
+        except Exception:
+            pass
+        try:
+            _json_matcher = None
+        except Exception:
+            pass
+
+        # 3) Attempt to call known module-level clear functions (best-effort)
+        modules_to_try = [
+            'src.core.utils.performance_cache',
+            'src.core.data.product_database',
+            'src.core.data.enhanced_json_matcher',
+            'src.core.data.ultra_fast_excel_processor',
+            'src.core.generation.fast_generation',
+            'src.core.generation.parallel_template_processor',
+            'src.core.utils.lightweight_performance',
+            'src.core.utils.response_cache',
+        ]
+        for m in modules_to_try:
+            try:
+                mod = importlib.import_module(m)
+                if hasattr(mod, 'clear_cache'):
+                    try:
+                        mod.clear_cache()
+                    except Exception as e:
+                        logging.debug(f'Module {m}.clear_cache() failed: {e}')
+                if hasattr(mod, 'clear_caches'):
+                    try:
+                        mod.clear_caches()
+                    except Exception as e:
+                        logging.debug(f'Module {m}.clear_caches() failed: {e}')
+            except Exception as e:
+                logging.debug(f'Import {m} failed during cache clear: {e}')
+
+        # 4) Remove files and directories in CACHE_DIR
+        try:
+            if os.path.exists(CACHE_DIR):
+                for fname in os.listdir(CACHE_DIR):
+                    fpath = os.path.join(CACHE_DIR, fname)
+                    try:
+                        if os.path.isfile(fpath) or os.path.islink(fpath):
+                            os.remove(fpath)
+                        else:
+                            shutil.rmtree(fpath)
+                    except Exception as e:
+                        logging.debug(f'Unable to remove cache file {fpath}: {e}')
+        except Exception as e:
+            logging.warning(f'Error clearing cache directory: {e}')
+
+        # 5) Force garbage collection
+        try:
+            gc.collect()
+        except Exception:
+            pass
+
+        logging.info('Comprehensive cache clear performed via /api/performance/cache/clear')
+        return jsonify({'message': 'comprehensive_cache_cleared'})
     except Exception as e:
         logging.error(f"Failed to clear caches: {e}")
         return jsonify({'error': str(e)}), 500
