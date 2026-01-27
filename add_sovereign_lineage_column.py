@@ -14,8 +14,25 @@ logger = logging.getLogger(__name__)
 def add_sovereign_lineage_column(db_path):
     """Add sovereign_lineage column to products table if it doesn't exist."""
     try:
+        # Skip obviously invalid/empty files early
+        try:
+            if os.path.getsize(db_path) == 0:
+                logger.warning(f"⚠️  Skipping empty DB file: {db_path}")
+                return False
+        except OSError:
+            # If file is not accessible for size check, continue and let sqlite report the error
+            pass
+
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
+
+        # Confirm 'products' table exists before attempting schema changes
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+        table_exists = cursor.fetchone() is not None
+        if not table_exists:
+            logger.warning(f"⚠️  Skipping {db_path}: no 'products' table found")
+            conn.close()
+            return False
 
         # Check if column exists
         cursor.execute("PRAGMA table_info(products)")
