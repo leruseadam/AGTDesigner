@@ -193,12 +193,41 @@ def generate_preroll_product_list(records: List[Dict[str, Any]], cache: Cache) -
                     # Add items to table
                     for item in brand_items:
                         row_cells = table.add_row().cells
-                        row_cells[0].text = item.get('product_name', '')
-                        row_cells[1].text = item.get('brand', '')
-                        row_cells[2].text = item.get('price', '')
-                        row_cells[3].text = item.get('weight', '')
-                        row_cells[4].text = item.get('lineage', '')
-                        row_cells[5].text = item.get('doh', '')
+                        # Normalize keys: accept both lowercase and uppercase variants used across codebase
+                        row_cells[0].text = (
+                            item.get('product_name') or
+                            item.get('Product Name*') or
+                            item.get('ProductName') or
+                            ''
+                        )
+                        row_cells[1].text = (
+                            item.get('brand') or
+                            item.get('Product Brand') or
+                            item.get('ProductBrand') or
+                            ''
+                        )
+                        row_cells[2].text = (
+                            item.get('price') or
+                            item.get('Price') or
+                            ''
+                        )
+                        row_cells[3].text = (
+                            item.get('weight') or
+                            item.get('CombinedWeight') or
+                            item.get('WeightUnits') or
+                            ''
+                        )
+                        # Lineage may be stored as 'lineage' or 'Lineage' in different modules
+                        row_cells[4].text = (
+                            item.get('lineage') or
+                            item.get('Lineage') or
+                            ''
+                        )
+                        row_cells[5].text = (
+                            item.get('doh') or
+                            item.get('DOH') or
+                            ''
+                        )
                     
                     # Add spacing after each brand table
                     list_doc.add_paragraph('')
