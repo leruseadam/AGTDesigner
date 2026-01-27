@@ -7714,16 +7714,29 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         }
                         logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' set to '{derived}' from Product Strain '{product_strain}' (DB missing)")
                     else:
-                        # No strain available and DB missing — default to MIXED
-                        lineage_info = {
-                            'lineage': 'MIXED',
-                            'has_sovereign': False,
-                            'product_sovereign': None,
-                            'strain_sovereign': None,
-                            'strain_canonical': None,
-                            'db_lineage': 'MIXED'
-                        }
-                        logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' defaulted to 'MIXED' (no Product Strain and DB missing)")
+                        # No strain available and DB missing — prefer Excel-provided lineage if present
+                        excel_lineage = tag.get('excel_lineage') or tag.get('Excel Lineage') or tag.get('Lineage') or tag.get('Lineage*')
+                        if excel_lineage and str(excel_lineage).strip():
+                            lineage_info = {
+                                'lineage': excel_lineage,
+                                'has_sovereign': False,
+                                'product_sovereign': None,
+                                'strain_sovereign': None,
+                                'strain_canonical': None,
+                                'db_lineage': excel_lineage
+                            }
+                            logging.info(f"🔁 NON-CLASSIC LINEAGE: Using excel_lineage fallback for new product '{name}': '{excel_lineage}'")
+                        else:
+                            # Default to MIXED if no Excel lineage provided
+                            lineage_info = {
+                                'lineage': 'MIXED',
+                                'has_sovereign': False,
+                                'product_sovereign': None,
+                                'strain_sovereign': None,
+                                'strain_canonical': None,
+                                'db_lineage': 'MIXED'
+                            }
+                            logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' defaulted to 'MIXED' (no Product Strain and DB missing)")
             
             # If no DB/strain lineage_info is available, allow Excel-provided lineage
             # only as a fallback for NEW products (i.e., when DB has no record).
@@ -11408,14 +11421,34 @@ def get_available_tags():
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
                 # CRITICAL PERFORMANCE FIX: Skip database enrichment when fast_load=1 UNLESS lineage was manually updated
-                # This provides instant tag loading (<1 second) on PythonAnywhere
+                # or the database contains lineage information. If the DB contains lineage (strains.sovereign_lineage)
+                # we must prefer DB enrichment so manual edits and authoritative lineage appear immediately.
                 # EXCEPTION: If lineage_update_timestamp exists, ALWAYS apply database lineage (manual changes must show)
                 has_lineage_updates = bool(session.get('lineage_update_timestamp'))
-                skip_db_enrichment = fast_load and not has_lineage_updates
+
+                # QUICK CHECK: If the product database contains any strain-level sovereign_lineage,
+                # force enrichment even in fast_load to ensure DB lineage is returned immediately.
+                db_has_lineage = False
+                try:
+                    product_db_quick = get_product_database(store_name)
+                    if product_db_quick:
+                        conn_q = product_db_quick._get_connection()
+                        cursor_q = conn_q.cursor()
+                        cursor_q.execute("SELECT COUNT(*) FROM strains WHERE sovereign_lineage IS NOT NULL AND TRIM(sovereign_lineage) != ''")
+                        cnt = cursor_q.fetchone()[0]
+                        if cnt and int(cnt) > 0:
+                            db_has_lineage = True
+                            logging.info(f"⚠️ QUICK DB CHECK: Found {cnt} strains with sovereign_lineage - will enforce DB enrichment")
+                except Exception:
+                    # Be conservative: if check fails, do not change behavior
+                    db_has_lineage = False
+
+                # Only skip DB enrichment when fast_load is enabled, no lineage updates, and DB has no lineage
+                skip_db_enrichment = fast_load and not has_lineage_updates and not db_has_lineage
                 if skip_db_enrichment:
                     logging.info(f"⚡ PERFORMANCE: Skipping database enrichment (fast_load=1 for speed)")
-                elif has_lineage_updates:
-                    logging.info(f"🔄 LINEAGE UPDATE DETECTED: Forcing database enrichment even with fast_load=1")
+                elif has_lineage_updates or db_has_lineage:
+                    logging.info(f"🔄 LINEAGE UPDATE / DB HAS LINEAGE: Forcing database enrichment even with fast_load=1")
 
                 # CRITICAL FIX: Only strip Excel lineage if we're going to enrich with database lineage
                 # If skipping enrichment (fast_load mode), keep Excel lineage as fallback
@@ -11677,23 +11710,64 @@ def get_available_tags():
                             tag['DOH Compliant (Yes/No)'] = ''
                     logging.info(f"✅ CRITICAL FIX: Ensured DOH fields exist for all {len(simple_tags)} tags after enrichment exception")
 
-            # CRITICAL FIX: Always align tags with database lineage to ensure lineage fields are populated
-            # Even in fast_load mode, we need lineage fields for the UI to display dropdowns
-            # PERFORMANCE: Use lightweight alignment that doesn't require full database queries
+            # CRITICAL FIX: Align tags with database lineage, but do it non-blocking to ensure
+            # the HTTP response returns immediately. We attempt a short synchronous align (timeout)
+            # and, if it doesn't finish quickly, spawn a background align that will update the cache.
             try:
                 if store_name and simple_tags:
-                    # CRITICAL: Always align to ensure lineage fields exist, even in fast_load mode
-                    # This ensures UI can display lineage dropdowns even when enrichment was skipped
-                    logging.info(f"🔄 SIMPLE PATH: Aligning {len(simple_tags)} tags with database lineage (fast_load={fast_load})...")
-                    simple_tags = _align_tags_with_db_lineage(simple_tags, store_name, skip_if_aligned=skip_db_enrichment, force_overwrite=not skip_db_enrichment)
-                    logging.info(f"✅ SIMPLE PATH: Tags aligned with database lineage")
+                    logging.info(f"🔄 SIMPLE PATH: Attempting non-blocking alignment of {len(simple_tags)} tags (fast_load={fast_load})...")
+
+                    import threading
+
+                    align_result = {}
+
+                    def _align_worker(tags_snapshot, store, result_container):
+                        try:
+                            aligned = _align_tags_with_db_lineage(tags_snapshot, store, skip_if_aligned=skip_db_enrichment, force_overwrite=not skip_db_enrichment)
+                            result_container['tags'] = aligned
+                        except Exception as e:
+                            result_container['error'] = str(e)
+
+                    # Use a shallow copy of tags for background work to avoid mutation races
+                    tags_copy = [dict(t) for t in simple_tags]
+                    worker = threading.Thread(target=_align_worker, args=(tags_copy, store_name, align_result), daemon=True)
+                    worker.start()
+
+                    # Wait briefly for quick align to finish (half a second)
+                    worker.join(0.5)
+
+                    if 'tags' in align_result:
+                        simple_tags = align_result['tags']
+                        logging.info("✅ SIMPLE PATH: Alignment completed within timeout")
+                    else:
+                        # Didn't finish quickly: schedule background alignment to complete and cache results
+                        logging.info("⏱️ SIMPLE PATH: Alignment timed out; scheduling background alignment and returning immediately")
+
+                        def _bg_align_and_cache(tags_snapshot, store, cache_key_local):
+                            try:
+                                aligned = _align_tags_with_db_lineage(tags_snapshot, store, skip_if_aligned=False, force_overwrite=True)
+                                safe_aligned = make_json_safe(aligned)
+                                try:
+                                    cache.set(cache_key_local, safe_aligned, timeout=3600)
+                                    logging.info("💾 Background alignment completed and cached")
+                                except Exception as ce:
+                                    logging.warning(f"Failed to set background cache: {ce}")
+                            except Exception as e:
+                                logging.warning(f"Background alignment failed: {e}")
+
+                        bg_thread = threading.Thread(target=_bg_align_and_cache, args=(tags_copy, store_name, cache_key), daemon=True)
+                        bg_thread.start()
+
+                        # Signal frontend to clear its caches and re-request if needed
+                        try:
+                            force_frontend_cache_clear = True
+                        except Exception:
+                            pass
             except Exception as align_err:
-                logging.warning(f"Failed to align simple tags with database: {align_err}")
-                # CRITICAL FIX: If alignment fails, ensure tags have at least Excel lineage or default
-                # This prevents empty lineage fields that break UI dropdowns
+                logging.warning(f"Failed to start non-blocking alignment for simple tags: {align_err}")
+                # CRITICAL FIX: If alignment couldn't be started, ensure tags have at least Excel lineage or default
                 for tag in simple_tags:
                     if not tag.get('Lineage') and not tag.get('currentLineage') and not tag.get('canonical_lineage'):
-                        # No lineage at all - set default based on product type
                         product_type = tag.get('Product Type*', '').lower()
                         from src.core.constants import CLASSIC_TYPES
                         is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
@@ -11702,7 +11776,7 @@ def get_available_tags():
                         tag['currentLineage'] = default_lineage
                         tag['canonical_lineage'] = default_lineage
                         tag['lineage'] = default_lineage.lower()
-                        logging.warning(f"⚠️ Set default lineage '{default_lineage}' for tag '{tag.get('Product Name*', 'unknown')}' after alignment failure")
+                        logging.warning(f"⚠️ Set default lineage '{default_lineage}' for tag '{tag.get('Product Name*', 'unknown')}' after alignment worker failure")
 
             # CRITICAL FIX: Enforce non-classic lineage rules BEFORE serialization
             # This ensures non-classic types can ONLY have MIXED or CBD lineage, never SATIVA/INDICA/etc.
