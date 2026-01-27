@@ -7770,28 +7770,27 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     effective_lineage = validated_sovereign
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
-                # CRITICAL FIX: Set canonical_lineage in a way that reflects DB-authoritative values
-                # DOCX uses COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-                # For UI consistency we should prefer any explicit sovereign lineage when present
-                # (product-level then strain-level), then fall back to strain canonical, then sensible defaults.
+                # CRITICAL FIX: Set canonical_lineage to match DOCX generation logic
+                # DOCX uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                # BUT canonical_lineage field should ONLY come from strains table, NEVER from p."Lineage"
+                # p."Lineage" is Excel data which can be MIXED - canonical_lineage is the canonical value from strains
+                # CRITICAL: canonical_lineage should ONLY use strain_canonical (from strains table), never db_lineage (which includes p."Lineage")
                 canonical_to_use = None
-
-                # Priority 1: Use product-level sovereign_lineage if present
-                if lineage_info.get('product_sovereign'):
-                    canonical_to_use = lineage_info['product_sovereign']
-                # Priority 2: Use strain-level sovereign_lineage if present
-                elif lineage_info.get('strain_sovereign'):
-                    canonical_to_use = lineage_info['strain_sovereign']
-                # Priority 3: Use strain canonical_lineage
-                elif lineage_info.get('strain_canonical'):
+                
+                # Priority 1: Use strain_canonical if available (from JOIN or fallback lookup)
+                # This is the ONLY valid source for canonical_lineage - it comes from the strains table
+                if lineage_info.get('strain_canonical'):
                     canonical_to_use = lineage_info['strain_canonical']
-                else:
-                    # Fallback: if classic type and no canonical info, default to HYBRID
+                # Priority 2: If no strain_canonical, try to get it from strain lookup (already done above, but check again)
+                elif not lineage_info.get('strain_canonical'):
+                    # Fallback lookup should have already run, but if strain_canonical is still None,
+                    # we can't use db_lineage because it might be MIXED from p."Lineage"
+                    # For classic products, default to HYBRID if no canonical_lineage found
                     if is_classic:
-                        canonical_to_use = 'HYBRID'
+                        canonical_to_use = 'HYBRID'  # Default for classic products without canonical_lineage
                         logging.warning(f"⚠️ No canonical_lineage found for classic product '{name}', defaulting to HYBRID")
                     else:
-                        # For non-classic products, prefer db_lineage or MIXED
+                        # For non-classic products, MIXED is valid
                         canonical_to_use = lineage_info.get('db_lineage') or db_lineage or 'MIXED'
                 
                 if canonical_to_use:

@@ -6,42 +6,19 @@ Fix script to remove invalid "SOVEREIGN" lineage values from the database.
 
 import sqlite3
 import sys
-import argparse
 from pathlib import Path
-import subprocess
 
 # Find the database file
-parser = argparse.ArgumentParser(description="Fix invalid 'SOVEREIGN' lineage values in SQLite DB")
-parser.add_argument('--db', '-d', help='Path to SQLite database file (overrides default uploads path)')
-args = parser.parse_args()
-
 base_dir = Path(__file__).parent
 uploads_dir = base_dir / "uploads"
-default_db = uploads_dir / "product_database_AGT_Bothell.db"
-db_path = Path(args.db) if args.db else default_db
+db_path = uploads_dir / "product_database_AGT_Bothell.db"
 
 if not db_path.exists():
     print(f"❌ Database not found at {db_path}")
     sys.exit(1)
 
-# Try connecting and provide a helpful diagnostic if the file isn't a valid SQLite DB
-try:
-    conn = sqlite3.connect(str(db_path))
-    cursor = conn.cursor()
-except sqlite3.DatabaseError as e:
-    print(f"❌ sqlite3.DatabaseError when opening {db_path}: {e}")
-    print("This usually means the file is not a SQLite database or is corrupted.")
-    print("Run the following commands to inspect the file (shell):")
-    print(f"  file '{db_path}'")
-    print(f"  hexdump -C -n 64 '{db_path}' | head -n 5")
-    # Try to run `file` tool for convenience if available
-    try:
-        out = subprocess.check_output(['file', str(db_path)], stderr=subprocess.STDOUT)
-        print('\nfile output:')
-        print(out.decode('utf-8').strip())
-    except Exception:
-        pass
-    sys.exit(2)
+conn = sqlite3.connect(str(db_path))
+cursor = conn.cursor()
 
 print("=" * 80)
 print("FIXING INVALID 'SOVEREIGN' LINEAGE VALUES")
