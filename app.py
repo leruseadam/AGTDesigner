@@ -9894,7 +9894,7 @@ def generate_labels():
             'SATIVA': 'S',
             'INDICA': 'I', 
             # Treat HYBRID as MIX for better clarity across classic and non-classic types
-            'HYBRID': 'MIX',
+            'HYBRID': 'H',
             'HYBRID/SATIVA': 'HS',
             'HYBRID/INDICA': 'HI',
             'CBD': 'CBD',
