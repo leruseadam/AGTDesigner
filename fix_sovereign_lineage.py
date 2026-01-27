@@ -7,7 +7,6 @@ Fix script to remove invalid "SOVEREIGN" lineage values from the database.
 import sqlite3
 import sys
 from pathlib import Path
-from datetime import datetime
 
 # Find the database file
 base_dir = Path(__file__).parent
@@ -53,57 +52,28 @@ if count > 0:
     for name, sov, lin, canon in samples:
         print(f"      - {name}: sovereign={sov}, Lineage={lin}, canonical={canon}")
     
-    # Fix products safely on a per-row basis and record audit entries
+    # Fix products - set SOVEREIGN to NULL so it falls back to other lineage fields
     cursor.execute('''
-        SELECT id, "Product Name*", sovereign_lineage, "Lineage", canonical_lineage
-        FROM products
+        UPDATE products
+        SET sovereign_lineage = NULL
         WHERE UPPER(TRIM(sovereign_lineage)) = 'SOVEREIGN'
-           OR UPPER(TRIM("Lineage")) = 'SOVEREIGN'
-           OR UPPER(TRIM(canonical_lineage)) = 'SOVEREIGN'
     ''')
-    rows = cursor.fetchall()
-    fixed_products = 0
-    fixed_lineage = 0
-    fixed_canonical = 0
-
-    now = datetime.utcnow().isoformat()
-    for pid, name, sov, lin, canon in rows:
-        old_sov = sov
-        old_lin = lin
-        old_canon = canon
-
-        # Determine new_lineage (prefer canonical if present and not 'SOVEREIGN')
-        new_lineage = None
-        if old_canon and str(old_canon).strip().upper() != 'SOVEREIGN':
-            new_lineage = old_canon
-        elif old_lin and str(old_lin).strip().upper() != 'SOVEREIGN':
-            new_lineage = old_lin
-
-        try:
-            # Insert audit record before making destructive changes
-            cursor.execute('''
-                INSERT INTO lineage_audit (product_id, product_name, old_lineage, old_sovereign_lineage, new_lineage, updated_by, source, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (pid, name, old_lin, old_sov, new_lineage, 'maintenance_script', 'fix_sovereign_lineage', now))
-
-            # Clear sovereign_lineage if it was 'SOVEREIGN'
-            if old_sov and str(old_sov).strip().upper() == 'SOVEREIGN':
-                cursor.execute('UPDATE products SET sovereign_lineage = NULL WHERE id = ?', (pid,))
-                fixed_products += 1
-
-            # Clear Lineage if it was 'SOVEREIGN'
-            if old_lin and str(old_lin).strip().upper() == 'SOVEREIGN':
-                cursor.execute('UPDATE products SET "Lineage" = NULL WHERE id = ?', (pid,))
-                fixed_lineage += 1
-
-            # Clear canonical_lineage if it was 'SOVEREIGN'
-            if old_canon and str(old_canon).strip().upper() == 'SOVEREIGN':
-                cursor.execute('UPDATE products SET canonical_lineage = NULL WHERE id = ?', (pid,))
-                fixed_canonical += 1
-
-        except Exception as e:
-            print(f"Failed to fix product id={pid} ({name}): {e}")
-
+    fixed_products = cursor.rowcount
+    
+    cursor.execute('''
+        UPDATE products
+        SET "Lineage" = NULL
+        WHERE UPPER(TRIM("Lineage")) = 'SOVEREIGN'
+    ''')
+    fixed_lineage = cursor.rowcount
+    
+    cursor.execute('''
+        UPDATE products
+        SET canonical_lineage = NULL
+        WHERE UPPER(TRIM(canonical_lineage)) = 'SOVEREIGN'
+    ''')
+    fixed_canonical = cursor.rowcount
+    
     conn.commit()
     print(f"   ✅ Fixed {fixed_products} products with sovereign_lineage='SOVEREIGN'")
     print(f"   ✅ Fixed {fixed_lineage} products with Lineage='SOVEREIGN'")

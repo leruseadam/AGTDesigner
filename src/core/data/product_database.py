@@ -1,5 +1,4 @@
 from .field_mapping import get_canonical_field
-import re
 import sqlite3
 import json
 import logging
@@ -105,60 +104,6 @@ def _get_cached_fuzzy_match(product_name: str) -> Optional[Dict[str, Any]]:
                 # Expired, remove from cache
                 del _fuzzy_match_cache[cache_key]
                 del _fuzzy_match_cache_timestamps[cache_key]
-    return None
-
-
-def _canonicalize_lineage_value(lineage: Optional[str]) -> Optional[str]:
-    """Normalize and validate lineage values to a canonical set.
-
-    Returns canonical uppercase lineage string if valid, otherwise None.
-    """
-    if not lineage:
-        return None
-    s = str(lineage).strip()
-    if not s:
-        return None
-    s_up = s.upper().replace('\u2013', '-').replace('\u2014', '-')
-    # Common mappings and fixes
-    mapping = {
-        'HYBRID': 'HYBRID',
-        'HYBRID/SATIVA': 'HYBRID/SATIVA',
-        'HYBRID - SATIVA': 'HYBRID/SATIVA',
-        'HYBRID/SATIVA': 'HYBRID/SATIVA',
-        'SATIVA': 'SATIVA',
-        'SATIVA/HYBRID': 'HYBRID/SATIVA',
-        'INDICA': 'INDICA',
-        'CLASSIC': 'CLASSIC',
-        'NON-CLASSIC': 'NON-CLASSIC',
-        'NONCLASSIC': 'NON-CLASSIC',
-        'NON CLASSIC': 'NON-CLASSIC',
-        'NON-CLASSICAL': 'NON-CLASSIC',
-        'NON-CLASSICAL?': 'NON-CLASSIC'
-    }
-
-    # Strip common noise
-    s_up = re.sub(r'[^A-Z0-9/\- ]', '', s_up).strip()
-    if s_up in mapping:
-        return mapping[s_up]
-
-    # Handle 'MIXED' or ambiguous values by mapping to HYBRID
-    if s_up in ('MIXED', 'MIX', 'UNKNOWN', 'N/A', 'NA'):
-        logger.warning(f"Canonicalizing ambiguous lineage '{lineage}' -> 'HYBRID'")
-        return 'HYBRID'
-
-    # If it's already one of the allowed values, accept it
-    allowed = {'HYBRID', 'HYBRID/SATIVA', 'SATIVA', 'INDICA', 'CLASSIC', 'NON-CLASSIC'}
-    if s_up in allowed:
-        return s_up
-
-    # Try simple heuristics: contains 'SATIVA' or 'INDICA'
-    if 'SATIVA' in s_up:
-        return 'SATIVA'
-    if 'INDICA' in s_up:
-        return 'INDICA'
-
-    # Unknown value -- reject to avoid bad overwrites
-    logger.warning(f"Rejected unknown lineage value during canonicalization: '{lineage}'")
     return None
 
 def _set_cached_fuzzy_match(product_name: str, result: Optional[Dict[str, Any]]):
@@ -588,25 +533,6 @@ class ProductDatabase:
                             self._ensure_essential_columns_exist(cursor, conn)
                         except Exception as essential_error:
                             logger.warning(f"Could not ensure essential columns on existing DB: {essential_error}")
-                        # Ensure lineage_audit table exists on legacy DBs
-                        try:
-                            cursor.execute('''
-                                CREATE TABLE IF NOT EXISTS lineage_audit (
-                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                    product_id INTEGER,
-                                    product_name TEXT,
-                                    old_lineage TEXT,
-                                    old_sovereign_lineage TEXT,
-                                    new_lineage TEXT,
-                                    updated_by TEXT,
-                                    source TEXT,
-                                    updated_at TEXT NOT NULL
-                                )
-                            ''')
-                            conn.commit()
-                            logger.info("Ensured lineage_audit table exists on existing DB")
-                        except Exception:
-                            logger.warning("Could not ensure lineage_audit table on existing DB")
                         self._initialized = True
                         return
                 
@@ -709,21 +635,6 @@ class ProductDatabase:
                         change_date TEXT NOT NULL,
                         change_reason TEXT,
                         FOREIGN KEY (strain_id) REFERENCES strains (id)
-                    )
-                ''')
-
-                # Create lineage_audit table for recording product-level lineage updates
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS lineage_audit (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        product_id INTEGER,
-                        product_name TEXT,
-                        old_lineage TEXT,
-                        old_sovereign_lineage TEXT,
-                        new_lineage TEXT,
-                        updated_by TEXT,
-                        source TEXT,
-                        updated_at TEXT NOT NULL
                     )
                 ''')
                 
@@ -5077,102 +4988,54 @@ class ProductDatabase:
             cursor = conn.cursor()
             current_date = datetime.now().isoformat()
 
-            # Canonicalize lineage value to prevent improper values
-            canonical_new = _canonicalize_lineage_value(new_lineage)
-            if not canonical_new:
-                logger.error(f"Refusing to write unknown/invalid lineage value: '{new_lineage}' for product '{product_name}'")
-                return False
-
-            # Find candidate product rows to update (support vendor+brand filtering)
+            # CRITICAL FIX: Use normalized name and try both column names
+            # This ensures updates work even with formatting differences
+            # CRITICAL: Set BOTH Lineage and sovereign_lineage for manual updates
             if vendor and brand:
                 cursor.execute('''
-                    SELECT id, "Product Name*", "Lineage", sovereign_lineage
-                    FROM products
+                    UPDATE products
+                    SET "Lineage" = ?, sovereign_lineage = ?
                     WHERE ("Product Name*" = ? OR "ProductName" = ?)
                     AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (product_name, product_name, vendor, brand))
+                ''', (new_lineage, new_lineage, product_name, product_name, vendor, brand))
+                logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
             else:
+                # Try exact match first
                 cursor.execute('''
-                    SELECT id, "Product Name*", "Lineage", sovereign_lineage
-                    FROM products
+                    UPDATE products
+                    SET "Lineage" = ?, sovereign_lineage = ?
                     WHERE "Product Name*" = ? OR "ProductName" = ?
-                ''', (product_name, product_name))
+                ''', (new_lineage, new_lineage, product_name, product_name))
 
-            rows = cursor.fetchall()
-            if not rows:
-                # Try case-insensitive fallback
-                if vendor and brand:
-                    cursor.execute('''
-                        SELECT id, "Product Name*", "Lineage", sovereign_lineage
-                        FROM products
-                        WHERE (LOWER(TRIM("Product Name*")) = LOWER(TRIM(?)) OR LOWER(TRIM("ProductName")) = LOWER(TRIM(?)))
-                        AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                    ''', (product_name, product_name, vendor, brand))
-                else:
-                    cursor.execute('''
-                        SELECT id, "Product Name*", "Lineage", sovereign_lineage
-                        FROM products
-                        WHERE LOWER(TRIM("Product Name*")) = LOWER(TRIM(?)) OR LOWER(TRIM("ProductName")) = LOWER(TRIM(?))
-                    ''', (product_name, product_name))
-                rows = cursor.fetchall()
-
-            if not rows:
-                logger.warning(f"No matching product rows found to update lineage for '{product_name}' (vendor={vendor}, brand={brand})")
-                return False
-
-            updated_any = False
-            for prod_id, prod_name_db, old_lineage, old_sovereign in rows:
-                old_lineage = (old_lineage or '').strip()
-                old_sovereign = (old_sovereign or '').strip()
-
-                # Do not overwrite an existing sovereign_lineage value set previously
-                if old_sovereign and old_sovereign != '' and old_sovereign != canonical_new:
-                    logger.info(f"Skipping update for product id={prod_id} ('{prod_name_db}') because sovereign_lineage is already set to '{old_sovereign}'")
-                    # Still record an audit entry for attempted change
-                    try:
-                        cursor.execute('''
-                            INSERT INTO lineage_audit (product_id, product_name, old_lineage, old_sovereign_lineage, new_lineage, updated_by, source, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (prod_id, prod_name_db, old_lineage, old_sovereign, canonical_new, 'system', 'attempted_update', current_date))
-                    except Exception:
-                        logger.debug("Failed to write lineage_audit for skipped update")
-                    continue
-
-                # Perform the update
-                try:
+                # If no rows updated with exact match, try case-insensitive match
+                if cursor.rowcount == 0:
                     cursor.execute('''
                         UPDATE products
-                        SET "Lineage" = ?, sovereign_lineage = ?, updated_at = ?
-                        WHERE id = ?
-                    ''', (canonical_new, canonical_new, current_date, prod_id))
-                    if cursor.rowcount > 0:
-                        updated_any = True
-                        logger.info(f"Updated product id={prod_id} ('{prod_name_db}') lineage -> '{canonical_new}'")
-                        # Record audit
-                        try:
-                            cursor.execute('''
-                                INSERT INTO lineage_audit (product_id, product_name, old_lineage, old_sovereign_lineage, new_lineage, updated_by, source, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (prod_id, prod_name_db, old_lineage, old_sovereign, canonical_new, 'system', 'auto_persist', current_date))
-                        except Exception:
-                            logger.debug("Failed to write lineage_audit after update")
-                except Exception as e:
-                    logger.error(f"Error updating product id={prod_id} lineage: {e}")
+                        SET "Lineage" = ?, sovereign_lineage = ?
+                        WHERE LOWER(TRIM("Product Name*")) = LOWER(TRIM(?))
+                        OR LOWER(TRIM("ProductName")) = LOWER(TRIM(?))
+                    ''', (new_lineage, new_lineage, product_name, product_name))
+                    logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' using case-insensitive match to '{new_lineage}'")
+                else:
+                    logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' to '{new_lineage}'")
 
             conn.commit()
+            rows_updated = cursor.rowcount
+            if rows_updated == 0:
+                logger.warning(f"No product found in database to update: '{product_name}' (vendor={vendor}, brand={brand})")
+            else:
+                logger.info(f"Successfully updated {rows_updated} row(s) for product '{product_name}'")
 
-            if updated_any:
-                # Clear lineage cache for affected product name(s)
+                # CRITICAL FIX: Clear lineage cache for this product to force fresh lookup
+                # Without this, get_product_lineage() will return the old cached value
                 with _lineage_cache_lock:
                     cache_key = product_name.strip().lower()
                     if cache_key in _lineage_cache:
                         del _lineage_cache[cache_key]
                         del _lineage_cache_timestamps[cache_key]
                         logger.info(f"✅ Cleared lineage cache for '{product_name}' after update")
-            else:
-                logger.info(f"No rows updated for product '{product_name}' (updates were skipped due to existing sovereign_lineage or other reasons)")
 
-            return updated_any
+            return rows_updated > 0
         except Exception as e:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
             return False 

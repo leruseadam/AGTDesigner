@@ -4973,18 +4973,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Error in enhanced final marker cleanup: {e}")
 
-    def _ultimate_marker_cleanup(self, doc):
-        """
-        Backwards-compatible alias for older tests/scripts that call
-        `_ultimate_marker_cleanup`. Delegates to the enhanced final cleanup.
-        """
-        try:
-            # Call the enhanced cleanup and final lineage cleanup to ensure parity
-            self._final_marker_cleanup(doc)
-            self._final_lineage_cleanup(doc)
-        except Exception as e:
-            self.logger.debug(f"_ultimate_marker_cleanup wrapper caught: {e}")
-
     def _final_lineage_cleanup(self, doc):
         """
         Final cleanup to remove any leading spaces from lineage content.
