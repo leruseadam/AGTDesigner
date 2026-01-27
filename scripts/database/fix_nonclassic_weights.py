@@ -9,7 +9,6 @@ import sys
 import os
 from datetime import datetime
 from pathlib import Path
-from src.core.data.product_database import ProductDatabase
 
 # Database path
 DB_PATH = Path(__file__).parent / 'uploads' / 'product_database_AGT_Bothell.db'
@@ -21,13 +20,9 @@ def fix_nonclassic_weights():
         print(f"❌ Database not found: {DB_PATH}")
         return False
     
-    try:
-        product_db = ProductDatabase(store_name='AGT_Bothell')
-        conn = product_db._get_connection()
-    except Exception:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-
+    
     print("="*80)
     print("FIXING ALL NON-CLASSIC WEIGHTS")
     print("="*80)

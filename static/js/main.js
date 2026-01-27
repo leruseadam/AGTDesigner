@@ -2761,15 +2761,9 @@ const TagManager = {
                     }
                 }
                 
-                // Lineage - normalize and map 'THC' -> 'MIXED' for filtering/display
+                // Lineage
                 const lineage = tag.Lineage || tag.lineage || '';
-                if (lineage && lineage.trim()) {
-                    let normalizedLineage = (typeof window.normalizeLineageValue !== 'undefined')
-                        ? window.normalizeLineageValue(lineage)
-                        : lineage.toString().trim().toUpperCase();
-                    if (normalizedLineage === 'THC') normalizedLineage = 'MIXED';
-                    filterOptions.lineage.add(normalizedLineage);
-                }
+                if (lineage && lineage.trim()) filterOptions.lineage.add(lineage.trim());
                 
                 // Weight
                 const weight = tag['Weight*'] || tag.Weight || tag.weight || '';
@@ -12248,25 +12242,6 @@ const TagManager = {
             }
             verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
             
-            // If server signals that frontend cache is stale, clear local caches and retry once
-            try {
-                if (responseData && responseData.force_frontend_cache_clear) {
-                    console.warn('⚠️ Server requested frontend cache clear (stale cached payload detected). Clearing local caches and re-fetching...');
-                    try { this.clearAvailableTagsCache(); } catch (e) { console.warn('Failed to clear frontend cache:', e); }
-                    if (!this._frontendCacheClearRetried) {
-                        this._frontendCacheClearRetried = true;
-                        // Short delay to allow storage to clear
-                        await new Promise(resolve => setTimeout(resolve, 120));
-                        // Force reload to bypass any cached browser responses
-                        return this.fetchAndUpdateAvailableTags(true);
-                    } else {
-                        console.warn('Frontend cache clear already retried once; continuing with current response');
-                    }
-                }
-            } catch (e) {
-                console.warn('Error handling server cache-clear flag:', e);
-            }
-
             // Handle both old array format and new object format
             let tags;
             if (Array.isArray(responseData)) {
@@ -19492,12 +19467,7 @@ function populateLineageFilterOptions(options) {
   options.forEach(opt => {
     const option = document.createElement('option');
     option.value = opt;
-        // Normalize option key before mapping to abbreviated display name so
-        // variants like 'THC' and 'MIXED' resolve to the correct abbreviation.
-        const normalizedOpt = (window.normalizeLineageValue && typeof window.normalizeLineageValue === 'function')
-            ? window.normalizeLineageValue(opt)
-            : (opt || '').toString().trim().toUpperCase();
-        const displayName = ABBREVIATED_LINEAGE[normalizedOpt] || ABBREVIATED_LINEAGE[opt] || opt;
+    const displayName = ABBREVIATED_LINEAGE[opt] || opt;
     option.textContent = displayName;
     lineageFilter.appendChild(option);
   });
@@ -20820,11 +20790,7 @@ document.addEventListener('forceRefreshSelectedTags', function(event) {
 // JSON Matching Function - Global function for JSON product matching
 window.performJsonMatch = function() {
     const jsonUrlInput = document.getElementById('jsonUrlInput');
-    // Try multiple selectors for compatibility with different template versions
-    const matchBtn = document.querySelector('#jsonMatchModal .btn-modern2')
-                  || document.querySelector('#jsonMatchModal .btn-primary')
-                  || document.querySelector('#jsonMatchModal .btn-lg')
-                  || document.querySelector('#jsonMatchModal button[type="button"]');
+    const matchBtn = document.querySelector('#jsonMatchModal .btn-modern2');
     const resultsDiv = document.getElementById('jsonMatchResults');
     const matchCount = document.getElementById('matchCount');
     const matchedProductsList = document.getElementById('matchedProductsList');

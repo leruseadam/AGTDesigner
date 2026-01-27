@@ -2461,42 +2461,6 @@ class JSONMatcher:
                                     # REJECT non-matching vendors to prevent cross-brand contamination
                                     logging.debug(f"🚫 REJECTED: Vendor mismatch - JSON vendor '{current_vendor_filter}' ≠ Excel vendor '{excel_vendor}'")
                                     continue  # Skip this candidate entirely
-
-                            # 0.5 STRICT CATEGORY FILTER: prevent matching across incompatible product categories
-                            try:
-                                excel_type = (cache_item.get('product_type', '') or '').lower().strip()
-                                json_type_norm = (product_type or '').lower().strip()
-
-                                def _category_of(t: str) -> str:
-                                    if not t:
-                                        return 'unknown'
-                                    t = t.lower()
-                                    if any(x in t for x in ['edible', 'gummy', 'chocolate', 'cookie', 'chew', 'fruit']):
-                                        return 'edible'
-                                    if any(x in t for x in ['tincture', 'sublingual', 'drop']):
-                                        return 'tincture'
-                                    if any(x in t for x in ['vape', 'cartridge', 'disposable', 'pen']):
-                                        return 'vape'
-                                    if any(x in t for x in ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate', 'sauce']):
-                                        return 'concentrate'
-                                    if any(x in t for x in ['flower', 'bud', 'pre-roll', 'joint', 'preroll']):
-                                        return 'flower'
-                                    if any(x in t for x in ['topical', 'balm', 'lotion', 'cream', 'salve']):
-                                        return 'topical'
-                                    if any(x in t for x in ['capsule', 'pill', 'tablet', 'softgel']):
-                                        return 'capsule'
-                                    return 'unknown'
-
-                                cat_json = _category_of(json_type_norm)
-                                cat_excel = _category_of(excel_type)
-
-                                # If both categories are known and different, skip candidate
-                                if cat_json != 'unknown' and cat_excel != 'unknown' and cat_json != cat_excel:
-                                    logging.debug(f"🚫 REJECTED: Category mismatch (JSON:{cat_json} vs DB:{cat_excel}) - skipping '{excel_product_name}'")
-                                    continue
-                            except Exception:
-                                # On any error, don't block matching - fall back to existing logic
-                                pass
                             
                             # 1. Exact name match (highest priority)
                             if product_name.lower() == excel_product_name:
@@ -5678,9 +5642,9 @@ class JSONMatcher:
             
             # CRITICAL FIX: Integrate JSON-matched products with Excel system
             try:
-                # Only attempt Excel integration when a Flask app context is active
-                from flask import has_app_context, g
-                if has_app_context() and hasattr(g, 'excel_processor') and g.excel_processor:
+                # Get the current Excel processor from the session
+                from flask import g
+                if hasattr(g, 'excel_processor') and g.excel_processor:
                     logging.info("Integrating JSON-matched products with Excel system...")
                     integration_success = self.integrate_with_excel_system(g.excel_processor, all_tags)
                     if integration_success:
@@ -5688,7 +5652,7 @@ class JSONMatcher:
                     else:
                         logging.warning("⚠️ Failed to integrate JSON products with Excel system")
                 else:
-                    logging.info("Skipping Excel integration: no active Flask application context or no excel_processor")
+                    logging.warning("No Excel processor available in session for integration")
             except Exception as integration_error:
                 logging.error(f"Error during Excel integration: {integration_error}")
             

@@ -26,7 +26,6 @@ def auto_fix_moonshots():
     print("="*80)
     print("AUTO-FIXING CONSTELLATION MOONSHOTS")
     print("="*80)
-    from src.core.data.product_database import ProductDatabase
     print("Ensuring all Moonshots are 1.7 oz regardless of Excel values...")
     print()
     
@@ -37,11 +36,8 @@ def auto_fix_moonshots():
         WHERE "Product Name*" LIKE '%Moonshot%' 
         AND "Product Brand" = 'Constellation Cannabis'
     ''')
-        try:
-            product_db = ProductDatabase(store_name='AGT_Bothell')
-            conn = product_db._get_connection()
-        except Exception:
-            conn = sqlite3.connect(DB_PATH)
+    
+    moonshots = cursor.fetchall()
     
     if not moonshots:
         print("No Constellation Moonshots found")
@@ -62,12 +58,7 @@ def auto_fix_moonshots():
             print(f"Fixing: {name}")
             print(f"  {weight} {units or '(no unit)'} → 1.7 oz")
             
-            # product_db owns connection; close only if we opened sqlite3 directly
-            try:
-                if 'product_db' not in locals():
-                    conn.close()
-            except Exception:
-                pass
+            cursor.execute('''
                 UPDATE products
                 SET "Weight*" = '1.7',
                     "Units" = 'oz',
@@ -97,12 +88,7 @@ def verify_moonshots():
     """Verify all Moonshots are correct."""
     
     conn = sqlite3.connect(DB_PATH)
-        # product_db owns connection; close only if we opened sqlite3 directly
-        try:
-            if 'product_db' not in locals():
-                conn.close()
-        except Exception:
-            pass
+    cursor = conn.cursor()
     
     cursor.execute('''
         SELECT "Product Name*", "Weight*", "Units"

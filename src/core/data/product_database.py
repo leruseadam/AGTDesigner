@@ -5951,50 +5951,15 @@ class ProductDatabase:
                         candidates.append((product, score))
                 
                 # Sort candidates by score (highest first), then prioritize records with processed descriptions
-                # (shorter descriptions are more likely to be processed). If multiple candidates tie
-                # on score, prefer the one with the lower hidden cost (if present in the DB row).
+                # (shorter descriptions are more likely to be processed)
                 candidates.sort(key=lambda x: (
                     x[1],  # Score (highest first)
                     -len(x[0].get('Description', '')),  # Shorter descriptions first (negative for reverse)
                     x[0].get('Product Name*', '')  # Product name for consistency
                 ), reverse=True)
-
-                # Select best match, with cost-based tie-break among near-equal scores
-                best_match = None
-                best_score = 0
+                
                 if candidates:
                     best_match, best_score = candidates[0]
-                    # Gather candidates with effectively the same score (within tiny epsilon)
-                    same_score = [c for c in candidates if abs(c[1] - best_score) < 0.001]
-                    if len(same_score) > 1:
-                        # Prefer the candidate with the lowest numeric cost value if available
-                        def _parse_cost(prod):
-                            for k in ('Cost', 'cost', 'Vendor Cost', 'Vendor Cost*', 'Internal Cost'):
-                                v = prod.get(k)
-                                if v is None:
-                                    continue
-                                try:
-                                    return float(v)
-                                except Exception:
-                                    # Try stripping currency symbols
-                                    try:
-                                        return float(str(v).replace('$', '').replace(',', '').strip())
-                                    except Exception:
-                                        continue
-                            return None
-
-                        best_cand = None
-                        best_cost = None
-                        for prod, sc in same_score:
-                            c = _parse_cost(prod)
-                            if c is None:
-                                # treat missing cost as less-preferred (use large sentinel)
-                                c = float('inf')
-                            if best_cand is None or c < best_cost:
-                                best_cand = (prod, sc)
-                                best_cost = c
-                        if best_cand:
-                            best_match, best_score = best_cand
                 
                 if best_match:
                     logger.info(f"Fuzzy match: '{search_name}' -> '{best_match.get('Product Name*', '')}' (score: {best_score:.2f})")

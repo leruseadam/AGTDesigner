@@ -8,7 +8,6 @@ Fixes:
 """
 
 import sqlite3
-from src.core.data.product_database import ProductDatabase
 import sys
 import os
 from datetime import datetime
@@ -24,11 +23,7 @@ def fix_all_weights(dry_run=False):
         print(f"❌ Error: Database not found at {DB_PATH}")
         return False
     
-    try:
-        product_db = ProductDatabase(store_name='AGT_Bothell')
-        conn = product_db._get_connection()
-    except Exception:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     print("="*80)
@@ -272,11 +267,7 @@ def fix_all_weights(dry_run=False):
 def verify_fixes():
     """Verify all fixes were applied correctly."""
     
-    try:
-        product_db = ProductDatabase(store_name='AGT_Bothell')
-        conn = product_db._get_connection()
-    except Exception:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     print("\n" + "="*80)

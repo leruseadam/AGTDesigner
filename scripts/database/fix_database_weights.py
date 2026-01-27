@@ -66,7 +66,6 @@ def normalize_moonshot_weights():
             ''', (target_weight, target_units, datetime.now().isoformat(), product_id))
             
             updated_count += 1
-            from src.core.data.product_database import ProductDatabase
             print("  ✓ Updated")
         else:
             print(f"Already correct: {name} ({current_weight} {current_units})")
@@ -74,11 +73,8 @@ def normalize_moonshot_weights():
         print()
     
     conn.commit()
-                try:
-                    product_db = ProductDatabase(store_name='AGT_Bothell')
-                    conn = product_db._get_connection()
-                except Exception:
-                    conn = sqlite3.connect(DB_PATH)
+    conn.close()
+    
     print("="*80)
     print(f"COMPLETE: Updated {updated_count} of {len(moonshots)} Moonshots")
     print("="*80)
@@ -98,11 +94,7 @@ def fix_specific_product(product_name_pattern, correct_weight, correct_units):
         FROM products
         WHERE "Product Name*" LIKE ?
     ''', (f'%{product_name_pattern}%',))
-                    try:
-                        if 'product_db' not in locals():
-                            conn.close()
-                    except Exception:
-                        pass
+    
     products = cursor.fetchall()
     
     if not products:
@@ -139,11 +131,7 @@ def list_products_by_brand(brand_name, name_pattern=None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-                try:
-                    if 'product_db' not in locals():
-                        conn.close()
-                except Exception:
-                    pass
+    query = 'SELECT "Product Name*", "Product Brand", "Weight*", "Units" FROM products WHERE "Product Brand" = ?'
     params = [brand_name]
     
     if name_pattern:
@@ -152,11 +140,8 @@ def list_products_by_brand(brand_name, name_pattern=None):
     
     query += ' ORDER BY "Product Name*"'
     
-                try:
-                    product_db = ProductDatabase(store_name='AGT_Bothell')
-                    conn = product_db._get_connection()
-                except Exception:
-                    conn = sqlite3.connect(DB_PATH)
+    cursor.execute(query, params)
+    products = cursor.fetchall()
     
     print(f"\n{brand_name} Products:")
     print("="*80)
@@ -173,11 +158,7 @@ def audit_weights():
     """Audit all product weights to find inconsistencies."""
     
     conn = sqlite3.connect(DB_PATH)
-                    try:
-                        if 'product_db' not in locals():
-                            conn.close()
-                    except Exception:
-                        pass
+    cursor = conn.cursor()
     
     print("\n" + "="*80)
     print("WEIGHT AUDIT - Finding Potential Issues")
@@ -199,22 +180,15 @@ def audit_weights():
     for name, brand, weight, units in missing_units[:10]:  # Show first 10
         print(f"   - {name} ({brand}): {weight} {units or '(no unit)'}")
     if len(missing_units) > 10:
-                try:
-                    if 'product_db' not in locals():
-                        conn.close()
-                except Exception:
-                    pass
+        print(f"   ... and {len(missing_units) - 10} more")
     print()
     
     # Find products with unusual weights
     print("2. Products with potentially incorrect weights (> 100):")
     cursor.execute('''
         SELECT "Product Name*", "Product Brand", "Weight*", "Units"
-                try:
-                    product_db = ProductDatabase(store_name='AGT_Bothell')
-                    conn = product_db._get_connection()
-                except Exception:
-                    conn = sqlite3.connect(DB_PATH)
+        FROM products
+        WHERE CAST("Weight*" AS REAL) > 100
         ORDER BY CAST("Weight*" AS REAL) DESC
     ''')
     
@@ -238,20 +212,13 @@ def audit_weights():
     ''')
     
     unit_issues = cursor.fetchall()
-                try:
-                    if 'product_db' not in locals():
-                        conn.close()
-                except Exception:
-                    pass
+    print(f"   Found {len(unit_issues)} products")
     for name, brand, weight, units in unit_issues[:10]:
         print(f"   - {name} ({brand}): {weight} {units}")
     if len(unit_issues) > 10:
         print(f"   ... and {len(unit_issues) - 10} more")
-                try:
-                    product_db = ProductDatabase(store_name='AGT_Bothell')
-                    conn = product_db._get_connection()
-                except Exception:
-                    conn = sqlite3.connect(DB_PATH)
+    
+    conn.close()
 
 def interactive_mode():
     """Interactive mode to fix weights."""
@@ -312,11 +279,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     if len(sys.argv) > 1:
-                try:
-                    if 'product_db' not in locals():
-                        conn.close()
-                except Exception:
-                    pass
+        command = sys.argv[1].lower()
         
         if command == 'moonshots':
             # Quick fix for Constellation Moonshots

@@ -4,7 +4,6 @@ Fix all identified weight issues in the database.
 """
 
 import sqlite3
-from src.core.data.product_database import ProductDatabase
 from datetime import datetime
 from pathlib import Path
 
@@ -18,11 +17,7 @@ def fix_all_weight_issues():
         print(f"❌ Database not found: {DB_PATH}")
         return False
     
-    try:
-        product_db = ProductDatabase(store_name='AGT_Bothell')
-        conn = product_db._get_connection()
-    except Exception:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     print("="*80)
@@ -208,11 +203,7 @@ def fix_all_weight_issues():
 def verify_fixes():
     """Verify the fixes were applied."""
     
-    try:
-        product_db = ProductDatabase(store_name='AGT_Bothell')
-        conn = product_db._get_connection()
-    except Exception:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     print("="*80)

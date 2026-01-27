@@ -7,7 +7,6 @@ import sys
 import os
 import pandas as pd
 import sqlite3
-from src.core.data.product_database import ProductDatabase
 from pathlib import Path
 from datetime import datetime
 
@@ -64,15 +63,8 @@ def sync_products_from_excel(excel_path, db_path):
     print(f"  Loaded {len(df)} rows")
     print()
     
-    # Connect to database (prefer ProductDatabase for app-managed DBs)
-    try:
-        if 'product_database' in str(db_path):
-            product_db = ProductDatabase(store_name='AGT_Bothell')
-            conn = product_db._get_connection()
-        else:
-            conn = sqlite3.connect(db_path)
-    except Exception:
-        conn = sqlite3.connect(db_path)
+    # Connect to database
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     updated_count = 0

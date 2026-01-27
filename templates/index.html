@@ -5630,7 +5630,7 @@
       z-index: 1049 !important;
     }
 
-    /* JSON Match Modal Styling - match other app modals (dark glass + header gradient) */
+    /* JSON Match Modal Styling - Dark text on light background, scrollable */
     #jsonMatchModal .modal-dialog,
     #detailedJsonMatchModal .modal-dialog {
       max-height: 90vh !important;
@@ -5638,49 +5638,37 @@
       margin: 5vh auto !important;
     }
 
-    /* Use the same dark glass content as the database editor modal */
     #jsonMatchModal .modal-content,
     #detailedJsonMatchModal .modal-content {
-      background: rgba(22, 33, 62, 0.95) !important;
-      backdrop-filter: blur(12px) !important;
-      -webkit-backdrop-filter: blur(12px) !important;
-      border: 1px solid rgba(255, 255, 255, 0.03) !important;
-      color: #ffffff !important;
+      background: rgba(255, 255, 255, 0.98) !important;
+      color: #1a1a2e !important;
       height: 100% !important;
       max-height: 90vh !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
-      border-radius: 14px !important;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.45) !important;
     }
 
-    /* Header matches the primary database modal header gradient */
     #jsonMatchModal .modal-header,
     #detailedJsonMatchModal .modal-header {
-      background: linear-gradient(135deg, #495057 0%, #343a40 100%) !important;
+      background: linear-gradient(135deg, #2d3748, #1a202c) !important;
       color: white !important;
       flex-shrink: 0 !important;
-      border-radius: 12px 12px 0 0 !important;
-      border-bottom: 1px solid rgba(255,255,255,0.04) !important;
     }
 
     #jsonMatchModal .modal-title,
     #detailedJsonMatchModal .modal-title {
-      color: #ffffff !important;
-      font-weight: 700 !important;
+      color: white !important;
     }
 
-    /* Body uses translucent dark background to match the modal content */
     #jsonMatchModal .modal-body,
     #detailedJsonMatchModal .modal-body {
-      color: #e9eef6 !important;
-      background: transparent !important;
+      color: #1a1a2e !important;
+      background: #f8f9fa !important;
       overflow-y: auto !important;
       overflow-x: hidden !important;
       flex: 1 1 auto !important;
       min-height: 0 !important;
-      padding: 1rem !important;
     }
 
     #jsonMatchModal .modal-body p,
@@ -5689,45 +5677,31 @@
     #jsonMatchModal .modal-body .form-text,
     #detailedJsonMatchModal .modal-body p,
     #detailedJsonMatchModal .modal-body h6,
-    #detailedJsonMatchModal .modal-body label {
-      color: #e9eef6 !important;
-    }
-
-    /* Alert boxes need dark text on light background */
-    #jsonMatchModal .modal-body .alert,
+    #detailedJsonMatchModal .modal-body label,
     #detailedJsonMatchModal .modal-body .alert {
       color: #1a1a2e !important;
-      background: rgba(13, 202, 240, 0.15) !important;
-      border: 1px solid rgba(13, 202, 240, 0.3) !important;
-    }
-
-    #jsonMatchModal .modal-body .alert strong,
-    #detailedJsonMatchModal .modal-body .alert strong {
-      color: #0d6efd !important;
     }
 
     #jsonMatchModal .modal-body .text-info,
     #detailedJsonMatchModal .modal-body .text-info {
-      color: #80d0ff !important;
+      color: #0077b3 !important;
     }
 
     #jsonMatchModal .modal-body .text-success,
     #detailedJsonMatchModal .modal-body .text-success {
-      color: #7ee08a !important;
+      color: #28a745 !important;
     }
 
     #jsonMatchModal .modal-footer,
     #detailedJsonMatchModal .modal-footer {
-      background: rgba(16,24,40,0.6) !important;
-      border-top: 1px solid rgba(255,255,255,0.03) !important;
+      background: #f1f3f4 !important;
+      border-top: 1px solid #dee2e6 !important;
       flex-shrink: 0;
-      color: #d8e6ff !important;
     }
 
     #jsonMatchModal .btn-close-white,
     #detailedJsonMatchModal .btn-close-white {
       filter: none !important;
-      color: #ffffff !important;
     }
 
     /* Match results list scrollable */
@@ -10143,7 +10117,7 @@
               </div>
               <div class="card-body">
                 <div class="row">
-                  <div class="col-6">
+                  <div class="col-md-6">
                     <h6 class="text-info">📥 From JSON:</h6>
                     <div class="bg-info bg-opacity-10 p-3 rounded">
                       <strong>${match.json_name || 'Unknown'}</strong>
@@ -10156,7 +10130,7 @@
                       </div>
                     </div>
                   </div>
-                  <div class="col-6">
+                  <div class="col-md-6">
                     <h6 class="text-success">✅ Database Match (100% DB Data):</h6>
                     ${match.best_match ? `
                       <div class="bg-success bg-opacity-10 p-3 rounded">

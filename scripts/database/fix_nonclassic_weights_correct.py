@@ -5,7 +5,6 @@ Non-classic types: Topicals, Edible Solids (but NOT concentrates - those stay in
 """
 
 import sqlite3
-from src.core.data.product_database import ProductDatabase
 import sys
 import os
 from datetime import datetime
@@ -21,11 +20,7 @@ def fix_nonclassic_weights():
         print(f"❌ Database not found: {DB_PATH}")
         return False
     
-    try:
-        product_db = ProductDatabase(store_name='AGT_Bothell')
-        conn = product_db._get_connection()
-    except Exception:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     print("="*80)
@@ -176,11 +171,7 @@ def fix_nonclassic_weights():
 def verify_nonclassic_weights():
     """Verify all non-classic weights are correct."""
     
-    try:
-        product_db = ProductDatabase(store_name='AGT_Bothell')
-        conn = product_db._get_connection()
-    except Exception:
-        conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     print("="*80)

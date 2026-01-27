@@ -1953,53 +1953,9 @@ class JSONMatcher:
             
             scored_candidates.append((candidate, score))
         
-        # Sort by score (highest first)
+        # Sort by score and return top candidates
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
-
-        # If multiple candidates tie on score, prefer the one with the lower hidden cost (if present).
-        def _parse_cost_from_candidate(candidate_item):
-            if not isinstance(candidate_item, dict):
-                return None
-            for k in ('Cost', 'cost', 'Vendor Cost', 'Vendor Cost*', 'Internal Cost'):
-                v = candidate_item.get(k)
-                if v is None:
-                    continue
-                try:
-                    return float(v)
-                except Exception:
-                    try:
-                        return float(str(v).replace('$', '').replace(',', '').strip())
-                    except Exception:
-                        continue
-            return None
-
-        # Build final ordered list applying cost tie-break for near-equal scores
-        final_candidates = []
-        i = 0
-        while i < len(scored_candidates):
-            cand, sc = scored_candidates[i]
-            # Group all with same-ish score
-            group = [(cand, sc)]
-            j = i + 1
-            while j < len(scored_candidates) and abs(scored_candidates[j][1] - sc) < 0.001:
-                group.append(scored_candidates[j])
-                j += 1
-
-            if len(group) == 1:
-                final_candidates.append(group[0][0])
-            else:
-                # sort group by cost ascending (None treated as +inf)
-                def _cost_key(entry):
-                    prod = entry[0]
-                    c = _parse_cost_from_candidate(prod)
-                    return c if c is not None else float('inf')
-                group_sorted = sorted(group, key=_cost_key)
-                final_candidates.extend([prod for prod, _ in group_sorted])
-
-            i = j
-
-        # Apply score threshold and return candidates
-        return [candidate for candidate in final_candidates if (isinstance(candidate, dict) and next((s for c, s in scored_candidates if c is candidate), 0) > 0.1)]
+        return [candidate for candidate, score in scored_candidates if score > 0.1]  # Reduced threshold from 0.2 to 0.1 for more candidates
         
     def _calculate_match_score(self, json_item: dict, cache_item: dict) -> float:
         """Calculate a match score between JSON item and cache item using enhanced field matching."""
@@ -2556,78 +2512,6 @@ class JSONMatcher:
                 # SIMPLIFIED MATCHING: Try matching against sheet cache (from Excel or Database)
                 best_match = None
                 best_score = 0.0
-                # QUICK WEIGHT-FIRST MATCH: If JSON has explicit weight in name or fields,
-                # prefer DB products that match the normalized base name and exact/similar weight.
-                try:
-                    import re as _re
-                    # extract item weight from explicit field or product_name
-                    weight_source = weight if weight and _re.search(r"\d", weight) else product_name
-                    item_weight_num = None
-                    if weight_source and _re.search(r"\d", weight_source):
-                        wm = _re.search(r"(\d+(?:\.\d+)?)\s*(mg|g|oz|ml)?", weight_source, flags=_re.IGNORECASE)
-                        if wm:
-                            val = float(wm.group(1))
-                            unit = (wm.group(2) or 'g').lower()
-                            if unit == 'mg':
-                                item_weight_num = val / 1000.0
-                            elif unit == 'oz':
-                                item_weight_num = val * 28.35
-                            elif unit == 'ml':
-                                item_weight_num = ('ml', val)
-                            else:
-                                item_weight_num = val
-
-                    if item_weight_num and not isinstance(item_weight_num, tuple):
-                        # derive base name without weight tokens
-                        base_name = _re.sub(r"(\s*-?\s*\d+(?:\.\d+)?\s*(?:mg|g|oz|ml)\b)", '', product_name, flags=_re.IGNORECASE).strip().lower()
-                        # search sheet cache first for exact weight candidate
-                        candidates_for_weight = []
-                        if self._sheet_cache and len(self._sheet_cache) > 0:
-                            candidates_for_weight = self._sheet_cache
-                        else:
-                            # fallback to scanning DB via _get_product_database if available
-                            try:
-                                pdb = self._get_product_database()
-                                conn = pdb._get_connection()
-                                cur = conn.cursor()
-                                # simple LIKE search on product name
-                                cur.execute('SELECT * FROM products WHERE LOWER("Product Name*") LIKE ? LIMIT 200', (f"%{base_name}%",))
-                                rows = cur.fetchall()
-                                # convert sqlite rows to dict using cursor description
-                                desc = [d[0] for d in cur.description]
-                                for r in rows:
-                                    candidates_for_weight.append(dict(zip(desc, r)))
-                            except Exception:
-                                candidates_for_weight = []
-
-                        # evaluate candidates for exact weight match
-                        for cand in candidates_for_weight:
-                            try:
-                                cand_name = (cand.get('original_name') or cand.get('Product Name*') or '').lower()
-                                if base_name in cand_name:
-                                    # parse candidate weight
-                                    cw = cand.get('Weight*') or cand.get('weight') or cand.get('Product Name*') or ''
-                                    wm2 = _re.search(r"(\d+(?:\.\d+)?)\s*(mg|g|oz|ml)?", str(cw), flags=_re.IGNORECASE)
-                                    if wm2:
-                                        val2 = float(wm2.group(1))
-                                        unit2 = (wm2.group(2) or 'g').lower()
-                                        if unit2 == 'mg':
-                                            cand_weight_num = val2 / 1000.0
-                                        elif unit2 == 'oz':
-                                            cand_weight_num = val2 * 28.35
-                                        elif unit2 == 'ml':
-                                            cand_weight_num = ('ml', val2)
-                                        else:
-                                            cand_weight_num = val2
-                                        if isinstance(cand_weight_num, (int, float)) and abs(cand_weight_num - item_weight_num) <= max(0.01, item_weight_num * 0.1):
-                                            # strong exact weight+name match found
-                                            best_match = cand.get('_db_product') if '_db_product' in cand else cand
-                                            best_score = 200.0
-                                            break
-                            except Exception:
-                                continue
-                except Exception:
-                    pass
                  
                 # Use sheet cache for matching (works with both Excel data and Database data)
                 if self._sheet_cache and len(self._sheet_cache) > 0:
@@ -2684,41 +2568,6 @@ class JSONMatcher:
                                 else:
                                     # REJECT non-matching vendors to prevent cross-brand contamination
                                     continue  # Skip this candidate entirely
-
-                                # 0.5 STRICT CATEGORY FILTER: prevent matching across incompatible product categories
-                                try:
-                                    excel_type = (cache_item.get('product_type', '') or '').lower().strip()
-                                    json_type_norm = (product_type or '').lower().strip()
-
-                                    def _category_of(t: str) -> str:
-                                        if not t:
-                                            return 'unknown'
-                                        t = t.lower()
-                                        if any(x in t for x in ['edible', 'gummy', 'chocolate', 'cookie', 'chew', 'fruit']):
-                                            return 'edible'
-                                        if any(x in t for x in ['tincture', 'sublingual', 'drop']):
-                                            return 'tincture'
-                                        if any(x in t for x in ['vape', 'cartridge', 'disposable', 'pen']):
-                                            return 'vape'
-                                        if any(x in t for x in ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate', 'sauce']):
-                                            return 'concentrate'
-                                        if any(x in t for x in ['flower', 'bud', 'pre-roll', 'joint', 'preroll']):
-                                            return 'flower'
-                                        if any(x in t for x in ['topical', 'balm', 'lotion', 'cream', 'salve']):
-                                            return 'topical'
-                                        if any(x in t for x in ['capsule', 'pill', 'tablet', 'softgel']):
-                                            return 'capsule'
-                                        return 'unknown'
-
-                                    cat_json = _category_of(json_type_norm)
-                                    cat_excel = _category_of(excel_type)
-
-                                    # If both categories are known and different, skip candidate
-                                    if cat_json != 'unknown' and cat_excel != 'unknown' and cat_json != cat_excel:
-                                        continue
-                                except Exception:
-                                    # On any error, don't block matching - fall back to existing logic
-                                    pass
                             
                             # 2. STRICT word-by-word matching to prevent incorrect matches
                             # Check if key distinguishing words are present
@@ -2769,57 +2618,6 @@ class JSONMatcher:
                                     score += 80.0
                                 else:
                                     score += 30.0  # Reduced score for weak overlap
-
-                            # 2b. WEIGHT/UNIT PENALTY: if both JSON and candidate have explicit weights, penalize large mismatches
-                            try:
-                                item_weight_num = None
-                                candidate_weight_num = None
-                                # parse JSON weight: prefer explicit 'weight' field, otherwise parse from product_name
-                                import re as _re
-                                weight_source = weight if weight and _re.search(r"\d", weight) else product_name
-                                if weight_source and _re.search(r"\d", weight_source):
-                                    wmatch = _re.search(r"(\d+(?:\.\d+)?)\s*(mg|g|oz|ml)?", weight_source, flags=_re.IGNORECASE)
-                                    if wmatch:
-                                        val = float(wmatch.group(1))
-                                        unit = (wmatch.group(2) or 'g').lower()
-                                        if unit == 'mg':
-                                            item_weight_num = val / 1000.0
-                                        elif unit == 'oz':
-                                            item_weight_num = val * 28.35
-                                        elif unit == 'ml':
-                                            item_weight_num = ('ml', val)
-                                        else:
-                                            item_weight_num = val
-
-                                # parse candidate weight from cache_item fields or original_name
-                                cand_w = cache_item.get('Weight*') or cache_item.get('weight') or cache_item.get('original_name') or ''
-                                if cand_w and _re.search(r"\d", str(cand_w)):
-                                    wmatch = _re.search(r"(\d+(?:\.\d+)?)\s*(mg|g|oz|ml)?", str(cand_w), flags=_re.IGNORECASE)
-                                    if wmatch:
-                                        val = float(wmatch.group(1))
-                                        unit = (wmatch.group(2) or 'g').lower()
-                                        if unit == 'mg':
-                                            candidate_weight_num = val / 1000.0
-                                        elif unit == 'oz':
-                                            candidate_weight_num = val * 28.35
-                                        elif unit == 'ml':
-                                            candidate_weight_num = ('ml', val)
-                                        else:
-                                            candidate_weight_num = val
-
-                                # If both are numeric grams, penalize big diffs
-                                if isinstance(item_weight_num, (int, float)) and isinstance(candidate_weight_num, (int, float)):
-                                    diff = abs(item_weight_num - candidate_weight_num)
-                                    tolerance = max(0.1, item_weight_num * 0.25)
-                                    if diff > tolerance:
-                                        # subtract a significant penalty proportional to diff
-                                        score -= min(80.0, diff * 10.0)
-                                else:
-                                    # If one side is ml and the other is grams, heavy penalty
-                                    if (isinstance(item_weight_num, tuple) and isinstance(candidate_weight_num, (int, float))) or (isinstance(candidate_weight_num, tuple) and isinstance(item_weight_num, (int, float))):
-                                        score -= 80.0
-                            except Exception:
-                                pass
                             
                             # 4. Enhanced fuzzy matching with more lenient threshold
                             try:
@@ -6145,9 +5943,9 @@ class JSONMatcher:
             
             # CRITICAL FIX: Integrate JSON-matched products with Excel system
             try:
-                # Only attempt Excel integration when a Flask app context is active
-                from flask import has_app_context, g
-                if has_app_context() and hasattr(g, 'excel_processor') and g.excel_processor:
+                # Get the current Excel processor from the session
+                from flask import g
+                if hasattr(g, 'excel_processor') and g.excel_processor:
                     logging.info("Integrating JSON-matched products with Excel system...")
                     integration_success = self.integrate_with_excel_system(g.excel_processor, all_tags)
                     if integration_success:
@@ -6155,7 +5953,7 @@ class JSONMatcher:
                     else:
                         logging.warning("⚠️ Failed to integrate JSON products with Excel system")
                 else:
-                    logging.info("Skipping Excel integration: no active Flask application context or no excel_processor")
+                    logging.warning("No Excel processor available in session for integration")
             except Exception as integration_error:
                 logging.error(f"Error during Excel integration: {integration_error}")
             
@@ -8657,11 +8455,6 @@ class JSONMatcher:
                 'product_tags': product_tags,
                 'image_url': image_url,
                 'ingredients': ingredients,
-                # Provide multiple common cost keys so Excel mapping can pick them up
-                'cost': cost,
-                'Cost': cost,
-                'Vendor Cost': cost,
-                'Vendor Cost*': cost,
                 
                 # AI Match Information for tracking
                 'ai_match_score': ai_match_score,
@@ -10049,34 +9842,6 @@ class JSONMatcher:
             for product in matched_products:
                 # Create a row that matches the Excel DataFrame structure
                 row_data = {}
-                # If product has a cost value, map it to the preferred Excel cost column
-                try:
-                    cost_val = None
-                    # Look for common cost keys on the product dict
-                    for k in ('Cost', 'cost', 'vendor cost', 'vendor cost*', 'internal cost'):
-                        if k in product and product.get(k) not in (None, ''):
-                            cost_val = product.get(k)
-                            break
-                    # Find preferred cost-like column in the existing Excel DF (case-insensitive)
-                    if cost_val is not None and excel_processor.df is not None:
-                        preferred_cols = ['Cost', 'Vendor Cost', 'Vendor Cost*', 'Internal Cost', 'Cost*']
-                        matched_cost_col = None
-                        for pc in preferred_cols:
-                            for col in excel_processor.df.columns:
-                                if col.lower().replace(' ', '').replace('*', '') == pc.lower().replace(' ', '').replace('*', ''):
-                                    matched_cost_col = col
-                                    break
-                            if matched_cost_col:
-                                break
-                        # If we found a matching Excel column, inject value into product under that exact column name
-                        if matched_cost_col:
-                            product[matched_cost_col] = cost_val
-                        else:
-                            # Ensure at least 'Cost' column exists in the final row mapping
-                            product['Cost'] = cost_val
-                except Exception:
-                    # Non-fatal: continue without cost mapping
-                    pass
                 
                 # Map all the fields to Excel columns
                 for key, value in product.items():

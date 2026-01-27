@@ -6,7 +6,6 @@ Fixes missing columns in existing databases
 
 import os
 import sqlite3
-from src.core.data.product_database import ProductDatabase
 import logging
 from pathlib import Path
 
@@ -21,17 +20,8 @@ def fix_database_schema(db_path: str) -> bool:
             return False
         
         logging.info(f"🔧 Fixing database schema: {db_path}")
-
-        # Prefer ProductDatabase connection when operating on the app uploads DB
-        try:
-            if 'product_database' in str(db_path):
-                product_db = ProductDatabase(store_name='AGT_Bothell')
-                conn = product_db._get_connection()
-            else:
-                conn = sqlite3.connect(db_path)
-        except Exception:
-            conn = sqlite3.connect(db_path)
-
+        
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
         # Check if products table exists

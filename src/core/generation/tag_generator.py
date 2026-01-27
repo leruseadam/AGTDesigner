@@ -953,9 +953,7 @@ def process_chunk(args):
                         if not pname or pname in seen:
                             continue
                         if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
-                            # Normalize product name key to uppercase stripped form for reliable matching
-                            key = str(pname).strip().upper()
-                            product_lineage_cache[key] = str(lineage).strip().upper()
+                            product_lineage_cache[pname] = str(lineage).strip().upper()
                             seen.add(pname)
                 except Exception as batch_err:
                     logger.warning(f"Batch product lineage query failed: {batch_err}")
@@ -977,9 +975,7 @@ def process_chunk(args):
                         sname = row_result[0]
                         preferred = row_result[1] or row_result[2]
                         if preferred and str(preferred).strip().upper() != 'SOVEREIGN':
-                            # Normalize strain name key for reliable matching
-                            skey = str(sname).strip().upper()
-                            strain_info_cache[skey] = {
+                            strain_info_cache[sname] = {
                                 'sovereign_lineage': row_result[1],
                                 'canonical_lineage': row_result[2]
                             }
@@ -994,8 +990,7 @@ def process_chunk(args):
             row = chunk[i]
             
             # CRITICAL FIX: Log missing product data for debugging
-            # Use Product Name* when available, fall back to ProductName
-            product_name = str(row.get("Product Name*", "") or row.get("ProductName", "")).strip()
+            product_name = str(row.get("ProductName", "")).strip()
             if not product_name or product_name.lower() in ['', 'nan', 'none', 'null']:
                 logger.warning(f"⚠️  SKIPPING EMPTY PRODUCT at index {i}: No product name found")
                 continue
@@ -1092,7 +1087,7 @@ def process_chunk(args):
                 product_type = fallback_product_type.lower()
             else:
                 # CRITICAL FIX: For new products without proper type, infer from product name
-                product_name = str(row.get("Product Name*", "") or row.get("ProductName", ""))
+                product_name = str(row.get("ProductName", ""))
                 if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
                     product_type = 'flower'
                     logger.info(f"🔧 TAG_GENERATOR INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
@@ -1111,7 +1106,7 @@ def process_chunk(args):
             
             # Fix brand name for paraphernalia products
             if product_brand == "Paraphernalia" and product_type == "paraphernalia":
-                product_name = str(row.get("Product Name*", "") or row.get("ProductName", ""))
+                product_name = str(row.get("ProductName", ""))
                 if " by " in product_name:
                     product_brand = product_name.split(" by ")[-1].strip()
                 else:
@@ -1148,7 +1143,7 @@ def process_chunk(args):
             
             # Add other fields to label_data
             # Get product name and apply non-breaking hyphens to prevent "Pre-Roll" splitting
-            product_name = str(row.get("Product Name*", "") or row.get("ProductName", ""))
+            product_name = str(row.get("ProductName", ""))
             if product_name:
                 from src.core.generation.text_processing import make_nonbreaking_hyphens
                 product_name = make_nonbreaking_hyphens(product_name)
@@ -1214,15 +1209,13 @@ def process_chunk(args):
                     lineage_val = None
                     # 1. Product-level lineage from database
                     if product_name:
-                        lookup_key = str(product_name).strip().upper()
-                        db_product_lineage = product_lineage_cache.get(lookup_key)
+                        db_product_lineage = product_lineage_cache.get(product_name)
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
                     # 2. Fallback: strain-level (sovereign_lineage > canonical_lineage)
                     if (not lineage_val or lineage_val in ['MIXED', 'THC', '', None]) and product_strain:
-                        slookup = str(product_strain).strip().upper()
-                        strain_info = strain_info_cache.get(slookup)
+                        strain_info = strain_info_cache.get(product_strain)
                         if strain_info:
                             for key in ('sovereign_lineage', 'canonical_lineage'):
                                 canon = strain_info.get(key)
@@ -1326,35 +1319,6 @@ def process_chunk(args):
             context[f"Label{i+1}"] = label_data
             if DEBUG_ENABLED:
                 logger.debug(f"Created label data for Label{i+1}")
-
-    # Final safety pass: ensure Lineage is populated from DB/cache for any missing values
-    try:
-        for key, label in list(context.items()):
-            if not key.startswith('Label') or not isinstance(label, dict):
-                continue
-            current_lineage = str(label.get('Lineage', '') or '').strip()
-            # Treat empty or generic MIXED as missing for classic types
-            if current_lineage == '' or current_lineage.upper() in ['', 'MIXED']:
-                pname = label.get('ProductName') or ''
-                pstrain = label.get('ProductStrain') or ''
-                db_lineage = None
-                if pname and product_lineage_cache:
-                    db_lineage = product_lineage_cache.get(pname)
-                if not db_lineage and pstrain and strain_info_cache:
-                    strain_info = strain_info_cache.get(pstrain)
-                    if strain_info:
-                        db_lineage = (strain_info.get('sovereign_lineage') or strain_info.get('canonical_lineage'))
-                if db_lineage and str(db_lineage).strip().upper() not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
-                    db_lineage_clean = str(db_lineage).strip().upper()
-                    label['Lineage'] = db_lineage_clean
-                    # keep product brand fields consistent for classic types
-                    label['ProductBrand'] = db_lineage_clean
-                    label['ProductBrand_Center'] = db_lineage_clean
-                    # update context
-                    context[key] = label
-                    logger.info(f"✅ DOCX SAFETY PATCH: Filled lineage from DB for '{pname}' -> '{db_lineage_clean}'")
-    except Exception as safety_err:
-        logger.warning(f"DOCX lineage safety pass failed: {safety_err}")
 
     # Render template
     if DEBUG_ENABLED:

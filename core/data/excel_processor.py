@@ -5161,33 +5161,25 @@ class ExcelProcessor:
                     self.logger.warning(f"Failed to update strain '{identifier}' in database")
                     return False
             else:
-                # Product name-based update - use safe per-product update API
-                try:
-                    products = product_db.get_products_by_names([identifier])
-                    if not products:
-                        self.logger.warning(f"No products found with name '{identifier}' for lineage update")
-                        return False
-
-                    updated = False
-                    for prod in products:
-                        vendor = prod.get('Vendor') or prod.get('Vendor/Supplier*') or None
-                        brand = prod.get('Product Brand') or prod.get('ProductBrand') or None
-                        pname = prod.get('ProductName') or prod.get('Product Name*') or identifier
-                        try:
-                            success = product_db.update_product_lineage(pname, new_lineage, vendor=vendor, brand=brand)
-                        except Exception:
-                            success = False
-                        if success:
-                            updated = True
-
-                    if updated:
-                        self.logger.info(f"Updated lineage for product '{identifier}' to '{new_lineage}' in database")
-                        return True
-                    else:
-                        self.logger.warning(f"No products updated for name '{identifier}' for lineage update")
-                        return False
-                except Exception as e:
-                    self.logger.error(f"Error updating products by name '{identifier}': {e}")
+                # Product name-based update - directly update products table
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+                
+                # Update the lineage for the specific product by name
+                cursor.execute('''
+                    UPDATE products 
+                    SET "Lineage" = ? 
+                    WHERE "Product Name*" = ?
+                ''', (new_lineage, identifier))
+                
+                updated_rows = cursor.rowcount
+                conn.commit()
+                
+                if updated_rows > 0:
+                    self.logger.info(f"Updated lineage for product '{identifier}' to '{new_lineage}' in database ({updated_rows} rows)")
+                    return True
+                else:
+                    self.logger.warning(f"No products found with name '{identifier}' for lineage update")
                     return False
                     
         except Exception as e:

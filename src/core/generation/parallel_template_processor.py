@@ -9,8 +9,6 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from typing import List, Dict, Any, Optional, Callable
 from multiprocessing import cpu_count
 import os
-from io import BytesIO
-from copy import deepcopy
 
 logger = logging.getLogger(__name__)
 
@@ -191,47 +189,28 @@ class OptimizedDocxGenerator:
         
         os.makedirs(output_dir, exist_ok=True)
         
-        # Preload template bytes and a parsed base template to avoid reparsing per-label
-        tpl_bytes = None
-        base_doc = None
-        try:
-            with open(template_path, 'rb') as fh:
-                tpl_bytes = fh.read()
-            # Create a base DocxTemplate instance once and deepcopy it per-label
-            try:
-                from docxtpl import DocxTemplate
-                base_doc = DocxTemplate(BytesIO(tpl_bytes))
-            except Exception:
-                base_doc = None
-        except Exception as e:
-            logger.warning(f"Could not preload template bytes: {e}")
-
         def generate_single_label(data: Dict[str, Any]) -> str:
             """Generate a single label"""
             try:
+                # Import here to avoid pickling issues
+                from docxtpl import DocxTemplate
+                
                 # Generate output filename
                 output_filename = f"label_{data.get('id', self.generated_count)}.docx"
                 output_path = os.path.join(output_dir, output_filename)
-
-                # Use a deepcopy of the parsed template when possible to avoid reparsing
-                if base_doc is not None:
-                    doc = deepcopy(base_doc)
-                else:
-                    from docxtpl import DocxTemplate
-                    if tpl_bytes is not None:
-                        doc = DocxTemplate(BytesIO(tpl_bytes))
-                    else:
-                        doc = DocxTemplate(template_path)
-
+                
+                # Load template
+                doc = DocxTemplate(template_path)
+                
                 # Render with data
                 doc.render(data)
-
+                
                 # Save
                 doc.save(output_path)
-
+                
                 self.generated_count += 1
                 return output_path
-
+                
             except Exception as e:
                 logger.error(f"Error generating label: {e}")
                 return None
