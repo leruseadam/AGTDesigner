@@ -9893,11 +9893,12 @@ def generate_labels():
         lineage_abbr = {
             'SATIVA': 'S',
             'INDICA': 'I', 
-            'HYBRID': 'H',
+            # Treat HYBRID as MIX for better clarity across classic and non-classic types
+            'HYBRID': 'MIX',
             'HYBRID/SATIVA': 'HS',
             'HYBRID/INDICA': 'HI',
             'CBD': 'CBD',
-            'MIXED': 'MIX',
+            'MIXED': 'THC',
             'PARAPHERNALIA': 'PARA'
         }.get(main_lineage, main_lineage[:3])
         
