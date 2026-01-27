@@ -226,12 +226,15 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 try:
                     if orientation.lower() == 'preroll':
                         import re as _re
-                        if _re.search(r"\b\w+\s+CANNABIS\b", upper_brand):
+                        # Only apply the rule for longer brand names (avoid applying
+                        # to short two-word names unless they are actually long).
+                        words = [w for w in _re.split(r"\s+", upper_brand) if w]
+                        if len(words) > 2 and _re.search(r"\b\w+\s+CANNABIS\b", upper_brand):
                             final_size = 6.5 * scale_factor
-                            logger.debug(f"Preroll brand rule match ('<word> CANNABIS'): '{brand_text}' -> forcing {final_size}pt")
+                            logger.debug(f"Preroll brand rule match (long '<word> CANNABIS'): '{brand_text}' -> forcing {final_size}pt")
                             return Pt(final_size)
                 except Exception:
-                    # Fall back silently if regex check fails
+                    # Fall back silently if regex/check fails
                     logger.exception("Error while applying preroll cannabis-suffix brand rule")
 
             # Heuristic override: brands like 'Collections Cannabis' should be treated
