@@ -990,7 +990,8 @@ def process_chunk(args):
             row = chunk[i]
             
             # CRITICAL FIX: Log missing product data for debugging
-            product_name = str(row.get("ProductName", "")).strip()
+            # Use Product Name* when available, fall back to ProductName
+            product_name = str(row.get("Product Name*", "") or row.get("ProductName", "")).strip()
             if not product_name or product_name.lower() in ['', 'nan', 'none', 'null']:
                 logger.warning(f"⚠️  SKIPPING EMPTY PRODUCT at index {i}: No product name found")
                 continue
@@ -1087,7 +1088,7 @@ def process_chunk(args):
                 product_type = fallback_product_type.lower()
             else:
                 # CRITICAL FIX: For new products without proper type, infer from product name
-                product_name = str(row.get("ProductName", ""))
+                product_name = str(row.get("Product Name*", "") or row.get("ProductName", ""))
                 if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
                     product_type = 'flower'
                     logger.info(f"🔧 TAG_GENERATOR INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
@@ -1106,7 +1107,7 @@ def process_chunk(args):
             
             # Fix brand name for paraphernalia products
             if product_brand == "Paraphernalia" and product_type == "paraphernalia":
-                product_name = str(row.get("ProductName", ""))
+                product_name = str(row.get("Product Name*", "") or row.get("ProductName", ""))
                 if " by " in product_name:
                     product_brand = product_name.split(" by ")[-1].strip()
                 else:
@@ -1143,7 +1144,7 @@ def process_chunk(args):
             
             # Add other fields to label_data
             # Get product name and apply non-breaking hyphens to prevent "Pre-Roll" splitting
-            product_name = str(row.get("ProductName", ""))
+            product_name = str(row.get("Product Name*", "") or row.get("ProductName", ""))
             if product_name:
                 from src.core.generation.text_processing import make_nonbreaking_hyphens
                 product_name = make_nonbreaking_hyphens(product_name)
