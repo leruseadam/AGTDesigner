@@ -8400,27 +8400,27 @@
       if (!contentEl) return;
 
       contentEl.innerHTML = lists.map(list => `
-        <div class="saved-list-item card bg-dark mb-2" data-list-id="${list.id}">
-          <div class="card-body p-3">
-            <div class="d-flex justify-content-between align-items-start">
+        <div class="saved-list-item card" data-list-id="${list.id}" style="background: rgba(40, 40, 60, 0.9);">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
               <div class="flex-grow-1">
-                <h6 class="mb-1 text-light">${escapeHtml(list.name)}</h6>
-                <small class="text-muted">
-                  <i class="bi bi-tags me-1"></i>${list.tag_count} tags
+                <h6>${escapeHtml(list.name)}</h6>
+                <small>
+                  <i class="bi bi-tags me-1"></i><strong>${list.tag_count}</strong> tags
                   <span class="mx-2">|</span>
                   <i class="bi bi-shop me-1"></i>${escapeHtml(list.store)}
                   <span class="mx-2">|</span>
                   <i class="bi bi-clock me-1"></i>${formatDate(list.updated_at)}
                 </small>
               </div>
-              <div class="btn-group btn-group-sm">
-                <button type="button" class="btn btn-outline-success" onclick="loadTagList(${list.id}, false)" title="Load (replace current selection)">
-                  <i class="bi bi-download"></i>
+              <div class="btn-group">
+                <button type="button" class="btn btn-success" onclick="loadTagList(${list.id}, false)" title="Load & Replace">
+                  <i class="bi bi-download me-1"></i>Load
                 </button>
-                <button type="button" class="btn btn-outline-info" onclick="loadTagList(${list.id}, true)" title="Append to current selection">
-                  <i class="bi bi-plus-lg"></i>
+                <button type="button" class="btn btn-info" onclick="loadTagList(${list.id}, true)" title="Add to current selection">
+                  <i class="bi bi-plus-lg me-1"></i>Add
                 </button>
-                <button type="button" class="btn btn-outline-danger" onclick="deleteTagList(${list.id}, '${escapeHtml(list.name)}')" title="Delete">
+                <button type="button" class="btn btn-outline-danger" onclick="deleteTagList(${list.id}, '${escapeHtml(list.name)}')" title="Delete this list">
                   <i class="bi bi-trash"></i>
                 </button>
               </div>
