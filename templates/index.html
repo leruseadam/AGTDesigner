@@ -8423,49 +8423,54 @@
           // Use tags_with_lineage from backend (includes lineage from database)
           const tagsWithLineage = data.tags_with_lineage || [];
 
+          console.log('📋 Loading saved list - tagNames:', tagNames.length, 'tagsWithLineage:', tagsWithLineage.length);
+
           // Update TagManager state
           if (window.TagManager) {
             window.TagManager.state.persistentSelectedTags = [...tagNames];
             window.TagManager.state.selectedTags = new Set(tagNames);
             window.TagManager.state._selectedTagsSet = new Set(tagNames);
 
-            // Use tag objects with lineage from backend, or fall back to lookup
-            let tagObjects = tagsWithLineage;
+            // Use tag objects with lineage from backend
+            let tagObjects = tagsWithLineage.length > 0 ? tagsWithLineage : tagNames.map(name => ({
+              'Product Name*': name,
+              displayName: name,
+              lineage: 'MIXED',
+              currentLineage: 'MIXED'
+            }));
 
-            if (!tagObjects || tagObjects.length === 0) {
-              // Fallback: Convert tag names to tag objects
-              tagObjects = tagNames.map(name => {
-                // Try to find the full tag object from TagManager's lookup map
-                let tag = window.TagManager._tagLookupMap?.get(name);
-
-                // Fallback to originalTags if not in lookup map
-                if (!tag && window.TagManager.state.originalTags) {
-                  tag = window.TagManager.state.originalTags.find(t => t['Product Name*'] === name);
-                }
-
-                // If still not found, create a minimal tag object
-                if (!tag) {
-                  tag = { 'Product Name*': name, displayName: name, lineage: 'MIXED' };
-                }
-
-                return tag;
-              }).filter(Boolean);
+            // Initialize lookup map if needed
+            if (!window.TagManager._tagLookupMap) {
+              window.TagManager._tagLookupMap = new Map();
             }
 
             // Update the TagManager lookup map with new lineage data
-            if (window.TagManager._tagLookupMap && tagsWithLineage.length > 0) {
-              tagsWithLineage.forEach(tag => {
-                const name = tag['Product Name*'];
-                if (name) {
-                  // Merge with existing data if present
-                  const existing = window.TagManager._tagLookupMap.get(name) || {};
-                  window.TagManager._tagLookupMap.set(name, { ...existing, ...tag });
-                }
-              });
+            tagObjects.forEach(tag => {
+              const name = tag['Product Name*'];
+              if (name) {
+                const existing = window.TagManager._tagLookupMap.get(name) || {};
+                window.TagManager._tagLookupMap.set(name, { ...existing, ...tag });
+              }
+            });
+
+            // Also add to originalTags if not present (so updateSelectedTags validation passes)
+            if (!window.TagManager.state.originalTags) {
+              window.TagManager.state.originalTags = [];
             }
+            tagObjects.forEach(tag => {
+              const name = tag['Product Name*'];
+              if (name && !window.TagManager.state.originalTags.some(t => t['Product Name*'] === name)) {
+                window.TagManager.state.originalTags.push(tag);
+              }
+            });
+
+            // Force update flag and clear cached render state
+            window.TagManager._forceSelectedTagsUpdate = true;
+            window.TagManager._lastRenderedSelectedTags = null;
 
             // Refresh the UI using updateSelectedTags with proper tag objects
             if (typeof window.TagManager.updateSelectedTags === 'function') {
+              console.log('📋 Calling updateSelectedTags with', tagObjects.length, 'tags');
               window.TagManager.updateSelectedTags(tagObjects);
             }
 
