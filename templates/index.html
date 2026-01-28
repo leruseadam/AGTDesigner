@@ -3369,51 +3369,101 @@
       letter-spacing: 0.3px;
     }
 
+    /* Modal dialog size */
+    #savedTagListsModal .modal-dialog {
+      max-width: 700px;
+      width: 90vw;
+    }
+
     #savedTagListsModal .modal-content {
-      border-radius: 16px;
-      background: linear-gradient(135deg, rgba(30, 30, 45, 0.98), rgba(20, 20, 35, 0.98));
-      border: 1px solid rgba(160, 132, 232, 0.3);
+      border-radius: 20px;
+      background: linear-gradient(135deg, rgba(35, 35, 55, 0.99), rgba(25, 25, 40, 0.99));
+      border: 2px solid rgba(160, 132, 232, 0.4);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
     }
 
     #savedTagListsModal .modal-header {
-      background: linear-gradient(135deg, rgba(160, 132, 232, 0.15), rgba(100, 80, 180, 0.1));
-      border-bottom: 1px solid rgba(160, 132, 232, 0.2);
-      padding: 1rem 1.5rem;
+      background: linear-gradient(135deg, rgba(160, 132, 232, 0.2), rgba(100, 80, 180, 0.15));
+      border-bottom: 2px solid rgba(160, 132, 232, 0.3);
+      padding: 1.5rem 2rem;
+    }
+
+    #savedTagListsModal .modal-header .modal-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #fff;
     }
 
     #savedTagListsModal .modal-body {
-      padding: 1.5rem;
+      padding: 2rem;
+    }
+
+    #savedTagListsModal .modal-body h6 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e0e0e0;
+      margin-bottom: 1rem;
+    }
+
+    #savedTagListsModal .modal-footer {
+      padding: 1rem 2rem 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
     }
 
     .saved-lists-container {
-      max-height: 350px;
+      max-height: 400px;
       overflow-y: auto;
     }
 
     .saved-list-item {
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
       transition: all 0.2s ease;
+      margin-bottom: 12px;
     }
 
     .saved-list-item:hover {
-      border-color: rgba(160, 132, 232, 0.4);
-      background: rgba(160, 132, 232, 0.1) !important;
+      border-color: rgba(160, 132, 232, 0.5);
+      background: rgba(160, 132, 232, 0.15) !important;
+    }
+
+    .saved-list-item .card-body {
+      padding: 1rem 1.25rem;
+    }
+
+    .saved-list-item h6 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.5rem;
+    }
+
+    .saved-list-item small {
+      font-size: 0.9rem;
+      color: #aaa;
     }
 
     .saved-list-item .btn-group .btn {
-      padding: 0.25rem 0.5rem;
-      font-size: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      font-size: 1rem;
     }
 
     .save-list-section .form-control-modern {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.08);
+      border: 2px solid rgba(255, 255, 255, 0.15);
       color: #fff;
+      font-size: 1rem;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+    }
+
+    .save-list-section .form-control-modern::placeholder {
+      color: rgba(255, 255, 255, 0.5);
     }
 
     .save-list-section .form-control-modern:focus {
-      background: rgba(255, 255, 255, 0.08);
-      border-color: rgba(160, 132, 232, 0.5);
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(160, 132, 232, 0.6);
       box-shadow: 0 0 0 2px rgba(160, 132, 232, 0.2);
     }
 
@@ -6839,11 +6889,11 @@
 
   <!-- Saved Tag Lists Modal -->
   <div class="modal fade" id="savedTagListsModal" tabindex="-1" aria-labelledby="savedTagListsModalLabel">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-      <div class="modal-content glass-card">
-        <div class="modal-header border-0">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
           <h5 class="modal-title" id="savedTagListsModalLabel">
-            <i class="bi bi-bookmark-star me-2 text-primary"></i>
+            <i class="bi bi-bookmark-star-fill me-2" style="color: #ffd700;"></i>
             Saved Tag Lists
           </h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -6851,35 +6901,32 @@
         <div class="modal-body">
           <!-- Save Current Selection -->
           <div class="save-list-section mb-4">
-            <h6 class="text-light mb-3">Save Current Selection</h6>
-            <div class="row g-2">
-              <div class="col">
-                <input type="text" id="saveListName" class="form-control form-control-modern" placeholder="Enter list name...">
-              </div>
-              <div class="col-auto">
-                <button type="button" class="btn btn-primary btn-sm" onclick="saveCurrentTagList()">
-                  <i class="bi bi-save me-1"></i> Save
-                </button>
-              </div>
+            <h6>Save Current Selection</h6>
+            <div class="d-flex gap-3 align-items-center">
+              <input type="text" id="saveListName" class="form-control form-control-modern flex-grow-1" placeholder="Enter list name...">
+              <button type="button" class="btn btn-primary btn-lg px-4" onclick="saveCurrentTagList()" style="white-space: nowrap;">
+                <i class="bi bi-save me-2"></i>Save List
+              </button>
             </div>
-            <small class="text-muted mt-1 d-block">
-              <span id="currentSelectionCount">0</span> tags currently selected
-            </small>
+            <div class="mt-2" style="font-size: 1rem; color: #aaa;">
+              <i class="bi bi-tags me-1"></i><span id="currentSelectionCount">0</span> tags currently selected
+            </div>
           </div>
 
-          <hr class="border-secondary">
+          <hr style="border-color: rgba(160, 132, 232, 0.3); margin: 1.5rem 0;">
 
           <!-- Saved Lists -->
           <div class="saved-lists-section">
-            <h6 class="text-light mb-3">Your Saved Lists</h6>
+            <h6>Your Saved Lists</h6>
             <div id="savedListsContainer" class="saved-lists-container">
-              <div class="text-center text-muted py-4" id="savedListsLoading">
-                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                Loading saved lists...
+              <div class="text-center py-5" id="savedListsLoading" style="color: #aaa;">
+                <div class="spinner-border me-2" role="status" style="width: 1.5rem; height: 1.5rem;"></div>
+                <span style="font-size: 1.1rem;">Loading saved lists...</span>
               </div>
-              <div class="text-center text-muted py-4 d-none" id="savedListsEmpty">
-                <i class="bi bi-folder2-open fs-1 mb-2 d-block"></i>
-                No saved lists yet. Save your first list above!
+              <div class="text-center py-5 d-none" id="savedListsEmpty" style="color: #aaa;">
+                <i class="bi bi-folder2-open d-block mb-3" style="font-size: 3rem;"></i>
+                <div style="font-size: 1.1rem;">No saved lists yet</div>
+                <div style="font-size: 0.95rem; color: #888;">Save your first list above!</div>
               </div>
               <div id="savedListsContent" class="d-none">
                 <!-- Saved lists will be populated here -->
@@ -6887,8 +6934,8 @@
             </div>
           </div>
         </div>
-        <div class="modal-footer border-0">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-lg px-4" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>
@@ -8450,10 +8497,10 @@
 
         if (data.success) {
           const tagNames = data.tags || [];
-          // Use tags_with_lineage from backend (includes lineage from database)
-          const tagsWithLineage = data.tags_with_lineage || [];
+          // Backend provides partial data - we'll prefer full data from loaded inventory
+          const backendTagsWithLineage = data.tags_with_lineage || [];
 
-          console.log('📋 Loading saved list - tagNames:', tagNames.length, 'tagsWithLineage:', tagsWithLineage.length);
+          console.log('📋 Loading saved list - tagNames:', tagNames.length, 'backendTags:', backendTagsWithLineage.length);
 
           // Update TagManager state
           if (window.TagManager) {
@@ -8461,38 +8508,54 @@
             window.TagManager.state.selectedTags = new Set(tagNames);
             window.TagManager.state._selectedTagsSet = new Set(tagNames);
 
-            // Use tag objects with lineage from backend
-            let tagObjects = tagsWithLineage.length > 0 ? tagsWithLineage : tagNames.map(name => ({
-              'Product Name*': name,
-              displayName: name,
-              lineage: 'MIXED',
-              currentLineage: 'MIXED'
-            }));
+            // Build tag objects by looking up FULL data from loaded inventory first
+            // Only fall back to backend data if tag not found in current inventory
+            const tagObjects = [];
+            const notFoundInInventory = [];
+
+            tagNames.forEach(name => {
+              // First, try to find full tag in _tagLookupMap (best source)
+              let fullTag = window.TagManager._tagLookupMap?.get(name);
+
+              // Second, try originalTags array
+              if (!fullTag && window.TagManager.state.originalTags) {
+                fullTag = window.TagManager.state.originalTags.find(t => t['Product Name*'] === name);
+              }
+
+              // Third, try current tags array
+              if (!fullTag && window.TagManager.state.tags) {
+                fullTag = window.TagManager.state.tags.find(t => t['Product Name*'] === name);
+              }
+
+              if (fullTag) {
+                // Found in inventory - use full data
+                tagObjects.push({ ...fullTag });
+              } else {
+                // Not in current inventory - use backend data or minimal fallback
+                notFoundInInventory.push(name);
+                const backendTag = backendTagsWithLineage.find(t => t['Product Name*'] === name);
+                if (backendTag) {
+                  tagObjects.push({ ...backendTag });
+                } else {
+                  tagObjects.push({
+                    'Product Name*': name,
+                    displayName: name,
+                    lineage: 'MIXED',
+                    currentLineage: 'MIXED'
+                  });
+                }
+              }
+            });
+
+            if (notFoundInInventory.length > 0) {
+              console.warn('📋 Tags not found in current inventory:', notFoundInInventory.length, notFoundInInventory.slice(0, 5));
+            }
+            console.log('📋 Built', tagObjects.length, 'tag objects from inventory lookup');
 
             // Initialize lookup map if needed
             if (!window.TagManager._tagLookupMap) {
               window.TagManager._tagLookupMap = new Map();
             }
-
-            // Update the TagManager lookup map with new lineage data
-            tagObjects.forEach(tag => {
-              const name = tag['Product Name*'];
-              if (name) {
-                const existing = window.TagManager._tagLookupMap.get(name) || {};
-                window.TagManager._tagLookupMap.set(name, { ...existing, ...tag });
-              }
-            });
-
-            // Also add to originalTags if not present (so updateSelectedTags validation passes)
-            if (!window.TagManager.state.originalTags) {
-              window.TagManager.state.originalTags = [];
-            }
-            tagObjects.forEach(tag => {
-              const name = tag['Product Name*'];
-              if (name && !window.TagManager.state.originalTags.some(t => t['Product Name*'] === name)) {
-                window.TagManager.state.originalTags.push(tag);
-              }
-            });
 
             // Force update flag and clear cached render state
             window.TagManager._forceSelectedTagsUpdate = true;
