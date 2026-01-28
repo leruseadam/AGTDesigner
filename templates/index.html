@@ -8318,6 +8318,11 @@
       try {
         const store = sessionStorage.getItem('selected_store') || '';
         const response = await fetch(`/api/saved-tag-lists?store=${encodeURIComponent(store)}`);
+
+        if (!response.ok) {
+          throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+
         const data = await response.json();
 
         if (loadingEl) loadingEl.classList.add('d-none');
@@ -8325,6 +8330,8 @@
         if (data.success && data.lists && data.lists.length > 0) {
           renderSavedLists(data.lists);
           if (contentEl) contentEl.classList.remove('d-none');
+        } else if (data.error) {
+          throw new Error(data.error);
         } else {
           if (emptyEl) emptyEl.classList.remove('d-none');
         }
@@ -8332,7 +8339,9 @@
         console.error('Error loading saved lists:', error);
         if (loadingEl) loadingEl.classList.add('d-none');
         if (emptyEl) {
-          emptyEl.innerHTML = '<i class="bi bi-exclamation-triangle fs-1 mb-2 d-block text-warning"></i>Error loading saved lists';
+          emptyEl.innerHTML = `<i class="bi bi-exclamation-triangle fs-1 mb-2 d-block text-warning"></i>
+            <div>Error loading saved lists</div>
+            <small class="text-muted">Server may need to be reloaded</small>`;
           emptyEl.classList.remove('d-none');
         }
       }
