@@ -2194,6 +2194,10 @@ const TagManager = {
             
             // Always use fetch with keepalive for better reliability
             // sendBeacon doesn't support proper error handling
+            const _showToast = extraPayload && extraPayload.showToast;
+            if (_showToast) {
+                try { this.showToast && this.showToast('Saving selection…'); } catch (e) {}
+            }
             fetch('/api/save-selection-state', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2202,11 +2206,20 @@ const TagManager = {
             }).then(response => {
                 if (!response.ok) {
                     verboseLog(`⚠️ Failed to save selection state for undo: ${response.status} ${response.statusText}`);
+                    if (_showToast) {
+                        try { this.showModal && this.showModal({ title: 'Save Failed', message: 'Failed to save state to server.', buttons: [{text:'OK', value:'ok', primary:true}] }); } catch (e) {}
+                    }
                 } else {
                     verboseLog('✅ Selection state saved successfully to backend for undo');
+                    if (_showToast) {
+                        try { this.showToast && this.showToast('Selection saved'); } catch (e) {}
+                    }
                 }
             }).catch(error => {
                 verboseLog('⚠️ Failed to save selection state for undo:', error);
+                if (_showToast) {
+                    try { this.showModal && this.showModal({ title: 'Save Error', message: `Error saving selection: ${String(error)}`, buttons: [{text:'OK', value:'ok', primary:true}] }); } catch (e) {}
+                }
             });
         } catch (error) {
             console.error('❌ Error saving selection state for undo:', error);
@@ -3034,6 +3047,9 @@ const TagManager = {
 
             verboseLog(`💾 Saving ${selectedTagNames.length} selected tags to backend...`);
 
+            // Show a saving splash while the backend request is in flight
+            try { this.showSplash && this.showSplash('Saving selection...'); } catch (e) {}
+
             const response = await fetch('/api/selected-tags', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3042,11 +3058,27 @@ const TagManager = {
 
             if (!response.ok) {
                 console.warn(`⚠️ Failed to save selected tags to backend: ${response.status}`);
+                try {
+                    this.hideSplash && this.hideSplash();
+                    this.showModal && this.showModal({
+                        title: 'Save Failed',
+                        message: `Failed to save ${selectedTagNames.length} tags (server returned ${response.status}).`,
+                        buttons: [{ text: 'OK', value: 'ok', primary: true }]
+                    });
+                } catch (e) {}
                 return;
             }
 
             const result = await response.json();
             verboseLog('✅ Selected tags saved to backend:', result);
+            try {
+                this.hideSplash && this.hideSplash();
+                this.showModal && this.showModal({
+                    title: 'Saved',
+                    message: `Saved ${selectedTagNames.length} selected tags.`,
+                    buttons: [{ text: 'OK', value: 'ok', primary: true }]
+                });
+            } catch (e) {}
         } catch (error) {
             console.warn('⚠️ Error saving selected tags to backend:', error);
         }
@@ -19512,6 +19544,206 @@ function attachSelectedTagsCheckboxListeners() {
         });
     });
 }
+
+// --- Custom modal / splash / toast helpers ---
+(function() {
+    function createOverlay(id) {
+        let el = document.getElementById(id);
+        if (!el) {
+            el = document.createElement('div');
+            el.id = id;
+            el.style.position = 'fixed';
+            el.style.top = '0';
+            el.style.left = '0';
+            el.style.width = '100%';
+            el.style.height = '100%';
+            el.style.zIndex = '2147483646';
+        }
+        return el;
+    }
+
+    function showModalImpl(opts) {
+        try {
+            const overlay = createOverlay('agt-modal-overlay');
+            overlay.style.background = 'rgba(0,0,0,0.45)';
+
+            const box = document.createElement('div');
+            box.style.position = 'fixed';
+            box.style.left = '50%';
+            box.style.top = '50%';
+            box.style.transform = 'translate(-50%, -50%)';
+            box.style.zIndex = '2147483647';
+            box.style.minWidth = '320px';
+            box.style.maxWidth = '720px';
+            box.style.background = '#0f1720';
+            box.style.color = '#fff';
+            box.style.borderRadius = '10px';
+            box.style.boxShadow = '0 8px 40px rgba(0,0,0,0.6)';
+            box.style.padding = '18px';
+            box.style.fontFamily = 'Inter, system-ui, -apple-system, Roboto, Arial';
+
+            const title = document.createElement('div');
+            title.style.fontSize = '16px';
+            title.style.fontWeight = '700';
+            title.style.marginBottom = '8px';
+            title.textContent = opts.title || '';
+            box.appendChild(title);
+
+            const msg = document.createElement('div');
+            msg.style.fontSize = '14px';
+            msg.style.marginBottom = '14px';
+            msg.innerHTML = opts.message || '';
+            box.appendChild(msg);
+
+            const btnBar = document.createElement('div');
+            btnBar.style.display = 'flex';
+            btnBar.style.justifyContent = 'flex-end';
+            btnBar.style.gap = '8px';
+
+            const buttons = opts.buttons || [{text: 'OK', value: 'ok', primary: true}];
+            buttons.forEach(b => {
+                const btn = document.createElement('button');
+                btn.textContent = b.text || 'OK';
+                btn.style.padding = '8px 12px';
+                btn.style.borderRadius = '6px';
+                btn.style.border = 'none';
+                btn.style.cursor = 'pointer';
+                btn.style.fontWeight = '600';
+                if (b.primary) {
+                    btn.style.background = '#0ea5a6';
+                    btn.style.color = '#042022';
+                } else {
+                    btn.style.background = '#263238';
+                    btn.style.color = '#fff';
+                }
+                btn.addEventListener('click', () => {
+                    try { document.body.removeChild(overlay); } catch (e) {}
+                    try { document.body.removeChild(box); } catch (e) {}
+                    if (typeof b.onClick === 'function') b.onClick(b.value);
+                });
+                btnBar.appendChild(btn);
+            });
+            box.appendChild(btnBar);
+
+            // Ensure previous overlay removed
+            const prev = document.getElementById('agt-modal-overlay');
+            if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+            document.body.appendChild(overlay);
+            // Remove any existing modal box id to avoid duplicates
+            const existingBox = document.getElementById('agt-modal-box');
+            if (existingBox && existingBox.parentNode) existingBox.parentNode.removeChild(existingBox);
+            box.id = 'agt-modal-box';
+            document.body.appendChild(box);
+            return true;
+        } catch (e) {
+            console.warn('showModalImpl failed', e);
+            return false;
+        }
+    }
+
+    function showSplashImpl(message) {
+        try {
+            let splash = document.getElementById('agt-save-splash');
+            if (!splash) {
+                splash = document.createElement('div');
+                splash.id = 'agt-save-splash';
+                splash.style.position = 'fixed';
+                splash.style.top = '16px';
+                splash.style.right = '16px';
+                splash.style.zIndex = '2147483648';
+                splash.style.padding = '12px 14px';
+                splash.style.background = 'rgba(2,6,23,0.9)';
+                splash.style.color = '#e6f6f5';
+                splash.style.borderRadius = '10px';
+                splash.style.boxShadow = '0 6px 24px rgba(0,0,0,0.5)';
+                splash.style.fontWeight = '600';
+                splash.style.display = 'flex';
+                splash.style.alignItems = 'center';
+                splash.style.gap = '10px';
+                const spinner = document.createElement('span');
+                spinner.className = 'agt-spinner';
+                spinner.style.width = '14px';
+                spinner.style.height = '14px';
+                spinner.style.border = '2px solid rgba(255,255,255,0.2)';
+                spinner.style.borderTop = '2px solid #0ea5a6';
+                spinner.style.borderRadius = '50%';
+                spinner.style.animation = 'agt-spin 1s linear infinite';
+                const text = document.createElement('span');
+                text.id = 'agt-save-splash-text';
+                text.style.fontSize = '13px';
+                splash.appendChild(spinner);
+                splash.appendChild(text);
+                // add keyframe style if not present
+                if (!document.getElementById('agt-spinner-style')) {
+                    const style = document.createElement('style');
+                    style.id = 'agt-spinner-style';
+                    style.textContent = `@keyframes agt-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
+                    document.head.appendChild(style);
+                }
+                document.body.appendChild(splash);
+            }
+            const textEl = document.getElementById('agt-save-splash-text');
+            if (textEl) textEl.textContent = message || 'Saving...';
+            splash.style.display = 'flex';
+            return splash;
+        } catch (e) {
+            console.warn('showSplashImpl failed', e);
+            return null;
+        }
+    }
+
+    function hideSplashImpl() {
+        try {
+            const splash = document.getElementById('agt-save-splash');
+            if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+        } catch (e) {}
+    }
+
+    function showToastImpl(message, timeout = 2200) {
+        try {
+            let container = document.getElementById('agt-toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'agt-toast-container';
+                container.style.position = 'fixed';
+                container.style.bottom = '18px';
+                container.style.right = '18px';
+                container.style.zIndex = '2147483648';
+                document.body.appendChild(container);
+            }
+            const t = document.createElement('div');
+            t.style.background = 'linear-gradient(90deg,#082329,#063235)';
+            t.style.color = '#e6fbfa';
+            t.style.padding = '10px 14px';
+            t.style.borderRadius = '8px';
+            t.style.marginTop = '8px';
+            t.style.boxShadow = '0 6px 20px rgba(0,0,0,0.45)';
+            t.style.fontWeight = '600';
+            t.textContent = message || '';
+            container.appendChild(t);
+            setTimeout(() => {
+                try { t.style.opacity = '0'; t.style.transition = 'opacity 300ms'; } catch (e) {}
+                setTimeout(() => { try { t.remove(); } catch (e) {} }, 350);
+            }, timeout);
+        } catch (e) { console.warn('showToastImpl failed', e); }
+    }
+
+    // Attach helpers to TagManager if available, and to window for global use
+    try {
+        if (window.TagManager) {
+            window.TagManager.showModal = showModalImpl;
+            window.TagManager.showSplash = showSplashImpl;
+            window.TagManager.hideSplash = hideSplashImpl;
+            window.TagManager.showToast = showToastImpl;
+        }
+        window.agtShowModal = showModalImpl;
+        window.agtShowSplash = showSplashImpl;
+        window.agtHideSplash = hideSplashImpl;
+        window.agtShowToast = showToastImpl;
+    } catch (e) {
+        console.warn('Failed to attach modal/splash helpers:', e);
+    }
+})();
 
 TagManager.state.selectedTags.clear();
 TagManager.debouncedUpdateAvailableTags(TagManager.state.originalTags, TagManager.state.tags);
