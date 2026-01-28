@@ -6138,6 +6138,302 @@ def update_selected_order():
         logging.error(f"Error in update_selected_order: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
+# =============================================================================
+# SAVED TAG LISTS FEATURE
+# =============================================================================
+
+def get_saved_lists_db_path():
+    """Get the path to the saved tag lists database."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(current_dir, 'uploads', 'saved_tag_lists.db')
+
+def init_saved_lists_db():
+    """Initialize the saved tag lists database table if it doesn't exist."""
+    db_path = get_saved_lists_db_path()
+    try:
+        with db_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS saved_tag_lists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    store TEXT,
+                    tags TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            # Create index for faster lookups by store
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_saved_lists_store
+                ON saved_tag_lists(store)
+            ''')
+            conn.commit()
+            logging.info("Saved tag lists database initialized successfully")
+    except Exception as e:
+        logging.error(f"Error initializing saved tag lists database: {e}")
+        raise
+
+@app.route('/api/saved-tag-lists', methods=['GET'])
+def get_saved_tag_lists():
+    """Get all saved tag lists, optionally filtered by store."""
+    try:
+        store = request.args.get('store', session.get('selected_store', ''))
+
+        # Initialize DB if needed
+        init_saved_lists_db()
+
+        db_path = get_saved_lists_db_path()
+        with db_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            # Get lists for the current store and global lists (store is null/empty)
+            cursor.execute('''
+                SELECT id, name, store, tags, created_at, updated_at
+                FROM saved_tag_lists
+                WHERE store = ? OR store IS NULL OR store = ''
+                ORDER BY updated_at DESC
+            ''', (store,))
+
+            rows = cursor.fetchall()
+            lists = []
+            for row in rows:
+                tags = json.loads(row['tags']) if row['tags'] else []
+                lists.append({
+                    'id': row['id'],
+                    'name': row['name'],
+                    'store': row['store'] or 'All Stores',
+                    'tags': tags,
+                    'tag_count': len(tags),
+                    'created_at': row['created_at'],
+                    'updated_at': row['updated_at']
+                })
+
+            return jsonify({
+                'success': True,
+                'lists': lists,
+                'count': len(lists)
+            })
+
+    except Exception as e:
+        logging.error(f"Error fetching saved tag lists: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/saved-tag-lists', methods=['POST'])
+def save_tag_list():
+    """Save the current selected tags as a named list."""
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+        tags = data.get('tags', [])
+        store = data.get('store', session.get('selected_store', ''))
+
+        if not name:
+            return jsonify({'error': 'List name is required'}), 400
+
+        if not tags:
+            return jsonify({'error': 'No tags to save'}), 400
+
+        # Initialize DB if needed
+        init_saved_lists_db()
+
+        db_path = get_saved_lists_db_path()
+        with db_connection(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Check if a list with this name already exists for this store
+            cursor.execute('''
+                SELECT id FROM saved_tag_lists
+                WHERE name = ? AND (store = ? OR (store IS NULL AND ? IS NULL) OR (store = '' AND ? = ''))
+            ''', (name, store, store, store))
+
+            existing = cursor.fetchone()
+
+            tags_json = json.dumps(tags)
+
+            if existing:
+                # Update existing list
+                cursor.execute('''
+                    UPDATE saved_tag_lists
+                    SET tags = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (tags_json, existing[0]))
+                list_id = existing[0]
+                message = f'Tag list "{name}" updated successfully'
+            else:
+                # Create new list
+                cursor.execute('''
+                    INSERT INTO saved_tag_lists (name, store, tags)
+                    VALUES (?, ?, ?)
+                ''', (name, store, tags_json))
+                list_id = cursor.lastrowid
+                message = f'Tag list "{name}" saved successfully'
+
+            conn.commit()
+
+            logging.info(f"Saved tag list '{name}' with {len(tags)} tags for store '{store}'")
+
+            return jsonify({
+                'success': True,
+                'message': message,
+                'id': list_id,
+                'name': name,
+                'tag_count': len(tags)
+            })
+
+    except Exception as e:
+        logging.error(f"Error saving tag list: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/saved-tag-lists/<int:list_id>', methods=['GET'])
+def get_saved_tag_list(list_id):
+    """Get a specific saved tag list by ID."""
+    try:
+        init_saved_lists_db()
+
+        db_path = get_saved_lists_db_path()
+        with db_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT id, name, store, tags, created_at, updated_at
+                FROM saved_tag_lists
+                WHERE id = ?
+            ''', (list_id,))
+
+            row = cursor.fetchone()
+
+            if not row:
+                return jsonify({'error': 'Tag list not found'}), 404
+
+            tags = json.loads(row['tags']) if row['tags'] else []
+
+            return jsonify({
+                'success': True,
+                'list': {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'store': row['store'] or 'All Stores',
+                    'tags': tags,
+                    'tag_count': len(tags),
+                    'created_at': row['created_at'],
+                    'updated_at': row['updated_at']
+                }
+            })
+
+    except Exception as e:
+        logging.error(f"Error fetching tag list {list_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/saved-tag-lists/<int:list_id>', methods=['DELETE'])
+def delete_saved_tag_list(list_id):
+    """Delete a saved tag list."""
+    try:
+        init_saved_lists_db()
+
+        db_path = get_saved_lists_db_path()
+        with db_connection(db_path) as conn:
+            cursor = conn.cursor()
+
+            # Check if list exists
+            cursor.execute('SELECT name FROM saved_tag_lists WHERE id = ?', (list_id,))
+            row = cursor.fetchone()
+
+            if not row:
+                return jsonify({'error': 'Tag list not found'}), 404
+
+            list_name = row[0]
+
+            cursor.execute('DELETE FROM saved_tag_lists WHERE id = ?', (list_id,))
+            conn.commit()
+
+            logging.info(f"Deleted saved tag list '{list_name}' (ID: {list_id})")
+
+            return jsonify({
+                'success': True,
+                'message': f'Tag list "{list_name}" deleted successfully'
+            })
+
+    except Exception as e:
+        logging.error(f"Error deleting tag list {list_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/saved-tag-lists/<int:list_id>/load', methods=['POST'])
+def load_saved_tag_list(list_id):
+    """Load a saved tag list into the current selection."""
+    try:
+        data = request.get_json() or {}
+        append = data.get('append', False)  # If true, append to current selection instead of replacing
+
+        init_saved_lists_db()
+
+        db_path = get_saved_lists_db_path()
+        with db_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT id, name, tags
+                FROM saved_tag_lists
+                WHERE id = ?
+            ''', (list_id,))
+
+            row = cursor.fetchone()
+
+            if not row:
+                return jsonify({'error': 'Tag list not found'}), 404
+
+            saved_tags = json.loads(row['tags']) if row['tags'] else []
+            list_name = row['name']
+
+        # Get current excel processor and update selected tags
+        excel_processor = get_session_excel_processor()
+
+        if append:
+            # Get current selected tag names
+            current_selected = set()
+            for tag in excel_processor.selected_tags:
+                if isinstance(tag, dict):
+                    current_selected.add(tag.get('Product Name*', ''))
+                elif isinstance(tag, str):
+                    current_selected.add(tag)
+
+            # Add saved tags that aren't already selected
+            for tag_name in saved_tags:
+                if tag_name not in current_selected:
+                    current_selected.add(tag_name)
+
+            final_tags = list(current_selected)
+        else:
+            final_tags = saved_tags
+
+        # Update the excel processor and session
+        excel_processor.selected_tags = final_tags
+        session['selected_tags'] = final_tags
+        session.modified = True
+
+        logging.info(f"Loaded saved tag list '{list_name}' with {len(saved_tags)} tags (append={append})")
+
+        return jsonify({
+            'success': True,
+            'message': f'Loaded tag list "{list_name}" successfully',
+            'tags': final_tags,
+            'tag_count': len(final_tags),
+            'appended': append
+        })
+
+    except Exception as e:
+        logging.error(f"Error loading tag list {list_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# =============================================================================
+# END SAVED TAG LISTS FEATURE
+# =============================================================================
+
+
 @app.route('/api/clear-filters', methods=['POST'])
 def clear_filters():
     try:

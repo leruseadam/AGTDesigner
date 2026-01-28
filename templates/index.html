@@ -3335,6 +3335,67 @@
             });
           </script>
   <style>
+    /* Saved Tag Lists Button and Modal Styles */
+    .saved-lists-btn {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .saved-lists-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 2px 8px rgba(160, 132, 232, 0.4);
+    }
+
+    #savedTagListsModal .modal-content {
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(30, 30, 45, 0.98), rgba(20, 20, 35, 0.98));
+      border: 1px solid rgba(160, 132, 232, 0.3);
+    }
+
+    #savedTagListsModal .modal-header {
+      background: linear-gradient(135deg, rgba(160, 132, 232, 0.15), rgba(100, 80, 180, 0.1));
+      border-bottom: 1px solid rgba(160, 132, 232, 0.2);
+      padding: 1rem 1.5rem;
+    }
+
+    #savedTagListsModal .modal-body {
+      padding: 1.5rem;
+    }
+
+    .saved-lists-container {
+      max-height: 350px;
+      overflow-y: auto;
+    }
+
+    .saved-list-item {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.2s ease;
+    }
+
+    .saved-list-item:hover {
+      border-color: rgba(160, 132, 232, 0.4);
+      background: rgba(160, 132, 232, 0.1) !important;
+    }
+
+    .saved-list-item .btn-group .btn {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+    }
+
+    .save-list-section .form-control-modern {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .save-list-section .form-control-modern:focus {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(160, 132, 232, 0.5);
+      box-shadow: 0 0 0 2px rgba(160, 132, 232, 0.2);
+    }
+
     /* Store Selection Styles */
     .store-selection-container {
       text-align: center;
@@ -6379,7 +6440,12 @@
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">SELECTED TAGS</h5>
-                  <span class="badge badge-modern" id="selectedTagsCount">(0)</span>
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="badge badge-modern" id="selectedTagsCount">(0)</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary saved-lists-btn" onclick="openSavedListsModal()" title="Save/Load Tag Lists">
+                      <i class="fas fa-bookmark"></i>
+                    </button>
+                  </div>
                 </div>
                 <div class="search-input-container">
                   <input type="text" id="selectedTagsSearch" class="form-control form-control-modern" placeholder="Search selected tags...">
@@ -6749,6 +6815,64 @@
       });
     })();
   </script>
+
+  <!-- Saved Tag Lists Modal -->
+  <div class="modal fade" id="savedTagListsModal" tabindex="-1" aria-labelledby="savedTagListsModalLabel">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+      <div class="modal-content glass-card">
+        <div class="modal-header border-0">
+          <h5 class="modal-title" id="savedTagListsModalLabel">
+            <i class="fas fa-bookmark me-2 text-primary"></i>
+            Saved Tag Lists
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Save Current Selection -->
+          <div class="save-list-section mb-4">
+            <h6 class="text-light mb-3">Save Current Selection</h6>
+            <div class="row g-2">
+              <div class="col">
+                <input type="text" id="saveListName" class="form-control form-control-modern" placeholder="Enter list name...">
+              </div>
+              <div class="col-auto">
+                <button type="button" class="btn btn-primary" onclick="saveCurrentTagList()">
+                  <i class="fas fa-save me-1"></i> Save
+                </button>
+              </div>
+            </div>
+            <small class="text-muted mt-1 d-block">
+              <span id="currentSelectionCount">0</span> tags currently selected
+            </small>
+          </div>
+
+          <hr class="border-secondary">
+
+          <!-- Saved Lists -->
+          <div class="saved-lists-section">
+            <h6 class="text-light mb-3">Your Saved Lists</h6>
+            <div id="savedListsContainer" class="saved-lists-container">
+              <div class="text-center text-muted py-4" id="savedListsLoading">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                Loading saved lists...
+              </div>
+              <div class="text-center text-muted py-4 d-none" id="savedListsEmpty">
+                <i class="fas fa-folder-open fa-2x mb-2 d-block"></i>
+                No saved lists yet. Save your first list above!
+              </div>
+              <div id="savedListsContent" class="d-none">
+                <!-- Saved lists will be populated here -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Help Modal -->
   <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel">
     <div class="modal-dialog modal-lg">
@@ -8120,7 +8244,301 @@
       })();
     });
   </script>
-  
+
+  <!-- Saved Tag Lists Feature -->
+  <script>
+    // =====================================================
+    // SAVED TAG LISTS FEATURE
+    // =====================================================
+
+    let savedListsModal = null;
+
+    // Open the saved lists modal
+    window.openSavedListsModal = function() {
+      const modalElement = document.getElementById('savedTagListsModal');
+      if (!modalElement) {
+        console.error('Saved tag lists modal not found');
+        return;
+      }
+
+      if (!savedListsModal) {
+        savedListsModal = new bootstrap.Modal(modalElement);
+      }
+
+      // Update current selection count
+      updateCurrentSelectionCount();
+
+      // Load saved lists
+      loadSavedLists();
+
+      savedListsModal.show();
+    };
+
+    // Update the count of currently selected tags
+    function updateCurrentSelectionCount() {
+      const countEl = document.getElementById('currentSelectionCount');
+      if (countEl && window.TagManager) {
+        const count = window.TagManager.state.persistentSelectedTags?.length || 0;
+        countEl.textContent = count;
+      }
+    }
+
+    // Load saved lists from the server
+    async function loadSavedLists() {
+      const loadingEl = document.getElementById('savedListsLoading');
+      const emptyEl = document.getElementById('savedListsEmpty');
+      const contentEl = document.getElementById('savedListsContent');
+
+      // Show loading state
+      if (loadingEl) loadingEl.classList.remove('d-none');
+      if (emptyEl) emptyEl.classList.add('d-none');
+      if (contentEl) contentEl.classList.add('d-none');
+
+      try {
+        const store = sessionStorage.getItem('selected_store') || '';
+        const response = await fetch(`/api/saved-tag-lists?store=${encodeURIComponent(store)}`);
+        const data = await response.json();
+
+        if (loadingEl) loadingEl.classList.add('d-none');
+
+        if (data.success && data.lists && data.lists.length > 0) {
+          renderSavedLists(data.lists);
+          if (contentEl) contentEl.classList.remove('d-none');
+        } else {
+          if (emptyEl) emptyEl.classList.remove('d-none');
+        }
+      } catch (error) {
+        console.error('Error loading saved lists:', error);
+        if (loadingEl) loadingEl.classList.add('d-none');
+        if (emptyEl) {
+          emptyEl.innerHTML = '<i class="fas fa-exclamation-triangle fa-2x mb-2 d-block text-warning"></i>Error loading saved lists';
+          emptyEl.classList.remove('d-none');
+        }
+      }
+    }
+
+    // Render the saved lists in the modal
+    function renderSavedLists(lists) {
+      const contentEl = document.getElementById('savedListsContent');
+      if (!contentEl) return;
+
+      contentEl.innerHTML = lists.map(list => `
+        <div class="saved-list-item card bg-dark mb-2" data-list-id="${list.id}">
+          <div class="card-body p-3">
+            <div class="d-flex justify-content-between align-items-start">
+              <div class="flex-grow-1">
+                <h6 class="mb-1 text-light">${escapeHtml(list.name)}</h6>
+                <small class="text-muted">
+                  <i class="fas fa-tags me-1"></i>${list.tag_count} tags
+                  <span class="mx-2">|</span>
+                  <i class="fas fa-store me-1"></i>${escapeHtml(list.store)}
+                  <span class="mx-2">|</span>
+                  <i class="fas fa-clock me-1"></i>${formatDate(list.updated_at)}
+                </small>
+              </div>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-success" onclick="loadTagList(${list.id}, false)" title="Load (replace current selection)">
+                  <i class="fas fa-download"></i>
+                </button>
+                <button type="button" class="btn btn-outline-info" onclick="loadTagList(${list.id}, true)" title="Append to current selection">
+                  <i class="fas fa-plus"></i>
+                </button>
+                <button type="button" class="btn btn-outline-danger" onclick="deleteTagList(${list.id}, '${escapeHtml(list.name)}')" title="Delete">
+                  <i class="fas fa-trash"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    // Save current tag selection as a new list
+    window.saveCurrentTagList = async function() {
+      const nameInput = document.getElementById('saveListName');
+      const name = nameInput?.value?.trim();
+
+      if (!name) {
+        showToastMessage('Please enter a name for the list', 'warning');
+        nameInput?.focus();
+        return;
+      }
+
+      // Get current selected tags from TagManager
+      let tags = [];
+      if (window.TagManager && window.TagManager.state.persistentSelectedTags) {
+        tags = [...window.TagManager.state.persistentSelectedTags];
+      }
+
+      if (tags.length === 0) {
+        showToastMessage('No tags selected to save', 'warning');
+        return;
+      }
+
+      try {
+        const store = sessionStorage.getItem('selected_store') || '';
+        const response = await fetch('/api/saved-tag-lists', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, tags, store })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          showToastMessage(data.message, 'success');
+          nameInput.value = '';
+          loadSavedLists(); // Refresh the list
+        } else {
+          showToastMessage(data.error || 'Failed to save list', 'danger');
+        }
+      } catch (error) {
+        console.error('Error saving tag list:', error);
+        showToastMessage('Error saving tag list', 'danger');
+      }
+    };
+
+    // Load a saved tag list
+    window.loadTagList = async function(listId, append = false) {
+      try {
+        const response = await fetch(`/api/saved-tag-lists/${listId}/load`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ append })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          const tagNames = data.tags || [];
+
+          // Update TagManager state
+          if (window.TagManager) {
+            window.TagManager.state.persistentSelectedTags = [...tagNames];
+            window.TagManager.state.selectedTags = new Set(tagNames);
+            window.TagManager.state._selectedTagsSet = new Set(tagNames);
+
+            // Convert tag names to tag objects for updateSelectedTags
+            const tagObjects = tagNames.map(name => {
+              // Try to find the full tag object from TagManager's lookup map
+              let tag = window.TagManager._tagLookupMap?.get(name);
+
+              // Fallback to originalTags if not in lookup map
+              if (!tag && window.TagManager.state.originalTags) {
+                tag = window.TagManager.state.originalTags.find(t => t['Product Name*'] === name);
+              }
+
+              // If still not found, create a minimal tag object
+              if (!tag) {
+                tag = { 'Product Name*': name, displayName: name, lineage: 'MIXED' };
+              }
+
+              return tag;
+            }).filter(Boolean);
+
+            // Refresh the UI using updateSelectedTags with proper tag objects
+            if (typeof window.TagManager.updateSelectedTags === 'function') {
+              window.TagManager.updateSelectedTags(tagObjects);
+            }
+
+            // Update tag count display
+            if (typeof window.TagManager.updateTagCount === 'function') {
+              window.TagManager.updateTagCount('selected', tagNames.length);
+            }
+
+            // Also update the selected tags count badge
+            const countBadge = document.getElementById('selectedTagsCount');
+            if (countBadge) {
+              countBadge.textContent = `(${tagNames.length})`;
+            }
+          }
+
+          showToastMessage(data.message, 'success');
+
+          // Close modal
+          if (savedListsModal) {
+            savedListsModal.hide();
+          }
+        } else {
+          showToastMessage(data.error || 'Failed to load list', 'danger');
+        }
+      } catch (error) {
+        console.error('Error loading tag list:', error);
+        showToastMessage('Error loading tag list', 'danger');
+      }
+    };
+
+    // Delete a saved tag list
+    window.deleteTagList = async function(listId, listName) {
+      if (!confirm(`Are you sure you want to delete "${listName}"?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/saved-tag-lists/${listId}`, {
+          method: 'DELETE'
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          showToastMessage(data.message, 'success');
+          loadSavedLists(); // Refresh the list
+        } else {
+          showToastMessage(data.error || 'Failed to delete list', 'danger');
+        }
+      } catch (error) {
+        console.error('Error deleting tag list:', error);
+        showToastMessage('Error deleting tag list', 'danger');
+      }
+    };
+
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Helper function to format date
+    function formatDate(dateStr) {
+      if (!dateStr) return 'Unknown';
+      try {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit'
+        });
+      } catch {
+        return dateStr;
+      }
+    }
+
+    // Helper function to show toast messages
+    function showToastMessage(message, type = 'info') {
+      // Try to use existing toast function if available
+      if (typeof showToast === 'function') {
+        showToast(message, type);
+        return;
+      }
+
+      // Fallback: use Toast utility if available
+      if (typeof Toast !== 'undefined' && Toast.show) {
+        Toast.show(message, type);
+        return;
+      }
+
+      // Final fallback: alert
+      console.log(`[${type}] ${message}`);
+      if (type === 'danger' || type === 'warning') {
+        alert(message);
+      }
+    }
+  </script>
+
   <!-- ⚡ PERFORMANCE: Defer non-critical scripts -->
   <script src="{{ url_for('static', filename='js/enhanced-ui.js') }}?v={{ cache_bust }}" defer></script>
   <script src="{{ url_for('static', filename='js/generation-splash.js') }}" defer></script>
