@@ -6415,12 +6415,89 @@ def load_saved_tag_list(list_id):
         session['selected_tags'] = final_tags
         session.modified = True
 
+        # Fetch lineage data from database for the loaded tags
+        tags_with_lineage = []
+        try:
+            store_name = session.get('selected_store', '')
+            product_db = get_product_database(store_name)
+
+            if product_db and final_tags:
+                # Query database for lineage info
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+
+                # Build lineage map from database
+                lineage_map = {}
+                chunk_size = 400
+                for start in range(0, len(final_tags), chunk_size):
+                    chunk = final_tags[start:start + chunk_size]
+                    placeholders = ','.join(['?' for _ in chunk])
+                    cursor.execute(f'''
+                        SELECT p."Product Name*",
+                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                               p.sovereign_lineage as product_sovereign,
+                               s.sovereign_lineage as strain_sovereign,
+                               s.canonical_lineage as strain_canonical,
+                               p."Product Brand" as product_brand,
+                               p."DOH" as doh
+                        FROM products p
+                        LEFT JOIN strains s ON p.strain_id = s.id
+                        WHERE p."Product Name*" IN ({placeholders})
+                        ORDER BY p.id DESC
+                    ''', chunk)
+
+                    for row in cursor.fetchall():
+                        db_name = row[0]
+                        db_lineage = row[1]
+                        product_sovereign = row[2]
+                        strain_sovereign = row[3]
+                        strain_canonical = row[4]
+                        product_brand = row[5]
+                        doh = row[6]
+
+                        if db_name:
+                            lineage_map[db_name] = {
+                                'lineage': db_lineage,
+                                'sovereign_lineage': product_sovereign or strain_sovereign,
+                                'canonical_lineage': strain_canonical,
+                                'product_brand': product_brand,
+                                'doh': doh
+                            }
+
+                # Build tag objects with lineage
+                for tag_name in final_tags:
+                    tag_obj = {
+                        'Product Name*': tag_name,
+                        'displayName': tag_name
+                    }
+
+                    if tag_name in lineage_map:
+                        info = lineage_map[tag_name]
+                        tag_obj['lineage'] = info.get('lineage') or 'MIXED'
+                        tag_obj['sovereign_lineage'] = info.get('sovereign_lineage')
+                        tag_obj['canonical_lineage'] = info.get('canonical_lineage')
+                        tag_obj['currentLineage'] = info.get('lineage') or 'MIXED'
+                        if info.get('product_brand'):
+                            tag_obj['Product Brand'] = info['product_brand']
+                        if info.get('doh'):
+                            tag_obj['DOH'] = info['doh']
+                    else:
+                        tag_obj['lineage'] = 'MIXED'
+                        tag_obj['currentLineage'] = 'MIXED'
+
+                    tags_with_lineage.append(tag_obj)
+        except Exception as e:
+            logging.warning(f"Could not fetch lineage for saved tags: {e}")
+            # Fallback to basic tag objects without lineage
+            tags_with_lineage = [{'Product Name*': name, 'displayName': name, 'lineage': 'MIXED'} for name in final_tags]
+
         logging.info(f"Loaded saved tag list '{list_name}' with {len(saved_tags)} tags (append={append})")
 
         return jsonify({
             'success': True,
             'message': f'Loaded tag list "{list_name}" successfully',
             'tags': final_tags,
+            'tags_with_lineage': tags_with_lineage,
             'tag_count': len(final_tags),
             'appended': append
         })

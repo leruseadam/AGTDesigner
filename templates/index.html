@@ -8420,6 +8420,8 @@
 
         if (data.success) {
           const tagNames = data.tags || [];
+          // Use tags_with_lineage from backend (includes lineage from database)
+          const tagsWithLineage = data.tags_with_lineage || [];
 
           // Update TagManager state
           if (window.TagManager) {
@@ -8427,23 +8429,40 @@
             window.TagManager.state.selectedTags = new Set(tagNames);
             window.TagManager.state._selectedTagsSet = new Set(tagNames);
 
-            // Convert tag names to tag objects for updateSelectedTags
-            const tagObjects = tagNames.map(name => {
-              // Try to find the full tag object from TagManager's lookup map
-              let tag = window.TagManager._tagLookupMap?.get(name);
+            // Use tag objects with lineage from backend, or fall back to lookup
+            let tagObjects = tagsWithLineage;
 
-              // Fallback to originalTags if not in lookup map
-              if (!tag && window.TagManager.state.originalTags) {
-                tag = window.TagManager.state.originalTags.find(t => t['Product Name*'] === name);
-              }
+            if (!tagObjects || tagObjects.length === 0) {
+              // Fallback: Convert tag names to tag objects
+              tagObjects = tagNames.map(name => {
+                // Try to find the full tag object from TagManager's lookup map
+                let tag = window.TagManager._tagLookupMap?.get(name);
 
-              // If still not found, create a minimal tag object
-              if (!tag) {
-                tag = { 'Product Name*': name, displayName: name, lineage: 'MIXED' };
-              }
+                // Fallback to originalTags if not in lookup map
+                if (!tag && window.TagManager.state.originalTags) {
+                  tag = window.TagManager.state.originalTags.find(t => t['Product Name*'] === name);
+                }
 
-              return tag;
-            }).filter(Boolean);
+                // If still not found, create a minimal tag object
+                if (!tag) {
+                  tag = { 'Product Name*': name, displayName: name, lineage: 'MIXED' };
+                }
+
+                return tag;
+              }).filter(Boolean);
+            }
+
+            // Update the TagManager lookup map with new lineage data
+            if (window.TagManager._tagLookupMap && tagsWithLineage.length > 0) {
+              tagsWithLineage.forEach(tag => {
+                const name = tag['Product Name*'];
+                if (name) {
+                  // Merge with existing data if present
+                  const existing = window.TagManager._tagLookupMap.get(name) || {};
+                  window.TagManager._tagLookupMap.set(name, { ...existing, ...tag });
+                }
+              });
+            }
 
             // Refresh the UI using updateSelectedTags with proper tag objects
             if (typeof window.TagManager.updateSelectedTags === 'function') {
