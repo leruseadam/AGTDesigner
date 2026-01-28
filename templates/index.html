@@ -6443,7 +6443,7 @@
                   <div class="d-flex align-items-center gap-2">
                     <span class="badge badge-modern" id="selectedTagsCount">(0)</span>
                     <button type="button" class="btn btn-sm btn-outline-primary saved-lists-btn" onclick="openSavedListsModal()" title="Save/Load Tag Lists">
-                      <i class="fas fa-bookmark"></i>
+                      <i class="bi bi-bookmark-star"></i>
                     </button>
                   </div>
                 </div>
@@ -6822,7 +6822,7 @@
       <div class="modal-content glass-card">
         <div class="modal-header border-0">
           <h5 class="modal-title" id="savedTagListsModalLabel">
-            <i class="fas fa-bookmark me-2 text-primary"></i>
+            <i class="bi bi-bookmark-star me-2 text-primary"></i>
             Saved Tag Lists
           </h5>
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -6837,7 +6837,7 @@
               </div>
               <div class="col-auto">
                 <button type="button" class="btn btn-primary" onclick="saveCurrentTagList()">
-                  <i class="fas fa-save me-1"></i> Save
+                  <i class="bi bi-save me-1"></i> Save
                 </button>
               </div>
             </div>
@@ -6857,7 +6857,7 @@
                 Loading saved lists...
               </div>
               <div class="text-center text-muted py-4 d-none" id="savedListsEmpty">
-                <i class="fas fa-folder-open fa-2x mb-2 d-block"></i>
+                <i class="bi bi-folder2-open fs-1 mb-2 d-block"></i>
                 No saved lists yet. Save your first list above!
               </div>
               <div id="savedListsContent" class="d-none">
@@ -8311,7 +8311,7 @@
         console.error('Error loading saved lists:', error);
         if (loadingEl) loadingEl.classList.add('d-none');
         if (emptyEl) {
-          emptyEl.innerHTML = '<i class="fas fa-exclamation-triangle fa-2x mb-2 d-block text-warning"></i>Error loading saved lists';
+          emptyEl.innerHTML = '<i class="bi bi-exclamation-triangle fs-1 mb-2 d-block text-warning"></i>Error loading saved lists';
           emptyEl.classList.remove('d-none');
         }
       }
@@ -8329,22 +8329,22 @@
               <div class="flex-grow-1">
                 <h6 class="mb-1 text-light">${escapeHtml(list.name)}</h6>
                 <small class="text-muted">
-                  <i class="fas fa-tags me-1"></i>${list.tag_count} tags
+                  <i class="bi bi-tags me-1"></i>${list.tag_count} tags
                   <span class="mx-2">|</span>
-                  <i class="fas fa-store me-1"></i>${escapeHtml(list.store)}
+                  <i class="bi bi-shop me-1"></i>${escapeHtml(list.store)}
                   <span class="mx-2">|</span>
-                  <i class="fas fa-clock me-1"></i>${formatDate(list.updated_at)}
+                  <i class="bi bi-clock me-1"></i>${formatDate(list.updated_at)}
                 </small>
               </div>
               <div class="btn-group btn-group-sm">
                 <button type="button" class="btn btn-outline-success" onclick="loadTagList(${list.id}, false)" title="Load (replace current selection)">
-                  <i class="fas fa-download"></i>
+                  <i class="bi bi-download"></i>
                 </button>
                 <button type="button" class="btn btn-outline-info" onclick="loadTagList(${list.id}, true)" title="Append to current selection">
-                  <i class="fas fa-plus"></i>
+                  <i class="bi bi-plus-lg"></i>
                 </button>
                 <button type="button" class="btn btn-outline-danger" onclick="deleteTagList(${list.id}, '${escapeHtml(list.name)}')" title="Delete">
-                  <i class="fas fa-trash"></i>
+                  <i class="bi bi-trash"></i>
                 </button>
               </div>
             </div>
