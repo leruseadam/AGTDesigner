@@ -2984,7 +2984,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Professional section headers - FURTHER REDUCED MARGINS */
   .control-panel h5,
   .control-panel .section-header {
-    font-size: 0.85rem !important;
+    font-size: 1.7rem !important;
     font-weight: 600 !important;
     letter-spacing: 2px !important;
     text-transform: uppercase !important;
@@ -2994,6 +2994,21 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-top: 0.15rem !important; /* Further reduced from 0.25rem */
     padding-bottom: 0.15rem !important; /* Further reduced from 0.2rem */
   }
+
+/* Make Current Inventory and Selected Tags headers twice as big */
+.tag-list-container .filter-label,
+.glass-card .filter-label,
+.control-panel .filter-label {
+  font-size: 2.2rem !important;
+  font-weight: 800 !important;
+  letter-spacing: 2px !important;
+  text-transform: uppercase !important;
+  color: #fff !important;
+  text-shadow: 0 2px 8px rgba(160,132,232,0.18);
+  margin-bottom: 0.25rem !important;
+  margin-top: 0.15rem !important;
+  padding-bottom: 0.15rem !important;
+}
   
   /* Ensure center panel uses full available height */
   .control-panel {
@@ -3600,29 +3615,39 @@ body.modal-open #mainContent.store-selection-disabled,
   
 /* Reduce vertical size of the saved-lists button (compact) */
 .saved-lists-btn {
-  padding: 0.2rem 0.45rem !important;
-  min-height: 28px !important;
-  height: 28px !important;
+  /* Enforce a larger, fixed size and prevent flex-based resizing */
+  padding: 0.4rem 0.7rem !important;
+  min-height: 44px !important;
+  height: 44px !important;
   line-height: 1 !important;
-  font-size: 0.85rem !important;
-  border-radius: 8px !important;
+  font-size: 1rem !important;
+  border-radius: 10px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 0.35rem !important;
+  gap: 0.5rem !important;
+  box-sizing: border-box !important;
+  flex: 0 0 auto !important; /* do not grow or shrink */
+  align-self: center !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  min-width: 92px !important;
 }
 
 .saved-lists-btn .bi {
-  width: 20px !important;
-  height: 20px !important;
+  width: 18px !important;
+  height: 18px !important;
 }
 
 .saved-lists-btn .saved-lists-label {
   display: inline-block !important;
-  font-size: 0.85rem !important;
+  font-size: 1rem !important;
   line-height: 1 !important;
   margin-left: 0 !important;
   padding: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
 }
 
 /* If you want the button even more compact (icon-only), uncomment below */
@@ -10097,14 +10122,14 @@ body.modal-open #mainContent.store-selection-disabled,
   #availableTags .vendor-section > .vendor-header > .vendor-title,
   #availableTags .vendor-section > .vendor-header span.vendor-title,
   #availableTags .vendor-section .vendor-header .vendor-title.flex-grow-1 {
-    font-size: 2.125em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1.375em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
-    line-height: 1.3 !important;
+    line-height: 1.2 !important;
   }
 
   /* Increase vendor title text size in tag lists */
   .vendor-header .vendor-title {
-    font-size: 1.525em !important; /* Increased by 0.125em (~2px) */
+    font-size: 1.375em !important; /* Increased by 0.125em (~2px) */
     font-weight: 700 !important;
   }
 
@@ -10119,7 +10144,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Base font sizing variables */
   :root {
-    --base-font-size: 14px;
+    --base-font-size: 16px;
     --min-font-size: 10px;
     --max-font-size: 28px;
     --line-height-ratio: 1.2;
@@ -11701,7 +11726,7 @@ html, body {
 
 .list-item-title {
     margin: 0 0 0.5rem 0;
-    font-size: 1rem;
+    font-size: 1.3rem;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.95);
 }
