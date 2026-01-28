@@ -3598,6 +3598,38 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Legacy button styles - replaced by .btn-control */
   /* .control-panel .btn-sm styles are deprecated - use .btn-control instead */
   
+/* Reduce vertical size of the saved-lists button (compact) */
+.saved-lists-btn {
+  padding: 0.2rem 0.45rem !important;
+  min-height: 28px !important;
+  height: 28px !important;
+  line-height: 1 !important;
+  font-size: 0.85rem !important;
+  border-radius: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.35rem !important;
+}
+
+.saved-lists-btn .bi {
+  width: 20px !important;
+  height: 20px !important;
+}
+
+.saved-lists-btn .saved-lists-label {
+  display: inline-block !important;
+  font-size: 0.85rem !important;
+  line-height: 1 !important;
+  margin-left: 0 !important;
+  padding: 0 !important;
+}
+
+/* If you want the button even more compact (icon-only), uncomment below */
+/*
+.saved-lists-btn .saved-lists-label { display: none !important; }
+.saved-lists-btn { min-width: 34px !important; width: 34px !important; padding: 0 !important; }
+*/
   /* Tag items with dropdowns */
   .tag-row {
     margin-bottom: 1px !important;

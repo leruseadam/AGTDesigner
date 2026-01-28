@@ -3337,7 +3337,7 @@
   <style>
     /* Saved Tag Lists Button and Modal Styles */
     .saved-lists-btn {
-      padding: 0.3rem 0.6rem;
+      padding: 0.6rem 0.9rem;
       font-size: 0.5rem;
       font-weight: 600;
       border-radius: 6px;
@@ -8359,6 +8359,8 @@
 
     // Load saved lists from the server
     async function loadSavedLists() {
+      // Show network loading modal while fetching saved lists
+      if (typeof showLoadingModal === 'function') showLoadingModal('Loading saved lists...');
       const loadingEl = document.getElementById('savedListsLoading');
       const emptyEl = document.getElementById('savedListsEmpty');
       const contentEl = document.getElementById('savedListsContent');
@@ -8379,6 +8381,7 @@
         const data = await response.json();
 
         if (loadingEl) loadingEl.classList.add('d-none');
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
 
         if (data.success && data.lists && data.lists.length > 0) {
           renderSavedLists(data.lists);
@@ -8397,6 +8400,7 @@
             <small class="text-muted">Server may need to be reloaded</small>`;
           emptyEl.classList.remove('d-none');
         }
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
       }
     }
 
@@ -8492,6 +8496,7 @@
 
     // Load a saved tag list
     window.loadTagList = async function(listId, append = false) {
+      if (typeof showLoadingModal === 'function') showLoadingModal('Loading list...');
       try {
         const response = await fetch(`/api/saved-tag-lists/${listId}/load`, {
           method: 'POST',
@@ -8602,9 +8607,11 @@
         } else {
           showToastMessage(data.error || 'Failed to load list', 'danger');
         }
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
       } catch (error) {
         console.error('Error loading tag list:', error);
         showToastMessage('Error loading tag list', 'danger');
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
       }
     };
 
@@ -8655,6 +8662,63 @@
       } catch {
         return dateStr;
       }
+
+    // -----------------------------
+    // Loading Modal Helpers
+    // -----------------------------
+    // Create and manage a small non-dismissible loading modal with spinner.
+    (function() {
+      let _loadingModal = null;
+
+      window.showLoadingModal = function(message) {
+        try {
+          let modalEl = document.getElementById('loadingModal');
+          if (!modalEl) {
+            // Inject modal markup at end of body
+            modalEl = document.createElement('div');
+            modalEl.id = 'loadingModal';
+            modalEl.className = 'modal fade';
+            modalEl.tabIndex = -1;
+            modalEl.setAttribute('aria-hidden', 'true');
+            modalEl.innerHTML = `
+              <div class="modal-dialog modal-sm modal-dialog-centered">
+                <div class="modal-content" style="background: transparent; border: none; box-shadow: none;">
+                  <div class="modal-body text-center text-white">
+                    <div class="spinner-border text-light" role="status" style="width:3rem;height:3rem;"></div>
+                    <div id="loadingModalMessage" style="margin-top:0.5rem; font-weight:600;">${message || 'Loading...'}</div>
+                  </div>
+                </div>
+              </div>
+            `;
+            document.body.appendChild(modalEl);
+          } else {
+            const msgEl = modalEl.querySelector('#loadingModalMessage');
+            if (msgEl) msgEl.textContent = message || 'Loading...';
+          }
+
+          if (!_loadingModal) _loadingModal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+          _loadingModal.show();
+        } catch (e) {
+          console.warn('Could not show loading modal', e);
+        }
+      };
+
+      window.hideLoadingModal = function() {
+        try {
+          if (_loadingModal) {
+            _loadingModal.hide();
+          } else {
+            const el = document.getElementById('loadingModal');
+            if (el) {
+              const m = bootstrap.Modal.getInstance(el);
+              if (m) m.hide();
+            }
+          }
+        } catch (e) {
+          console.warn('Could not hide loading modal', e);
+        }
+      };
+    })();
     }
 
     // Helper function to show toast messages
