@@ -19563,82 +19563,85 @@ function attachSelectedTagsCheckboxListeners() {
     }
 
     function showModalImpl(opts) {
-        try {
-            const overlay = createOverlay('agt-modal-overlay');
-            overlay.style.background = 'rgba(0,0,0,0.45)';
+        // Return a Promise that resolves with the value of the button clicked
+        return new Promise((resolve) => {
+            try {
+                const overlay = createOverlay('agt-modal-overlay');
+                overlay.style.background = 'rgba(0,0,0,0.45)';
 
-            const box = document.createElement('div');
-            box.style.position = 'fixed';
-            box.style.left = '50%';
-            box.style.top = '50%';
-            box.style.transform = 'translate(-50%, -50%)';
-            box.style.zIndex = '2147483647';
-            box.style.minWidth = '320px';
-            box.style.maxWidth = '720px';
-            box.style.background = '#0f1720';
-            box.style.color = '#fff';
-            box.style.borderRadius = '10px';
-            box.style.boxShadow = '0 8px 40px rgba(0,0,0,0.6)';
-            box.style.padding = '18px';
-            box.style.fontFamily = 'Inter, system-ui, -apple-system, Roboto, Arial';
+                const box = document.createElement('div');
+                box.style.position = 'fixed';
+                box.style.left = '50%';
+                box.style.top = '50%';
+                box.style.transform = 'translate(-50%, -50%)';
+                box.style.zIndex = '2147483647';
+                box.style.minWidth = '320px';
+                box.style.maxWidth = '720px';
+                box.style.background = '#0f1720';
+                box.style.color = '#fff';
+                box.style.borderRadius = '10px';
+                box.style.boxShadow = '0 8px 40px rgba(0,0,0,0.6)';
+                box.style.padding = '18px';
+                box.style.fontFamily = 'Inter, system-ui, -apple-system, Roboto, Arial';
 
-            const title = document.createElement('div');
-            title.style.fontSize = '16px';
-            title.style.fontWeight = '700';
-            title.style.marginBottom = '8px';
-            title.textContent = opts.title || '';
-            box.appendChild(title);
+                const title = document.createElement('div');
+                title.style.fontSize = '16px';
+                title.style.fontWeight = '700';
+                title.style.marginBottom = '8px';
+                title.textContent = opts.title || '';
+                box.appendChild(title);
 
-            const msg = document.createElement('div');
-            msg.style.fontSize = '14px';
-            msg.style.marginBottom = '14px';
-            msg.innerHTML = opts.message || '';
-            box.appendChild(msg);
+                const msg = document.createElement('div');
+                msg.style.fontSize = '14px';
+                msg.style.marginBottom = '14px';
+                msg.innerHTML = opts.message || '';
+                box.appendChild(msg);
 
-            const btnBar = document.createElement('div');
-            btnBar.style.display = 'flex';
-            btnBar.style.justifyContent = 'flex-end';
-            btnBar.style.gap = '8px';
+                const btnBar = document.createElement('div');
+                btnBar.style.display = 'flex';
+                btnBar.style.justifyContent = 'flex-end';
+                btnBar.style.gap = '8px';
 
-            const buttons = opts.buttons || [{text: 'OK', value: 'ok', primary: true}];
-            buttons.forEach(b => {
-                const btn = document.createElement('button');
-                btn.textContent = b.text || 'OK';
-                btn.style.padding = '8px 12px';
-                btn.style.borderRadius = '6px';
-                btn.style.border = 'none';
-                btn.style.cursor = 'pointer';
-                btn.style.fontWeight = '600';
-                if (b.primary) {
-                    btn.style.background = '#0ea5a6';
-                    btn.style.color = '#042022';
-                } else {
-                    btn.style.background = '#263238';
-                    btn.style.color = '#fff';
-                }
-                btn.addEventListener('click', () => {
-                    try { document.body.removeChild(overlay); } catch (e) {}
-                    try { document.body.removeChild(box); } catch (e) {}
-                    if (typeof b.onClick === 'function') b.onClick(b.value);
+                const buttons = opts.buttons || [{text: 'OK', value: 'ok', primary: true}];
+                buttons.forEach(b => {
+                    const btn = document.createElement('button');
+                    btn.textContent = b.text || 'OK';
+                    btn.style.padding = '8px 12px';
+                    btn.style.borderRadius = '6px';
+                    btn.style.border = 'none';
+                    btn.style.cursor = 'pointer';
+                    btn.style.fontWeight = '600';
+                    if (b.primary) {
+                        btn.style.background = '#0ea5a6';
+                        btn.style.color = '#042022';
+                    } else {
+                        btn.style.background = '#263238';
+                        btn.style.color = '#fff';
+                    }
+                    btn.addEventListener('click', () => {
+                        try { document.body.removeChild(overlay); } catch (e) {}
+                        try { document.body.removeChild(box); } catch (e) {}
+                        resolve(b.value);
+                    });
+                    btnBar.appendChild(btn);
                 });
-                btnBar.appendChild(btn);
-            });
-            box.appendChild(btnBar);
+                box.appendChild(btnBar);
 
-            // Ensure previous overlay removed
-            const prev = document.getElementById('agt-modal-overlay');
-            if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
-            document.body.appendChild(overlay);
-            // Remove any existing modal box id to avoid duplicates
-            const existingBox = document.getElementById('agt-modal-box');
-            if (existingBox && existingBox.parentNode) existingBox.parentNode.removeChild(existingBox);
-            box.id = 'agt-modal-box';
-            document.body.appendChild(box);
-            return true;
-        } catch (e) {
-            console.warn('showModalImpl failed', e);
-            return false;
-        }
+                // Ensure previous overlay removed
+                const prev = document.getElementById('agt-modal-overlay');
+                if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
+                document.body.appendChild(overlay);
+                // Remove any existing modal box id to avoid duplicates
+                const existingBox = document.getElementById('agt-modal-box');
+                if (existingBox && existingBox.parentNode) existingBox.parentNode.removeChild(existingBox);
+                box.id = 'agt-modal-box';
+                document.body.appendChild(box);
+            } catch (e) {
+                console.warn('showModalImpl failed', e);
+                // Resolve with null on failure
+                resolve(null);
+            }
+        });
     }
 
     function showSplashImpl(message) {

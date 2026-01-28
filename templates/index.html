@@ -3338,7 +3338,7 @@
     /* Saved Tag Lists Button and Modal Styles */
     .saved-lists-btn {
       padding: 0.3rem 0.6rem;
-      font-size: 0.7rem;
+      font-size: 0.5rem;
       font-weight: 600;
       border-radius: 6px;
       background: linear-gradient(135deg, #a084e8 0%, #8b6dd4 100%);
@@ -8501,25 +8501,33 @@
 
         const data = await response.json();
 
-        if (data.success) {
+          if (data.success) {
           const tagNames = data.tags || [];
           // Backend provides partial data - we'll prefer full data from loaded inventory
           const backendTagsWithLineage = data.tags_with_lineage || [];
 
           console.log('📋 Loading saved list - tagNames:', tagNames.length, 'backendTags:', backendTagsWithLineage.length);
 
-          // Update TagManager state
-          if (window.TagManager) {
-            window.TagManager.state.persistentSelectedTags = [...tagNames];
-            window.TagManager.state.selectedTags = new Set(tagNames);
-            window.TagManager.state._selectedTagsSet = new Set(tagNames);
+            // Update TagManager state
+            if (window.TagManager) {
+            // If append flag was set, merge tags into existing selection; otherwise replace
+            const existing = window.TagManager.state.persistentSelectedTags || [];
+            let mergedNames;
+            if (append) {
+              mergedNames = existing.concat(tagNames.filter(n => !existing.includes(n)));
+            } else {
+              mergedNames = [...tagNames];
+            }
+            window.TagManager.state.persistentSelectedTags = mergedNames;
+            window.TagManager.state.selectedTags = new Set(mergedNames);
+            window.TagManager.state._selectedTagsSet = new Set(mergedNames);
 
             // Build tag objects by looking up FULL data from loaded inventory first
             // Only fall back to backend data if tag not found in current inventory
             const tagObjects = [];
             const notFoundInInventory = [];
 
-            tagNames.forEach(name => {
+            mergedNames.forEach(name => {
               // First, try to find full tag in _tagLookupMap (best source)
               let fullTag = window.TagManager._tagLookupMap?.get(name);
 
@@ -8575,13 +8583,13 @@
 
             // Update tag count display
             if (typeof window.TagManager.updateTagCount === 'function') {
-              window.TagManager.updateTagCount('selected', tagNames.length);
+              window.TagManager.updateTagCount('selected', mergedNames.length);
             }
 
             // Also update the selected tags count badge
             const countBadge = document.getElementById('selectedTagsCount');
             if (countBadge) {
-              countBadge.textContent = `(${tagNames.length})`;
+              countBadge.textContent = `(${mergedNames.length})`;
             }
           }
 
