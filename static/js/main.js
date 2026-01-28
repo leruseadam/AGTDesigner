@@ -12240,16 +12240,19 @@ const TagManager = {
                 this._fetchingAvailableTags = false;
                 throw lastError || new Error('Failed to fetch tags after retries. Please try refreshing the page or uploading the file again.');
             }
+            console.log('📋 Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count, message: responseData.message } : null);
             verboseLog('Available tags response data:', responseData ? { source: responseData.source, totalCount: responseData.total_count } : null);
-            
+
             // Handle both old array format and new object format
             let tags;
             if (Array.isArray(responseData)) {
                 // Old format: direct array
                 tags = responseData;
+                console.log('📋 Response is direct array with', tags.length, 'tags');
             } else if (responseData && responseData.tags && Array.isArray(responseData.tags)) {
                 // New format: {tags: [...], total_count: N, source: '...'}
                 tags = responseData.tags;
+                console.log('📋 Response has tags array with', tags.length, 'tags');
                 verboseLog(`Backend returned ${tags.length} tags from ${responseData.source || 'unknown source'}`);
             } else {
                 console.error('No tags loaded from backend or invalid response format:', responseData);
@@ -12311,15 +12314,20 @@ const TagManager = {
                         verboseLog('✅ Using cached tags as fallback for error response');
                         return true;
                     }
+                    // CRITICAL: Reset flag when no cache available and showing message
+                    this._fetchingAvailableTags = false;
+                    console.log('📋 No cache available, showing message to user:', errorMsg);
                     // Show message to user if no cache available
                     const availableTagsContainer = document.getElementById('availableTags');
+                    console.log('📋 availableTagsContainer found:', !!availableTagsContainer);
                     if (availableTagsContainer && errorMsg) {
+                        console.log('📋 Updating availableTagsContainer with message');
                         availableTagsContainer.innerHTML = `
                             <div class="text-center py-4">
                                 <div class="alert alert-info mx-3">
                                     <p class="mb-2">${errorMsg}</p>
                                     <button class="btn btn-primary btn-sm" onclick="TagManager.fetchAndUpdateAvailableTags()">
-                                        <i class="fas fa-redo"></i> Retry
+                                        <i class="bi bi-arrow-clockwise"></i> Retry
                                     </button>
                                 </div>
                             </div>
