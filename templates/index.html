@@ -8355,10 +8355,14 @@
 
     // Save current tag selection as a new list
     window.saveCurrentTagList = async function() {
+      console.log('📋 saveCurrentTagList called');
       const nameInput = document.getElementById('saveListName');
+      console.log('📋 nameInput element:', nameInput);
       const name = nameInput?.value?.trim();
+      console.log('📋 name value:', name);
 
       if (!name) {
+        console.log('📋 No name provided, showing warning');
         showToastMessage('Please enter a name for the list', 'warning');
         nameInput?.focus();
         return;
@@ -8366,11 +8370,16 @@
 
       // Get current selected tags from TagManager
       let tags = [];
+      console.log('📋 TagManager exists:', !!window.TagManager);
+      console.log('📋 TagManager.state:', window.TagManager?.state);
+      console.log('📋 persistentSelectedTags:', window.TagManager?.state?.persistentSelectedTags);
       if (window.TagManager && window.TagManager.state.persistentSelectedTags) {
         tags = [...window.TagManager.state.persistentSelectedTags];
       }
+      console.log('📋 tags to save:', tags);
 
       if (tags.length === 0) {
+        console.log('📋 No tags to save, showing warning');
         showToastMessage('No tags selected to save', 'warning');
         return;
       }
