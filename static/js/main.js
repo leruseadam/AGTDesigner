@@ -19333,6 +19333,78 @@ try {
         // right after this script loads, to ensure DOM is ready
 
         // Also expose helper functions immediately
+
+// Robustness: delegated checkbox handlers
+// Add event delegation so clicks/changes on .tag-checkbox still work even if
+// individual element handlers are lost during re-renders or filter changes.
+(function() {
+    try {
+        const delegatedChange = function(e) {
+            const el = e.target;
+            if (!el || !el.classList || !el.classList.contains('tag-checkbox')) return;
+
+            // If the checkbox already has its own change handler, do nothing
+            if (el._changeHandler || el.onchange) return;
+
+            const TM = window.TagManager;
+            if (!TM) return;
+
+            const name = el.value;
+            if (!name) return;
+
+            // Ensure internal sets exist
+            if (!TM.state._selectedTagsSet) TM.state._selectedTagsSet = new Set(TM.state.persistentSelectedTags || []);
+
+            const isChecked = !!el.checked;
+            if (isChecked) {
+                if (!TM.state._selectedTagsSet.has(name)) {
+                    TM.state.persistentSelectedTags.push(name);
+                    TM.state._selectedTagsSet.add(name);
+                }
+            } else {
+                const idx = TM.state.persistentSelectedTags.indexOf(name);
+                if (idx > -1) {
+                    TM.state.persistentSelectedTags.splice(idx, 1);
+                    TM.state._selectedTagsSet.delete(name);
+                }
+            }
+
+            TM.state.selectedTags = new Set(TM.state.persistentSelectedTags);
+
+            // Update selected tags display and persist selection
+            try {
+                const selectedTagObjects = TM.getSelectedTagObjects ? TM.getSelectedTagObjects() : [];
+                if (typeof TM.updateSelectedTags === 'function') TM.updateSelectedTags(selectedTagObjects);
+            } catch (err) {
+                console.warn('Delegated handler failed to update selected tags:', err);
+            }
+
+            setTimeout(() => {
+                try { TM.saveSelectedTagsToBackend && TM.saveSelectedTagsToBackend(); } catch (_) {}
+                try { TM.saveSelectionState && TM.saveSelectionState('checkbox_delegated'); } catch (_) {}
+            }, 50);
+        };
+
+        // Click fallback to ensure pointer events/disabled state are cleared
+        const delegatedClick = function(e) {
+            const el = e.target;
+            if (!el || !el.classList || !el.classList.contains('tag-checkbox')) return;
+            if (el.hasAttribute('data-reordering') || el.hasAttribute('data-drag-disabled')) {
+                el.removeAttribute('data-reordering');
+                el.removeAttribute('data-drag-disabled');
+                el.style.pointerEvents = 'auto';
+            }
+            el.disabled = false;
+            el.style.pointerEvents = 'auto';
+        };
+
+        document.addEventListener('change', delegatedChange, true);
+        document.addEventListener('click', delegatedClick, true);
+        console.log('✅ Delegated checkbox handlers installed');
+    } catch (e) {
+        console.warn('Failed to install delegated checkbox handlers:', e);
+    }
+})();
         if (TagManager.debouncedUpdateAvailableTags) {
             window.updateAvailableTags = TagManager.debouncedUpdateAvailableTags.bind(TagManager);
         }
