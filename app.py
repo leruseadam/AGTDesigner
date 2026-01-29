@@ -604,8 +604,9 @@ _excel_processor_reset_flag = False  # Flag to track when processor has been exp
 # Unique identifier for this Flask server instance (changes on restart)
 SERVER_INSTANCE_ID = str(uuid.uuid4())
 
-# Global ProductDatabase instance
-_product_database = None
+# Global ProductDatabase instances (one per store)
+_product_databases = {}  # store_name -> ProductDatabase instance
+_product_database_lock = threading.Lock()
 
 # Global JSONMatcher instance
 _json_matcher = None
@@ -1411,32 +1412,47 @@ def _resolve_database_path_for_store(store_name: Optional[str] = None) -> Tuple[
 
 
 def get_product_database(store_name=None):
-    """Lazy load ProductDatabase to avoid startup delay."""
-    global _product_database
-    
+    """Lazy load ProductDatabase per store to avoid startup delay and cross-store leakage.
+
+    Returns a ProductDatabase instance specific to the requested store. Instances are cached
+    in `_product_databases` keyed by resolved store name. A lock protects creation so
+    multiple concurrent requests won't race to initialize the same DB.
+    """
+    global _product_databases, _product_database_lock
+
     if store_name is None:
         logging.warning("get_product_database called without store name; attempting fallback resolution.")
-    
+
     db_path, resolved_store = _resolve_database_path_for_store(store_name)
     if not db_path:
         raise FileNotFoundError(f"No product database file available for store '{store_name}'. Upload the database via the admin tools.")
 
-    effective_store = resolved_store or store_name
+    effective_store = resolved_store or (store_name or '')
 
-    # Check if reload is needed
-    current_store_in_db = getattr(_product_database, '_store_name', None) if _product_database else None
-    current_db_path = getattr(_product_database, 'db_path', None) if _product_database else None
-    needs_reload = (_product_database is None or current_store_in_db != effective_store or current_db_path != db_path)
+    # Use a per-store cached ProductDatabase
+    with _product_database_lock:
+        product_db = _product_databases.get(effective_store)
+        current_db_path = getattr(product_db, 'db_path', None) if product_db else None
 
-    if needs_reload:
-        from src.core.data.product_database import ProductDatabase
-        _product_database = ProductDatabase(db_path)
-        _product_database._store_name = effective_store
-        if getattr(_product_database, 'db_path', db_path) != db_path:
-            logging.warning(f"ProductDatabase db_path mismatch: {_product_database.db_path} != {db_path}")
-        _product_database.init_database()
+        # If missing or points to a different file, (re)create
+        if product_db is None or current_db_path != db_path:
+            from src.core.data.product_database import ProductDatabase
+            product_db = ProductDatabase(db_path)
+            product_db._store_name = effective_store
+            # Ensure db_path attribute is set for future comparisons
+            try:
+                product_db.db_path = db_path
+            except Exception:
+                pass
 
-    return _product_database
+            if getattr(product_db, 'db_path', db_path) != db_path:
+                logging.warning(f"ProductDatabase db_path mismatch: {getattr(product_db,'db_path',None)} != {db_path}")
+
+            # Initialize DB (build indices/caches as needed)
+            product_db.init_database()
+            _product_databases[effective_store] = product_db
+
+    return _product_databases[effective_store]
 
 # Local override: always try to use the Bothell DB file if present
 def _get_bothell_product_db():
@@ -6189,11 +6205,11 @@ def get_saved_tag_lists():
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # Get lists for the current store and global lists (store is null/empty)
+            # Get lists only for the current store (ensure lists are store-scoped)
             cursor.execute('''
                 SELECT id, name, store, tags, created_at, updated_at
                 FROM saved_tag_lists
-                WHERE store = ? OR store IS NULL OR store = ''
+                WHERE store = ?
                 ORDER BY updated_at DESC
             ''', (store,))
 
@@ -6243,11 +6259,11 @@ def save_tag_list():
         with db_connection(db_path) as conn:
             cursor = conn.cursor()
 
-            # Check if a list with this name already exists for this store
+            # Check if a list with this name already exists for this exact store
             cursor.execute('''
                 SELECT id FROM saved_tag_lists
-                WHERE name = ? AND (store = ? OR (store IS NULL AND ? IS NULL) OR (store = '' AND ? = ''))
-            ''', (name, store, store, store))
+                WHERE name = ? AND store = ?
+            ''', (name, store))
 
             existing = cursor.fetchone()
 
@@ -6309,6 +6325,13 @@ def get_saved_tag_list(list_id):
             if not row:
                 return jsonify({'error': 'Tag list not found'}), 404
 
+            # Enforce store scoping: only allow access to lists for the current selected store
+            requested_store = row['store'] or ''
+            current_store = session.get('selected_store', '')
+            if requested_store != current_store:
+                logging.warning(f"Unauthorized access attempt to saved list {list_id} (list_store={requested_store} current_store={current_store})")
+                return jsonify({'error': 'Tag list not found'}), 404
+
             tags = json.loads(row['tags']) if row['tags'] else []
 
             return jsonify({
@@ -6338,19 +6361,24 @@ def delete_saved_tag_list(list_id):
         with db_connection(db_path) as conn:
             cursor = conn.cursor()
 
-            # Check if list exists
-            cursor.execute('SELECT name FROM saved_tag_lists WHERE id = ?', (list_id,))
+            # Check if list exists and belongs to current store
+            cursor.execute('SELECT name, store FROM saved_tag_lists WHERE id = ?', (list_id,))
             row = cursor.fetchone()
 
             if not row:
                 return jsonify({'error': 'Tag list not found'}), 404
 
             list_name = row[0]
+            list_store = row[1] or ''
+            current_store = session.get('selected_store', '')
+            if list_store != current_store:
+                logging.warning(f"Unauthorized delete attempt for list {list_id} (list_store={list_store} current_store={current_store})")
+                return jsonify({'error': 'Tag list not found'}), 404
 
             cursor.execute('DELETE FROM saved_tag_lists WHERE id = ?', (list_id,))
             conn.commit()
 
-            logging.info(f"Deleted saved tag list '{list_name}' (ID: {list_id})")
+            logging.info(f"Deleted saved tag list '{list_name}' (ID: {list_id}) for store '{current_store}'")
 
             return jsonify({
                 'success': True,
@@ -6376,7 +6404,7 @@ def load_saved_tag_list(list_id):
             cursor = conn.cursor()
 
             cursor.execute('''
-                SELECT id, name, tags
+                SELECT id, name, tags, store
                 FROM saved_tag_lists
                 WHERE id = ?
             ''', (list_id,))
@@ -6384,6 +6412,13 @@ def load_saved_tag_list(list_id):
             row = cursor.fetchone()
 
             if not row:
+                return jsonify({'error': 'Tag list not found'}), 404
+
+            # Enforce store scoping: only allow loading lists for the current selected store
+            list_store = row['store'] or ''
+            current_store = session.get('selected_store', '')
+            if list_store != current_store:
+                logging.warning(f"Unauthorized load attempt for list {list_id} (list_store={list_store} current_store={current_store})")
                 return jsonify({'error': 'Tag list not found'}), 404
 
             saved_tags = json.loads(row['tags']) if row['tags'] else []
