@@ -5950,21 +5950,46 @@
       overflow-y: visible !important;
     }
 
-    /* Card styling within the modal */
+    /* Card styling within the modal - dark cards for dark modal */
     #detailedJsonMatchModal .card {
-      background: white !important;
-      color: #1a1a2e !important;
-      border: 1px solid #dee2e6 !important;
+      background: rgba(40, 40, 60, 0.95) !important;
+      color: #ffffff !important;
+      border: 1px solid rgba(255, 255, 255, 0.2) !important;
     }
 
     #detailedJsonMatchModal .card-header {
-      background: #e9ecef !important;
-      color: #1a1a2e !important;
-      border-bottom: 1px solid #dee2e6 !important;
+      background: rgba(60, 60, 80, 0.95) !important;
+      color: #ffffff !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
     }
 
     #detailedJsonMatchModal .card-body {
-      color: #1a1a2e !important;
+      color: #ffffff !important;
+    }
+
+    /* Override bg-info and bg-success panels inside detailed modal */
+    #detailedJsonMatchModal .bg-info,
+    #detailedJsonMatchModal .bg-success,
+    #detailedJsonMatchModal .bg-secondary,
+    #detailedJsonMatchModal [class*="bg-opacity"] {
+      background: rgba(60, 60, 80, 0.8) !important;
+      color: #ffffff !important;
+    }
+
+    /* Make all text-muted visible in detailed modal */
+    #detailedJsonMatchModal .text-muted {
+      color: rgba(200, 200, 220, 0.9) !important;
+    }
+
+    /* Ensure strong and small text are visible */
+    #detailedJsonMatchModal .card-body strong,
+    #detailedJsonMatchModal .card-body small,
+    #detailedJsonMatchModal .card-body em {
+      color: #ffffff !important;
+    }
+
+    #detailedJsonMatchModal .card-body small.text-muted {
+      color: rgba(200, 200, 220, 0.9) !important;
     }
 
     /* Form controls in JSON match modals - dark text */
