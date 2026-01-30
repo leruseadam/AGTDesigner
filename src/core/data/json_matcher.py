@@ -2072,12 +2072,14 @@ class JSONMatcher:
                     weight_bonus = 0.05
 
             # --- BEGIN: Pre-roll pack matching ---
-            # Check for pre-roll pack matching (2pk, 5pk, 10pk)
+            # Check for pre-roll pack matching (2pk, 5pk, 10pk) - only if both have pack indicators
             preroll_pack_bonus = 0.0
-            pack_match_score = self._match_preroll_pack(json_name_raw, json_weight, cache_name_raw)
-            if pack_match_score is not None:
-                preroll_pack_bonus = pack_match_score * 0.3  # Up to 0.3 bonus for perfect pack match
-                logging.debug(f"Pre-roll pack match score: {pack_match_score:.2f}, bonus: {preroll_pack_bonus:.2f}")
+            json_name_lower = json_name_raw.lower()
+            cache_name_lower = cache_name_raw.lower()
+            if ('pk' in json_name_lower or 'pack' in json_name_lower) and ('pk' in cache_name_lower or 'pack' in cache_name_lower):
+                pack_match_score = self._match_preroll_pack(json_name_raw, json_weight, cache_name_raw)
+                if pack_match_score is not None:
+                    preroll_pack_bonus = pack_match_score * 0.3  # Up to 0.3 bonus for perfect pack match
             # --- END: Pre-roll pack matching ---
             # --- END: Enhanced weight matching ---
             
@@ -6578,36 +6580,47 @@ class JSONMatcher:
                     return best_match, 0.5, "Weight + type based match"
 
             # Step 7b: Try intelligent pre-roll pack matching for products like "2pk", "5pk", "10pk"
-            # This matches JSON products with pack indicators to database products like "0.5g x 2 Pack"
-            json_pack_info = self._extract_preroll_pack_info(json_name)
-            if json_pack_info and json_pack_info.get('pack_count'):
-                pack_count = json_pack_info['pack_count']
-                logging.debug(f"🔍 PRE-ROLL PACK DETECTION: '{json_name}' → detected {pack_count}pk (expected total: {json_pack_info['total_weight']}g)")
+            # Only run if the JSON name contains pack indicators to avoid slow iteration
+            pack_pattern = re.search(r'(\d+)\s*pk\b|\d+\s*pack\b|x\s*\d+\s*pack', json_name.lower())
+            if pack_pattern:
+                json_pack_info = self._extract_preroll_pack_info(json_name)
+                if json_pack_info and json_pack_info.get('pack_count'):
+                    pack_count = json_pack_info['pack_count']
+                    logging.debug(f"🔍 PRE-ROLL PACK DETECTION: '{json_name}' → detected {pack_count}pk")
 
-                # Search for matching pack products in the cache
-                pack_matches = []
-                for product in self.product_cache:
-                    cache_name = str(product.get("original_name", product.get("Product Name*", ""))).lower()
-                    cache_vendor = str(product.get("vendor", "")).lower()
+                    # Search for matching pack products in the cache (limit to 200 for performance)
+                    pack_matches = []
+                    checked = 0
+                    for product in self.product_cache:
+                        if checked >= 200:
+                            break
+                        cache_name = str(product.get("original_name", product.get("Product Name*", ""))).lower()
 
-                    # Vendor filtering if available
-                    if json_vendor and cache_vendor and json_vendor not in cache_vendor and cache_vendor not in json_vendor:
-                        continue
+                        # Quick filter: skip if cache doesn't have pack indicators
+                        if 'pack' not in cache_name and 'pk' not in cache_name:
+                            continue
 
-                    # Check for pack matching
-                    pack_score = self._match_preroll_pack(json_name, json_weight, cache_name)
-                    if pack_score is not None and pack_score > 0.5:
-                        match_dict = dict(product)
-                        match_dict['fuzzy_score'] = pack_score * 100
-                        match_dict['_preroll_pack_score'] = pack_score
-                        pack_matches.append(match_dict)
+                        checked += 1
+                        cache_vendor = str(product.get("vendor", "")).lower()
 
-                if pack_matches:
-                    pack_matches.sort(key=lambda x: x.get('fuzzy_score', 0), reverse=True)
-                    best_match = pack_matches[0]
-                    score = best_match.get('_preroll_pack_score', 0.6)
-                    logging.debug(f"✅ PRE-ROLL PACK MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f})")
-                    return best_match, score, f"Pre-roll pack match ({pack_count}pk)"
+                        # Vendor filtering if available
+                        if json_vendor and cache_vendor and json_vendor not in cache_vendor and cache_vendor not in json_vendor:
+                            continue
+
+                        # Check for pack matching
+                        pack_score = self._match_preroll_pack(json_name, json_weight, cache_name)
+                        if pack_score is not None and pack_score > 0.5:
+                            match_dict = dict(product)
+                            match_dict['fuzzy_score'] = pack_score * 100
+                            match_dict['_preroll_pack_score'] = pack_score
+                            pack_matches.append(match_dict)
+
+                    if pack_matches:
+                        pack_matches.sort(key=lambda x: x.get('fuzzy_score', 0), reverse=True)
+                        best_match = pack_matches[0]
+                        score = best_match.get('_preroll_pack_score', 0.6)
+                        logging.debug(f"✅ PRE-ROLL PACK MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f})")
+                        return best_match, score, f"Pre-roll pack match ({pack_count}pk)"
 
             # Step 8: Try comprehensive multi-field matching with all available data
             comprehensive_matches = self._find_comprehensive_matches(json_item)
@@ -6975,12 +6988,13 @@ class JSONMatcher:
                         score += 0.25
                         match_reasons.append(f"package_count:{json_pk_match.group(1)}")
 
-                # Strategy 3b: Intelligent pre-roll pack matching
-                json_weight = str(json_item.get("weight", ""))
-                preroll_pack_score = self._match_preroll_pack(json_name, json_weight, product_name)
-                if preroll_pack_score is not None and preroll_pack_score > 0.3:
-                    score += preroll_pack_score * 0.35
-                    match_reasons.append(f"preroll_pack_match:{preroll_pack_score:.2f}")
+                # Strategy 3b: Intelligent pre-roll pack matching (only if both have pack indicators)
+                if ('pk' in json_name or 'pack' in json_name) and ('pk' in product_name or 'pack' in product_name):
+                    json_weight = str(json_item.get("weight", ""))
+                    preroll_pack_score = self._match_preroll_pack(json_name, json_weight, product_name)
+                    if preroll_pack_score is not None and preroll_pack_score > 0.3:
+                        score += preroll_pack_score * 0.35
+                        match_reasons.append(f"preroll_pack_match:{preroll_pack_score:.2f}")
                 
                 # Strategy 4: Weight matching (3.4oz, 1oz, etc.)
                 json_weight_match = re.search(r'(\d+\.?\d*)oz', json_name)
@@ -8004,11 +8018,14 @@ class JSONMatcher:
         if not json_weight or not cache_name:
             return False
 
-        # Check for pre-roll pack matching first
+        # Check for pre-roll pack matching first (only if both have pack indicators)
         if json_name:
-            pack_match_score = self._match_preroll_pack(json_name, json_weight, cache_name)
-            if pack_match_score is not None and pack_match_score > 0.5:
-                return True
+            json_lower = json_name.lower()
+            cache_lower = cache_name.lower()
+            if ('pk' in json_lower or 'pack' in json_lower) and ('pk' in cache_lower or 'pack' in cache_lower):
+                pack_match_score = self._match_preroll_pack(json_name, json_weight, cache_name)
+                if pack_match_score is not None and pack_match_score > 0.5:
+                    return True
 
         # Extract weight from cache name using regex
         weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|mg)', cache_name.lower())
