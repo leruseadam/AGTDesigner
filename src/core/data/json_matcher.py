@@ -364,6 +364,9 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
 
     # Additional product-name based heuristics
     if product_name_lower:
+        # RSO/CO2 tankers - check FIRST before other concentrate types
+        if any(keyword in product_name_lower for keyword in ["rso", "applicator", "tanker", "syringe", "co2 oil", "co2 extract", "ethanol extract", "alcohol extract"]):
+            return _log_and_return("RSO/CO2 Tankers", 'name_rso_co2_keywords')
         if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
             return _log_and_return("Pre-Roll", 'name_preroll_keywords')
         if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "vape", "510", "all-in-one", "aio", "disposable"]):
@@ -7794,12 +7797,13 @@ class JSONMatcher:
         # Define product type categories
         type_categories = {
             'flower': ['flower', 'bud', 'nug', 'usable marijuana'],
-            'concentrate': ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate'],
-            'vape': ['vape', 'cartridge', 'cart', 'all-in-one'],
+            'concentrate': ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate', 'badder', 'diamonds', 'sauce', 'crumble'],
+            'vape': ['vape', 'cartridge', 'cart', 'all-in-one', 'disposable', 'vape cartridge'],
             'edible': ['edible', 'gummy', 'chocolate', 'cookie', 'brownie'],
             'pre-roll': ['pre-roll', 'preroll', 'joint', 'blunt'],
             'tincture': ['tincture', 'drops', 'sublingual'],
-            'topical': ['topical', 'cream', 'lotion', 'salve']
+            'topical': ['topical', 'cream', 'lotion', 'salve'],
+            'rso_co2': ['rso', 'co2', 'rso/co2 tankers', 'rso/co2', 'applicator', 'tanker', 'syringe', 'co2 extract', 'ethanol extract']
         }
         
         # Find JSON type category
@@ -9194,9 +9198,10 @@ class JSONMatcher:
             'capsules': ['capsule', 'pill', 'cap'],
             'topicals': ['topical ointment', 'topical', 'cream', 'balm', 'lotion', 'salve'],
             'flower': ['core flower', 'flower', 'bud', 'nug'],
-            'concentrates': ['concentrate', 'wax', 'shatter', 'oil', 'resin'],
-            'vapes': ['vape', 'cartridge', 'cart', 'pen'],
-            'tinctures': ['tincture', 'drops', 'liquid edible']
+            'concentrates': ['concentrate', 'wax', 'shatter', 'resin', 'rosin', 'badder', 'diamonds', 'sauce', 'crumble', 'live resin'],
+            'vapes': ['vape', 'cartridge', 'cart', 'pen', 'vape cartridge', 'disposable'],
+            'tinctures': ['tincture', 'drops', 'liquid edible'],
+            'rso_co2': ['rso', 'co2', 'rso/co2 tankers', 'rso/co2', 'applicator', 'tanker', 'syringe', 'co2 extract', 'ethanol extract']
         }
         
         # Check if both types are in the same compatibility group
