@@ -557,6 +557,40 @@ p, span, div {
   max-width: 90vw !important;
 }
 
+/* Make the detailed JSON match modal take up more of the viewport so more matches are visible */
+#detailedJsonMatchModal .modal-dialog {
+  max-width: 96vw !important;
+  max-height: 96vh !important;
+}
+
+#detailedJsonMatchModal .modal-content {
+  height: 96vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#detailedJsonMatchModal .modal-body {
+  max-height: calc(96vh - 140px) !important; /* allow for header+footer */
+  overflow-y: auto !important;
+}
+
+/* Also apply to the simpler JSON modal */
+#jsonMatchModal .modal-dialog {
+  max-width: 96vw !important;
+  max-height: 96vh !important;
+}
+
+#jsonMatchModal .modal-content {
+  height: 96vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#jsonMatchModal .modal-body {
+  max-height: calc(96vh - 140px) !important;
+  overflow-y: auto !important;
+}
+
 #detailedJsonMatchModal .table td,
 #detailedJsonMatchModal .table th {
   padding: 0.85rem !important;
