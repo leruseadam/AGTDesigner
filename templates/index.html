@@ -5867,11 +5867,10 @@
     #detailedJsonMatchModal .modal-body p,
     #detailedJsonMatchModal .modal-body h6,
     #detailedJsonMatchModal .modal-body label,
-    #detailedJsonMatchModal .modal-body p,
-    #detailedJsonMatchModal .modal-body h6,
-    #detailedJsonMatchModal .modal-body label,
+    #detailedJsonMatchModal .modal-body small,
+    #detailedJsonMatchModal .modal-body .text-muted,
     #detailedJsonMatchModal .modal-body .alert {
-      color: #1a1a2e !important;
+      color: rgba(255, 255, 255, 0.9) !important;
     }
 
     #jsonMatchModal .modal-body .text-info {
@@ -5879,7 +5878,7 @@
     }
 
     #detailedJsonMatchModal .modal-body .text-info {
-      color: #0077b3 !important;
+      color: #5bc0de !important;
     }
 
     #jsonMatchModal .modal-body .text-success {
@@ -5897,9 +5896,22 @@
     }
 
     #detailedJsonMatchModal .modal-footer {
-      background: #f1f3f4 !important;
-      border-top: 1px solid #dee2e6 !important;
+      background: rgba(30, 30, 50, 0.95) !important;
+      border-top: 1px solid rgba(255,255,255,0.1) !important;
       flex-shrink: 0;
+    }
+
+    #detailedJsonMatchModal .modal-footer .btn-glass,
+    #detailedJsonMatchModal .modal-footer .btn {
+      background: #3b82f6 !important;
+      color: #ffffff !important;
+      border: 1px solid #3b82f6 !important;
+    }
+
+    #detailedJsonMatchModal .modal-footer .btn-glass:hover,
+    #detailedJsonMatchModal .modal-footer .btn:hover {
+      background: #2563eb !important;
+      border-color: #2563eb !important;
     }
 
     #jsonMatchModal .btn-close {
