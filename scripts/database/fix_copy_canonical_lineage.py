@@ -23,6 +23,9 @@ import time
 from datetime import datetime
 
 DEFAULT_DB = os.path.join(os.getcwd(), 'uploads', 'product_database.db')
+\
+# If a store-specific DB exists (e.g. product_database_AGT_Bothell.db), prefer it when --db not provided
+
 BACKUP_DIR = os.path.join(os.getcwd(), 'uploads', 'db_backups')
 
 
@@ -45,11 +48,35 @@ def normalize(s):
 def main():
     parser = argparse.ArgumentParser(description='Copy canonical lineage from strains to products')
     parser.add_argument('--db', default=DEFAULT_DB, help='Path to product_database.db')
+    parser.add_argument('--store', default=None, help='Optional store suffix (e.g. AGT_Bothell) to target product_database_<store>.db')
     parser.add_argument('--apply', action='store_true', help='Apply updates (default is dry-run)')
     parser.add_argument('--verbose', action='store_true', help='Verbose logging')
     args = parser.parse_args()
 
     db_path = args.db
+
+    # If user provided --store, prefer uploads/product_database_<store>.db when --db not set
+    if args.store and db_path == DEFAULT_DB:
+        candidate = os.path.join(os.getcwd(), 'uploads', f'product_database_{args.store}.db')
+        if os.path.exists(candidate):
+            db_path = candidate
+            if args.verbose:
+                print(f"Detected store-specific DB for --store {args.store}: {db_path}")
+
+    # Auto-detect a Bothell DB if default and a Bothell file exists
+    if db_path == DEFAULT_DB:
+        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        try:
+            for fname in os.listdir(uploads_dir):
+                if fname.lower().startswith('product_database') and 'bothell' in fname.lower() and fname.lower().endswith('.db'):
+                    candidate = os.path.join(uploads_dir, fname)
+                    db_path = candidate
+                    if args.verbose:
+                        print(f"Auto-detected Bothell DB: {db_path}")
+                    break
+        except Exception:
+            pass
+
     if not os.path.exists(db_path):
         print(f"ERROR: Database not found at: {db_path}")
         return 2
