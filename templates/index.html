@@ -5801,15 +5801,16 @@
       backdrop-filter: blur(12px) saturate(120%) !important;
     }
 
+    /* Dark glass theme for detailed JSON modal - improves contrast on dark overlays */
     #detailedJsonMatchModal .modal-content {
-      background: var(--glass-bg, rgba(255,255,255,0.75)) !important;
-      color: var(--text-primary, #1a1a2e) !important;
+      background: rgba(12,12,20,0.88) !important;
+      color: #ffffff !important;
       height: 100% !important;
       max-height: 96vh !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
-      border: var(--glass-border, 1px solid rgba(255,255,255,0.08)) !important;
+      border: 1px solid rgba(255,255,255,0.04) !important;
       backdrop-filter: blur(8px) saturate(120%) !important;
     }
 
@@ -5895,10 +5896,13 @@
       flex-shrink: 0;
     }
 
+    /* Make footer visually continuous with content and remove the bright divider */
     #detailedJsonMatchModal .modal-footer {
-      background: rgba(30, 30, 50, 0.95) !important;
-      border-top: 1px solid rgba(255,255,255,0.1) !important;
+      background: transparent !important;
+      border-top: none !important;
       flex-shrink: 0;
+      padding-top: 0.75rem !important;
+      padding-bottom: 0.75rem !important;
     }
 
     #detailedJsonMatchModal .modal-footer .btn-glass,
@@ -5906,6 +5910,7 @@
       background: #3b82f6 !important;
       color: #ffffff !important;
       border: 1px solid #3b82f6 !important;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25) !important;
     }
 
     #detailedJsonMatchModal .modal-footer .btn-glass:hover,
@@ -5914,12 +5919,24 @@
       border-color: #2563eb !important;
     }
 
-    #jsonMatchModal .btn-close {
+    /* Ensure close icon contrasts on dark modal */
+    #jsonMatchModal .btn-close,
+    #detailedJsonMatchModal .btn-close,
+    #detailedJsonMatchModal .btn-close-white {
       filter: invert(1) !important;
+      opacity: 0.98 !important;
     }
 
-    #detailedJsonMatchModal .btn-close-white {
-      filter: none !important;
+    /* Add a subtle circular background to the close button for clarity */
+    #detailedJsonMatchModal .btn-close {
+      background: rgba(255,255,255,0.06) !important;
+      border-radius: 999px !important;
+      width: 40px !important;
+      height: 40px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 0 !important;
     }
 
     /* Match results list scrollable */

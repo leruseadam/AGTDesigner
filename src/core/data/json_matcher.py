@@ -2528,16 +2528,16 @@ class JSONMatcher:
                             if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
                                 candidates_to_check.append(cache_item)
                     else:
-                        # No vendor filter - check all items but limit to first 500 for performance
-                        candidates_to_check = self._sheet_cache[:500]
-                    
+                        # No vendor filter - check all items
+                        candidates_to_check = self._sheet_cache
+
                     # If vendor filtering found too few candidates, expand search
-                    if len(candidates_to_check) < 10 and current_vendor_filter:
-                        # Add top 100 candidates regardless of vendor for fallback
-                        candidates_to_check.extend(self._sheet_cache[:100])
-                    
-                    # PERFORMANCE: Limit candidates to check (max 200 for speed)
-                    candidates_to_check = candidates_to_check[:200]
+                    if len(candidates_to_check) < 50 and current_vendor_filter:
+                        # Add all candidates regardless of vendor for fallback
+                        candidates_to_check.extend(self._sheet_cache)
+
+                    # PERFORMANCE: Limit candidates to check (max 1000 for better coverage)
+                    candidates_to_check = candidates_to_check[:1000]
                     
                     # Match against filtered candidates
                     for cache_item in candidates_to_check:
@@ -2694,14 +2694,13 @@ class JSONMatcher:
                         from fuzzywuzzy import fuzz
                         name_similarity = fuzz.token_sort_ratio(json_name, db_name)
                         
-                        # Require at least 60% name similarity for ANY match (lowered from 70% for better discovery)
+                        # Require at least 40% name similarity for ANY match (lowered from 60% for better discovery)
                         # This allows legitimate matches like:
                         # - "Jet Fuel Gelato Vaporizer" → "Jet Fuel Gelato Live Resin" (75%+)
                         # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
-                        # - Products with slight variations in naming
-                        # But prevents wrong matches like:
-                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (below 60%)
-                        if name_similarity < 60:
+                        # - Products with different naming conventions but same strain
+                        # But prevents completely wrong matches
+                        if name_similarity < 40:
                             logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
@@ -2718,10 +2717,10 @@ class JSONMatcher:
                         else:
                             name_similarity_required = True
                 
-                if best_match is not None and best_score >= 100.0:  # Very high confidence - auto-approve
+                if best_match is not None and best_score >= 80.0:  # High confidence - auto-approve (lowered from 100)
                     validated = True
-                    logging.info(f"✅ HIGH CONFIDENCE: Score {best_score:.1f} >= 100.0")
-                elif best_match is not None and best_score >= 50.0 and name_similarity_required:
+                    logging.info(f"✅ HIGH CONFIDENCE: Score {best_score:.1f} >= 80.0")
+                elif best_match is not None and best_score >= 30.0 and name_similarity_required:
                     # Medium confidence (50-100) - perform additional validation
                     json_name_str = product_name
                     db_name_str = str(best_match.get('Product Name*', '') or best_match.get('Description', '')).strip()
