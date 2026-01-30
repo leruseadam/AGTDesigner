@@ -3047,8 +3047,8 @@ const TagManager = {
 
             verboseLog(`💾 Saving ${selectedTagNames.length} selected tags to backend...`);
 
-            // Show a saving splash while the backend request is in flight
-            try { this.showSplash && this.showSplash('Saving selection...'); } catch (e) {}
+            // REMOVED: Don't show splash for individual selections - too annoying
+            // The save happens silently in the background
 
             const response = await fetch('/api/selected-tags', {
                 method: 'POST',
@@ -3071,14 +3071,7 @@ const TagManager = {
 
             const result = await response.json();
             verboseLog('✅ Selected tags saved to backend:', result);
-            try {
-                this.hideSplash && this.hideSplash();
-                this.showModal && this.showModal({
-                    title: 'Saved',
-                    message: `Saved ${selectedTagNames.length} selected tags.`,
-                    buttons: [{ text: 'OK', value: 'ok', primary: true }]
-                });
-            } catch (e) {}
+            // REMOVED: Don't show success modal for individual selections - saves silently
         } catch (error) {
             console.warn('⚠️ Error saving selected tags to backend:', error);
         }
