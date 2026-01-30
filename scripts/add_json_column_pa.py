@@ -23,6 +23,7 @@ import os
 import shutil
 import time
 import json
+import glob
 from typing import List
 
 
@@ -106,70 +107,87 @@ def create_index(conn: sqlite3.Connection, table: str, index_name: str = 'idx_pr
 
 def main():
     p = argparse.ArgumentParser(description='Add JSON column to products DB (safe: backups).')
-    p.add_argument('--db', required=True, help='Path to the SQLite products DB')
+    p.add_argument('--db', required=True, help='Path to the SQLite products DB, or a directory, or a glob pattern (e.g. uploads/*.db)')
     p.add_argument('--apply', action='store_true', help='Perform changes (default: dry-run)')
     p.add_argument('--populate-from', help="Populate JSON from an existing column name or 'auto' to build from common fields")
     p.add_argument('--create-index', action='store_true', help='Create a helper index on the JSON column')
     args = p.parse_args()
 
-    db = args.db
-    if not os.path.exists(db):
-        print('ERROR: DB file not found:', db)
-        return
+    db_input = args.db
 
-    print('DB:', db)
+    # Expand db_input to a list of database files
+    db_paths = []
+    if os.path.isdir(db_input):
+        # collect .db files in directory
+        for p in sorted(os.listdir(db_input)):
+            if p.lower().endswith('.db'):
+                db_paths.append(os.path.join(db_input, p))
+    elif any(ch in db_input for ch in ['*', '?', '[']):
+        # glob pattern
+        db_paths = sorted(glob.glob(db_input))
+    else:
+        # single file
+        db_paths = [db_input]
+
+    if not db_paths:
+        print('ERROR: no database files matched:', db_input)
+        return
 
     if not args.apply:
         print('DRY-RUN: no changes will be made. Use --apply to modify the DB.')
 
-    # Connect (use timeout to avoid locks)
-    conn = sqlite3.connect(db, timeout=20)
+    for db in db_paths:
+        print('\n=== Processing DB:', db, '===')
+        if not os.path.exists(db):
+            print('  SKIP: file not found')
+            continue
 
-    try:
-        if table_has_column(conn, 'products', 'JSON'):
-            print('Column JSON already exists in products table. Nothing to do.')
-            return
+        conn = sqlite3.connect(db, timeout=20)
+        try:
+            if table_has_column(conn, 'products', 'JSON'):
+                print('  Column JSON already exists in products table. Skipping.')
+                continue
 
-        if not args.apply:
-            print('Would add column: ALTER TABLE products ADD COLUMN "JSON" TEXT;')
+            if not args.apply:
+                print('  Would add column: ALTER TABLE products ADD COLUMN "JSON" TEXT;')
+                if args.populate_from:
+                    if args.populate_from.lower() == 'auto':
+                        print('  Would populate JSON from auto-built fields (Product Name*, Product Type*, Product Strain, Price, Weight*)')
+                    else:
+                        print(f'  Would populate JSON from existing column: {args.populate_from}')
+                if args.create_index:
+                    print('  Would create index on JSON prefix substr(JSON,1,200)')
+                continue
+
+            # Apply changes: backup then alter
+            bak = backup_db(db)
+            print('  Backup created at', bak)
+
+            print('  Adding JSON column...')
+            add_column(conn, 'products', 'JSON', 'TEXT')
+            print('  Column added.')
+
             if args.populate_from:
                 if args.populate_from.lower() == 'auto':
-                    print('Would populate JSON from auto-built fields (Product Name*, Product Type*, Product Strain, Price, Weight*)')
+                    fields = ['Product Name*', 'Product Type*', 'Product Strain', 'Price', 'Weight*', 'Description']
+                    print('  Populating JSON column by building JSON from fields:', fields)
+                    updated = populate_auto(conn, 'products', fields)
+                    print(f'  Populated {updated} rows (auto).')
                 else:
-                    print(f'Would populate JSON from existing column: {args.populate_from}')
+                    source = args.populate_from
+                    print('  Populating JSON column from existing column:', source)
+                    updated = populate_from_column(conn, 'products', f'"{source}"')
+                    print(f'  Populated {updated} rows from {source}.')
+
             if args.create_index:
-                print('Would create index on JSON prefix substr(JSON,1,200)')
-            return
+                print('  Creating JSON substring index...')
+                create_index(conn, 'products')
+                print('  Index created.')
 
-        # Apply changes: backup then alter
-        bak = backup_db(db)
-        print('Backup created at', bak)
+            print('  Done for DB.')
 
-        print('Adding JSON column...')
-        add_column(conn, 'products', 'JSON', 'TEXT')
-        print('Column added.')
-
-        if args.populate_from:
-            if args.populate_from.lower() == 'auto':
-                fields = ['Product Name*', 'Product Type*', 'Product Strain', 'Price', 'Weight*', 'Description']
-                print('Populating JSON column by building JSON from fields:', fields)
-                updated = populate_auto(conn, 'products', fields)
-                print(f'Populated {updated} rows (auto).')
-            else:
-                source = args.populate_from
-                print('Populating JSON column from existing column:', source)
-                updated = populate_from_column(conn, 'products', f'"{source}"')
-                print(f'Populated {updated} rows from {source}.')
-
-        if args.create_index:
-            print('Creating JSON substring index...')
-            create_index(conn, 'products')
-            print('Index created.')
-
-        print('Done.')
-
-    finally:
-        conn.close()
+        finally:
+            conn.close()
 
 
 if __name__ == '__main__':
