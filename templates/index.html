@@ -11667,8 +11667,10 @@
   
   <!-- JSON Match Modal -->
   <style>
-    /* Tighter, cleaner JSON modal styles */
-    #jsonMatchModal .modal-body { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); }
+    /* JSON modal: ensure large, centered, scrollable, glass-card appearance */
+    #jsonMatchModal .modal-dialog { max-width: 96vw !important; width: 96vw !important; max-height: 96vh !important; height: 96vh !important; margin: 2vh auto !important; }
+    #jsonMatchModal .modal-content { height: 100% !important; max-height: 96vh !important; display:flex !important; flex-direction:column !important; overflow: hidden !important; background: var(--glass-bg, rgba(255,255,255,0.75)) !important; backdrop-filter: blur(8px) saturate(120%) !important; border: var(--glass-border, 1px solid rgba(255,255,255,0.08)) !important; }
+    #jsonMatchModal .modal-body { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); overflow-y:auto !important; flex:1 1 auto !important; padding:1.25rem !important; }
     #jsonMatchModal .input-group .form-control { border-right: 0; }
     #jsonMatchModal .json-actions { gap: .5rem; }
     #matchedProductsList { background: rgba(255,255,255,0.03); border-radius: .5rem; }
@@ -11732,6 +11734,14 @@
   </div>
 
   <!-- Detailed JSON Match Comparison Modal -->
+  <style>
+    /* Ensure Detailed JSON Match modal is large, scrollable, and uses glass-card styling */
+    #detailedJsonMatchModal .modal-dialog { max-width: 96vw !important; width: 96vw !important; max-height: 96vh !important; height: 96vh !important; margin: 2vh auto !important; }
+    #detailedJsonMatchModal .modal-content { height: 100% !important; max-height: 96vh !important; display:flex !important; flex-direction:column !important; overflow: hidden !important; background: var(--glass-bg, rgba(255,255,255,0.75)) !important; backdrop-filter: blur(8px) saturate(120%) !important; border: var(--glass-border, 1px solid rgba(255,255,255,0.08)) !important; }
+    #detailedJsonMatchModal .modal-body { overflow-y:auto !important; flex:1 1 auto !important; padding:1.25rem !important; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); }
+    #detailedJsonMatchModal .modal-header { background: transparent !important; border-bottom: none !important; }
+    #detailedJsonMatchModal .modal-footer { background: transparent !important; border-top: none !important; }
+  </style>
   <div class="modal fade" id="detailedJsonMatchModal" tabindex="-1" aria-labelledby="detailedJsonMatchModalLabel" inert>
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
       <div class="modal-content">
