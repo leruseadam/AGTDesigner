@@ -5789,7 +5789,18 @@
       margin: 2vh auto !important;
     }
 
-    #jsonMatchModal .modal-content,
+    #jsonMatchModal .modal-content {
+      background: rgba(30, 30, 50, 0.95) !important;
+      color: #ffffff !important;
+      height: 100% !important;
+      max-height: 96vh !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      border: 1px solid rgba(255,255,255,0.15) !important;
+      backdrop-filter: blur(12px) saturate(120%) !important;
+    }
+
     #detailedJsonMatchModal .modal-content {
       background: var(--glass-bg, rgba(255,255,255,0.75)) !important;
       color: var(--text-primary, #1a1a2e) !important;
@@ -5802,7 +5813,13 @@
       backdrop-filter: blur(8px) saturate(120%) !important;
     }
 
-    #jsonMatchModal .modal-header,
+    #jsonMatchModal .modal-header {
+      background: transparent !important;
+      color: #ffffff !important;
+      flex-shrink: 0 !important;
+      border-bottom: none !important;
+    }
+
     #detailedJsonMatchModal .modal-header {
       background: transparent !important;
       color: var(--text-primary, #1a1a2e) !important;
@@ -5810,12 +5827,24 @@
       border-bottom: none !important;
     }
 
-    #jsonMatchModal .modal-title,
+    #jsonMatchModal .modal-title {
+      color: #ffffff !important;
+    }
+
     #detailedJsonMatchModal .modal-title {
       color: var(--text-primary, #1a1a2e) !important;
     }
 
-    #jsonMatchModal .modal-body,
+    #jsonMatchModal .modal-body {
+      color: #ffffff !important;
+      background: transparent !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      padding: 1.25rem !important;
+    }
+
     #detailedJsonMatchModal .modal-body {
       color: var(--text-primary, #1a1a2e) !important;
       background: transparent !important;
@@ -5830,6 +5859,14 @@
     #jsonMatchModal .modal-body h6,
     #jsonMatchModal .modal-body label,
     #jsonMatchModal .modal-body .form-text,
+    #jsonMatchModal .modal-body .text-muted,
+    #jsonMatchModal .modal-body div {
+      color: rgba(255, 255, 255, 0.9) !important;
+    }
+
+    #detailedJsonMatchModal .modal-body p,
+    #detailedJsonMatchModal .modal-body h6,
+    #detailedJsonMatchModal .modal-body label,
     #detailedJsonMatchModal .modal-body p,
     #detailedJsonMatchModal .modal-body h6,
     #detailedJsonMatchModal .modal-body label,
@@ -5837,24 +5874,38 @@
       color: #1a1a2e !important;
     }
 
-    #jsonMatchModal .modal-body .text-info,
+    #jsonMatchModal .modal-body .text-info {
+      color: #5bc0de !important;
+    }
+
     #detailedJsonMatchModal .modal-body .text-info {
       color: #0077b3 !important;
     }
 
-    #jsonMatchModal .modal-body .text-success,
+    #jsonMatchModal .modal-body .text-success {
+      color: #5cb85c !important;
+    }
+
     #detailedJsonMatchModal .modal-body .text-success {
       color: #28a745 !important;
     }
 
-    #jsonMatchModal .modal-footer,
+    #jsonMatchModal .modal-footer {
+      background: rgba(30, 30, 50, 0.9) !important;
+      border-top: 1px solid rgba(255,255,255,0.1) !important;
+      flex-shrink: 0;
+    }
+
     #detailedJsonMatchModal .modal-footer {
       background: #f1f3f4 !important;
       border-top: 1px solid #dee2e6 !important;
       flex-shrink: 0;
     }
 
-    #jsonMatchModal .btn-close-white,
+    #jsonMatchModal .btn-close {
+      filter: invert(1) !important;
+    }
+
     #detailedJsonMatchModal .btn-close-white {
       filter: none !important;
     }
