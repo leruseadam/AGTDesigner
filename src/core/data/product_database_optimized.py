@@ -202,6 +202,7 @@ class OptimizedProductDatabase:
                         vendor TEXT,
                         brand TEXT,
                         description TEXT,
+                        json TEXT,  -- Original Description value before processing
                         weight TEXT,
                         units TEXT,
                         price TEXT,

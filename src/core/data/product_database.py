@@ -564,6 +564,7 @@ class ProductDatabase:
                         "Vendor/Supplier*" TEXT,
                         "Product Brand" TEXT,
                         "Description" TEXT,
+                        "JSON" TEXT,  -- Original Description value before processing
                         "Weight*" TEXT,
                         "Units" TEXT,
                         "Price" TEXT,
@@ -869,6 +870,7 @@ class ProductDatabase:
                     "Vendor/Supplier*" TEXT,
                     "Product Brand" TEXT,
                     "Description" TEXT,
+                    "JSON" TEXT,  -- Original Description value before processing
                     "Weight*" TEXT,
                     "Units" TEXT,
                     "Price" TEXT,

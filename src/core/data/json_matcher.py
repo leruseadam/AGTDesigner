@@ -2070,6 +2070,15 @@ class JSONMatcher:
                     weight_bonus = 0.1
                 elif json_weight in cache_weight or cache_weight in json_weight:
                     weight_bonus = 0.05
+
+            # --- BEGIN: Pre-roll pack matching ---
+            # Check for pre-roll pack matching (2pk, 5pk, 10pk)
+            preroll_pack_bonus = 0.0
+            pack_match_score = self._match_preroll_pack(json_name_raw, json_weight, cache_name_raw)
+            if pack_match_score is not None:
+                preroll_pack_bonus = pack_match_score * 0.3  # Up to 0.3 bonus for perfect pack match
+                logging.debug(f"Pre-roll pack match score: {pack_match_score:.2f}, bonus: {preroll_pack_bonus:.2f}")
+            # --- END: Pre-roll pack matching ---
             # --- END: Enhanced weight matching ---
             
             # --- BEGIN: Enhanced description matching ---
@@ -2154,7 +2163,8 @@ class JSONMatcher:
             
             # Apply bonuses for additional field matches (with diminishing returns)
             # Description bonus gets highest priority since it's the most comprehensive field
-            final_score = base_score + (description_bonus * 1.0) + (brand_bonus * 0.8) + (type_bonus * 0.6) + (weight_bonus * 0.4)
+            # Pre-roll pack bonus gets high weight since it's a strong matching signal
+            final_score = base_score + (description_bonus * 1.0) + (brand_bonus * 0.8) + (type_bonus * 0.6) + (weight_bonus * 0.4) + (preroll_pack_bonus * 1.0)
             final_score = min(1.0, final_score)  # Cap at 1.0
             
             # Additional penalty for mismatched product types
@@ -6566,7 +6576,39 @@ class JSONMatcher:
                     best_match = weight_matches[0]
                     logging.debug(f"✅ WEIGHT+TYPE MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}'")
                     return best_match, 0.5, "Weight + type based match"
-            
+
+            # Step 7b: Try intelligent pre-roll pack matching for products like "2pk", "5pk", "10pk"
+            # This matches JSON products with pack indicators to database products like "0.5g x 2 Pack"
+            json_pack_info = self._extract_preroll_pack_info(json_name)
+            if json_pack_info and json_pack_info.get('pack_count'):
+                pack_count = json_pack_info['pack_count']
+                logging.debug(f"🔍 PRE-ROLL PACK DETECTION: '{json_name}' → detected {pack_count}pk (expected total: {json_pack_info['total_weight']}g)")
+
+                # Search for matching pack products in the cache
+                pack_matches = []
+                for product in self.product_cache:
+                    cache_name = str(product.get("original_name", product.get("Product Name*", ""))).lower()
+                    cache_vendor = str(product.get("vendor", "")).lower()
+
+                    # Vendor filtering if available
+                    if json_vendor and cache_vendor and json_vendor not in cache_vendor and cache_vendor not in json_vendor:
+                        continue
+
+                    # Check for pack matching
+                    pack_score = self._match_preroll_pack(json_name, json_weight, cache_name)
+                    if pack_score is not None and pack_score > 0.5:
+                        match_dict = dict(product)
+                        match_dict['fuzzy_score'] = pack_score * 100
+                        match_dict['_preroll_pack_score'] = pack_score
+                        pack_matches.append(match_dict)
+
+                if pack_matches:
+                    pack_matches.sort(key=lambda x: x.get('fuzzy_score', 0), reverse=True)
+                    best_match = pack_matches[0]
+                    score = best_match.get('_preroll_pack_score', 0.6)
+                    logging.debug(f"✅ PRE-ROLL PACK MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f})")
+                    return best_match, score, f"Pre-roll pack match ({pack_count}pk)"
+
             # Step 8: Try comprehensive multi-field matching with all available data
             comprehensive_matches = self._find_comprehensive_matches(json_item)
             if comprehensive_matches:
@@ -6925,13 +6967,20 @@ class JSONMatcher:
                         match_reasons.append(f"brand_prefix:{prefix}")
                         break
                 
-                # Strategy 3: Package count matching (10pk, 5pk, etc.)
+                # Strategy 3: Package count matching (10pk, 5pk, etc.) with pre-roll intelligence
                 json_pk_match = re.search(r'(\d+)pk', json_name)
                 product_pk_match = re.search(r'(\d+)pk', product_name)
                 if json_pk_match and product_pk_match:
                     if json_pk_match.group(1) == product_pk_match.group(1):
                         score += 0.25
                         match_reasons.append(f"package_count:{json_pk_match.group(1)}")
+
+                # Strategy 3b: Intelligent pre-roll pack matching
+                json_weight = str(json_item.get("weight", ""))
+                preroll_pack_score = self._match_preroll_pack(json_name, json_weight, product_name)
+                if preroll_pack_score is not None and preroll_pack_score > 0.3:
+                    score += preroll_pack_score * 0.35
+                    match_reasons.append(f"preroll_pack_match:{preroll_pack_score:.2f}")
                 
                 # Strategy 4: Weight matching (3.4oz, 1oz, etc.)
                 json_weight_match = re.search(r'(\d+\.?\d*)oz', json_name)
@@ -7707,7 +7756,125 @@ class JSONMatcher:
             return float(weight_clean)
         except (ValueError, AttributeError):
             return None
-    
+
+    def _extract_preroll_pack_info(self, product_name: str) -> Optional[dict]:
+        """
+        Extract pre-roll pack information from product name.
+
+        Detects patterns like '2pk', '5pk', '10pk' and calculates expected weights:
+        - 2pk = 0.5g x 2 = 1g total
+        - 5pk = 0.5g x 5 = 2.5g total (user says 3.75g, but using standard 0.5g joints)
+        - 10pk = 0.5g x 10 = 5g total
+
+        Returns dict with pack_count, individual_weight, total_weight, or None if not a pack.
+        """
+        if not product_name:
+            return None
+
+        name_lower = product_name.lower()
+
+        # Check if this is a pre-roll product
+        preroll_keywords = ['pre-roll', 'preroll', 'pre roll', 'joint', 'cone', 'infused pre']
+        is_preroll = any(keyword in name_lower for keyword in preroll_keywords)
+
+        # Extract pack count from patterns like "2pk", "5pk", "10pk", "2 pk", "5 pack", "10pack"
+        pack_patterns = [
+            r'(\d+)\s*pk\b',           # 2pk, 5pk, 10pk
+            r'(\d+)\s*pack\b',         # 2pack, 5 pack, 10pack
+            r'x\s*(\d+)\s*pack',       # x 2 Pack, x 5 Pack
+            r'(\d+)\s*ct\b',           # 2ct, 5ct (count)
+            r'(\d+)\s*count\b',        # 2 count, 5count
+        ]
+
+        pack_count = None
+        for pattern in pack_patterns:
+            match = re.search(pattern, name_lower)
+            if match:
+                pack_count = int(match.group(1))
+                break
+
+        if pack_count is None:
+            return None
+
+        # Standard pre-roll individual weight is 0.5g
+        # Some may be different (1g joints, mini 0.35g, etc.) but 0.5g is most common
+        individual_weight = 0.5
+
+        # Check for individual weight hints in the name
+        individual_weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g\s*x\s*\d+', name_lower)
+        if individual_weight_match:
+            individual_weight = float(individual_weight_match.group(1))
+
+        total_weight = individual_weight * pack_count
+
+        return {
+            'pack_count': pack_count,
+            'individual_weight': individual_weight,
+            'total_weight': total_weight,
+            'is_preroll': is_preroll
+        }
+
+    def _match_preroll_pack(self, json_name: str, json_weight: str, cache_name: str) -> Optional[float]:
+        """
+        Intelligently match pre-roll packs based on pack count and weight.
+
+        Matching rules:
+        - 2pk with ~1g total should match "0.5g x 2 Pack" products
+        - 5pk with ~2.5g total should match "0.5g x 5 Pack" products
+        - 10pk with ~5g total should match "0.5g x 10 Pack" products
+
+        Returns a match score (0.0 to 1.0) or None if not applicable.
+        """
+        if not json_name or not cache_name:
+            return None
+
+        json_pack_info = self._extract_preroll_pack_info(json_name)
+        cache_pack_info = self._extract_preroll_pack_info(cache_name)
+
+        # Both must be packs for this matching to apply
+        if not json_pack_info or not cache_pack_info:
+            return None
+
+        json_pack_count = json_pack_info['pack_count']
+        cache_pack_count = cache_pack_info['pack_count']
+
+        # Extract JSON weight value
+        json_weight_val = None
+        if json_weight:
+            weight_match = re.search(r'(\d+(?:\.\d+)?)', str(json_weight))
+            if weight_match:
+                json_weight_val = float(weight_match.group(1))
+
+        score = 0.0
+
+        # Exact pack count match is a strong signal
+        if json_pack_count == cache_pack_count:
+            score += 0.6
+
+            # Also check weight compatibility
+            if json_weight_val is not None:
+                expected_total = cache_pack_info['total_weight']
+                # Allow 20% tolerance for weight matching
+                weight_tolerance = 0.2
+                weight_diff = abs(json_weight_val - expected_total) / expected_total if expected_total > 0 else 1.0
+
+                if weight_diff <= weight_tolerance:
+                    score += 0.4  # Full weight match bonus
+                elif weight_diff <= 0.5:
+                    score += 0.2  # Partial weight match bonus
+        else:
+            # Pack counts don't match - check if weights might indicate same product
+            # e.g., JSON says "5pk" with 2.5g might still match "0.5g x 5 Pack"
+            if json_weight_val is not None:
+                cache_expected_total = cache_pack_info['total_weight']
+                json_expected_total = json_pack_info['total_weight']
+
+                # If JSON weight matches cache expected total weight, partial match
+                if abs(json_weight_val - cache_expected_total) / cache_expected_total <= 0.2:
+                    score += 0.3
+
+        return score if score > 0 else None
+
     def _calculate_weight_similarity(self, weight1: float, weight2: float) -> float:
         """Calculate similarity score between two weights."""
         try:
@@ -7832,29 +7999,35 @@ class JSONMatcher:
         # Return True if categories match or if either is None (unknown)
         return json_category is None or cache_category is None or json_category == cache_category
     
-    def _weights_compatible(self, json_weight: str, cache_name: str) -> bool:
-        """Check if weights are compatible."""
+    def _weights_compatible(self, json_weight: str, cache_name: str, json_name: str = None) -> bool:
+        """Check if weights are compatible, with special handling for pre-roll packs."""
         if not json_weight or not cache_name:
             return False
-        
+
+        # Check for pre-roll pack matching first
+        if json_name:
+            pack_match_score = self._match_preroll_pack(json_name, json_weight, cache_name)
+            if pack_match_score is not None and pack_match_score > 0.5:
+                return True
+
         # Extract weight from cache name using regex
         weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|mg)', cache_name.lower())
         if weight_match:
             cache_weight = float(weight_match.group(1))
             cache_unit = weight_match.group(2)
-            
+
             # Extract weight from JSON
             json_weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|mg)', json_weight.lower())
             if json_weight_match:
                 json_weight_val = float(json_weight_match.group(1))
                 json_unit = json_weight_match.group(2)
-                
+
                 # Convert to same unit for comparison
                 if json_unit == 'mg' and cache_unit == 'g':
                     json_weight_val = json_weight_val / 1000
                 elif json_unit == 'g' and cache_unit == 'mg':
                     json_weight_val = json_weight_val * 1000
-                
+
                 # Allow 10% tolerance
                 tolerance = 0.1
                 return abs(json_weight_val - cache_weight) / cache_weight <= tolerance
