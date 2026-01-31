@@ -939,7 +939,7 @@ class JSONMatcher:
                 self._product_table_columns = set()
         return column_name in self._product_table_columns
 
-    def _find_best_database_match(self, product_name: str, vendor: str, weight: str, strain: str, product_db) -> Optional[Dict[str, Any]]:
+    def _find_best_database_match(self, product_name: str, vendor: str, weight: str, strain: str, product_db, lineage: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Find the best matching product directly from the product database."""
         try:
             conn = product_db._get_connection()
@@ -1046,6 +1046,7 @@ class JSONMatcher:
                     return None
 
             item_weight = parse_weight(weight)
+            item_lineage = str(lineage or '').strip().lower()
 
             for candidate in candidates:
                 candidate_name = str(candidate.get('Product Name*') or candidate.get('product_name') or '').strip()
@@ -1066,6 +1067,17 @@ class JSONMatcher:
                     candidate_strain = str(candidate.get('Product Strain') or candidate.get('product_strain') or '').lower()
                     if candidate_strain and strain.lower() in candidate_strain:
                         score += 5
+
+                # Consider lineage when available: boost score if matches, penalize if mismatched
+                try:
+                    candidate_lineage = str(candidate.get('Lineage') or candidate.get('canonical_lineage') or '').strip().lower()
+                    if item_lineage and candidate_lineage:
+                        if item_lineage == candidate_lineage:
+                            score += 8
+                        else:
+                            score -= 6
+                except Exception:
+                    pass
 
                 if score > best_score:
                     best_score = score
@@ -1266,6 +1278,16 @@ class JSONMatcher:
             logging.warning("Cannot build sheet cache: DataFrame is None, attempting to load default file")
             # Try to load a default file
             try:
+                # Avoid trying to load default file when not in Flask app context
+                try:
+                    from flask import has_app_context
+                    if not has_app_context():
+                        logging.warning("Skipping default file load: no Flask app context")
+                        self._build_cache_from_database()
+                        return
+                except Exception:
+                    # If Flask isn't available or check fails, proceed cautiously
+                    pass
                 from .excel_processor import get_default_upload_file
                 default_file = get_default_upload_file()
                 if default_file:
@@ -3065,7 +3087,8 @@ class JSONMatcher:
                             vendor=vendor,
                             weight=str(item.get("unit_weight", item.get("weight", ""))).strip(),
                             strain=strain,
-                            product_db=product_db
+                            product_db=product_db,
+                            lineage=str(item.get('lineage', item.get('Lineage', ''))).strip()
                         )
                         if db_match:
                             return self._create_tag_from_database_info(db_match, vendor, item)
@@ -3721,7 +3744,7 @@ class JSONMatcher:
             def clean_product_name(name):
                 if not name:
                     return name
-                import re
+                # Use module-level `re` (avoid local import which causes UnboundLocalError)
                 # Replace "Vaporizer" with "Disposable Vape"
                 cleaned = re.sub(r'\bVaporizer\b', 'Disposable Vape', name, flags=re.IGNORECASE)
                 # Only remove obvious suffixes that are clearly not part of the product name
@@ -5205,6 +5228,80 @@ class JSONMatcher:
                     weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
                     strain = str(item.get("strain_name", item.get("strain", ""))).strip()
                     
+                    # PRIORITY 0: Exact JSON internal-ID match (use JSON column to find perfect DB match)
+                    try:
+                        # Look for common JSON fields that represent an internal product identifier
+                        internal_json_id = (item.get('Internal Product Identifier') or
+                                            item.get('internal_product_identifier') or
+                                            item.get('inventory_id') or
+                                            item.get('integrator_data') or
+                                            item.get('internal_id') or
+                                            item.get('sku') or
+                                            item.get('product_sku'))
+
+                        if internal_json_id and product_db:
+                            logging.info(f"🔎 Exact JSON ID present: '{internal_json_id}' — trying direct DB lookup")
+                            try:
+                                with sqlite3.connect(product_db.db_path) as conn:
+                                    cursor = conn.cursor()
+                                    # Safely determine which internal-id column exists in the products table
+                                    try:
+                                        cursor.execute("PRAGMA table_info(products)")
+                                        cols = [r[1] for r in cursor.fetchall()]
+                                    except Exception:
+                                        cols = []
+
+                                    col_name = None
+                                    if 'Internal Product Identifier' in cols:
+                                        col_name = '"Internal Product Identifier"'
+                                    elif 'internal_product_identifier' in cols:
+                                        col_name = 'internal_product_identifier'
+                                    elif 'internal_id' in cols:
+                                        col_name = 'internal_id'
+
+                                    if col_name:
+                                        sql = f'''
+                                            SELECT p.id, p."Product Name*", p."Description", p."Product Brand",
+                                                   p."Lineage", p."Product Type*", p."Weight*", p."Units",
+                                                   p."Price", p."Vendor/Supplier*", p."Product Strain",
+                                                   {col_name} as internal_id
+                                            FROM products p
+                                            WHERE COALESCE({col_name}, '') = ?
+                                            LIMIT 1
+                                        '''
+                                        cursor.execute(sql, (str(internal_json_id),))
+                                        res = cursor.fetchone()
+                                        if res:
+                                            db_info = {
+                                                'Product Name*': res[1],
+                                                'Description': res[2],
+                                                'Product Brand': res[3],
+                                                'Lineage': res[4],
+                                                'Product Type*': res[5],
+                                                'Weight*': res[6],
+                                                'Units': res[7],
+                                                'Price': res[8],
+                                                'Vendor/Supplier*': res[9],
+                                                'Product Strain': res[10],
+                                                'Internal Product Identifier': res[11]
+                                            }
+                                            if self._is_valid_product(db_info):
+                                                logging.info(f"✅ Exact JSON ID matched DB product: {db_info.get('Product Name*')}")
+                                                tag = self._create_tag_from_database_info(db_info, vendor, item)
+                                                all_tags.append(tag)
+                                                matched_count += 1
+                                                # Skip remaining matching for this item
+                                                continue
+                                            else:
+                                                logging.info("🚫 Exact-ID match found but product flagged invalid (void/sample)")
+                                    else:
+                                        logging.debug("Exact ID lookup skipped: no internal-ID column in products table")
+                            except Exception as id_lookup_err:
+                                logging.warning(f"Exact ID DB lookup failed: {id_lookup_err}")
+                    except Exception:
+                        # Defensive: don't let exact-id lookup crash the whole processing loop
+                        logging.exception("Unexpected error during exact JSON-ID lookup")
+
                     # PRIORITY 1: For SKU-like products, try database search first
                     db_info = None
                     if '_' in product_name and product_db:
@@ -5310,7 +5407,7 @@ class JSONMatcher:
                     # PRIORITY 2: Use comprehensive matching logic (Excel) if no SKU database match
                     try:
                         if product_db:
-                            db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
+                            db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db, lineage=str(item.get('lineage', item.get('Lineage', ''))).strip())
                             if db_direct_match:
                                 tag = self._create_tag_from_database_info(db_direct_match, vendor, item)
                                 all_tags.append(tag)
@@ -5410,7 +5507,8 @@ class JSONMatcher:
                                         
                                         logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
                         except Exception as ai_error:
-                            logging.warning(f"AI matching error for '{product_name}': {ai_error}")
+                            # Log full traceback to diagnose UnboundLocalError and similar issues
+                            logging.exception("AI matching error for '%s'", product_name)
                             
                     
                     # PRIORITY 3: Try educated guessing if no database match
@@ -5525,7 +5623,7 @@ class JSONMatcher:
                         
                         # Look for "by [Brand]" pattern
                         if not brand:
-                            import re
+                            # Use module-level `re` instead of importing here
                             by_match = re.search(r'by\s+([A-Za-z0-9\s]+)(?:\s|$)', product_name, re.IGNORECASE)
                             if by_match:
                                 brand = by_match.group(1).strip().title()
@@ -5662,7 +5760,7 @@ class JSONMatcher:
                     
                     # If weight is still empty, try to extract from product name
                     if not weight:
-                        import re
+                        # Use module-level `re` instead of importing here
                         # Look for weight patterns in product name
                         weight_patterns = [
                             r'(\d+\.?\d*)\s*(g|gram|grams|gm)',  # 3.5g, 3.5 gram, etc.
@@ -6449,7 +6547,15 @@ class JSONMatcher:
             
             if not json_name:
                 return None, 0.0, "No product name provided"
-            
+
+            # Step 0: HIGHEST PRIORITY - Check JSON column for exact match
+            # The JSON column stores original product names from previous JSON URL imports
+            json_column_match = self._find_json_column_match(json_name)
+            if json_column_match:
+                source = json_column_match.get('_source', 'database')
+                logging.debug(f"✅ JSON COLUMN EXACT MATCH: '{json_name}' → '{json_column_match.get('original_name', json_column_match.get('Product Name*', 'Unknown'))}'")
+                return json_column_match, 1.0, f"JSON column exact match ({source})"
+
             # Step 0.5: Try exact name matching with normalized names
             exact_matches = self._find_exact_name_matches(json_name)
             if exact_matches:
@@ -7373,10 +7479,53 @@ class JSONMatcher:
             logging.error(f"Error getting all products: {e}")
             return []
     
+    def _find_json_column_match(self, json_name: str) -> Optional[dict]:
+        """
+        Find exact match in the JSON column of database/excel products.
+        The JSON column stores original product names from previous JSON URL imports.
+        This is the highest priority matching method for repeat imports.
+        """
+        if not json_name:
+            return None
+
+        json_name_lower = json_name.strip().lower()
+
+        # Check Excel data first
+        if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
+            try:
+                df = self.excel_processor.df
+                if 'JSON' in df.columns:
+                    for _, row in df.iterrows():
+                        json_col_value = str(row.get('JSON', '')).strip()
+                        if json_col_value and json_col_value.lower() == json_name_lower:
+                            match = row.to_dict()
+                            match['_source'] = 'excel'
+                            match['_match_type'] = 'json_column'
+                            return match
+            except Exception as e:
+                logging.debug(f"Error checking Excel JSON column: {e}")
+
+        # Check database products
+        try:
+            from app import get_product_database
+            product_db = get_product_database()
+            db_products = product_db.get_all_products()
+            if db_products:
+                for product in db_products:
+                    json_col_value = str(product.get('JSON', '')).strip()
+                    if json_col_value and json_col_value.lower() == json_name_lower:
+                        product['_source'] = 'database'
+                        product['_match_type'] = 'json_column'
+                        return product
+        except Exception as e:
+            logging.debug(f"Error checking database JSON column: {e}")
+
+        return None
+
     def _find_exact_name_matches(self, json_name: str) -> List[dict]:
         """Find exact name matches in the cache using indexed lookup."""
         normalized_name = self._normalize(json_name)
-        
+
         # Use indexed cache for O(1) lookup instead of O(n) linear search
         if self._indexed_cache and 'exact_names' in self._indexed_cache:
             return self._indexed_cache['exact_names'].get(normalized_name, [])
@@ -8745,7 +8894,8 @@ class JSONMatcher:
                             vendor=vendor,
                             weight=str(fallback_weight),
                             strain=fallback_strain,
-                            product_db=product_db
+                            product_db=product_db,
+                            lineage=str(item.get('lineage', item.get('Lineage', ''))).strip()
                         )
                         if direct_match:
                             db_match = direct_match
@@ -10832,7 +10982,8 @@ class JSONMatcher:
                             vendor=vendor_norm,
                             weight=str(original_item.get("unit_weight", original_item.get("weight", ""))).strip(),
                             strain=str(original_item.get("strain_name", original_item.get("strain", ""))).strip(),
-                            product_db=product_db
+                            product_db=product_db,
+                            lineage=str(original_item.get('lineage', original_item.get('Lineage', ''))).strip()
                         )
                         if db_match:
                             upgraded_products.append(self._create_tag_from_database_info(db_match, vendor_norm, original_item))
