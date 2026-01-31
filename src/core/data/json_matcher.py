@@ -8737,11 +8737,12 @@ class JSONMatcher:
             # ALWAYS use the transformed primary_product_name as the base (not the raw description field)
             base_description = primary_product_name
             weight_display = f"{weight}{units}" if weight and units else ""
-            
-            # Check if description already contains the weight
-            has_weight_in_desc = (base_description and weight_display and 
-                                 weight_display.lower() in base_description.lower())
-            
+
+            # Check if description already contains ANY weight pattern (not just the exact weight)
+            # This prevents "0.5g x - 1g" duplications
+            import re
+            has_weight_in_desc = bool(base_description and re.search(r'\d+\.?\d*\s*g\b', base_description.lower()))
+
             if weight_display and not has_weight_in_desc:
                 # Append weight to description with soft hyphen format
                 formatted_description = f"{base_description} - {weight_display}"
