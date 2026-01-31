@@ -2177,23 +2177,48 @@ class JSONMatcher:
 
                 overlap = json_words & cache_words
 
-                # CRITICAL: Extract strain-like words (first 1-3 significant words are usually the strain)
-                # "GSC Live Resin Cartridge" -> strain words are "GSC"
-                # "Wedding Cake Live Resin" -> strain words are "Wedding", "Cake"
-                product_type_words = {'live', 'resin', 'cart', 'cartridge', 'vape', 'vaporizer',
-                                      'diamond', 'liquid', 'honey', 'crystal', 'disposable',
-                                      'concentrate', 'flower', 'preroll', 'pre-roll', 'edible',
-                                      'cured', 'rosin', 'badder', 'sauce', 'sugar', 'wax'}
+                # CRITICAL: Extract strain-like words by removing product type/brand/format words
+                # These are words that don't identify the actual strain
+                product_type_words = {
+                    # Product types
+                    'live', 'resin', 'cart', 'cartridge', 'vape', 'vaporizer',
+                    'diamond', 'liquid', 'honey', 'crystal', 'disposable',
+                    'concentrate', 'flower', 'preroll', 'pre-roll', 'edible',
+                    'cured', 'rosin', 'badder', 'sauce', 'sugar', 'wax',
+                    'aio', 'c-cell', 'ccell', 'pod', 'pen',
+                    # Brands (should not count as strain match)
+                    'dabstract', 'oleum', 'phat', 'panda', 'sticky', 'frog',
+                    'hot', 'sugar', 'grow', 'op', 'farms',
+                    # Format words
+                    'lr', 'indica', 'sativa', 'hybrid', 'thc', 'cbd',
+                    'infused', 'core', 'platinum', 'line', 'bong', 'buddies',
+                    'firecracker', 'gummiez', 'drops', 'fruit', 'bites',
+                    # Size/weight words
+                    '1g', '2g', '3.5g', '7g', '14g', '28g', '100mg',
+                    # Common filler
+                    'by', '-', 'x', '(i)', '(s)', '(h)', '(h/i)', '(h/s)'
+                }
 
                 json_strain_words = json_words - product_type_words
                 cache_strain_words = cache_words - product_type_words
+
+                # Also extract strain from parentheses format like "(Bone Collector/7g)"
+                import re
+                paren_match_json = re.search(r'\(([^/]+)/', json_name)
+                paren_match_cache = re.search(r'\(([^/]+)/', cache_name)
+                if paren_match_json:
+                    paren_strain = set(paren_match_json.group(1).lower().split())
+                    json_strain_words = json_strain_words | paren_strain
+                if paren_match_cache:
+                    paren_strain = set(paren_match_cache.group(1).lower().split())
+                    cache_strain_words = cache_strain_words | paren_strain
 
                 # The strain words MUST have overlap - this is the key fix
                 strain_overlap = json_strain_words & cache_strain_words
 
                 if not strain_overlap and json_strain_words and cache_strain_words:
                     # Different strains - reject completely
-                    # "GSC" has no overlap with "Wedding Cake" - reject
+                    # "Bone Collector" has no overlap with "Citronella" - reject
                     return 0.0
 
                 if overlap:
