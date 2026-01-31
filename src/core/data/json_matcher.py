@@ -2144,46 +2144,79 @@ class JSONMatcher:
                 return 0.0
             # --- END: Strict cannabis type filtering ---
 
-            # Calculate base score with more stringent requirements
+            # Calculate base score with STRICT requirements to prevent wrong strain matches
             base_score = 0.0
 
             # Exact match (highest score)
             if json_name == cache_name:
                 base_score = 1.0
-            # Contains match (high score)
+            # Contains match (high score) - but must be meaningful containment
             elif json_name in cache_name or cache_name in json_name:
-                base_score = 0.9
-            # Strain match bonus (good score)
+                # Verify it's not just matching generic words
+                shorter = json_name if len(json_name) < len(cache_name) else cache_name
+                if len(shorter) >= 5:  # Must be at least 5 chars to count as containment
+                    base_score = 0.9
+                else:
+                    base_score = 0.0
+            # Strain match bonus (good score) - ONLY if strains actually match
             elif json_strain and cache_strain and json_strain == cache_strain:
                 base_score = 0.8
-            # Word overlap analysis (more stringent)
+            # Word overlap analysis - VERY STRICT to prevent "GSC" matching "Wedding Cake"
             else:
                 json_words = set(json_name.split())
                 cache_words = set(cache_name.split())
-                
-                # Remove common words that don't add value
-                stop_words = {'and', 'or', 'the', 'a', 'an', 'with', 'for', 'live', 'resin', 'cart', 'cartridge'}
+
+                # Only remove true stop words - NOT product type words like "live", "resin"
+                # The strain name words must overlap!
+                stop_words = {'and', 'or', 'the', 'a', 'an', 'with', 'for', 'by', '-'}
                 json_words = json_words - stop_words
                 cache_words = cache_words - stop_words
-                
+
                 if len(json_words) == 0 or len(cache_words) == 0:
-                    base_score = 0.1
-                else:
-                    overlap = json_words & cache_words
-                    if overlap:
-                        # Require higher overlap for good matches
-                        overlap_ratio = len(overlap) / min(len(json_words), len(cache_words))
-                        if overlap_ratio >= 0.8:  # Raised from 0.5
+                    return 0.0  # No words to compare - reject
+
+                overlap = json_words & cache_words
+
+                # CRITICAL: Extract strain-like words (first 1-3 significant words are usually the strain)
+                # "GSC Live Resin Cartridge" -> strain words are "GSC"
+                # "Wedding Cake Live Resin" -> strain words are "Wedding", "Cake"
+                product_type_words = {'live', 'resin', 'cart', 'cartridge', 'vape', 'vaporizer',
+                                      'diamond', 'liquid', 'honey', 'crystal', 'disposable',
+                                      'concentrate', 'flower', 'preroll', 'pre-roll', 'edible',
+                                      'cured', 'rosin', 'badder', 'sauce', 'sugar', 'wax'}
+
+                json_strain_words = json_words - product_type_words
+                cache_strain_words = cache_words - product_type_words
+
+                # The strain words MUST have overlap - this is the key fix
+                strain_overlap = json_strain_words & cache_strain_words
+
+                if not strain_overlap and json_strain_words and cache_strain_words:
+                    # Different strains - reject completely
+                    # "GSC" has no overlap with "Wedding Cake" - reject
+                    return 0.0
+
+                if overlap:
+                    # Calculate overlap ratio including strain requirement
+                    overlap_ratio = len(overlap) / min(len(json_words), len(cache_words))
+                    strain_overlap_ratio = len(strain_overlap) / min(len(json_strain_words), len(cache_strain_words)) if json_strain_words and cache_strain_words else 0
+
+                    # Require at least 50% strain word overlap
+                    if strain_overlap_ratio >= 0.5:
+                        if overlap_ratio >= 0.8:
                             base_score = 0.7
-                        elif overlap_ratio >= 0.6:  # Raised from 0.3
+                        elif overlap_ratio >= 0.6:
                             base_score = 0.5
-                        elif overlap_ratio >= 0.4:  # New middle tier
+                        elif overlap_ratio >= 0.4:
                             base_score = 0.3
                         else:
-                            base_score = 0.0  # Reject weak overlap - prevents random matches
+                            base_score = 0.0
                     else:
-                        # No word overlap - reject match entirely
+                        # Strain words don't overlap enough - reject
                         return 0.0
+                else:
+                    # No word overlap at all - reject match entirely
+                    return 0.0
             
             # Apply bonuses for additional field matches (with diminishing returns)
             # Description bonus gets highest priority since it's the most comprehensive field
@@ -5251,24 +5284,30 @@ class JSONMatcher:
                                     except Exception:
                                         cols = []
 
-                                    col_name = None
+                                    raw_col = None
+                                    # Determine the actual column name (without SQL quoting)
                                     if 'Internal Product Identifier' in cols:
-                                        col_name = '"Internal Product Identifier"'
+                                        raw_col = 'Internal Product Identifier'
                                     elif 'internal_product_identifier' in cols:
-                                        col_name = 'internal_product_identifier'
+                                        raw_col = 'internal_product_identifier'
                                     elif 'internal_id' in cols:
-                                        col_name = 'internal_id'
+                                        raw_col = 'internal_id'
 
-                                    if col_name:
+                                    if raw_col:
+                                        # Always reference the column with explicit quoting and table alias to avoid
+                                        # "no such column" errors when column names contain spaces or mixed case.
+                                        col_ref = f'p."{raw_col}"'
+                                        coalesce_ref = f'COALESCE({col_ref}, '')'
                                         sql = f'''
                                             SELECT p.id, p."Product Name*", p."Description", p."Product Brand",
                                                    p."Lineage", p."Product Type*", p."Weight*", p."Units",
                                                    p."Price", p."Vendor/Supplier*", p."Product Strain",
-                                                   {col_name} as internal_id
+                                                   {col_ref} as internal_id
                                             FROM products p
-                                            WHERE COALESCE({col_name}, '') = ?
+                                            WHERE {coalesce_ref} = ?
                                             LIMIT 1
                                         '''
+                                        logging.debug(f"Exact-ID SQL: {sql.strip()} | params: {(str(internal_json_id),)}")
                                         cursor.execute(sql, (str(internal_json_id),))
                                         res = cursor.fetchone()
                                         if res:
