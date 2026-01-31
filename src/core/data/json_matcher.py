@@ -2180,10 +2180,10 @@ class JSONMatcher:
                         elif overlap_ratio >= 0.4:  # New middle tier
                             base_score = 0.3
                         else:
-                            base_score = 0.1  # Lower score for weak overlap
+                            base_score = 0.0  # Reject weak overlap - prevents random matches
                     else:
-                        # No word overlap - very low score
-                        base_score = 0.05
+                        # No word overlap - reject match entirely
+                        return 0.0
             
             # Apply bonuses for additional field matches (with diminishing returns)
             # Description bonus gets highest priority since it's the most comprehensive field
@@ -6801,10 +6801,10 @@ class JSONMatcher:
                 score = 0.0
                 match_details = []
                 
-                # Name similarity (highest weight)
+                # Name similarity (highest weight) - MUST have reasonable name match
                 if json_name:
                     name_similarity = self._calculate_name_similarity(json_name, product.get('Product Name*', ''))
-                    if name_similarity > 0.1:  # Extremely lenient threshold
+                    if name_similarity > 0.4:  # Require at least 40% name similarity
                         score += name_similarity * 0.4
                         match_details.append(f"name:{name_similarity:.2f}")
                 
@@ -6843,8 +6843,9 @@ class JSONMatcher:
                         score += strain_similarity * 0.05
                         match_details.append(f"strain:{strain_similarity:.2f}")
                 
-                # If we have any score at all, include this match
-                if score > 0.05:  # Extremely lenient threshold
+                # Require meaningful score AND name match to prevent random matches
+                has_name_match = any('name:' in d for d in match_details)
+                if score > 0.25 and has_name_match:  # Require 25% score AND name component
                     product['comprehensive_score'] = score
                     product['match_details'] = '|'.join(match_details)
                     matches.append(product)
@@ -6859,38 +6860,53 @@ class JSONMatcher:
     
     def _find_partial_field_matches(self, json_item: dict) -> List[dict]:
         """
-        Find matches using any available field data with very lenient thresholds.
+        Find matches using available field data with stricter thresholds to prevent random matches.
         """
         try:
             matches = []
             all_products = self._get_all_products()
-            
+
+            json_name = str(json_item.get('product_name', '')).strip().lower()
+
             for product in all_products:
                 score = 0.0
                 match_fields = []
-                
-                # Try to match any available field
-                for json_key, json_value in json_item.items():
-                    if not json_value or str(json_value).strip() == '':
-                        continue
-                    
-                    json_str = str(json_value).strip().lower()
-                    
-                    # Try to find a corresponding field in the product
-                    for product_key, product_value in product.items():
-                        if not product_value or str(product_value).strip() == '':
-                            continue
-                        
-                        product_str = str(product_value).strip().lower()
-                        
-                        # Calculate similarity
-                        similarity = self._calculate_text_similarity(json_str, product_str)
-                        if similarity > 0.4:  # Lenient threshold
+                has_name_match = False
+
+                product_name = str(product.get('Product Name*', '')).strip().lower()
+
+                # CRITICAL: Must have some name similarity to prevent random matches
+                if json_name and product_name:
+                    name_sim = self._calculate_text_similarity(json_name, product_name)
+                    if name_sim > 0.5:  # Require 50% name similarity
+                        score += name_sim * 0.5
+                        match_fields.append(f"name:{name_sim:.2f}")
+                        has_name_match = True
+
+                # Only check other fields if we have a name match
+                if not has_name_match:
+                    continue
+
+                # Try to match key fields only (not arbitrary fields)
+                key_fields = [
+                    ('vendor', 'Vendor/Supplier*'),
+                    ('brand', 'Product Brand'),
+                    ('product_type', 'Product Type*'),
+                    ('strain_name', 'Product Strain'),
+                ]
+
+                for json_key, product_key in key_fields:
+                    json_value = str(json_item.get(json_key, '')).strip().lower()
+                    product_value = str(product.get(product_key, '')).strip().lower()
+
+                    if json_value and product_value:
+                        similarity = self._calculate_text_similarity(json_value, product_value)
+                        if similarity > 0.6:  # Require 60% similarity for supporting fields
                             score += similarity * 0.1
-                            match_fields.append(f"{json_key}->{product_key}:{similarity:.2f}")
-                
-                # If we found any matches, include this product
-                if score > 0.1:  # Very lenient threshold
+                            match_fields.append(f"{json_key}:{similarity:.2f}")
+
+                # Require meaningful score with name match
+                if score > 0.3 and has_name_match:
                     product['partial_score'] = score
                     product['match_fields'] = '|'.join(match_fields)
                     matches.append(product)
