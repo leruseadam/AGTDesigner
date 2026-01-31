@@ -41,6 +41,12 @@ def table_has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return column.lower() in cols
 
 
+def table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table,))
+    return cur.fetchone() is not None
+
+
 def add_column(conn: sqlite3.Connection, table: str, column: str, column_type: str = 'TEXT') -> None:
     cur = conn.cursor()
     cur.execute(f"ALTER TABLE {table} ADD COLUMN \"{column}\" {column_type};")
@@ -144,6 +150,10 @@ def main():
 
         conn = sqlite3.connect(db, timeout=20)
         try:
+            if not table_exists(conn, 'products'):
+                print('  SKIP: table "products" not found in this DB.')
+                continue
+
             if table_has_column(conn, 'products', 'JSON'):
                 print('  Column JSON already exists in products table. Skipping.')
                 continue
