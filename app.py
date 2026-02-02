@@ -14310,12 +14310,12 @@ def download_processed_excel():
             product_db = get_product_database(store_name)
             if product_db:
                 try:
-                    # Get all products from database
-                    db_products = product_db.get_all_products(limit=10000)
-                    if db_products:
-                        # Convert database products to DataFrame
+                    # Fast path: get products as DataFrame in one query (avoids slow get_all_products row-by-row)
+                    products_df = product_db.get_products_dataframe(limit=10000)
+                    if products_df is not None and not products_df.empty:
                         import pandas as pd
-                        processed_products = [process_database_product_for_api(p) for p in db_products]
+                        records = products_df.to_dict('records')
+                        processed_products = [process_database_product_for_api(p) for p in records]
                         df = pd.DataFrame(processed_products)
                         logging.info(f"Using {len(df)} database products for Excel download")
                     else:
@@ -14409,24 +14409,24 @@ def download_processed_excel():
         if df is None or df.empty:
             return jsonify({'error': 'No data available after filtering'}), 400
 
-        # Create output buffer
+        # Create output buffer (xlsxwriter is faster than openpyxl for writing)
         output_buffer = BytesIO()
         logging.debug(f"Creating Excel file with {df.shape[0]} rows and {df.shape[1]} columns")
-        df.to_excel(output_buffer, index=False, engine='openpyxl')
+        try:
+            df.to_excel(output_buffer, index=False, engine='xlsxwriter')
+        except Exception:
+            df.to_excel(output_buffer, index=False, engine='openpyxl')
         output_buffer.seek(0)
 
-        # Generate descriptive filename with vendor and record count
+        # Generate descriptive filename with vendor and record count (value_counts is much faster than iterrows)
         today_str = datetime.now().strftime('%Y%m%d')
         time_str = datetime.now().strftime('%H%M%S')
-        
-        # Get vendor information for filename
-        vendor_counts = {}
-        for _, row in df.iterrows():
-            vendor = str(row.get('Vendor', 'Unknown')).strip()
-            if vendor and vendor != 'Unknown':
-                vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
-        
-        primary_vendor = max(vendor_counts.items(), key=lambda x: x[1])[0] if vendor_counts else 'Unknown'
+        vendor_col = next((c for c in ['Vendor', 'Vendor/Supplier*', 'vendor'] if c in df.columns), None)
+        if vendor_col is not None:
+            counts = df[vendor_col].astype(str).str.strip().replace('', None).replace('nan', None).dropna().value_counts()
+            primary_vendor = str(counts.index[0]).strip() if len(counts) else 'Unknown'
+        else:
+            primary_vendor = 'Unknown'
         vendor_clean = primary_vendor.replace(' ', '_').replace('&', 'AND').replace(',', '').replace('.', '')[:15]
         
         filename = f"AGT_{vendor_clean}_Processed_Data_{len(df)}RECORDS_{today_str}_{time_str}.xlsx"

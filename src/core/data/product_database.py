@@ -7388,6 +7388,24 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error getting all products: {e}")
             return []
+
+    def get_products_dataframe(self, limit: Optional[int] = 10000) -> Optional[pd.DataFrame]:
+        """Get products as DataFrame (fast path for export/download). Uses single read_sql_query."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(products)")
+            available_columns = [row[1] for row in cursor.fetchall()]
+            exclude_cols = {'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id'}
+            columns_to_export = [col for col in available_columns if col not in exclude_cols]
+            select_columns = ', '.join([f'"{col}"' for col in columns_to_export])
+            limit_clause = f' LIMIT {int(limit)}' if limit else ''
+            query = f'SELECT {select_columns} FROM products ORDER BY id{limit_clause}'
+            return pd.read_sql_query(query, conn)
+        except Exception as e:
+            logger.error(f"Error getting products DataFrame: {e}")
+            return None
     
     def update_all_product_strains(self) -> Dict[str, Any]:
         """Update all existing Product Strain column values using the _calculate_product_strain logic."""

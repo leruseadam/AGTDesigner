@@ -2631,10 +2631,16 @@ class ProductDatabase:
 
             logger.info(f"Exporting {len(products_df)} products and {len(strains_df)} strains")
 
-            # Export to Excel
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                strains_df.to_excel(writer, sheet_name='Strains', index=False)
-                products_df.to_excel(writer, sheet_name='Products', index=False)
+            # Export to Excel using xlsxwriter (much faster than openpyxl for large files)
+            try:
+                with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                    strains_df.to_excel(writer, sheet_name='Strains', index=False)
+                    products_df.to_excel(writer, sheet_name='Products', index=False)
+            except Exception:
+                # Fallback to openpyxl if xlsxwriter fails
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    strains_df.to_excel(writer, sheet_name='Strains', index=False)
+                    products_df.to_excel(writer, sheet_name='Products', index=False)
 
             logger.info(f"Database exported to {output_path}")
 
