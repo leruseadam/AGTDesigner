@@ -6947,8 +6947,56 @@
           });
         }
         
+        // When backend says no store but we have a recent valid session store, sync to backend and proceed
+        const hasSessionStoreToRestore = sessionStore && sessionStore.trim() !== '' && sessionStoreValid;
+        if (requiresStore && !hasValidStore && hasSessionStoreToRestore) {
+          console.log('🔄 Backend has no store but session has', sessionStore, '- syncing to backend...');
+          fetch('/api/set-store', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ store: sessionStore })
+          })
+          .then(r => r.json())
+          .then(setData => {
+            if (setData && setData.success) {
+              console.log('✅ Store restored from session:', sessionStore);
+              sessionStorage.setItem('selected_store', sessionStore);
+              sessionStorage.setItem('store_just_selected', 'true');
+              sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
+              window.STORE_MODAL_BLOCKING = false;
+              const modalEl = document.getElementById('storeSelectionModal');
+              if (modalEl) {
+                modalEl.style.display = 'none';
+                modalEl.classList.remove('show');
+                modalEl.setAttribute('aria-hidden', 'true');
+              }
+              document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
+              document.body.classList.remove('modal-open');
+              document.body.style.overflow = '';
+              if (mainContent) {
+                mainContent.style.display = 'block';
+                mainContent.style.visibility = 'visible';
+                mainContent.style.pointerEvents = 'auto';
+                mainContent.classList.remove('store-selection-disabled');
+                mainContent.classList.add('store-selected', 'loaded');
+              }
+              if (typeof updateCurrentStoreDisplay === 'function') updateCurrentStoreDisplay(sessionStore);
+              if (typeof updateStoreStatus === 'function') updateStoreStatus('Store: ' + sessionStore.replace(/_/g, ' '), 'active');
+              return;
+            }
+            console.log('❗ set-store failed, showing modal');
+            forceShowModal();
+          })
+          .catch(err => {
+            console.warn('set-store failed:', err);
+            forceShowModal();
+          });
+          return;
+        }
+
         // CRITICAL FIX: Trust backend - if backend says store is valid, show content
-        // Only show modal if backend explicitly requires it
+        // Only show modal if backend explicitly requires it and we have no session to restore
         if (requiresStore || (!hasValidStore && !sessionStore)) {
           console.log('❗ No valid store match - showing modal');
           console.log('❗ Details:', {

@@ -11901,15 +11901,17 @@ const TagManager = {
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
-                // PERFORMANCE: Much shorter timeout for faster failure recovery
+                // Don't hide splash while tag fetch is in progress - avoids "sketchy" empty UI
                 const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
                 safetyTimeout = setTimeout(() => {
+                    if (this._fetchingAvailableTags) {
+                        verboseLog(`⚠️ Safety timeout (${safetyTimeoutMs}ms): Tag fetch still in progress - keeping splash visible`);
+                        return;
+                    }
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
-                    // Just hide the splash, don't show error message
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
-                    // Don't show error message - let the app continue working
                 }, safetyTimeoutMs);
             }
 
@@ -20254,8 +20256,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.TagManager._checkingExistingData = false;
             }
             
-            if (fetchingStuck && fetchingDuration > 30000) {
-                console.warn('⚠️ Resetting stuck _fetchingAvailableTags flag on visibility change');
+            // Only reset fetch flag after 60s+ so we don't kill an in-progress 60s web request
+            if (fetchingStuck && fetchingDuration > 60000) {
+                console.warn('⚠️ Resetting stuck _fetchingAvailableTags flag on visibility change (after 60s)');
                 window.TagManager._fetchingAvailableTags = false;
             }
             
