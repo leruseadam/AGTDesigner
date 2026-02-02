@@ -1198,9 +1198,10 @@
             vendor_brands: [] 
           };
           const analytics = analyticsResult.value || analyticsResult.reason || {};
-          const availableTags = availableTagsResult.value || [];
+          const availableTagsRaw = availableTagsResult.value || [];
+          const availableTags = Array.isArray(availableTagsRaw) ? availableTagsRaw : (availableTagsRaw && availableTagsRaw.tags) ? availableTagsRaw.tags : [];
           
-          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 0;
+          const totalProducts = availableTags.length;
           const totalStrains = stats.total_strains || 0;
           
           console.log('Analytics data loaded:', { 
@@ -6484,7 +6485,7 @@
                 </div>
               </div>
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
-                <div id="availableTags" class="tag-list-container">>
+                <div id="availableTags" class="tag-list-container">
                   <div class="tag-list">
                     <div class="d-flex align-items-center gap-3 mb-2">
                       <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
