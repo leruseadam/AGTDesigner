@@ -5089,7 +5089,7 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
-            # Fixed query - use products table directly with correct column names
+            # One row per normalized_name (latest by id) to avoid redundant DB rows slowing tag load
             cursor.execute(f'''
                 SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
                        "Product Strain" as strain_name, "Lineage" as canonical_lineage, total_occurrences, first_seen_date, last_seen_date,
@@ -5102,7 +5102,8 @@ class ProductDatabase:
                        "CombinedWeight", "Ratio_or_THC_CBD", "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN"
                 FROM products
                 WHERE normalized_name IN ({placeholders})
-            ''', normalized_names)
+                  AND id IN (SELECT MAX(id) FROM products WHERE normalized_name IN ({placeholders}) GROUP BY normalized_name)
+            ''', normalized_names + normalized_names)
             
             results = cursor.fetchall()
             

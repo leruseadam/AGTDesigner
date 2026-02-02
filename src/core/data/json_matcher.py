@@ -6428,8 +6428,6 @@ class JSONMatcher:
             json_type = str(json_item.get("product_type", "")).strip().lower()
             json_weight = str(json_item.get("weight", "")).strip()
             json_strain = str(json_item.get("strain_name", "")).strip().lower()
-            # Extract description from JSON item - this is the PRIMARY field for JSON column matching
-            json_description = str(json_item.get("description", json_item.get("product_description", ""))).strip()
 
             # Normalize the product name for better matching
             json_name_normalized = self._normalize_name(json_name)
@@ -6440,14 +6438,14 @@ class JSONMatcher:
             if not json_name:
                 return None, 0.0, "No product name provided"
 
-            # Step 0: HIGHEST PRIORITY - Match description against JSON column in database
-            # The JSON column contains original Excel Description values before transformation
-            if json_description:
-                json_column_match = self._find_json_column_match(json_description)
-                if json_column_match:
-                    source = json_column_match.get('_source', 'database')
-                    logging.info(f"✅ JSON COLUMN MATCH: '{json_description[:50]}...' → '{json_column_match.get('Product Name*', 'Unknown')}' ({source})")
-                    return json_column_match, 1.0, f"JSON column exact match ({source})"
+            # Step 0: HIGHEST PRIORITY - Match product_name against JSON column in database
+            # The JSON column contains original Excel Description values (which are the same product_name values)
+            # Bamboo JSON uses product_name as the description field
+            json_column_match = self._find_json_column_match(json_name)
+            if json_column_match:
+                source = json_column_match.get('_source', 'database')
+                logging.info(f"✅ JSON COLUMN MATCH: '{json_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}' ({source})")
+                return json_column_match, 1.0, f"JSON column exact match ({source})"
 
             # Step 0.5: Try exact name matching with normalized names
             exact_matches = self._find_exact_name_matches(json_name)

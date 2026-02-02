@@ -7893,13 +7893,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         cursor = conn.cursor()
         
         # CRITICAL FIX: Use EXACT same query as docx generation for consistency
-        # Match by "Product Name*" exactly like docx generation (tag_generator.py line 909)
+        # PERFORMANCE: One row per product name (latest by id) to avoid redundant DB rows slowing tag load
         chunk_size = 400
         for start in range(0, len(product_names), chunk_size):
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
-        # EXACT same query as docx generation - but also return individual fields to preserve priority
-        # CRITICAL FIX: Also select Product Brand and DOH to enrich tags with brand and DOH data
             cursor.execute(f'''
                 SELECT p."Product Name*", 
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
@@ -7912,8 +7910,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
+                  AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) GROUP BY "Product Name*")
                 ORDER BY p.id DESC
-            ''', chunk)
+            ''', chunk + chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
                 db_lineage_raw = row[1]
@@ -12780,6 +12779,7 @@ def get_available_tags():
                                             placeholders = ','.join(['?'] * len(chunk))
                                             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                                             # Also handle case where normalized_product_strain is NULL - fall back to name-based join
+                                            # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                             chunk_query = f'''
                                                 SELECT DISTINCT
                                                     COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
@@ -12790,10 +12790,11 @@ def get_available_tags():
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                            WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
+                              AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
                                                 ORDER BY p.id DESC
                                             '''
-                                            cur.execute(chunk_query, chunk + chunk)
+                                            cur.execute(chunk_query, chunk + chunk + chunk + chunk)
                                             all_batch_results.extend(cur.fetchall())
                                         except Exception as chunk_err:
                                             logging.warning(f"Batch chunk query failed: {chunk_err}")
@@ -12803,6 +12804,7 @@ def get_available_tags():
                                     placeholders = ','.join(['?'] * len(all_search_names))
                                     # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                                     # Also handle case where normalized_product_strain is NULL - fall back to name-based join
+                                    # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                     batch_query = f'''
                                         SELECT DISTINCT
                                             COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
@@ -12813,7 +12815,8 @@ def get_available_tags():
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                            WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
+                              AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
                                         ORDER BY p.id DESC
                                     '''
                                     # Add query timing to detect slow queries
@@ -12822,7 +12825,7 @@ def get_available_tags():
                                     # Target: <100ms for fast loading, <500ms for normal loading
                                     MAX_QUERY_TIME = 0.1 if fast_load else 0.5  # Stricter timeout in fast mode
                                     try:
-                                        cur.execute(batch_query, all_search_names + all_search_names)
+                                        cur.execute(batch_query, all_search_names + all_search_names + all_search_names + all_search_names)
                                         batch_results = cur.fetchall()
                                         
                                         query_duration = (time.time() - query_start) * 1000
