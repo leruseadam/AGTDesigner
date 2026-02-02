@@ -12021,26 +12021,21 @@ const TagManager = {
             const timestamp = Date.now();
             
             // PERFORMANCE vs CORRECTNESS:
-            // - On true "first load" (no existing tags and no cache), we MUST load with full database lineage
-            //   to avoid showing Excel/stale lineage that then "flips" a moment later.
-            // - On subsequent loads (or when cache exists), we can safely use fast_load=1 for speed.
-            //
-            // So:
-            // - First load (no tags, no cache) → fast_load=0  (no flash, correct lineage from the start)
-            // - All other cases               → fast_load=1  (fast, backend does lightweight alignment)
+            // - Web: always use fast_load=1 so tags appear quickly; backend aligns lineage; we can refresh lineage in background.
+            // - Desktop first load (no cache): fast_load=0 for correct lineage from the start.
+            // - Desktop subsequent: fast_load=1 for speed.
             const isFirstTrueLoad = !hasExistingTags && !hasCache && !this._hasLoadedOnce;
-            const fastLoadParam = isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1';
+            const fastLoadParam = isWebClient ? '&fast_load=1' : (isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1');
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
             
-            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (60s for large datasets on web)
-            // Desktop/localhost should respond quickly with fast_load=1
-            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for web (was 1, but timeouts need retries)
-            const maxProcessingRetries = isWebClient ? 2 : 2; // Allow 2 processing retries for web
-            const fetchTimeout = isWebClient ? 60000 : 45000; // 60s timeout for web clients (large datasets), 45s for desktop
+            // ⚡ WEB CLIENT: Shorter timeout so we don't wait too long; fall back to cache/lite/retry
+            const maxRetries = isWebClient ? 2 : 2;
+            const maxProcessingRetries = isWebClient ? 2 : 2;
+            const fetchTimeout = isWebClient ? 25000 : 45000; // 25s for web (was 60s), 45s for desktop
             
             let retryCount = 0;
             let processingRetryCount = 0;
