@@ -5780,27 +5780,28 @@
       z-index: 1049 !important;
     }
 
-    /* JSON Match Modal Styling - smaller initial modal */
+    /* JSON Match Modal Styling - larger for URL input and results */
     #jsonMatchModal .modal-dialog {
-      max-height: auto !important;
+      max-height: 92vh !important;
       height: auto !important;
-      max-width: 600px !important;
-      margin: 10vh auto !important;
+      max-width: 90vw !important;
+      min-width: 720px !important;
+      margin: 4vh auto !important;
     }
 
-    /* Detailed JSON Match Modal - larger for viewing results */
+    /* Detailed JSON Match Modal - large for viewing results */
     #detailedJsonMatchModal .modal-dialog {
-      max-height: 96vh !important;
-      height: 96vh !important;
-      max-width: 96vw !important;
-      margin: 2vh auto !important;
+      max-height: 98vh !important;
+      height: 98vh !important;
+      max-width: 98vw !important;
+      margin: 1vh auto !important;
     }
 
     #jsonMatchModal .modal-content {
       background: rgba(30, 30, 50, 0.95) !important;
       color: #ffffff !important;
       height: auto !important;
-      max-height: 80vh !important;
+      max-height: 90vh !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
@@ -5813,7 +5814,7 @@
       background: rgba(12,12,20,0.95) !important;
       color: #ffffff !important;
       height: 100% !important;
-      max-height: 96vh !important;
+      max-height: 98vh !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
@@ -11060,6 +11061,16 @@
       }
     }
     
+    window.saveJsonMatchAnalysis = function() {
+      const acceptAllBtn = document.getElementById('acceptAllBtn');
+      if (acceptAllBtn && acceptAllBtn.getAttribute('data-matches')) {
+        acceptAllMatches();
+      } else {
+        const detailedModal = bootstrap.Modal.getInstance(document.getElementById('detailedJsonMatchModal'));
+        if (detailedModal) detailedModal.hide();
+      }
+    }
+    
     window.selectCustomMatches = function() {
       alert('Custom selection feature coming soon! For now, please use the individual match cards to review specific items.');
     }
@@ -11781,6 +11792,9 @@
           </div>
         </div>
         <div class="modal-footer border-0">
+          <button type="button" class="btn btn-primary btn-glass me-2" onclick="saveJsonMatchAnalysis()" id="detailedJsonMatchSaveBtn" title="Accept current matches and save to selection">
+            <i class="bi bi-save me-1"></i>Save
+          </button>
           <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
         </div>
       </div>

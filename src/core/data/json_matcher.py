@@ -2527,14 +2527,12 @@ class JSONMatcher:
                             excel_vendor = cache_item.get('vendor', '').strip()
                             if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
                                 candidates_to_check.append(cache_item)
+                        # CRITICAL: Do NOT expand to all candidates when vendor filter yields few results.
+                        # Expanding caused wrong matches (e.g. "Bone Collector 1g Preroll" → "MAC Berry Core").
+                        # Prefer no match → fallback to JSON-only product over wrong DB match.
                     else:
                         # No vendor filter - check all items
                         candidates_to_check = self._sheet_cache
-
-                    # If vendor filtering found too few candidates, expand search
-                    if len(candidates_to_check) < 50 and current_vendor_filter:
-                        # Add all candidates regardless of vendor for fallback
-                        candidates_to_check.extend(self._sheet_cache)
 
                     # PERFORMANCE: Limit candidates to check (max 1000 for better coverage)
                     candidates_to_check = candidates_to_check[:1000]
@@ -2562,18 +2560,58 @@ class JSONMatcher:
                             # 0. VENDOR FILTER: STRICT vendor isolation - reject non-matching vendors
                             excel_vendor = cache_item.get('vendor', '').strip()
                             vendor_match_bonus = 0.0
-                            if current_vendor_filter and excel_vendor:
-                                # CRITICAL: Use the vendor matching function to check if vendors match
+                            if current_vendor_filter:
+                                if not excel_vendor:
+                                    # JSON has vendor but DB product has no vendor - skip to prevent wrong matches
+                                    continue
                                 vendor_matches = self._is_vendor_match(current_vendor_filter, excel_vendor)
-                                
                                 if vendor_matches:
                                     vendor_match_bonus = 50.0  # Strong bonus for vendor match
                                 else:
-                                    # REJECT non-matching vendors to prevent cross-brand contamination
                                     continue  # Skip this candidate entirely
                             
-                            # 2. STRICT word-by-word matching to prevent incorrect matches
-                            # Check if key distinguishing words are present
+                            # 1. STRAIN OVERLAP: When JSON has strain_name, DB product must share strain
+                            if strain and len(strain.strip()) >= 2:
+                                strain_tokens = set(re.sub(r'[^\w\s]', ' ', strain.lower()).split())
+                                strain_tokens -= {'lr', 'x', 'and', 'or', 'hybrid', 'indica', 'sativa', 'mixed', ''}
+                                excel_strain = (cache_item.get('strain', '') or '').lower()
+                                excel_name_and_strain = excel_product_name + ' ' + excel_strain
+                                if strain_tokens:
+                                    # Require at least one significant strain token in DB name/strain
+                                    if not any(t in excel_name_and_strain for t in strain_tokens if len(t) >= 2):
+                                        continue
+
+                            # 2. WEIGHT COMPATIBILITY: When JSON has unit_weight, reject different weights
+                            if weight and str(weight).strip():
+                                try:
+                                    json_w = float(str(weight).replace(',', '.').strip())
+                                    db_weight_raw = (cache_item.get('_db_product') or cache_item).get('Weight*') or (cache_item.get('_db_product') or cache_item).get('weight') or ''
+                                    db_weight_str = str(db_weight_raw).strip()
+                                    db_w = None
+                                    if db_weight_str and db_weight_str.replace('.', '').replace(',', '').isdigit():
+                                        db_w = float(db_weight_str.replace(',', '.'))
+                                    else:
+                                        m = re.search(r'(\d+(?:\.\d+)?)\s*g', excel_product_name + ' ' + db_weight_str)
+                                        if m:
+                                            db_w = float(m.group(1))
+                                    if db_w is not None and abs(json_w - db_w) > 0.01:
+                                        continue
+                                except (ValueError, TypeError):
+                                    pass
+
+                            # 3. PRODUCT TYPE COMPATIBILITY: Reject clearly different categories
+                            if inventory_type:
+                                json_type_lower = (inventory_type or '').lower()
+                                excel_type = (cache_item.get('product_type', '') or '').lower()
+                                # Cross-category: edible vs concentrate/flower
+                                if 'edible' in json_type_lower or 'solid edible' in json_type_lower:
+                                    if 'concentrate' in excel_type or 'flower' in excel_type or 'preroll' in excel_type or 'pre-roll' in excel_type or 'vape' in excel_type:
+                                        continue
+                                if 'concentrate' in json_type_lower and 'inhalation' in json_type_lower:
+                                    if 'edible' in excel_type or 'gummy' in excel_type or 'chocolate' in excel_type:
+                                        continue
+
+                            # 4. STRICT word-by-word matching to prevent incorrect matches
                             json_words = set(product_name.lower().split())
                             excel_words = set(excel_product_name.split())
                             
@@ -2613,16 +2651,15 @@ class JSONMatcher:
                                 if identifier_overlap < 0.5:  # Less than 50% overlap of product identifiers
                                     continue  # Not a match - different products
                             
-                            # 3. Partial name match only if words align
+                            # 5. Partial name match only if words align
                             if product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
-                                # Check word overlap
                                 word_overlap = len(json_words & excel_words) / max(len(json_words), len(excel_words))
-                                if word_overlap >= 0.5:  # At least 50% word overlap
+                                if word_overlap >= 0.5:
                                     score += 80.0
                                 else:
-                                    score += 30.0  # Reduced score for weak overlap
+                                    score += 30.0
                             
-                            # 4. Enhanced fuzzy matching with more lenient threshold
+                            # 6. Enhanced fuzzy matching
                             try:
                                 from fuzzywuzzy import fuzz
                                 
@@ -2694,13 +2731,8 @@ class JSONMatcher:
                         from fuzzywuzzy import fuzz
                         name_similarity = fuzz.token_sort_ratio(json_name, db_name)
                         
-                        # Require at least 40% name similarity for ANY match (lowered from 60% for better discovery)
-                        # This allows legitimate matches like:
-                        # - "Jet Fuel Gelato Vaporizer" → "Jet Fuel Gelato Live Resin" (75%+)
-                        # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
-                        # - Products with different naming conventions but same strain
-                        # But prevents completely wrong matches
-                        if name_similarity < 40:
+                        # Require at least 55% name similarity to reduce wrong matches (e.g. MAC x Trophy Wife → Pineapple MAC)
+                        if name_similarity < 55:
                             logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
@@ -7319,11 +7351,46 @@ class JSONMatcher:
             logging.error(f"Error getting all products: {e}")
             return []
 
+    def _extract_strain_from_bamboo_name(self, product_name: str) -> str:
+        """
+        Extract strain name from product names (both Bamboo and Excel formats).
+        E.g., "MAC x Trophy Wife LR Dabstract 1g AIO - (I)" -> "mac x trophy wife"
+        E.g., "MAC x Trophy Wife Live Resin Cartridge" -> "mac x trophy wife"
+        E.g., "Nectarine Jelly Liquid Diamond Vaporizer 1.0g" -> "nectarine jelly"
+        """
+        if not product_name:
+            return ""
+
+        name_lower = product_name.lower().strip()
+
+        # Common patterns to remove (both Bamboo and Excel formats)
+        # Order matters - more specific patterns first
+        patterns = [
+            r'\s*-\s*\([shim]\)\s*$',  # - (I), - (S), - (H), - (M) at end
+            r'\s+\d+(?:\.\d+)?g?\s+(?:aio|c-cell|cart|cartridge|disposable|vape)\s*',  # 1g AIO, 1g C-Cell
+            r'\s+(?:lr|live\s*resin|rosin)\s+(?:dabstract|oleum|phat\s*panda)\s*',  # LR Dabstract
+            r'\s+(?:dabstract|oleum|phat\s*panda|trigonal\s*industries)\s*',  # Brand names
+            r'\s+(?:liquid\s*diamond|live\s*resin|infused)\s+(?:disposable\s*)?(?:vaporizer|vape|cart(?:ridge)?|pre-?roll)\s*',  # Liquid Diamond Vaporizer
+            r'\s+(?:live\s*resin|liquid\s*diamond)\s*',  # Live Resin, Liquid Diamond alone
+            r'\s+sugar\s*cone(?:\s+infused)?(?:\s+pre-?roll)?\s*',  # Sugar Cone [Infused] [Pre-Roll]
+            r'\s+(?:disposable\s*)?(?:vaporizer|vape|cart(?:ridge)?|pre-?roll)\s*',  # product types at end
+            r'\s*\d+(?:\.\d+)?g\s*$',  # Weight at end (must have 'g')
+        ]
+
+        strain = name_lower
+        for pattern in patterns:
+            strain = re.sub(pattern, '', strain, flags=re.IGNORECASE)
+
+        return strain.strip()
+
     def _find_json_column_match(self, json_description: str) -> Optional[dict]:
         """
-        Find exact match by comparing incoming JSON description against the JSON column in database/excel.
+        Find match by comparing incoming JSON description against the JSON column in database/excel.
         The JSON column stores original Description values from Excel files before transformation.
-        This is the highest priority matching method - simple exact string comparison.
+
+        Matching strategy:
+        1. Try exact match first (highest confidence)
+        2. Try strain-based match for Bamboo format names (e.g., "MAC x Trophy Wife LR Dabstract 1g AIO - (I)")
 
         Args:
             json_description: The description field from the incoming JSON URL
@@ -7337,23 +7404,43 @@ class JSONMatcher:
         description_lower = json_description.strip().lower()
         logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{description_lower[:50]}...'")
 
+        # Extract strain from Bamboo format for fallback matching
+        extracted_strain = self._extract_strain_from_bamboo_name(json_description)
+        logging.debug(f"   Extracted strain: '{extracted_strain}'")
+
         # Check Excel data first (current session data)
+        excel_strain_matches = []
         if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
             try:
                 df = self.excel_processor.df
                 if 'JSON' in df.columns:
                     for _, row in df.iterrows():
                         json_col_value = str(row.get('JSON', '')).strip()
-                        if json_col_value and json_col_value.lower() == description_lower:
+                        if not json_col_value:
+                            continue
+                        json_col_lower = json_col_value.lower()
+
+                        # Try exact match first
+                        if json_col_lower == description_lower:
                             match = row.to_dict()
                             match['_source'] = 'excel'
-                            match['_match_type'] = 'json_column'
-                            logging.info(f"✅ JSON COLUMN MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
+                            match['_match_type'] = 'json_column_exact'
+                            logging.info(f"✅ JSON COLUMN EXACT MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
                             return match
+
+                        # Collect strain matches for fallback
+                        if extracted_strain and len(extracted_strain) >= 5:
+                            db_strain = self._extract_strain_from_bamboo_name(json_col_value)
+                            if db_strain and extracted_strain == db_strain:
+                                match = row.to_dict()
+                                match['_source'] = 'excel'
+                                match['_match_type'] = 'json_column_strain'
+                                excel_strain_matches.append(match)
             except Exception as e:
                 logging.debug(f"Error checking Excel JSON column: {e}")
 
         # Check database products
+        db_strain_matches = []
         try:
             from app import get_product_database
             product_db = get_product_database()
@@ -7362,13 +7449,81 @@ class JSONMatcher:
                 if db_products:
                     for product in db_products:
                         json_col_value = str(product.get('JSON', '')).strip()
-                        if json_col_value and json_col_value.lower() == description_lower:
+                        if not json_col_value:
+                            continue
+                        json_col_lower = json_col_value.lower()
+
+                        # Try exact match first
+                        if json_col_lower == description_lower:
                             product['_source'] = 'database'
-                            product['_match_type'] = 'json_column'
-                            logging.info(f"✅ JSON COLUMN MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
+                            product['_match_type'] = 'json_column_exact'
+                            logging.info(f"✅ JSON COLUMN EXACT MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
                             return product
+
+                        # Collect strain matches for fallback
+                        if extracted_strain and len(extracted_strain) >= 5:
+                            db_strain = self._extract_strain_from_bamboo_name(json_col_value)
+                            if db_strain and extracted_strain == db_strain:
+                                product_copy = dict(product)
+                                product_copy['_source'] = 'database'
+                                product_copy['_match_type'] = 'json_column_strain'
+                                db_strain_matches.append(product_copy)
         except Exception as e:
             logging.debug(f"Error checking database JSON column: {e}")
+
+        # If no exact match, try strain-based matches (prefer database over excel)
+        # Score matches by product type similarity
+        def score_product_type_match(match_json: str, input_name: str) -> int:
+            """Score how well product types match between input and database."""
+            score = 0
+            input_lower = input_name.lower()
+            match_lower = match_json.lower()
+
+            # Product type keywords to check
+            type_keywords = [
+                ('sugar cone', 20),
+                ('pre-roll', 15),
+                ('preroll', 15),
+                ('cartridge', 15),
+                ('cart', 10),
+                ('vape', 10),
+                ('vaporizer', 10),
+                ('disposable', 10),
+                ('aio', 10),
+                ('live resin', 8),
+                ('liquid diamond', 8),
+                ('flower', 5),
+            ]
+
+            for keyword, points in type_keywords:
+                in_input = keyword in input_lower
+                in_match = keyword in match_lower
+                if in_input and in_match:
+                    score += points
+                elif in_input != in_match:
+                    score -= points // 2  # Penalty for mismatch
+
+            return score
+
+        if db_strain_matches:
+            # Score and sort matches by product type similarity
+            for m in db_strain_matches:
+                m['_type_score'] = score_product_type_match(m.get('JSON', ''), json_description)
+            db_strain_matches.sort(key=lambda x: x.get('_type_score', 0), reverse=True)
+
+            best_match = db_strain_matches[0]
+            logging.info(f"✅ JSON COLUMN STRAIN MATCH (Database): '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}' (type_score: {best_match.get('_type_score', 0)})")
+            return best_match
+
+        if excel_strain_matches:
+            # Score and sort matches by product type similarity
+            for m in excel_strain_matches:
+                m['_type_score'] = score_product_type_match(m.get('JSON', ''), json_description)
+            excel_strain_matches.sort(key=lambda x: x.get('_type_score', 0), reverse=True)
+
+            best_match = excel_strain_matches[0]
+            logging.info(f"✅ JSON COLUMN STRAIN MATCH (Excel): '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}'")
+            return best_match
 
         logging.debug(f"❌ No JSON column match found for '{description_lower[:50]}...'")
         return None
