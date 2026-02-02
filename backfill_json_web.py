@@ -26,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Update this path to match your PythonAnywhere setup
-UPLOADS_DIR = '/home/adamcordova/labelMaker/uploads'  # <-- UPDATE THIS
+UPLOADS_DIR = '/home/adamcordova/AGTDesigner/uploads'  # <-- UPDATE THIS
 
 STORE_PATTERNS = {
     'bothell': 'AGT_Bothell',
@@ -151,8 +151,15 @@ def main():
         logger.error("Please update UPLOADS_DIR at the top of this script")
         return
 
+    # Find all database files
+    db_files = list(uploads_dir.glob('product_database_*.db'))
+    logger.info(f"Found {len(db_files)} database files")
+
     excel_files = list(uploads_dir.glob('*.xlsx')) + list(uploads_dir.glob('*.xls'))
     logger.info(f"Found {len(excel_files)} Excel files")
+
+    # Track which databases have been processed with Excel data
+    processed_dbs = set()
 
     for excel_path in excel_files:
         logger.info(f"\nProcessing: {excel_path.name}")
@@ -171,6 +178,22 @@ def main():
         descriptions = load_excel_descriptions(str(excel_path))
         updated = update_json_column(str(db_path), descriptions)
         logger.info(f"✅ Updated {updated} products")
+        processed_dbs.add(str(db_path))
+
+    # Process ALL database files to ensure JSON column exists and is populated
+    # This handles databases without corresponding Excel files
+    logger.info("\nProcessing remaining databases without Excel files...")
+
+    for db_path in db_files:
+        if str(db_path) in processed_dbs:
+            continue
+
+        logger.info(f"\nChecking: {db_path.name}")
+        ensure_json_column_exists(str(db_path))
+        # Update with empty descriptions - triggers fallback to copy Description to JSON
+        updated = update_json_column(str(db_path), {})
+        if updated > 0:
+            logger.info(f"✅ Updated {updated} products")
 
     logger.info("\n✅ Backfill complete!")
 

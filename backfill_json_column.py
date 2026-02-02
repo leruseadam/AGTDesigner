@@ -219,6 +219,24 @@ def backfill_local():
         updated = update_json_column(str(db_path), descriptions)
         logger.info(f"Updated {updated} products in {db_path.name}")
 
+    # Process ALL database files to ensure JSON column exists and is populated
+    # This handles databases without corresponding Excel files
+    logger.info(f"\n{'='*60}")
+    logger.info("Processing remaining databases without Excel files...")
+
+    for db_path in db_files:
+        logger.info(f"\nChecking: {db_path.name}")
+
+        # Ensure JSON column exists
+        if not ensure_json_column_exists(str(db_path)):
+            continue
+
+        # Update with empty descriptions dict - this will trigger the fallback
+        # to copy Description column to JSON for products without JSON values
+        updated = update_json_column(str(db_path), {})
+        if updated > 0:
+            logger.info(f"Updated {updated} products in {db_path.name}")
+
     logger.info(f"\n{'='*60}")
     logger.info("✅ Local backfill complete!")
 
