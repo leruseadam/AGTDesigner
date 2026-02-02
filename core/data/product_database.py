@@ -1381,8 +1381,9 @@ class ProductDatabase:
                         'Weight Unit* (grams/gm or ounces/oz)': product_data.get('Weight Unit* (grams/gm or ounces/oz)', product_data.get('Units', '')),
                         'THC test result': product_data.get('THC test result', ''),
                         'CBD test result': product_data.get('CBD test result', ''),
+                        'JSON': product_data.get('JSON', ''),  # Original Description for JSON URL matching
                     }
-                    
+
                     # Only include columns that exist in the database
                     for col_name, col_value in column_data_map.items():
                         if col_name in available_columns:

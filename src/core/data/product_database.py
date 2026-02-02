@@ -564,7 +564,6 @@ class ProductDatabase:
                         "Vendor/Supplier*" TEXT,
                         "Product Brand" TEXT,
                         "Description" TEXT,
-                        "JSON" TEXT,  -- Original Description value before processing
                         "Weight*" TEXT,
                         "Units" TEXT,
                         "Price" TEXT,
@@ -870,7 +869,6 @@ class ProductDatabase:
                     "Vendor/Supplier*" TEXT,
                     "Product Brand" TEXT,
                     "Description" TEXT,
-                    "JSON" TEXT,  -- Original Description value before processing
                     "Weight*" TEXT,
                     "Units" TEXT,
                     "Price" TEXT,
@@ -1574,8 +1572,9 @@ class ProductDatabase:
                         'Weight Unit* (grams/gm or ounces/oz)': product_data.get('Weight Unit* (grams/gm or ounces/oz)', product_data.get('Units', '')),
                         'THC test result': product_data.get('THC test result', ''),
                         'CBD test result': product_data.get('CBD test result', ''),
+                        'JSON': product_data.get('JSON', ''),  # Original Description for JSON URL matching
                     }
-                    
+
                     # CRITICAL FIX: Include ALL remaining fields from product_data that aren't already in column_data_map
                     # This ensures all Excel columns are included, not just the hardcoded ones
                     for col_name, col_value in product_data.items():

@@ -1198,10 +1198,9 @@
             vendor_brands: [] 
           };
           const analytics = analyticsResult.value || analyticsResult.reason || {};
-          const availableTagsRaw = availableTagsResult.value || [];
-          const availableTags = Array.isArray(availableTagsRaw) ? availableTagsRaw : (availableTagsRaw && availableTagsRaw.tags) ? availableTagsRaw.tags : [];
+          const availableTags = availableTagsResult.value || [];
           
-          const totalProducts = availableTags.length;
+          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 0;
           const totalStrains = stats.total_strains || 0;
           
           console.log('Analytics data loaded:', { 
@@ -6485,7 +6484,7 @@
                 </div>
               </div>
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
-                <div id="availableTags" class="tag-list-container">
+                <div id="availableTags" class="tag-list-container">>
                   <div class="tag-list">
                     <div class="d-flex align-items-center gap-3 mb-2">
                       <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
@@ -6947,56 +6946,8 @@
           });
         }
         
-        // When backend says no store but we have a recent valid session store, sync to backend and proceed
-        const hasSessionStoreToRestore = sessionStore && sessionStore.trim() !== '' && sessionStoreValid;
-        if (requiresStore && !hasValidStore && hasSessionStoreToRestore) {
-          console.log('🔄 Backend has no store but session has', sessionStore, '- syncing to backend...');
-          fetch('/api/set-store', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ store: sessionStore })
-          })
-          .then(r => r.json())
-          .then(setData => {
-            if (setData && setData.success) {
-              console.log('✅ Store restored from session:', sessionStore);
-              sessionStorage.setItem('selected_store', sessionStore);
-              sessionStorage.setItem('store_just_selected', 'true');
-              sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
-              window.STORE_MODAL_BLOCKING = false;
-              const modalEl = document.getElementById('storeSelectionModal');
-              if (modalEl) {
-                modalEl.style.display = 'none';
-                modalEl.classList.remove('show');
-                modalEl.setAttribute('aria-hidden', 'true');
-              }
-              document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
-              document.body.classList.remove('modal-open');
-              document.body.style.overflow = '';
-              if (mainContent) {
-                mainContent.style.display = 'block';
-                mainContent.style.visibility = 'visible';
-                mainContent.style.pointerEvents = 'auto';
-                mainContent.classList.remove('store-selection-disabled');
-                mainContent.classList.add('store-selected', 'loaded');
-              }
-              if (typeof updateCurrentStoreDisplay === 'function') updateCurrentStoreDisplay(sessionStore);
-              if (typeof updateStoreStatus === 'function') updateStoreStatus('Store: ' + sessionStore.replace(/_/g, ' '), 'active');
-              return;
-            }
-            console.log('❗ set-store failed, showing modal');
-            forceShowModal();
-          })
-          .catch(err => {
-            console.warn('set-store failed:', err);
-            forceShowModal();
-          });
-          return;
-        }
-
         // CRITICAL FIX: Trust backend - if backend says store is valid, show content
-        // Only show modal if backend explicitly requires it and we have no session to restore
+        // Only show modal if backend explicitly requires it
         if (requiresStore || (!hasValidStore && !sessionStore)) {
           console.log('❗ No valid store match - showing modal');
           console.log('❗ Details:', {
@@ -11716,10 +11667,8 @@
   
   <!-- JSON Match Modal -->
   <style>
-    /* JSON modal: ensure large, centered, scrollable, glass-card appearance */
-    #jsonMatchModal .modal-dialog { max-width: 96vw !important; width: 96vw !important; max-height: 96vh !important; height: 96vh !important; margin: 2vh auto !important; }
-    #jsonMatchModal .modal-content { height: 100% !important; max-height: 96vh !important; display:flex !important; flex-direction:column !important; overflow: hidden !important; background: var(--glass-bg, rgba(255,255,255,0.75)) !important; backdrop-filter: blur(8px) saturate(120%) !important; border: var(--glass-border, 1px solid rgba(255,255,255,0.08)) !important; }
-    #jsonMatchModal .modal-body { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); overflow-y:auto !important; flex:1 1 auto !important; padding:1.25rem !important; }
+    /* Tighter, cleaner JSON modal styles */
+    #jsonMatchModal .modal-body { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); }
     #jsonMatchModal .input-group .form-control { border-right: 0; }
     #jsonMatchModal .json-actions { gap: .5rem; }
     #matchedProductsList { background: rgba(255,255,255,0.03); border-radius: .5rem; }
@@ -11783,14 +11732,6 @@
   </div>
 
   <!-- Detailed JSON Match Comparison Modal -->
-  <style>
-    /* Ensure Detailed JSON Match modal is large, scrollable, and uses glass-card styling */
-    #detailedJsonMatchModal .modal-dialog { max-width: 96vw !important; width: 96vw !important; max-height: 96vh !important; height: 96vh !important; margin: 2vh auto !important; }
-    #detailedJsonMatchModal .modal-content { height: 100% !important; max-height: 96vh !important; display:flex !important; flex-direction:column !important; overflow: hidden !important; background: var(--glass-bg, rgba(255,255,255,0.75)) !important; backdrop-filter: blur(8px) saturate(120%) !important; border: var(--glass-border, 1px solid rgba(255,255,255,0.08)) !important; }
-    #detailedJsonMatchModal .modal-body { overflow-y:auto !important; flex:1 1 auto !important; padding:1.25rem !important; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); }
-    #detailedJsonMatchModal .modal-header { background: transparent !important; border-bottom: none !important; }
-    #detailedJsonMatchModal .modal-footer { background: transparent !important; border-top: none !important; }
-  </style>
   <div class="modal fade" id="detailedJsonMatchModal" tabindex="-1" aria-labelledby="detailedJsonMatchModalLabel" inert>
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
       <div class="modal-content">
@@ -11840,9 +11781,6 @@
           </div>
         </div>
         <div class="modal-footer border-0">
-          <button type="button" class="btn btn-success me-2" onclick="acceptAllMatches()" id="footerSaveBtn">
-            <i class="bi bi-check-circle me-1"></i>Save
-          </button>
           <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
