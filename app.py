@@ -17323,7 +17323,10 @@ def database_export():
         
         # Export database
         try:
+            logging.info(f"Calling export_database with path: {temp_file_name}")
+            logging.info(f"Database path: {product_db.db_path}")
             product_db.export_database(temp_file_name)
+            logging.info("export_database completed successfully")
         except Exception as export_err:
             import traceback
             error_trace = traceback.format_exc()
@@ -17341,9 +17344,20 @@ def database_export():
                 'details': error_trace[:1000] if len(error_trace) > 1000 else error_trace
             }), 500
         
-        # Verify file was created
+        # Verify file was created and has content
         if not os.path.exists(temp_file_name):
             return jsonify({'error': 'Export file was not created'}), 500
+        
+        file_size = os.path.getsize(temp_file_name)
+        logging.info(f"Export file created: {temp_file_name} ({file_size} bytes)")
+        
+        if file_size == 0:
+            # Clean up empty file
+            try:
+                os.unlink(temp_file_name)
+            except Exception:
+                pass
+            return jsonify({'error': 'Export file was created but is empty'}), 500
         
         # Send file with proper cleanup
         # Generate descriptive filename with timestamp

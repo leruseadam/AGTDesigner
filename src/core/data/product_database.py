@@ -3246,20 +3246,14 @@ class ProductDatabase:
 
             logger.info(f"Database exported to {output_path}")
             
-            # Ensure connection is closed
-            if conn:
-                conn.close()
+            # Don't close connection here - it's from a pool and should be returned to pool
+            # The connection pool will handle cleanup
 
         except Exception as e:
             logger.error(f"Error exporting database: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            # Ensure connection is closed even on error
-            try:
-                if 'conn' in locals() and conn:
-                    conn.close()
-            except Exception:
-                pass
+            # Don't close connection on error - let pool handle it
             raise
     
     def update_all_descriptions(self) -> Dict[str, Any]:
