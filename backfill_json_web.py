@@ -97,80 +97,41 @@ def load_excel_descriptions(excel_path):
 
 
 def update_json_column(db_path, descriptions):
+    """Update JSON column ONLY from Excel descriptions. No database fallbacks."""
     try:
+        if not descriptions:
+            logger.warning("No Excel descriptions provided - skipping update")
+            return 0
+
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute('SELECT id, "Product Name*", COALESCE("Description","") FROM products')
+        cursor.execute('SELECT id, "Product Name*" FROM products')
         products = cursor.fetchall()
 
         updated_from_excel = 0
-        updated_from_db = 0
-        updated_from_name = 0
 
-        # Track which rows we've updated this run so we don't overwrite a better
-        # source (Excel) with a weaker fallback.
-        updated_ids = set()
-
-        # First pass: Match from Excel descriptions (canonical, pre-transform)
-        if descriptions:
-            for product_id, product_name, _desc in products:
-                if not product_name:
-                    continue
-
-                product_name_lower = product_name.strip().lower()
-                if product_name_lower in descriptions:
-                    cursor.execute(
-                        'UPDATE products SET "JSON" = ? WHERE id = ?',
-                        (descriptions[product_name_lower], product_id)
-                    )
-                    updated_from_excel += 1
-                    updated_ids.add(product_id)
-
-            conn.commit()
-            logger.info(f"  From Excel (pre-transform): {updated_from_excel}")
-
-        # Second pass: For products not touched above, overwrite JSON from
-        # the current Description column (better than stale/incorrect JSON).
-        for product_id, _name, db_description in products:
-            if product_id in updated_ids:
-                continue
-            if not db_description:
+        # Only update from Excel descriptions - no fallbacks
+        for product_id, product_name in products:
+            if not product_name:
                 continue
 
-            cursor.execute(
-                'UPDATE products SET "JSON" = ? WHERE id = ?',
-                (db_description, product_id)
-            )
-            if cursor.rowcount:
-                updated_from_db += 1
-                updated_ids.add(product_id)
+            product_name_lower = product_name.strip().lower()
+            if product_name_lower in descriptions:
+                cursor.execute(
+                    'UPDATE products SET "JSON" = ? WHERE id = ?',
+                    (descriptions[product_name_lower], product_id)
+                )
+                updated_from_excel += 1
 
         conn.commit()
-        if updated_from_db > 0:
-            logger.info(f"  From DB Description: {updated_from_db}")
-
-        # Third pass: final fallback – for any remaining products, set JSON to
-        # Product Name* so that every product has some JSON value.
-        for product_id, product_name, _desc in products:
-            if product_id in updated_ids:
-                continue
-            if not product_name or not str(product_name).strip():
-                continue
-
-            cursor.execute(
-                'UPDATE products SET "JSON" = "Product Name*" WHERE id = ?',
-                (product_id,)
-            )
-            if cursor.rowcount:
-                updated_from_name += 1
-                updated_ids.add(product_id)
-
-        conn.commit()
-        if updated_from_name > 0:
-            logger.info(f"  From Product Name*: {updated_from_name}")
-
         conn.close()
-        return updated_from_excel + updated_from_db + updated_from_name
+        
+        if updated_from_excel > 0:
+            logger.info(f"  Updated {updated_from_excel} products from Excel")
+        else:
+            logger.warning("  No products matched Excel descriptions")
+        
+        return updated_from_excel
     except Exception as e:
         logger.error(f"Error: {e}")
         return 0
@@ -194,23 +155,34 @@ def main():
 
     logger.info(f"Processing Bothell database only: {db_path.name}")
 
-    # Find Excel files that match Bothell
+    # Find Excel files that match Bothell - REQUIRED
     excel_files = list(uploads_dir.glob('*.xlsx')) + list(uploads_dir.glob('*.xls'))
     bothell_excel_files = [f for f in excel_files if 'bothell' in f.name.lower()]
     
-    logger.info(f"Found {len(bothell_excel_files)} Bothell Excel files")
+    if not bothell_excel_files:
+        logger.error("❌ No Bothell Excel files found - backfill requires a Bothell Excel file")
+        logger.error("   Please upload a Bothell Excel file and try again")
+        return
 
-    # Process Bothell Excel files first
+    logger.info(f"Found {len(bothell_excel_files)} Bothell Excel file(s)")
+
+    # Process Bothell Excel files - REQUIRED
     descriptions = {}
     for excel_path in bothell_excel_files:
         logger.info(f"\nProcessing Excel: {excel_path.name}")
         excel_descriptions = load_excel_descriptions(str(excel_path))
-        descriptions.update(excel_descriptions)
+        if excel_descriptions:
+            descriptions.update(excel_descriptions)
+            logger.info(f"  Loaded {len(excel_descriptions)} product descriptions")
 
-    # Update Bothell database
+    if not descriptions:
+        logger.error("❌ No descriptions found in Bothell Excel file(s) - nothing to backfill")
+        return
+
+    # Update Bothell database - ONLY from Excel, no database fallbacks
     ensure_json_column_exists(str(db_path))
     updated = update_json_column(str(db_path), descriptions)
-    logger.info(f"✅ Updated {updated} products in Bothell database")
+    logger.info(f"✅ Updated {updated} products in Bothell database from Excel")
 
     logger.info("\n✅ Bothell backfill complete!")
 
