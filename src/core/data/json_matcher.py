@@ -1419,27 +1419,34 @@ class JSONMatcher:
                 exact_name = desc.lower().strip()
                 indexed_cache['exact_names'][exact_name] = cache_item
                 
-                # PERFORMANCE: Build Description column lookup for fast matching
-                # Use Description column (raw Excel values) - this will be copied to JSON column
+                # PERFORMANCE: Build JSON column lookup for fast matching
+                # Use Description column to populate JSON column (raw Excel values)
                 description_value = str(product.get('Description', '')).strip()
-                if description_value:
-                    desc_lower = description_value.lower()
-                    desc_normalized = self._normalize_name(desc_lower)
+                json_value = str(product.get('JSON', '')).strip()
+                
+                # Use Description if JSON is empty, otherwise use JSON (which should have Description copied)
+                value_to_use = description_value if description_value else json_value
+                if not value_to_use:
+                    value_to_use = description_value  # Fallback to Description
+                
+                if value_to_use:
+                    value_lower = value_to_use.lower()
+                    value_normalized = self._normalize_name(value_lower)
                     
                     # Store both exact and normalized versions for flexible matching
-                    if desc_lower not in indexed_cache['json_column_lookup']:
-                        indexed_cache['json_column_lookup'][desc_lower] = []
-                    indexed_cache['json_column_lookup'][desc_lower].append(product)
+                    if value_lower not in indexed_cache['json_column_lookup']:
+                        indexed_cache['json_column_lookup'][value_lower] = []
+                    indexed_cache['json_column_lookup'][value_lower].append(product)
                     
                     # Also store normalized version if different
-                    if desc_normalized != desc_lower:
-                        if desc_normalized not in indexed_cache['json_column_lookup']:
-                            indexed_cache['json_column_lookup'][desc_normalized] = []
-                        indexed_cache['json_column_lookup'][desc_normalized].append(product)
+                    if value_normalized != value_lower:
+                        if value_normalized not in indexed_cache['json_column_lookup']:
+                            indexed_cache['json_column_lookup'][value_normalized] = []
+                        indexed_cache['json_column_lookup'][value_normalized].append(product)
                     
-                    # CRITICAL: Also update the JSON column in the product dict for immediate use
-                    # This ensures JSON column has Description value even before database update
-                    product['JSON'] = description_value
+                    # CRITICAL: Ensure JSON column has Description value
+                    if description_value and (not json_value or json_value != description_value):
+                        product['JSON'] = description_value
                 
                 if vendor:
                     # CRITICAL FIX: Use consistent key format {name}|{vendor} to match lookup in _find_vendor_exact_name_matches
@@ -1484,7 +1491,7 @@ class JSONMatcher:
             logging.info(f"📊 Successfully built sheet cache from database with {len(cache)} products")
             logging.info(f"📊 Indexed {len(indexed_cache['exact_names'])} exact names")
             logging.info(f"📊 Indexed {len(indexed_cache['vendor_groups'])} vendor groups")
-            logging.info(f"📊 Indexed {len(indexed_cache['json_column_lookup'])} Description column values for fast matching")
+            logging.info(f"📊 Indexed {len(indexed_cache['json_column_lookup'])} JSON column values (populated from Description) for fast matching")
             
         except Exception as e:
             logging.error(f"📊 Error building cache from database: {e}")
@@ -7966,17 +7973,27 @@ class JSONMatcher:
                 df = self.excel_processor.df
                 if 'JSON' in df.columns:
                     # PERFORMANCE: Build lookup dict once if not exists
-                    # Use Description column (raw Excel values) not JSON column
+                    # Use Description column to populate JSON column, then use JSON column for matching
                     if not hasattr(self, '_excel_json_lookup'):
                         self._excel_json_lookup = {}
                         for _, row in df.iterrows():
-                            # Use Description column, fallback to JSON if Description doesn't exist
-                            desc_value = str(row.get('Description', '') or row.get('JSON', '')).strip()
-                            if desc_value:
-                                desc_lower = desc_value.lower()
-                                if desc_lower not in self._excel_json_lookup:
-                                    self._excel_json_lookup[desc_lower] = []
-                                self._excel_json_lookup[desc_lower].append(row.to_dict())
+                            # Get Description value (raw Excel)
+                            desc_value = str(row.get('Description', '')).strip()
+                            json_value = str(row.get('JSON', '')).strip()
+                            
+                            # Use Description if available, otherwise use JSON
+                            value_to_use = desc_value if desc_value else json_value
+                            
+                            if value_to_use:
+                                # Copy Description to JSON column in the row dict
+                                row_dict = row.to_dict()
+                                if desc_value:
+                                    row_dict['JSON'] = desc_value
+                                
+                                value_lower = value_to_use.lower()
+                                if value_lower not in self._excel_json_lookup:
+                                    self._excel_json_lookup[value_lower] = []
+                                self._excel_json_lookup[value_lower].append(row_dict)
                     
                     # Fast lookup - try exact match first
                     if description_lower in self._excel_json_lookup:
@@ -8038,22 +8055,30 @@ class JSONMatcher:
                     db_products = product_db.get_all_products()
                     if db_products:
                         for product in db_products[:1000]:  # Limit to 1000 for performance
-                            # Use Description column (raw Excel values) not JSON column
-                            desc_value = str(product.get('Description', '') or product.get('JSON', '')).strip()
-                            if not desc_value:
+                            # Use Description to populate JSON, then use JSON column for matching
+                            desc_value = str(product.get('Description', '')).strip()
+                            json_value = str(product.get('JSON', '')).strip()
+                            
+                            # Copy Description to JSON if JSON is empty
+                            if desc_value and (not json_value or json_value != desc_value):
+                                product['JSON'] = desc_value
+                                json_value = desc_value
+                            
+                            value_to_use = json_value if json_value else desc_value
+                            if not value_to_use:
                                 continue
-                            desc_lower = desc_value.lower()
+                            value_lower = value_to_use.lower()
 
                             # Try exact match first
-                            if desc_lower == description_lower:
+                            if value_lower == description_lower:
                                 product['_source'] = 'database'
                                 product['_match_type'] = 'json_column_exact'
-                                logging.info(f"✅ DESCRIPTION COLUMN EXACT MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
+                                logging.info(f"✅ JSON COLUMN EXACT MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
                                 return product
 
                             # Collect strain matches for fallback
                             if extracted_strain and len(extracted_strain) >= 5:
-                                db_strain = self._extract_strain_from_bamboo_name(desc_value)
+                                db_strain = self._extract_strain_from_bamboo_name(value_to_use)
                                 if db_strain and extracted_strain == db_strain:
                                     product_copy = dict(product)
                                     product_copy['_source'] = 'database'
