@@ -3172,11 +3172,21 @@ class ProductDatabase:
                     products_df.to_excel(writer, sheet_name='Products', index=False)
 
             logger.info(f"Database exported to {output_path}")
+            
+            # Ensure connection is closed
+            if conn:
+                conn.close()
 
         except Exception as e:
             logger.error(f"Error exporting database: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            # Ensure connection is closed even on error
+            try:
+                if 'conn' in locals() and conn:
+                    conn.close()
+            except Exception:
+                pass
             raise
     
     def update_all_descriptions(self) -> Dict[str, Any]:
