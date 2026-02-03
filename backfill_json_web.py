@@ -68,10 +68,12 @@ def ensure_json_column_exists(db_path):
 
 def load_excel_descriptions(excel_path):
     try:
+        # Read Excel - get ALL rows
         df = pd.read_excel(excel_path, engine='openpyxl')
         
         logger.info(f"  Excel columns found: {list(df.columns)}")
-        logger.info(f"  Total rows in Excel: {len(df)}")
+        logger.info(f"  Total rows in Excel file: {len(df)}")
+        logger.info(f"  Non-null rows: {df.notna().any(axis=1).sum()}")
 
         # Find Description column - be flexible with name matching
         description_col = None
@@ -110,31 +112,48 @@ def load_excel_descriptions(excel_path):
             return {}
 
         descriptions = {}
-        skipped_empty = 0
-        skipped_nan = 0
+        skipped_empty_name = 0
+        skipped_empty_desc = 0
+        processed = 0
         
+        # Process EVERY SINGLE ROW - don't skip anything
         for idx, row in df.iterrows():
-            product_name = str(row.get(product_name_col, '')).strip()
-            description = str(row.get(description_col, '')).strip()
+            # Get product name - handle NaN/empty properly
+            product_name_raw = row.get(product_name_col, '')
+            if product_name_raw is None or (isinstance(product_name_raw, float) and pd.isna(product_name_raw)):
+                product_name = ''
+            else:
+                product_name = str(product_name_raw).strip()
             
-            # Skip empty or NaN values
-            if not product_name:
-                skipped_empty += 1
+            # Get description - handle NaN/empty properly  
+            description_raw = row.get(description_col, '')
+            if description_raw is None or (isinstance(description_raw, float) and pd.isna(description_raw)):
+                description = ''
+            else:
+                description = str(description_raw).strip()
+            
+            # Skip ONLY if description is truly empty
+            if not description or description.lower() in ['nan', 'none', '']:
+                skipped_empty_desc += 1
                 continue
             
-            if not description or description.lower() in ['nan', 'none', '']:
-                skipped_nan += 1
+            # If no product name, skip this row (can't match without product name)
+            if not product_name:
+                skipped_empty_name += 1
                 continue
 
-            # Store by normalized product name
+            # Store by normalized product name - PROCESS ALL VALID DESCRIPTIONS
             product_name_lower = product_name.lower()
             descriptions[product_name_lower] = description
+            processed += 1
         
-        logger.info(f"  ✅ Loaded {len(descriptions)} valid product descriptions")
-        if skipped_empty > 0:
-            logger.info(f"  ⚠️  Skipped {skipped_empty} rows with empty product names")
-        if skipped_nan > 0:
-            logger.info(f"  ⚠️  Skipped {skipped_nan} rows with empty/NaN descriptions")
+        logger.info(f"  ✅ Loaded {len(descriptions)} product descriptions from Excel")
+        logger.info(f"  📊 Processed {processed} valid rows out of {len(df)} total rows")
+        logger.info(f"  📈 Description coverage: {len(descriptions)}/{len(df)} rows ({100*len(descriptions)/max(len(df),1):.1f}%)")
+        if skipped_empty_name > 0:
+            logger.warning(f"  ⚠️  Skipped {skipped_empty_name} rows with empty product names (had descriptions but can't match)")
+        if skipped_empty_desc > 0:
+            logger.info(f"  ℹ️  Skipped {skipped_empty_desc} rows with empty descriptions")
 
         return descriptions
     except Exception as e:
