@@ -16,6 +16,7 @@ import sys
 import sqlite3
 import pandas as pd
 import logging
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -68,13 +69,27 @@ def ensure_json_column_exists(db_path):
 
 
 def load_excel_descriptions(excel_path):
+    """
+    Load ORIGINAL Excel Description values (before any transformation).
+    
+    CRITICAL: This function reads the RAW Excel file BEFORE excel_processor transforms it.
+    The Description values here should be the FULL original descriptions (e.g., "Product Name by Vendor - 1g"),
+    NOT the shortened transformed versions (e.g., "Product Name").
+    
+    If the Excel file has already been processed and saved with transformed descriptions,
+    this function will read transformed values. Make sure to use the ORIGINAL uploaded Excel file.
+    """
     try:
-        # Read Excel - get ALL rows
+        # Read Excel - get ALL rows DIRECTLY from file (no processing)
+        # This should be the ORIGINAL Excel file before excel_processor transforms it
         df = pd.read_excel(excel_path, engine='openpyxl')
         
+        logger.info(f"  Reading Excel file: {Path(excel_path).name}")
         logger.info(f"  Excel columns found: {list(df.columns)}")
         logger.info(f"  Total rows in Excel file: {len(df)}")
         logger.info(f"  Non-null rows: {df.notna().any(axis=1).sum()}")
+        logger.info(f"  ⚠️  IMPORTANT: This must be the ORIGINAL Excel file (before processing)")
+        logger.info(f"     If descriptions look shortened, the file may have been processed already")
 
         # Find Description column - be flexible with name matching
         description_col = None
@@ -118,6 +133,8 @@ def load_excel_descriptions(excel_path):
         rows_without_descriptions = 0
         
         # Process EVERY SINGLE ROW - add ALL products with names, even without descriptions
+        # CRITICAL: Read RAW Description values directly from Excel BEFORE any processing
+        # These are the ORIGINAL untransformed descriptions that excel_processor captures into JSON
         for idx, row in df.iterrows():
             # Get product name - handle NaN/empty properly
             product_name_raw = row.get(product_name_col, '')
@@ -126,13 +143,19 @@ def load_excel_descriptions(excel_path):
             else:
                 product_name = str(product_name_raw).strip()
             
+            # CRITICAL: Get RAW Description value directly from Excel (untransformed)
+            # This should be the original full description BEFORE excel_processor transforms it
+            description_raw = row.get(description_col, '')
+            
             # Skip if no product name (can't add product without a name)
             if not product_name:
                 skipped_empty_name += 1
                 continue
             
-            # Get RAW Description value directly from Excel (before any transformation)
-            # CRITICAL: This is the untransformed raw Description that should go in JSON column
+            # CRITICAL: Get RAW Description value directly from Excel (before any transformation)
+            # This MUST be the ORIGINAL untransformed Description that excel_processor captures into JSON
+            # If the Excel file has already been processed, the Description column may be transformed
+            # In that case, we need to read from the ORIGINAL Excel file, not a processed one
             description_raw = row.get(description_col, '')
             raw_description = ''
             
@@ -143,33 +166,46 @@ def load_excel_descriptions(excel_path):
                 else:
                     raw_description = str(description_raw).strip()
             
-            # More lenient check - only skip if truly empty or just whitespace
-            description_lower = raw_description.lower().strip()
+            # CRITICAL: NO FALLBACKS - Only use the RAW Excel Description value
+            # If description is empty/transformed, we still use it (or empty string)
+            # DO NOT fall back to Product Name - user wants EXACTLY what's in Excel Description column
+            
+            # Clean up the raw description value
+            description_lower = raw_description.lower().strip() if raw_description else ''
             if not raw_description or description_lower in ['nan', 'none', '', 'null', 'n/a', 'na']:
-                raw_description = product_name  # Use product name as JSON value if no description
+                # NO FALLBACK - use empty string if no description
+                raw_description = ''
                 rows_without_descriptions += 1
             else:
                 rows_with_descriptions += 1
             
-            # Store the RAW Description value (untransformed) - this goes in JSON column
+            # Store ONLY the RAW Description value from Excel (no fallbacks)
+            # This goes EXACTLY into JSON column - no transformations, no fallbacks
+            # CRITICAL: description comes from Excel Description column, NOT Product Name
             description = raw_description
 
-            # Store by normalized product name - keep original name and description (or product name as fallback)
-            # If duplicate product name exists, prefer the one with a longer description (more complete)
+            # Store by normalized product name - ONLY store if we have a description
+            # NO FALLBACKS - only products with actual Excel Description values
+            # products_data format: {product_name_lower: (product_name, description)}
+            # - product_name is used ONLY for matching and required "Product Name*" field
+            # - description is Excel Description ONLY - NEVER Product Name
             product_name_lower = product_name.lower()
-            if product_name_lower in products_data:
-                existing_desc = products_data[product_name_lower][1]
-                # Keep the one with longer description (more likely to be complete)
-                if len(description) > len(existing_desc):
+            if description:  # Only store if we have a description (no fallbacks)
+                if product_name_lower in products_data:
+                    existing_desc = products_data[product_name_lower][1]
+                    # Keep the one with longer description (more likely to be complete/original)
+                    if len(description) > len(existing_desc):
+                        products_data[product_name_lower] = (product_name, description)
+                        logger.debug(f"  Replaced duplicate '{product_name}' with longer description")
+                else:
                     products_data[product_name_lower] = (product_name, description)
-                    logger.debug(f"  Replaced duplicate '{product_name}' with longer description")
-            else:
-                products_data[product_name_lower] = (product_name, description)
         
         logger.info(f"  ✅ Loaded {len(products_data)} products from Excel")
         logger.info(f"  📊 Products with descriptions: {rows_with_descriptions}")
-        logger.info(f"  📊 Products without descriptions (using product name): {rows_without_descriptions}")
-        logger.info(f"  📈 Total products to process: {len(products_data)}/{len(df)} rows ({100*len(products_data)/max(len(df),1):.1f}%)")
+        logger.info(f"  📊 Products without descriptions (skipped - no fallback): {rows_without_descriptions}")
+        logger.info(f"  📈 Total products with descriptions: {len(products_data)}/{len(df)} rows ({100*len(products_data)/max(len(df),1):.1f}%)")
+        logger.info(f"  ⚠️  IMPORTANT: Only products with Excel Description values will be updated")
+        logger.info(f"     Products without descriptions will be skipped (no Product Name fallback)")
         if skipped_empty_name > 0:
             logger.info(f"  ℹ️  Skipped {skipped_empty_name} rows with empty product names")
 
@@ -228,12 +264,14 @@ def update_json_column(db_path, products_data):
         # Match and update existing products
         logger.info(f"  Matching and updating existing products...")
         for normalized_name, (original_name, json_value) in normalized_excel_data.items():
+            # CRITICAL: original_name is ONLY used for matching, NEVER as JSON value
+            # json_value comes from Excel Description column ONLY
             if normalized_name in existing_products:
-                # Product exists - update JSON column
+                # Product exists - update JSON column with Excel Description ONLY
                 product_id = existing_products[normalized_name]
                 cursor.execute(
                     'UPDATE products SET "JSON" = ? WHERE id = ?',
-                    (json_value, product_id)
+                    (json_value, product_id)  # json_value = Excel Description, NOT Product Name
                 )
                 updated_from_excel += 1
                 unmatched_excel.discard(normalized_name)
@@ -251,6 +289,8 @@ def update_json_column(db_path, products_data):
         
         for normalized_name in list(unmatched_excel):
             original_name, json_value = normalized_excel_data[normalized_name]
+            # CRITICAL: original_name is Product Name (used for matching and required "Product Name*" field)
+            # json_value is Excel Description ONLY - NEVER use Product Name as JSON value
             
             # Insert new product with minimal required fields
             try:
@@ -275,11 +315,11 @@ def update_json_column(db_path, products_data):
                         "Source"
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    original_name,           # Product Name*
-                    normalized_name,         # normalized_name
+                    original_name,           # Product Name* (required field - NOT used as JSON)
+                    normalized_name,         # normalized_name (for matching - NOT used as JSON)
                     'Unknown',               # Product Type* (required)
-                    json_value,              # Description (raw value - will be transformed by database later)
-                    json_value,              # JSON (raw Description value from Excel - UNTRANSFORMED)
+                    json_value,              # Description (Excel Description - NOT Product Name)
+                    json_value,              # JSON (Excel Description ONLY - NEVER Product Name)
                     today,                   # first_seen_date
                     today,                   # last_seen_date
                     now,                     # created_at
