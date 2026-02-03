@@ -104,29 +104,6 @@ def load_excel_descriptions(excel_path):
             logger.error(f"  ❌ No Description column found in Excel file")
             logger.error(f"  Available columns: {list(df.columns)}")
             return {}
-        
-        # CRITICAL: Verify Description column has actual values (not empty)
-        description_non_null = df[description_col].notna().sum()
-        description_non_empty = (df[description_col].astype(str).str.strip() != '').sum()
-        logger.info(f"  Description column stats:")
-        logger.info(f"     Non-null values: {description_non_null}/{len(df)}")
-        logger.info(f"     Non-empty values: {description_non_empty}/{len(df)}")
-        
-        # Sample a few Description values to verify they're not Product Names
-        sample_descriptions = df[description_col].dropna().head(3).tolist()
-        sample_product_names = df[product_name_col].head(3).tolist() if product_name_col else []
-        logger.info(f"  Sample Description values:")
-        for i, desc in enumerate(sample_descriptions[:3]):
-            logger.info(f"     {i+1}. '{str(desc)[:80]}'")
-        if sample_product_names:
-            logger.info(f"  Sample Product Name values (for comparison):")
-            for i, pname in enumerate(sample_product_names[:3]):
-                logger.info(f"     {i+1}. '{str(pname)[:80]}'")
-        
-        if description_non_empty == 0:
-            logger.error(f"  ❌ Description column is EMPTY - cannot backfill JSON column")
-            logger.error(f"     All Description values are null or empty")
-            return {}
 
         # Find Product Name column - be flexible
         product_name_col = None
@@ -149,6 +126,29 @@ def load_excel_descriptions(excel_path):
             logger.error(f"  ❌ No Product Name column found in Excel file")
             logger.error(f"  Available columns: {list(df.columns)}")
             return {}
+        
+        # CRITICAL: Verify Description column has actual values (not empty)
+        description_non_null = df[description_col].notna().sum()
+        description_non_empty = (df[description_col].astype(str).str.strip() != '').sum()
+        logger.info(f"  Description column stats:")
+        logger.info(f"     Non-null values: {description_non_null}/{len(df)}")
+        logger.info(f"     Non-empty values: {description_non_empty}/{len(df)}")
+        
+        if description_non_empty == 0:
+            logger.error(f"  ❌ Description column is EMPTY - cannot backfill JSON column")
+            logger.error(f"     All Description values are null or empty")
+            return {}
+        
+        # Sample a few Description values to verify they're not Product Names
+        # (Now that product_name_col is defined, we can safely use it)
+        sample_descriptions = df[description_col].dropna().head(3).tolist()
+        sample_product_names = df[product_name_col].head(3).tolist()
+        logger.info(f"  Sample Description values:")
+        for i, desc in enumerate(sample_descriptions[:3]):
+            logger.info(f"     {i+1}. '{str(desc)[:80]}'")
+        logger.info(f"  Sample Product Name values (for comparison):")
+        for i, pname in enumerate(sample_product_names[:3]):
+            logger.info(f"     {i+1}. '{str(pname)[:80]}'")
 
         products_data = {}  # Store ALL products with product names
         skipped_empty_name = 0
