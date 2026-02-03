@@ -3454,8 +3454,20 @@ class ExcelProcessor:
             else:
                 self.dropdown_cache[filter_id] = []
 
-    def get_available_tags(self, filters: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
-        """Return a list of tag objects with all necessary data."""
+    def get_available_tags(
+        self,
+        filters: Optional[Dict[str, str]] = None,
+        max_tags: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return a list of tag objects with all necessary data.
+
+        Args:
+            filters: Optional filter dictionary.
+            max_tags: Optional soft limit on number of tags to return. When provided,
+                this is primarily used by ultra-fast/lite endpoints to get a small,
+                representative sample of tags for instant UI rendering. Full tag
+                loading continues to use the default (no limit).
+        """
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags")
             return []
@@ -3467,10 +3479,22 @@ class ExcelProcessor:
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
 
         # PERFORMANCE OPTIMIZATION: Convert DataFrame to dict records - much faster than iterrows()
-        # This is 5-10x faster than iterrows() for large DataFrames
-        rows_dict = filtered_df.to_dict('records')
+        # This is 5-10x faster than iterrows() for large DataFrames.
+        # If max_tags is provided, we only materialize a subset of rows here to keep
+        # lite/preview calls extremely fast.
+        if max_tags is not None and max_tags > 0:
+            # Use a safety factor to account for deduplication - we may need to
+            # inspect more than max_tags rows to end up with max_tags unique tags.
+            materialize_rows = min(len(filtered_df), max_tags * 3)
+            df_for_materialization = filtered_df.head(materialize_rows)
+        else:
+            df_for_materialization = filtered_df
+
+        rows_dict = df_for_materialization.to_dict('records')
         
         for row in rows_dict:
+            if max_tags is not None and len(tags) >= max_tags:
+                break
             # Get quantity from various possible column names
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             
@@ -7903,9 +7927,26 @@ class ExcelProcessor:
             logger.error(f"Error in get_available_tag_names: {e}")
             return []
 
-    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """Return a list of tag objects with all necessary data."""
-        cache_key = self._build_cache_key('available_tags', filters or {})
+    def get_available_tags(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        max_tags: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return a list of tag objects with all necessary data.
+
+        Args:
+            filters: Optional filter dictionary.
+            max_tags: Optional soft limit on number of tags to return. When provided,
+                this is primarily used by ultra-fast/lite endpoints to get a small,
+                representative sample of tags for instant UI rendering. Full tag
+                loading continues to use the default (no limit).
+        """
+        # Include max_tags in the cache key so limited results never pollute
+        # the full-results cache (and vice versa).
+        cache_params: Dict[str, Any] = dict(filters or {})
+        cache_params['_max_tags'] = int(max_tags) if max_tags is not None else 'all'
+
+        cache_key = self._build_cache_key('available_tags', cache_params)
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
             # CRITICAL FIX: Always enrich cached tags with fresh database values
@@ -8031,7 +8072,13 @@ class ExcelProcessor:
         cols = {col: filtered_df[col].values for col in filtered_df.columns}
         col_names = list(filtered_df.columns)
 
-        for idx in range(len(filtered_df)):
+        row_count = len(filtered_df)
+        for idx in range(row_count):
+            # If a max_tags limit is provided, stop once we've built enough tags.
+            # This is primarily used by ultra-fast/lite endpoints to get an initial
+            # subset of tags for instant rendering.
+            if max_tags is not None and len(tags) >= max_tags:
+                break
             # Fast index-based access instead of slow row iteration
             def get_val(col_name, default=''):
                 if col_name in cols:

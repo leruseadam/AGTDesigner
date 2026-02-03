@@ -21155,6 +21155,21 @@ def get_available_tags_lite():
     try:
         start_time = time.time()
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
+
+        # Optional: allow callers (like the ultra-fast TagManager prefetch) to
+        # request only a small subset of tags for instant display. Full tag
+        # loads should continue to use the regular /api/available-tags or
+        # /api/web/available-tags endpoints without this parameter.
+        max_tags_param = request.args.get('max_tags')
+        max_tags: Optional[int] = None
+        if max_tags_param:
+            try:
+                parsed = int(max_tags_param)
+                # Clamp to a reasonable range to avoid abuse
+                if parsed > 0:
+                    max_tags = min(parsed, 2000)
+            except (TypeError, ValueError):
+                max_tags = None
         
         # Only try Excel processor - no database queries
         excel_processor = get_excel_processor()
@@ -21164,8 +21179,10 @@ def get_available_tags_lite():
                 if hasattr(excel_processor, '_skip_enrichment'):
                     excel_processor._skip_enrichment = True
                 
-                # Get tags without database enrichment for speed
-                excel_tags = excel_processor.get_available_tags()
+                # Get tags without database enrichment for speed. When max_tags
+                # is provided, only build a small subset for ultra-fast UI
+                # prefetch while the full endpoints continue to load all tags.
+                excel_tags = excel_processor.get_available_tags(max_tags=max_tags)
                 
                 # CRITICAL: Optionally align lineage with database (sovereign_lineage) when requested
                 if prefer_db:

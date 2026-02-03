@@ -11615,7 +11615,11 @@ const TagManager = {
             // Keep this timeout short – we only want it if it is truly fast
             const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-            const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`, {
+            // Request a limited subset of tags for ultra-fast prefetch.
+            // The full /api/web/available-tags endpoint will still load all
+            // tags in the background; this is just to get something on screen
+            // immediately.
+            const response = await fetch(`/api/available-tags-lite?t=${Date.now()}&max_tags=400`, {
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
