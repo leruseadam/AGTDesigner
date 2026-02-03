@@ -1420,7 +1420,7 @@ class JSONMatcher:
                 indexed_cache['exact_names'][exact_name] = cache_item
                 
                 # PERFORMANCE: Build Description column lookup for fast matching
-                # Use Description column (raw Excel values) not JSON column (transformed)
+                # Use Description column (raw Excel values) - this will be copied to JSON column
                 description_value = str(product.get('Description', '')).strip()
                 if description_value:
                     desc_lower = description_value.lower()
@@ -1436,6 +1436,10 @@ class JSONMatcher:
                         if desc_normalized not in indexed_cache['json_column_lookup']:
                             indexed_cache['json_column_lookup'][desc_normalized] = []
                         indexed_cache['json_column_lookup'][desc_normalized].append(product)
+                    
+                    # CRITICAL: Also update the JSON column in the product dict for immediate use
+                    # This ensures JSON column has Description value even before database update
+                    product['JSON'] = description_value
                 
                 if vendor:
                     # CRITICAL FIX: Use consistent key format {name}|{vendor} to match lookup in _find_vendor_exact_name_matches
@@ -1452,6 +1456,30 @@ class JSONMatcher:
             
             self._sheet_cache = cache
             self._indexed_cache = indexed_cache
+            
+            # CRITICAL: Copy Description column values to JSON column for matching
+            logging.info("📊 Copying Description column values to JSON column...")
+            try:
+                import sqlite3
+                conn = sqlite3.connect(product_db.db_path)
+                cursor = conn.cursor()
+                # Update JSON column with Description values where JSON is empty or different
+                cursor.execute('''
+                    UPDATE products
+                    SET "JSON" = "Description"
+                    WHERE "Description" IS NOT NULL 
+                      AND "Description" != ""
+                      AND ("JSON" IS NULL OR "JSON" = "" OR "JSON" != "Description")
+                ''')
+                json_updated = cursor.rowcount
+                conn.commit()
+                conn.close()
+                if json_updated > 0:
+                    logging.info(f"✅ Updated {json_updated} products: Copied Description to JSON column")
+            except Exception as e:
+                logging.warning(f"⚠️  Could not update JSON column with Description values: {e}")
+                import traceback
+                logging.debug(traceback.format_exc())
             
             logging.info(f"📊 Successfully built sheet cache from database with {len(cache)} products")
             logging.info(f"📊 Indexed {len(indexed_cache['exact_names'])} exact names")
