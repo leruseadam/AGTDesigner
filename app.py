@@ -20149,6 +20149,40 @@ def json_match_detailed():
             if i < len(enhanced_matches):
                 enhanced_match = enhanced_matches[i]
             
+            # CRITICAL: Filter out Flower matches for concentrate/vape JSON items (mL units)
+            if enhanced_match:
+                import re
+                json_name_lower = json_name.lower()
+                json_type = str(json_item.get('inventory_type', '') or json_item.get('product_type', '')).lower()
+                json_weight = str(json_item.get('unit_weight', '') or json_item.get('weight', '') or '').lower()
+                
+                # Check if JSON is concentrate/vape (has mL units or concentrate/vape indicators)
+                # Check for mL weight patterns (e.g., "1ml", "0.5ml", "1 ml", "0.5 ml")
+                has_ml_weight = bool(re.search(r'\d+(?:\.\d+)?\s*ml', json_name_lower))
+                has_ml_in_weight = 'ml' in json_weight
+                
+                is_json_concentrate_vape = (
+                    has_ml_weight or has_ml_in_weight or
+                    'concentrate for inhalation' in json_type or
+                    any(x in json_name_lower for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds'])
+                )
+                
+                if is_json_concentrate_vape:
+                    db_type = str(enhanced_match.get('Product Type*', '') or '').lower()
+                    db_units = str(enhanced_match.get('Units', '') or '').lower()
+                    db_weight = str(enhanced_match.get('Weight*', '') or '').lower()
+                    db_name = str(enhanced_match.get('Product Name*', '') or '').lower()
+                    
+                    # Check if DB product is Flower
+                    is_db_flower = (
+                        'flower' in db_type or
+                        ('flower' in db_name and ('g' in db_units or 'g' in db_weight or not db_units))
+                    )
+                    
+                    if is_db_flower:
+                        logging.warning(f"🚫 REJECTED FLOWER MATCH: JSON '{json_name[:50]}' (concentrate/vape) matched Flower '{enhanced_match.get('Product Name*', '')[:50]}' - setting to None")
+                        enhanced_match = None
+            
             # Create detailed match info using database-priority data
             match_info = {
                 'json_name': json_name,

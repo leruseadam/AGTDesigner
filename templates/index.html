@@ -6264,6 +6264,8 @@
   <!-- CRITICAL FIX: Show immediate placeholder background while WebGL loads -->
   <div id="lava-background-placeholder" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; z-index: -1 !important; pointer-events: none !important; background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%) !important; background-size: 400% 400% !important; animation: lava-placeholder-fade 3s ease-in-out infinite !important;"></div>
   <canvas id="lava-lamp-canvas" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; z-index: -1 !important; pointer-events: none !important; display: block !important; background: transparent !important; max-width: none !important; max-height: none !important; min-width: 100% !important; min-height: 100% !important; transform: none !important; object-fit: cover !important; opacity: 0 !important; transition: opacity 0.5s ease-in !important;"></canvas>
+  <!-- Solid Color Background (hidden by default, color controlled via JS) -->
+  <div id="solid-color-background" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; z-index: -1 !important; pointer-events: none !important; background: #23192b; display: none; opacity: 0; transition: opacity 0.5s ease-in-out !important;"></div>
   <!-- CRITICAL FIX: Load lava-lamp.js immediately after canvas element (async for non-blocking) -->
   <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" async></script>
 
@@ -14029,6 +14031,11 @@
     </div>
   </div>
 
+  <!-- Background Toggle Button -->
+  <button id="backgroundToggle" class="background-toggle-btn" onclick="toggleBackground()" title="Toggle Background: Lava / Solid Color">
+    <i class="bi bi-palette"></i>
+  </button>
+
   <!-- Performance Toggle Button -->
   <button id="performanceToggle" class="performance-toggle-btn" onclick="togglePerformanceDashboard()" title="Performance Monitor">
     <i class="bi bi-speedometer2"></i>
@@ -14049,6 +14056,70 @@
   </div>
 
   <script>
+    // Background Toggle Functions (Lava + neutral solid colors)
+    const BACKGROUND_THEMES = [
+      { id: 'lava', label: 'Lava', type: 'lava' },
+      // Neutral solids inspired by app theme (desaturated / darker)
+      { id: 'soft-slate',   label: 'Soft Slate',   type: 'solid', color: '#181924' }, // muted base
+      { id: 'deep-slate',   label: 'Deep Slate',   type: 'solid', color: '#1f2430' }, // slightly lighter than cards
+      { id: 'warm-graphite',label: 'Warm Graphite',type: 'solid', color: '#262933' }, // warm neutral
+      { id: 'plum-charcoal',label: 'Plum Charcoal',type: 'solid', color: '#23192b' }  // from dark gradient, but reads neutral
+    ];
+    
+    let currentBackgroundIndex = 0; // 0 = lava, others = solid theme colors
+    
+    function applyBackgroundTheme(theme) {
+      const lavaPlaceholder = document.getElementById('lava-background-placeholder');
+      const lavaCanvas = document.getElementById('lava-lamp-canvas');
+      const solidBackground = document.getElementById('solid-color-background');
+      const toggle = document.getElementById('backgroundToggle');
+      
+      if (!lavaPlaceholder || !lavaCanvas || !solidBackground || !toggle) {
+        return;
+      }
+      
+      if (theme.type === 'lava') {
+        // Show lava background, hide solid background
+        lavaPlaceholder.style.display = 'block';
+        lavaPlaceholder.style.opacity = '1';
+        
+        lavaCanvas.style.display = 'block';
+        lavaCanvas.style.opacity = '1';
+        
+        solidBackground.style.opacity = '0';
+        solidBackground.style.display = 'none';
+        
+        toggle.classList.remove('active');
+        toggle.setAttribute('data-theme', 'lava');
+        toggle.title = 'Toggle Background: Lava → Solid Theme';
+        return;
+      }
+      
+      // Show themed solid background, hide lava
+      lavaPlaceholder.style.opacity = '0';
+      lavaCanvas.style.opacity = '0';
+      setTimeout(() => {
+        lavaPlaceholder.style.display = 'none';
+        lavaCanvas.style.display = 'none';
+      }, 500);
+      
+      solidBackground.style.background = theme.color;
+      solidBackground.style.display = 'block';
+      // Ensure transition runs
+      requestAnimationFrame(() => {
+        solidBackground.style.opacity = '1';
+      });
+      
+      toggle.classList.add('active');
+      toggle.setAttribute('data-theme', theme.id);
+      toggle.title = `Background: ${theme.label} (click to cycle)`;
+    }
+    
+    function toggleBackground() {
+      currentBackgroundIndex = (currentBackgroundIndex + 1) % BACKGROUND_THEMES.length;
+      applyBackgroundTheme(BACKGROUND_THEMES[currentBackgroundIndex]);
+    }
+
     // Performance Dashboard Functions
     function togglePerformanceDashboard() {
       const dashboard = document.getElementById('performanceDashboard');

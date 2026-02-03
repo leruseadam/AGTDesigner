@@ -369,7 +369,12 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
             return _log_and_return("RSO/CO2 Tankers", 'name_rso_co2_keywords')
         if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
             return _log_and_return("Pre-Roll", 'name_preroll_keywords')
-        if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "vape", "510", "all-in-one", "aio", "disposable"]):
+        # Distinguish between all‑in‑one/disposable devices and 510 carts.
+        # AIO (all‑in‑one) hardware is a disposable vape, not a 510 cartridge.
+        aio_keywords = ["all-in-one", "all in one", "aio"]
+        if any(keyword in product_name_lower for keyword in aio_keywords):
+            return _log_and_return("Disposable Vape", 'name_disposable_vape_keywords')
+        if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "vape", "510", "disposable"]):
             return _log_and_return("Vape Cartridge", 'name_vape_keywords')
         if any(keyword in product_name_lower for keyword in ["rosin", "resin", "wax", "shatter", "crumble", "sauce", "badder", "diamonds", "hash", "solventless", "distillate"]):
             return _log_and_return("Concentrate", 'name_concentrate_keywords')
@@ -995,6 +1000,22 @@ class JSONMatcher:
                         seen.add(key)
                         collected.append(row_dict)
                 
+                # CRITICAL: Add product type filtering for concentrate/vape items
+                # Check if this is a concentrate/vape search BEFORE building queries
+                product_name_lower = product_name.lower()
+                weight_lower = str(weight or '').lower()
+                has_ml_weight = bool(re.search(r'\d+(?:\.\d+)?\s*ml', product_name_lower))
+                has_ml_in_weight = 'ml' in weight_lower
+                is_concentrate_vape_search = (
+                    has_ml_weight or has_ml_in_weight or
+                    any(x in product_name_lower for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds', 'concentrate for inhalation'])
+                )
+                
+                # Build type exclusion clause for concentrate/vape searches
+                type_exclusion = ''
+                if is_concentrate_vape_search:
+                    type_exclusion = 'AND LOWER("Product Type*") NOT LIKE "%flower%" AND ("Product Type*" LIKE "%Concentrate%" OR "Product Type*" LIKE "%Vape%" OR "Product Type*" LIKE "%Cartridge%")'
+                
                 # First try vendor + keyword targeted searches
                 if vendor_filters and keywords:
                     for vendor_filter in vendor_filters:
@@ -1003,6 +1024,7 @@ class JSONMatcher:
                                 'SELECT * FROM products '
                                 'WHERE LOWER("Vendor/Supplier*") LIKE ? '
                                 'AND LOWER("Product Name*") LIKE ? '
+                                f'{type_exclusion} '
                                 'LIMIT 150'
                             )
                             params = [f"%{vendor_filter}%", f"%{keyword}%"]
@@ -1011,9 +1033,9 @@ class JSONMatcher:
                             if len(collected) >= 250:
                                 return collected
                 
-                # Next try vendor-only fetch
+                # Next try vendor-only fetch (with type filtering for concentrate/vape)
                 for vendor_filter in vendor_filters:
-                    sql = 'SELECT * FROM products WHERE LOWER("Vendor/Supplier*") LIKE ? LIMIT 250'
+                    sql = f'SELECT * FROM products WHERE LOWER("Vendor/Supplier*") LIKE ? {type_exclusion} LIMIT 250'
                     params = [f"%{vendor_filter}%"]
                     cursor.execute(sql, params)
                     add_rows(cursor.fetchall())
@@ -1047,10 +1069,36 @@ class JSONMatcher:
 
             item_weight = parse_weight(weight)
 
+            # Check if JSON item is concentrate/vape (has mL units or concentrate/vape indicators)
+            import re
+            product_name_lower = product_name.lower()
+            weight_lower = str(weight or '').lower()
+            # Check for mL weight patterns (e.g., "1ml", "0.5ml", "1 ml", "0.5 ml")
+            has_ml_weight = bool(re.search(r'\d+(?:\.\d+)?\s*ml', product_name_lower))
+            has_ml_in_weight = 'ml' in weight_lower
+            
+            is_json_concentrate_vape = (
+                has_ml_weight or has_ml_in_weight or
+                any(x in product_name_lower for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds', 'concentrate for inhalation'])
+            )
+            
             for candidate in candidates:
                 candidate_name = str(candidate.get('Product Name*') or candidate.get('product_name') or '').strip()
                 if not candidate_name:
                     continue
+                
+                # CRITICAL: Reject Flower matches for concentrate/vape JSON items
+                if is_json_concentrate_vape:
+                    db_type = str(candidate.get('Product Type*', '') or '').lower()
+                    db_units = str(candidate.get('Units', '') or '').lower()
+                    db_weight = str(candidate.get('Weight*', '') or '').lower()
+                    is_db_flower = (
+                        'flower' in db_type or
+                        ('flower' in candidate_name.lower() and ('g' in db_units or 'g' in db_weight or not db_units))
+                    )
+                    if is_db_flower:
+                        logging.debug(f"🚫 REJECTED FLOWER: JSON '{product_name[:50]}' (concentrate/vape) matched Flower '{candidate_name[:50]}'")
+                        continue
 
                 score = similarity_func(product_name.lower(), candidate_name.lower())
 
@@ -1100,6 +1148,19 @@ class JSONMatcher:
                                 candidate_name = str(candidate.get('Product Name*') or candidate.get('product_name') or '').strip()
                                 if not candidate_name:
                                     continue
+                                
+                                # CRITICAL: Reject Flower matches for concentrate/vape JSON items
+                                if is_json_concentrate_vape:
+                                    db_type = str(candidate.get('Product Type*', '') or '').lower()
+                                    db_units = str(candidate.get('Units', '') or '').lower()
+                                    db_weight = str(candidate.get('Weight*', '') or '').lower()
+                                    is_db_flower = (
+                                        'flower' in db_type or
+                                        ('flower' in candidate_name.lower() and ('g' in db_units or 'g' in db_weight or not db_units))
+                                    )
+                                    if is_db_flower:
+                                        logging.debug(f"🚫 REJECTED FLOWER (vendor): JSON '{product_name[:50]}' matched Flower '{candidate_name[:50]}'")
+                                        continue
                                 
                                 score = similarity_func(product_name.lower(), candidate_name.lower())
                                 
@@ -1217,12 +1278,26 @@ class JSONMatcher:
             ptype = str(template_product.get("Product Type*", "") or template_product.get("product_type", "")).strip()
             strain_lower = strain.strip().lower()
             vendor_lower = vendor.lower()
+            
+            # CRITICAL: Exclude Flower products when template is concentrate/vape
+            ptype_lower = ptype.lower()
+            is_template_concentrate_vape = (
+                'concentrate' in ptype_lower or 'vape' in ptype_lower or 'cartridge' in ptype_lower or
+                'ml' in str(weight or '').lower() or
+                any(x in str(template_product.get("Product Name*", "") or "").lower() for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds'])
+            )
+            
+            type_exclusion = ''
+            if is_template_concentrate_vape:
+                type_exclusion = 'AND LOWER("Product Type*") NOT LIKE "%flower%"'
+            
             sql = (
                 'SELECT * FROM products '
                 'WHERE LOWER("Vendor/Supplier*") LIKE ? '
                 'AND (LOWER("Product Name*") LIKE ? OR LOWER(COALESCE("Description", "")) LIKE ?) '
                 'AND ("Product Name*" NOT LIKE "%*VOID*%" AND (COALESCE("Description","") NOT LIKE "%*VOID*%")) '
                 'AND ("Product Name*" NOT LIKE "%trade sample%" AND (COALESCE("Description","") NOT LIKE "%trade sample%")) '
+                f'{type_exclusion} '
                 'LIMIT 20'
             )
             params = [f"%{vendor_lower}%", f"%{strain_lower}%", f"%{strain_lower}%"]
@@ -2628,6 +2703,19 @@ class JSONMatcher:
                 
                 # CRITICAL FIX: Transform SKU to readable name BEFORE matching
                 product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
+
+                # CRITICAL: Detect concentrate/vape JSON items (1mL / Prana AIO / Live Resin / Vape / Cartridge)
+                # For these, vendor metadata (from_license_name) is often the STORE, not the PRODUCT VENDOR,
+                # so strict vendor isolation will hide real matches. We turn vendor into a SOFT hint only.
+                import re
+                product_name_lower = product_name.lower()
+                weight_lower = str(weight or "").lower()
+                has_ml_weight = bool(re.search(r"\d+(?:\.\d+)?\s*ml", product_name_lower)) or "ml" in weight_lower
+                is_concentrate_vape_json = (
+                    has_ml_weight
+                    or "concentrate for inhalation" in inventory_type.lower()
+                    or any(x in product_name_lower for x in ["live resin", "aio", "prana aio", "vape", "cartridge", "disposable", "liquid diamonds"])
+                )
                 
                 print(f"🔍 DEBUG: ENHANCED MATCH - Processing item {i+1}/{len(unique_items)}: '{raw_product_name}' → '{product_name}'")
                 print(f"🔍 DEBUG: ENHANCED MATCH - Extracted values: weight='{weight}', price='{price}', strain='{strain}', brand='{brand}'")
@@ -2655,16 +2743,16 @@ class JSONMatcher:
                     candidates_to_check = []
                     
                     # First pass: Filter by vendor if available (much faster than checking all items)
-                    if current_vendor_filter:
+                    # BUT for concentrate/vape JSON items we must allow cross‑vendor matches, because the
+                    # JSON vendor is often the store (from_license_name), not the grower/processor.
+                    if current_vendor_filter and not is_concentrate_vape_json:
                         for cache_item in self._sheet_cache:
                             excel_vendor = cache_item.get('vendor', '').strip()
                             if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
                                 candidates_to_check.append(cache_item)
-                        # CRITICAL: Do NOT expand to all candidates when vendor filter yields few results.
-                        # Expanding caused wrong matches (e.g. "Bone Collector 1g Preroll" → "MAC Berry Core").
-                        # Prefer no match → fallback to JSON-only product over wrong DB match.
+                        # For non‑concentrate items we keep strict vendor isolation to avoid bad matches.
                     else:
-                        # No vendor filter - check all items
+                        # No (or relaxed) vendor filter - check all items
                         candidates_to_check = self._sheet_cache
 
                     # PERFORMANCE: Limit candidates to check (max 1000 for better coverage)
@@ -2690,10 +2778,11 @@ class JSONMatcher:
                             # ENHANCED SCORING: Multi-factor matching with PRECISION FOCUS
                             score = 0.0
                             
-                            # 0. VENDOR FILTER: STRICT vendor isolation - reject non-matching vendors
+                            # 0. VENDOR FILTER: STRICT vendor isolation for most products,
+                            # but RELAXED for concentrate/vape JSON items.
                             excel_vendor = cache_item.get('vendor', '').strip()
                             vendor_match_bonus = 0.0
-                            if current_vendor_filter:
+                            if current_vendor_filter and not is_concentrate_vape_json:
                                 if not excel_vendor:
                                     # JSON has vendor but DB product has no vendor - skip to prevent wrong matches
                                     continue
@@ -2702,6 +2791,10 @@ class JSONMatcher:
                                     vendor_match_bonus = 50.0  # Strong bonus for vendor match
                                 else:
                                     continue  # Skip this candidate entirely
+                            elif current_vendor_filter and is_concentrate_vape_json:
+                                # For concentrates/vapes, treat vendor as a soft signal only
+                                if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
+                                    vendor_match_bonus = 10.0  # Small nudge but NOT a hard requirement
                             
                             # 1. STRAIN OVERLAP: When JSON has strain_name, DB product must share strain
                             if strain and len(strain.strip()) >= 2:
@@ -5508,65 +5601,168 @@ class JSONMatcher:
                                 self.ai_matcher = AIProductMatcher(product_db)
                                 logging.info("✅ AI Product Matcher initialized")
                             
-                            # First try to find the product directly
-                            db_info = product_db.get_product_info(product_name, vendor)
+                            # CRITICAL: Detect product type first to search appropriately
+                            product_name_lower = product_name.lower()
+                            json_type = str(item.get('inventory_type', '') or item.get('product_type', '')).lower()
+                            json_weight = str(item.get('unit_weight', '') or item.get('weight', '') or '').lower()
+                            
+                            # Check for mL weight patterns (e.g., "1ml", "0.5ml", "1 ml", "0.5 ml")
+                            import re
+                            has_ml_weight = bool(re.search(r'\d+(?:\.\d+)?\s*ml', product_name_lower))
+                            has_ml_in_weight = 'ml' in json_weight
+                            
+                            is_json_concentrate_vape = (
+                                has_ml_weight or has_ml_in_weight or
+                                'concentrate for inhalation' in json_type or
+                                any(x in product_name_lower for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds'])
+                            )
+                            
+                            # Extract strain name for type-specific search
+                            # Try to extract strain from product name if not provided
+                            extracted_strain = strain
+                            if not extracted_strain:
+                                # Simple extraction: look for strain-like patterns in product name
+                                # Common patterns: "Northern Lights", "Granddaddy Purple", etc.
+                                name_parts = product_name.split(' - ')
+                                if len(name_parts) > 1:
+                                    # Often strain is in the second-to-last or last part before weight
+                                    for part in reversed(name_parts[:-1]):  # Exclude weight part
+                                        part_clean = part.strip().lower()
+                                        # Skip common non-strain words
+                                        if part_clean not in ['indica', 'sativa', 'hybrid', 'live resin', 'liquid diamonds', 'aio', 'prana aio']:
+                                            extracted_strain = part.strip()
+                                            break
+                                if not extracted_strain:
+                                    # Fallback: use last meaningful word before weight/ml indicators
+                                    import re
+                                    strain_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', product_name)
+                                    if strain_match:
+                                        extracted_strain = strain_match.group(1)
+                            
+                            # PRIORITY 1: Try type-specific search for concentrate/vape items
+                            db_info = None
+                            if is_json_concentrate_vape and extracted_strain:
+                                # Search for concentrate/vape products with matching strain
+                                concentrate_types = ['Concentrate', 'Vape Cartridge', 'Concentrate for Inhalation']
+                                for concentrate_type in concentrate_types:
+                                    type_matches = product_db.search_products_by_type_and_strain(concentrate_type, extracted_strain)
+                                    if type_matches:
+                                        # Find best match by name similarity
+                                        best_type_match = None
+                                        best_type_score = 0
+                                        for match in type_matches:
+                                            match_name = str(match.get('Product Name*', '') or '').lower()
+                                            # Simple similarity check
+                                            if any(keyword in match_name for keyword in product_name_lower.split() if len(keyword) > 3):
+                                                score = len(set(product_name_lower.split()) & set(match_name.split()))
+                                                if score > best_type_score:
+                                                    best_type_score = score
+                                                    best_type_match = match
+                                        
+                                        if best_type_match:
+                                            # Convert to db_info format
+                                            db_info = {
+                                                'product_name': best_type_match.get('Product Name*', ''),
+                                                'vendor': best_type_match.get('Vendor/Supplier*', vendor),
+                                                'product_type': best_type_match.get('Product Type*', ''),
+                                                'strain_name': extracted_strain,
+                                                'lineage': best_type_match.get('canonical_lineage', 'HYBRID'),
+                                                'price': str(best_type_match.get('Price', '') or ''),
+                                                'weight': str(best_type_match.get('Weight*', '') or ''),
+                                                'units': str(best_type_match.get('Units', '') or ''),
+                                                'description': best_type_match.get('Description', ''),
+                                            }
+                                            logging.info(f"✅ Found type-specific match: '{product_name}' → '{db_info.get('product_name')}' (Type: {concentrate_type})")
+                                            break
+                            
+                            # PRIORITY 2: Fall back to general product search if no type-specific match
+                            if not db_info:
+                                db_info = product_db.get_product_info(product_name, vendor)
                             
                             # Validate db_info if found
                             if db_info and not self._is_valid_product(db_info):
                                 logging.info(f"🚫 Direct database lookup found invalid product (void/sample): '{product_name}'")
                                 db_info = None  # Reset to None to try AI matching
                             
+                            # CRITICAL: Reject Flower matches for concentrate/vape items
+                            if db_info and is_json_concentrate_vape:
+                                db_type = str(db_info.get('product_type', '') or '').lower()
+                                db_name = str(db_info.get('product_name', '') or '').lower()
+                                if 'flower' in db_type or ('flower' in db_name and 'g' in str(db_info.get('units', '') or '').lower()):
+                                    logging.info(f"🚫 REJECTED Flower match for concentrate/vape: '{product_name}' matched '{db_info.get('product_name')}' (Flower)")
+                                    db_info = None
+                            
                             if not db_info:
-                                # Use AI-powered matching to find the best strain match
-                                logging.debug(f"Using AI matcher to find best strain match for: {product_name}")
+                                # CRITICAL: Check if JSON item is concentrate/vape before creating Core Flower matches
+                                product_name_lower = product_name.lower()
+                                json_type = str(item.get('inventory_type', '') or item.get('product_type', '')).lower()
+                                json_weight = str(item.get('unit_weight', '') or item.get('weight', '') or '').lower()
                                 
-                                # Extract product features for AI matching
-                                product_features = self.ai_matcher.extract_product_features(item)
+                                # Check for mL weight patterns (e.g., "1ml", "0.5ml", "1 ml", "0.5 ml")
+                                import re
+                                has_ml_weight = bool(re.search(r'\d+(?:\.\d+)?\s*ml', product_name_lower))
+                                has_ml_in_weight = 'ml' in json_weight
                                 
-                                # Find best matches using AI scoring
-                                matches = self.ai_matcher.find_best_matches(product_features, max_matches=3)
+                                is_json_concentrate_vape = (
+                                    has_ml_weight or has_ml_in_weight or
+                                    'concentrate for inhalation' in json_type or
+                                    any(x in product_name_lower for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds'])
+                                )
                                 
-                                if matches:
-                                    best_match = matches[0]
-                                    logging.info(f"🤖 AI Matcher found {len(matches)} potential matches")
-                                    logging.info(f"   Best match: {best_match.strain_name} (confidence: {best_match.confidence}, score: {best_match.total_score:.3f})")
+                                # Only use AI matching for Core Flower if JSON item is NOT concentrate/vape
+                                if not is_json_concentrate_vape:
+                                    # Use AI-powered matching to find the best strain match
+                                    logging.debug(f"Using AI matcher to find best strain match for: {product_name}")
                                     
-                                    # Get strain info for the best match
-                                    strain_info = product_db.get_strain_info(best_match.strain_name)
-                                    if strain_info:
-                                        # Extract weight from product name if available
-                                        weight_match = re.search(r'/(\d+)g', product_name)
-                                        extracted_weight = weight_match.group(1) if weight_match else "1"
+                                    # Extract product features for AI matching
+                                    product_features = self.ai_matcher.extract_product_features(item)
+                                    
+                                    # Find best matches using AI scoring
+                                    matches = self.ai_matcher.find_best_matches(product_features, max_matches=3)
+                                    
+                                    if matches:
+                                        best_match = matches[0]
+                                        logging.info(f"🤖 AI Matcher found {len(matches)} potential matches")
+                                        logging.info(f"   Best match: {best_match.strain_name} (confidence: {best_match.confidence}, score: {best_match.total_score:.3f})")
                                         
-                                        # Create description in the format: "Strain Name Core Flower - Weight"
-                                        # This follows the user's requirement for "Golden Pineapple Core Flower - 14g"
-                                        formatted_description = f"{best_match.strain_name} Core Flower - {extracted_weight}g"
-                                        
-                                        db_info = {
-                                            'product_name': product_name,
-                                            'vendor': vendor,
-                                            'strain_name': best_match.strain_name,
-                                            'lineage': strain_info.get('canonical_lineage', 'HYBRID'),
-                                            'product_type': product_features.get('product_type', 'Core Flower'),
-                                            'price': '',  # No default price - must come from data
-                                            'weight': extracted_weight,
-                                            'units': 'g',
-                                            'description': formatted_description,  # Use proper tag format
-                                            'ai_match_score': best_match.total_score,
-                                            'ai_confidence': best_match.confidence,
-                                            'ai_match_type': best_match.match_type,
-                                        }
-                                        
-                                        # Log AI matching details
-                                        match_summary = self.ai_matcher.get_match_summary(matches)
-                                        logging.info(f"🤖 AI Match Summary for '{product_name}':")
-                                        logging.info(f"   Strain: {best_match.strain_name}")
-                                        logging.info(f"   Confidence: {best_match.confidence}")
-                                        logging.info(f"   Score: {best_match.total_score:.3f}")
-                                        logging.info(f"   Match Type: {best_match.match_type}")
-                                        logging.info(f"   Score Breakdown: {match_summary['score_breakdown']}")
-                                        
-                                        logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
+                                        # Get strain info for the best match
+                                        strain_info = product_db.get_strain_info(best_match.strain_name)
+                                        if strain_info:
+                                            # Extract weight from product name if available
+                                            weight_match = re.search(r'/(\d+)g', product_name)
+                                            extracted_weight = weight_match.group(1) if weight_match else "1"
+                                            
+                                            # Create description in the format: "Strain Name Core Flower - Weight"
+                                            # This follows the user's requirement for "Golden Pineapple Core Flower - 14g"
+                                            formatted_description = f"{best_match.strain_name} Core Flower - {extracted_weight}g"
+                                            
+                                            db_info = {
+                                                'product_name': product_name,
+                                                'vendor': vendor,
+                                                'strain_name': best_match.strain_name,
+                                                'lineage': strain_info.get('canonical_lineage', 'HYBRID'),
+                                                'product_type': product_features.get('product_type', 'Core Flower'),
+                                                'price': '',  # No default price - must come from data
+                                                'weight': extracted_weight,
+                                                'units': 'g',
+                                                'description': formatted_description,  # Use proper tag format
+                                                'ai_match_score': best_match.total_score,
+                                                'ai_confidence': best_match.confidence,
+                                                'ai_match_type': best_match.match_type,
+                                            }
+                                            
+                                            # Log AI matching details
+                                            match_summary = self.ai_matcher.get_match_summary(matches)
+                                            logging.info(f"🤖 AI Match Summary for '{product_name}':")
+                                            logging.info(f"   Strain: {best_match.strain_name}")
+                                            logging.info(f"   Confidence: {best_match.confidence}")
+                                            logging.info(f"   Score: {best_match.total_score:.3f}")
+                                            logging.info(f"   Match Type: {best_match.match_type}")
+                                            logging.info(f"   Score Breakdown: {match_summary['score_breakdown']}")
+                                            
+                                            logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
+                                else:
+                                    logging.info(f"🚫 SKIPPING Core Flower AI match for concentrate/vape product: '{product_name}' - will not create invented Flower match")
                         except Exception as ai_error:
                             logging.warning(f"AI matching error for '{product_name}': {ai_error}")
                             

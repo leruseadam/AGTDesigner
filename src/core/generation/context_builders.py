@@ -18,8 +18,12 @@ def build_context(record, doc, template_type='vertical'):
     context['product_brand'] = record.get('ProductBrand', '')
     context['product_strain'] = record.get('ProductStrain', '')
     
-    # Pricing and weight
-    context['price'] = record.get('Price', '')
+    # Pricing and weight (DOCX expects 'Price'; web/UI may have Price* only)
+    context['price'] = record.get('Price') or record.get('Price*') or record.get('Price* (Tier Name for Bulk)') or record.get('Med Price', '') or ''
+    if context['price'] and hasattr(context['price'], '__str__'):
+        context['price'] = str(context['price']).strip()
+        if context['price'].lower() in ('nan', 'none', 'null', ''):
+            context['price'] = ''
     context['weight_units'] = record.get('WeightUnits', '')
     
     # Description and content

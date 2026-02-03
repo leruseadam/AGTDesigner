@@ -11004,6 +11004,35 @@ body.modal-open #mainContent.store-selection-disabled,
   background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
 }
 
+.background-toggle-btn {
+  position: fixed;
+  bottom: 16px;
+  right: 64px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  border: none;
+  color: white;
+  font-size: 17px;
+  cursor: pointer;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
+  transition: all 0.25s ease;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.background-toggle-btn:hover {
+  transform: scale(1.08);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.24);
+}
+
+.background-toggle-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
 /* Loading spinner styles */
 .loading-spinner {
   display: flex;
@@ -11192,6 +11221,14 @@ body.modal-open #mainContent.store-selection-disabled,
   .performance-toggle-btn {
     bottom: 8px;
     right: 8px;
+    width: 38px;
+    height: 38px;
+    font-size: 16px;
+  }
+  
+  .background-toggle-btn {
+    bottom: 8px;
+    right: 54px;
     width: 38px;
     height: 38px;
     font-size: 16px;

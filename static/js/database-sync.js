@@ -349,8 +349,19 @@ async function exportDatabase() {
   
   try {
     const response = await fetch('/api/database-export');
+    
     if (!response.ok) {
-      throw new Error(`Export failed: ${response.statusText}`);
+      // Try to read detailed error message from JSON response
+      let errorMessage = `Export failed: ${response.status} ${response.statusText}`;
+      try {
+        const data = await response.json();
+        if (data && (data.error || data.message)) {
+          errorMessage = data.error || data.message;
+        }
+      } catch (parseError) {
+        // If response isn't JSON, keep the default message
+      }
+      throw new Error(errorMessage);
     }
     
     // Get the filename from the Content-Disposition header

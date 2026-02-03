@@ -279,10 +279,20 @@ class ProductTypeSpecificMatcher:
 
     # Simple synonyms map for common equivalences to improve exact/overlap matching
     SYNONYM_MAP = {
+        # Hardware / form‑factor normalization
         'vaporizer': 'disposable vape',
         'vape pen': 'vape',
+        '510 vape': 'vape',
+        '510 cartridge': 'vape',
+        '510': 'vape',
+        # AIO / all‑in‑one devices are disposable vapes, not 510 carts
+        'aio': 'disposable vape',
+        'all in one': 'disposable vape',
+        'all-in-one': 'disposable vape',
+        'prana aio': 'disposable vape',
+        # Generic disposable shorthand
         'disposable vape': 'disposable vape',
-        'disposable': 'disposable',
+        'disposable': 'disposable vape',
         # add more synonyms here as needed
     }
 
@@ -1739,7 +1749,15 @@ class EnhancedJSONMatcher:
         database_products = self._get_database_products()
         
         # PERFORMANCE: Cache vendor-filtered products for 5x speed boost
-        json_vendor = self._normalize_vendor(json_product.get('vendor', ''))
+        # But ONLY when we have a real vendor value. Treat placeholders like
+        # "N/A", "NA", "None", "NO_VENDOR" as missing so we don't over‑restrict
+        # the candidate set (which was causing missed matches).
+        raw_vendor = str(json_product.get('vendor', '') or '').strip().lower()
+        if raw_vendor in ('', 'n/a', 'na', 'none', 'no vendor', 'no_vendor'):
+            json_vendor = ''
+        else:
+            json_vendor = self._normalize_vendor(raw_vendor)
+
         if json_vendor and json_vendor != 'no_vendor':
             cache_key = f"vendor_filter_{json_vendor}"
             vendor_filtered_products = self.cache.get(cache_key)
@@ -1774,8 +1792,47 @@ class EnhancedJSONMatcher:
         processing_time = time.perf_counter() - start_time
         for match in matches:
             match.processing_time = processing_time
+        
+        # CRITICAL: Filter out invalid matches - concentrate/vape JSON (mL) must not match Flower DB (g)
+        filtered_matches = []
+        json_name = self._get_product_name(json_product) or ''
+        json_name_lower = json_name.lower()
+        json_type = str(json_product.get('inventory_type', '') or json_product.get('product_type', '')).lower()
+        
+        # Check if JSON is concentrate/vape (has mL units or concentrate/vape indicators)
+        # Check for mL weight patterns (e.g., "1ml", "0.5ml", "1 ml", "0.5 ml")
+        import re
+        has_ml_weight = bool(re.search(r'\d+(?:\.\d+)?\s*ml', json_name_lower))
+        json_weight = str(json_product.get('unit_weight', '') or json_product.get('weight', '') or '').lower()
+        has_ml_in_weight = 'ml' in json_weight
+        
+        is_json_concentrate_vape = (
+            has_ml_weight or has_ml_in_weight or
+            'concentrate for inhalation' in json_type or
+            any(x in json_name_lower for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds'])
+        )
+        
+        for match in matches:
+            db_product = match.match_data
+            db_type = str(db_product.get('Product Type*', '') or '').lower()
+            db_units = str(db_product.get('Units', '') or '').lower()
+            db_weight = str(db_product.get('Weight*', '') or '').lower()
+            db_name = str(db_product.get('Product Name*', '') or '').lower()
             
-        return matches[:20]  # Return top 20 for speed (was 50)
+            # Check if DB product is Flower (type contains flower, and units/weight suggest grams)
+            is_db_flower = (
+                'flower' in db_type or
+                ('flower' in db_name and ('g' in db_units or 'g' in db_weight or not db_units))
+            )
+            
+            # Reject match if JSON is concentrate/vape and DB is Flower
+            if is_json_concentrate_vape and is_db_flower:
+                logging.warning(f"🚫 REJECTED FLOWER MATCH: JSON '{json_name[:50]}' (concentrate/vape) matched Flower '{db_name[:50]}' - invalid type mismatch")
+                continue
+            
+            filtered_matches.append(match)
+            
+        return filtered_matches[:20]  # Return top 20 for speed (was 50)
         
     def _hybrid_match(self, json_product: Dict, database_products: List[Dict], product_type: str) -> List[MatchResult]:
         """Hybrid matching combining multiple strategies"""

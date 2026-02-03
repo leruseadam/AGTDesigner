@@ -4262,6 +4262,19 @@ class ExcelProcessor:
             records = filtered_df.to_dict('records')
             logger.debug(f"Converted to {len(records)} records")
             
+            # CRITICAL: Ensure Price is set for DOCX (web/UI may have Price* only; template expects 'Price')
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                price = rec.get('Price')
+                price_star = rec.get('Price*') or rec.get('Price* (Tier Name for Bulk)') or rec.get('Med Price')
+                if price_star is not None and str(price_star).strip() and str(price_star).lower() not in ('nan', 'none', 'null', ''):
+                    if price is None or (hasattr(pd, 'isna') and pd.isna(price)) or not str(price).strip() or str(price).lower() in ('nan', 'none', 'null', ''):
+                        rec['Price'] = price_star
+                if price is not None and str(price).strip() and str(price).lower() not in ('nan', 'none', 'null', ''):
+                    if not rec.get('Price*') or (hasattr(pd, 'isna') and pd.isna(rec.get('Price*'))):
+                        rec['Price*'] = price
+            
             # Sort records by lineage order, then by the order they appear in selected_tags
             lineage_order = [
                 'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA',
