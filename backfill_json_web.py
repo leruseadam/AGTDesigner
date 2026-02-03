@@ -131,23 +131,36 @@ def load_excel_descriptions(excel_path):
                 skipped_empty_name += 1
                 continue
             
-            # Get description - handle NaN/empty properly  
+            # Get description - handle NaN/empty properly, be more lenient
             description_raw = row.get(description_col, '')
-            if description_raw is None or (isinstance(description_raw, float) and pd.isna(description_raw)):
-                description = ''
-            else:
-                description = str(description_raw).strip()
+            description = ''
             
-            # If no description, use product name as fallback
-            if not description or description.lower() in ['nan', 'none', '']:
+            if description_raw is not None:
+                if isinstance(description_raw, float):
+                    if not pd.isna(description_raw):
+                        description = str(description_raw).strip()
+                else:
+                    description = str(description_raw).strip()
+            
+            # More lenient check - only skip if truly empty or just whitespace
+            description_lower = description.lower().strip()
+            if not description or description_lower in ['nan', 'none', '', 'null', 'n/a', 'na']:
                 description = product_name  # Use product name as JSON value if no description
                 rows_without_descriptions += 1
             else:
                 rows_with_descriptions += 1
 
             # Store by normalized product name - keep original name and description (or product name as fallback)
+            # If duplicate product name exists, prefer the one with a longer description (more complete)
             product_name_lower = product_name.lower()
-            products_data[product_name_lower] = (product_name, description)
+            if product_name_lower in products_data:
+                existing_desc = products_data[product_name_lower][1]
+                # Keep the one with longer description (more likely to be complete)
+                if len(description) > len(existing_desc):
+                    products_data[product_name_lower] = (product_name, description)
+                    logger.debug(f"  Replaced duplicate '{product_name}' with longer description")
+            else:
+                products_data[product_name_lower] = (product_name, description)
         
         logger.info(f"  ✅ Loaded {len(products_data)} products from Excel")
         logger.info(f"  📊 Products with descriptions: {rows_with_descriptions}")
