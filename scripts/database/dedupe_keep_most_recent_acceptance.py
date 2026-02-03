@@ -120,7 +120,7 @@ def run_dedupe(db_path: str, dry_run: bool = False) -> dict:
             FROM products
             WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
         """, (norm_name, vendor, brand))
-        entries = cursor.fetchall()
+        entries = [dict(r) for r in cursor.fetchall()]
         if not entries:
             logger.warning("Duplicate group returned no rows (skipping): %r", (norm_name, vendor, brand))
             continue
