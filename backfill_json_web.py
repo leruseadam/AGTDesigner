@@ -17,6 +17,7 @@ import sqlite3
 import pandas as pd
 import logging
 from pathlib import Path
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -142,9 +143,9 @@ def load_excel_descriptions(excel_path):
                 skipped_empty_name += 1
                 continue
 
-            # Store by normalized product name - PROCESS ALL VALID DESCRIPTIONS
+            # Store by normalized product name - keep original name and description
             product_name_lower = product_name.lower()
-            descriptions[product_name_lower] = description
+            descriptions[product_name_lower] = (product_name, description)  # Store (original_name, description)
             processed += 1
         
         logger.info(f"  ✅ Loaded {len(descriptions)} product descriptions from Excel")
@@ -173,7 +174,7 @@ def normalize_name(name):
 
 
 def update_json_column(db_path, descriptions):
-    """Update JSON column ONLY from Excel descriptions. No database fallbacks."""
+    """Update JSON column from Excel descriptions AND INSERT missing products."""
     try:
         if not descriptions:
             logger.warning("No Excel descriptions provided - skipping update")
@@ -186,64 +187,120 @@ def update_json_column(db_path, descriptions):
         
         total_products = len(products)
         logger.info(f"  Found {total_products} total products in database")
-        logger.info(f"  Loaded {len(descriptions)} Excel descriptions")
+        logger.info(f"  Loaded {len(descriptions)} Excel products with descriptions")
 
-        # Normalize Excel descriptions keys for better matching
-        normalized_descriptions = {}
-        for excel_name, desc in descriptions.items():
-            normalized_key = normalize_name(excel_name)
+        # Normalize Excel data for matching
+        normalized_excel_data = {}
+        for excel_name_lower, (original_name, desc) in descriptions.items():
+            normalized_key = normalize_name(excel_name_lower)
             if normalized_key:
-                normalized_descriptions[normalized_key] = desc
+                normalized_excel_data[normalized_key] = (original_name, desc)
 
         updated_from_excel = 0
-        unmatched_excel = set(normalized_descriptions.keys())
+        inserted_new_products = 0
+        unmatched_excel = set(normalized_excel_data.keys())
         unmatched_db = []
 
-        # Match products from Excel descriptions
-        logger.info(f"  Matching products...")
+        # Build a set of existing product names for quick lookup
+        existing_products = {}
         for product_id, product_name in products:
-            if not product_name:
-                unmatched_db.append((product_id, None))
-                continue
+            if product_name:
+                db_name_normalized = normalize_name(product_name)
+                existing_products[db_name_normalized] = product_id
 
-            db_name_normalized = normalize_name(product_name)
-            
-            # Try exact match first
-            if db_name_normalized in normalized_descriptions:
-                desc_value = normalized_descriptions[db_name_normalized]
+        # Match and update existing products
+        logger.info(f"  Matching and updating existing products...")
+        for normalized_name, (original_name, desc) in normalized_excel_data.items():
+            if normalized_name in existing_products:
+                # Product exists - update JSON column
+                product_id = existing_products[normalized_name]
                 cursor.execute(
                     'UPDATE products SET "JSON" = ? WHERE id = ?',
-                    (desc_value, product_id)
+                    (desc, product_id)
                 )
                 updated_from_excel += 1
-                unmatched_excel.discard(db_name_normalized)
+                unmatched_excel.discard(normalized_name)
             else:
-                unmatched_db.append((product_id, product_name))
+                # Product doesn't exist - will insert after updates
+                pass
         
-        # Commit all updates at once
+        # Commit updates first
         conn.commit()
-
+        
+        # Now INSERT all products that don't exist
+        logger.info(f"  Inserting {len(unmatched_excel)} new products from Excel...")
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        for normalized_name in list(unmatched_excel):
+            original_name, desc = normalized_excel_data[normalized_name]
+            
+            # Insert new product with minimal required fields
+            try:
+                cursor.execute('''
+                    INSERT INTO products (
+                        "Product Name*", 
+                        normalized_name,
+                        "Product Type*",
+                        "Description",
+                        "JSON",
+                        first_seen_date,
+                        last_seen_date,
+                        created_at,
+                        updated_at,
+                        "State",
+                        "Is Sample? (yes/no)",
+                        "Is MJ product?(yes/no)",
+                        "Discountable? (yes/no)",
+                        "Room*",
+                        "Is Archived? (yes/no)",
+                        "Medical Only (Yes/No)",
+                        "Source"
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    original_name,           # Product Name*
+                    normalized_name,         # normalized_name
+                    'Unknown',               # Product Type* (required)
+                    desc,                    # Description
+                    desc,                    # JSON (same as description)
+                    today,                   # first_seen_date
+                    today,                   # last_seen_date
+                    now,                     # created_at
+                    now,                     # updated_at
+                    'active',                # State
+                    'no',                    # Is Sample?
+                    'yes',                   # Is MJ product?
+                    'yes',                   # Discountable?
+                    'Default',               # Room*
+                    'no',                    # Is Archived?
+                    'No',                    # Medical Only
+                    'Excel Backfill'         # Source
+                ))
+                inserted_new_products += 1
+            except sqlite3.IntegrityError as e:
+                # Product might already exist (race condition or unique constraint)
+                logger.warning(f"  ⚠️  Could not insert '{original_name}': {e}")
+                # Try to update it instead
+                cursor.execute('SELECT id FROM products WHERE normalized_name = ?', (normalized_name,))
+                result = cursor.fetchone()
+                if result:
+                    cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (desc, result[0]))
+                    updated_from_excel += 1
+        
+        # Commit inserts
+        conn.commit()
         conn.close()
         
-        logger.info(f"  ✅ Updated {updated_from_excel} products from Excel")
-        logger.info(f"  📊 Match rate: {updated_from_excel}/{total_products} products ({100*updated_from_excel/max(total_products,1):.1f}%)")
+        total_processed = updated_from_excel + inserted_new_products
+        logger.info(f"  ✅ Updated {updated_from_excel} existing products from Excel")
+        logger.info(f"  ✅ Inserted {inserted_new_products} new products from Excel")
+        logger.info(f"  📊 Total processed: {total_processed} products")
         
-        # Show diagnostics for unmatched products
-        if unmatched_excel:
-            logger.warning(f"  ⚠️  {len(unmatched_excel)} Excel products had no database match:")
-            sample_unmatched = list(unmatched_excel)[:5]
-            for excel_name in sample_unmatched:
-                logger.warning(f"     - Excel: '{excel_name}'")
-        
-        if unmatched_db:
-            logger.info(f"  ℹ️  {len(unmatched_db)} database products had no Excel match")
-            if len(unmatched_db) <= 5:
-                for product_id, db_name in unmatched_db:
-                    logger.info(f"     - DB: '{db_name}'")
-        
-        return updated_from_excel
+        return total_processed
     except Exception as e:
         logger.error(f"Error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return 0
 
 
