@@ -93,14 +93,19 @@ def choose_keep_id(rows_with_proper):
     """
     rows_with_proper = list of (id, has_proper_json, json_len, json_val).
     Keep: first row with proper JSON (prefer longer JSON), else row with smallest id.
+    Ignores None ids (some DBs may have nullable id in edge cases).
     """
-    with_proper = [(id_, jlen) for id_, proper, jlen, _ in rows_with_proper if proper]
+    with_proper = [(id_, jlen) for id_, proper, jlen, _ in rows_with_proper if proper and id_ is not None]
     if with_proper:
         # Keep id with longest JSON; tie-break by smallest id
         with_proper.sort(key=lambda x: (-x[1], x[0]))
         return with_proper[0][0]
-    # No proper JSON: keep smallest id
-    return min(id_ for id_, _, _, _ in rows_with_proper)
+    # No proper JSON: keep smallest id (skip None ids)
+    valid_ids = [id_ for id_, _, _, _ in rows_with_proper if id_ is not None]
+    if not valid_ids:
+        # Fallback: keep first row by position (first non-None or first id in list)
+        return rows_with_proper[0][0] if rows_with_proper else None
+    return min(valid_ids)
 
 
 def remove_duplicates_no_json(db_path: str, dry_run: bool = False) -> int:
@@ -123,8 +128,10 @@ def remove_duplicates_no_json(db_path: str, dry_run: bool = False) -> int:
     to_delete = []
     for key, rows in groups:
         keep_id = choose_keep_id(rows)
+        if keep_id is None:
+            continue
         for id_, proper, json_len, _ in rows:
-            if id_ != keep_id:
+            if id_ is not None and id_ != keep_id:
                 to_delete.append(id_)
 
     deleted_count = len(to_delete)

@@ -348,7 +348,7 @@ async function exportDatabase() {
   showExportSplash();
   
   try {
-    const response = await fetch('/api/database-export');
+    const response = await fetch('/api/database-export', { credentials: 'include' });
     
     if (!response.ok) {
       // Try to read detailed error message from JSON response

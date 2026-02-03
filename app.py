@@ -17365,23 +17365,12 @@ def database_export():
         
         filename = f"AGT_Product_Database_{timestamp}.xlsx"
         response = None
-        
-        # Try to send file by path first; if that fails (context issues), fall back to in-memory send
-        try:
-            response = send_file(
-                temp_file_name,
-                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                as_attachment=True,
-                download_name=filename
-            )
 
-            # Set proper download filename with headers
-            response = set_download_filename(response, filename)
-            response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        # On web (e.g. PythonAnywhere), send from memory and delete temp immediately to avoid
+        # cleanup race where the file is removed while still being streamed.
+        use_memory_send = is_pythonanywhere
 
-        except Exception as send_err:
-            # send_file can fail if called outside a proper request context or for other IO reasons.
-            logging.error(f"send_file failed, attempting in-memory fallback: {send_err}")
+        if use_memory_send:
             try:
                 with open(temp_file_name, 'rb') as f:
                     data = f.read()
@@ -17395,45 +17384,79 @@ def database_export():
                 )
                 response = set_download_filename(response, filename)
                 response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                try:
+                    if os.path.exists(temp_file_name):
+                        os.unlink(temp_file_name)
+                except Exception:
+                    pass
             except Exception as mem_err:
-                logging.error(f"In-memory send_file fallback also failed: {mem_err}")
-                # Attempt best-effort cleanup then return error
+                logging.error(f"Export send (memory) failed: {mem_err}")
                 try:
                     if os.path.exists(temp_file_name):
                         os.unlink(temp_file_name)
                 except Exception:
                     pass
                 return jsonify({'error': f'Export failed during send: {mem_err}'}), 500
-        
-        if response is None:
-            # Clean up temp file
+        else:
+            # Try to send file by path first; if that fails, fall back to in-memory send
             try:
-                if os.path.exists(temp_file_name):
-                    os.unlink(temp_file_name)
-            except Exception:
-                pass
-            return jsonify({'error': 'Failed to create response'}), 500
-
-        # Schedule background cleanup of the temporary file to avoid relying on response.call_on_close
-        try:
-            import threading
-
-            def _del_later(path, delay=8):
+                response = send_file(
+                    temp_file_name,
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    as_attachment=True,
+                    download_name=filename
+                )
+                response = set_download_filename(response, filename)
+                response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            except Exception as send_err:
+                logging.error(f"send_file failed, attempting in-memory fallback: {send_err}")
                 try:
-                    time.sleep(delay)  # Use the time module imported at top of file
-                    if os.path.exists(path):
-                        os.unlink(path)
-                except Exception as cleanup_error:
-                    logging.warning(f"Failed to cleanup temp file {path}: {cleanup_error}")
+                    with open(temp_file_name, 'rb') as f:
+                        data = f.read()
+                    mem = BytesIO(data)
+                    mem.seek(0)
+                    response = send_file(
+                        mem,
+                        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        as_attachment=True,
+                        download_name=filename
+                    )
+                    response = set_download_filename(response, filename)
+                    response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                except Exception as mem_err:
+                    logging.error(f"In-memory send_file fallback also failed: {mem_err}")
+                    try:
+                        if os.path.exists(temp_file_name):
+                            os.unlink(temp_file_name)
+                    except Exception:
+                        pass
+                    return jsonify({'error': f'Export failed during send: {mem_err}'}), 500
 
-            threading.Thread(target=_del_later, args=(temp_file_name,), daemon=True).start()
-        except Exception:
-            # If background scheduling fails, attempt immediate cleanup (best-effort)
+            if response is None:
+                try:
+                    if os.path.exists(temp_file_name):
+                        os.unlink(temp_file_name)
+                except Exception:
+                    pass
+                return jsonify({'error': 'Failed to create response'}), 500
+
+            # Schedule background cleanup of the temporary file
             try:
-                if os.path.exists(temp_file_name):
-                    os.unlink(temp_file_name)
+                import threading
+                def _del_later(path, delay=8):
+                    try:
+                        time.sleep(delay)
+                        if os.path.exists(path):
+                            os.unlink(path)
+                    except Exception as cleanup_error:
+                        logging.warning(f"Failed to cleanup temp file {path}: {cleanup_error}")
+                threading.Thread(target=_del_later, args=(temp_file_name,), daemon=True).start()
             except Exception:
-                pass
+                try:
+                    if os.path.exists(temp_file_name):
+                        os.unlink(temp_file_name)
+                except Exception:
+                    pass
 
         return response
         

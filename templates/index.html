@@ -3059,11 +3059,21 @@
                 }
               }
               
-              // Fetch the export file
-              fetch('/api/database-export')
-                .then(response => {
+              // Fetch the export file (include credentials so session/store is sent on web)
+              fetch('/api/database-export', { credentials: 'include' })
+                .then(async response => {
                   if (!response.ok) {
-                    throw new Error(`Export failed: ${response.statusText}`);
+                    let msg = response.statusText;
+                    try {
+                      const text = await response.text();
+                      try {
+                        const data = JSON.parse(text);
+                        msg = data.error || data.message || msg;
+                      } catch (_) {
+                        if (text && text.length < 300) msg = text;
+                      }
+                    } catch (_) {}
+                    throw new Error(msg);
                   }
                   return response.blob();
                 })

@@ -33,6 +33,15 @@
   --tag-list-scroll-padding: 1rem;
 }
 
+/* Toast body text: white for visibility on dark theme (global) */
+.toast-container .toast .toast-body,
+#successToast .toast-body,
+#errorToast .toast-body {
+  color: #fff !important;
+}
+#successToast .toast-body { background-color: rgba(25, 135, 84, 0.95); }
+#errorToast .toast-body { background-color: rgba(220, 53, 69, 0.95); }
+
 /* Final override for help button spacing/position */
 .help-button-container {
   margin: 0.5rem 0 1rem 0 !important;
@@ -4682,6 +4691,17 @@ body.modal-open #mainContent.store-selection-disabled,
     border-radius: 12px;
     color: white;
   }
+
+  /* Toast body text: always white for visibility on dark theme */
+  .toast-container .toast .toast-body,
+  #successToast .toast-body,
+  #errorToast .toast-body,
+  .toast .toast-body {
+    color: #fff !important;
+  }
+  #successToast .toast-body { background-color: rgba(25, 135, 84, 0.95); }
+  #errorToast .toast-body { background-color: rgba(220, 53, 69, 0.95); }
+  .toast-modern .toast-body { color: #fff !important; }
   
   /* Filter section */
 .filter-label {
