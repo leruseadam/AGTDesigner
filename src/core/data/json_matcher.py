@@ -7168,6 +7168,7 @@ class JSONMatcher:
             # No match found
             logging.debug(f"❌ NO MATCH FOUND: '{json_name}' - JSON column matching only")
             return None, 0.0, "No JSON column match found"
+    """
     
     def _find_comprehensive_matches(self, json_item: dict) -> List[dict]:
         """
