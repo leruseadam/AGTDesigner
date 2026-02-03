@@ -184,51 +184,35 @@ def main():
         logger.error("Please update UPLOADS_DIR at the top of this script")
         return
 
-    # Find all database files
-    db_files = list(uploads_dir.glob('product_database_*.db'))
-    logger.info(f"Found {len(db_files)} database files")
+    # Only process Bothell database
+    store_name = 'AGT_Bothell'
+    db_path = uploads_dir / f"product_database_{store_name}.db"
+    
+    if not db_path.exists():
+        logger.error(f"Bothell database not found: {db_path}")
+        return
 
+    logger.info(f"Processing Bothell database only: {db_path.name}")
+
+    # Find Excel files that match Bothell
     excel_files = list(uploads_dir.glob('*.xlsx')) + list(uploads_dir.glob('*.xls'))
-    logger.info(f"Found {len(excel_files)} Excel files")
+    bothell_excel_files = [f for f in excel_files if 'bothell' in f.name.lower()]
+    
+    logger.info(f"Found {len(bothell_excel_files)} Bothell Excel files")
 
-    # Track which databases have been processed with Excel data
-    processed_dbs = set()
+    # Process Bothell Excel files first
+    descriptions = {}
+    for excel_path in bothell_excel_files:
+        logger.info(f"\nProcessing Excel: {excel_path.name}")
+        excel_descriptions = load_excel_descriptions(str(excel_path))
+        descriptions.update(excel_descriptions)
 
-    for excel_path in excel_files:
-        logger.info(f"\nProcessing: {excel_path.name}")
+    # Update Bothell database
+    ensure_json_column_exists(str(db_path))
+    updated = update_json_column(str(db_path), descriptions)
+    logger.info(f"✅ Updated {updated} products in Bothell database")
 
-        store_name = get_store_from_filename(excel_path.name)
-        if not store_name:
-            logger.warning(f"Could not determine store")
-            continue
-
-        db_path = uploads_dir / f"product_database_{store_name}.db"
-        if not db_path.exists():
-            logger.warning(f"Database not found: {db_path}")
-            continue
-
-        ensure_json_column_exists(str(db_path))
-        descriptions = load_excel_descriptions(str(excel_path))
-        updated = update_json_column(str(db_path), descriptions)
-        logger.info(f"✅ Updated {updated} products")
-        processed_dbs.add(str(db_path))
-
-    # Process ALL database files to ensure JSON column exists and is populated
-    # This handles databases without corresponding Excel files
-    logger.info("\nProcessing remaining databases without Excel files...")
-
-    for db_path in db_files:
-        if str(db_path) in processed_dbs:
-            continue
-
-        logger.info(f"\nChecking: {db_path.name}")
-        ensure_json_column_exists(str(db_path))
-        # Update with empty descriptions - triggers fallback to copy Description to JSON
-        updated = update_json_column(str(db_path), {})
-        if updated > 0:
-            logger.info(f"✅ Updated {updated} products")
-
-    logger.info("\n✅ Backfill complete!")
+    logger.info("\n✅ Bothell backfill complete!")
 
 
 if __name__ == '__main__':
