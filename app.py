@@ -17232,13 +17232,30 @@ def database_export():
         temp_file.close()
         
         # Export database
-        product_db.export_database(temp_file.name)
+        try:
+            product_db.export_database(temp_file.name)
+        except Exception as export_err:
+            import traceback
+            logging.error(f"Error calling export_database: {export_err}\n{traceback.format_exc()}")
+            # Clean up temp file
+            try:
+                if os.path.exists(temp_file.name):
+                    os.unlink(temp_file.name)
+            except Exception:
+                pass
+            return jsonify({'error': f'Export failed: {export_err}'}), 500
+        
+        # Verify file was created
+        if not os.path.exists(temp_file.name):
+            return jsonify({'error': 'Export file was not created'}), 500
         
         # Send file with proper cleanup
         # Generate descriptive filename with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         filename = f"AGT_Product_Database_{timestamp}.xlsx"
+        response = None
+        
         # Try to send file by path first; if that fails (context issues), fall back to in-memory send
         try:
             response = send_file(
@@ -17277,6 +17294,15 @@ def database_export():
                 except Exception:
                     pass
                 return jsonify({'error': f'Export failed during send: {mem_err}'}), 500
+        
+        if response is None:
+            # Clean up temp file
+            try:
+                if os.path.exists(temp_file.name):
+                    os.unlink(temp_file.name)
+            except Exception:
+                pass
+            return jsonify({'error': 'Failed to create response'}), 500
 
         # Schedule background cleanup of the temporary file to avoid relying on response.call_on_close
         try:
