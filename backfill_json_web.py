@@ -86,6 +86,16 @@ def load_excel_descriptions(excel_path):
         logger.info(f"  ✅ Reading Description column DIRECTLY from Excel (pre-processed values)")
         logger.info(f"     This matches excel_processor.py line 2125: self.df['JSON'] = self.df['Description']")
 
+        # CRITICAL: Check JSON column FIRST - it contains original Description values before transformation
+        # excel_processor copies Description to JSON BEFORE replacing Description (line 1998)
+        json_col = None
+        for col in df.columns:
+            col_clean = str(col).strip().lower()
+            if col_clean == 'json':
+                json_col = col
+                logger.info(f"  ✅ Found JSON column: '{col}' (contains original Description values)")
+                break
+        
         # Find Description column - be flexible with name matching
         # Also check if Product Name column contains full descriptions (may be mislabeled)
         description_col = None
@@ -96,9 +106,13 @@ def load_excel_descriptions(excel_path):
                 logger.info(f"  Found Description column: '{col}'")
                 break
         
-        # If no Description column found, check if Product Name column has full descriptions
+        # Use JSON column if available (original Description values), otherwise use Description column
+        source_col = json_col if json_col else description_col
+        source_col_name = 'JSON' if json_col else 'Description'
+        
+        # If no source column found, check if Product Name column has full descriptions
         # (Sometimes the full descriptions are in Product Name column)
-        if not description_col:
+        if not source_col:
             logger.warning(f"  ⚠️  No 'Description' column found")
             logger.info(f"  Checking if Product Name column contains full descriptions...")
             
@@ -120,11 +134,11 @@ def load_excel_descriptions(excel_path):
                     logger.warning(f"  ⚠️  Product Name column contains long values (avg {avg_len:.1f} chars)")
                     logger.warning(f"     These may be the full descriptions")
                     logger.warning(f"     Sample: '{str(sample_pnames[0])[:80] if sample_pnames else 'N/A'}'")
-                    logger.error(f"  ❌ Cannot proceed - need a 'Description' column with full product descriptions")
+                    logger.error(f"  ❌ Cannot proceed - need a '{source_col_name}' column with full product descriptions")
                     logger.error(f"  Available columns: {list(df.columns)}")
                     return {}
             
-            logger.error(f"  ❌ No Description column found in Excel file")
+            logger.error(f"  ❌ No {source_col_name} column found in Excel file")
             logger.error(f"  Available columns: {list(df.columns)}")
             return {}
 
@@ -150,50 +164,51 @@ def load_excel_descriptions(excel_path):
             logger.error(f"  Available columns: {list(df.columns)}")
             return {}
         
-        # CRITICAL: Verify Description column has actual values (not empty)
-        description_non_null = df[description_col].notna().sum()
-        description_non_empty = (df[description_col].astype(str).str.strip() != '').sum()
-        logger.info(f"  Description column stats:")
-        logger.info(f"     Non-null values: {description_non_null}/{len(df)}")
-        logger.info(f"     Non-empty values: {description_non_empty}/{len(df)}")
+        # CRITICAL: Verify source column has actual values (not empty)
+        source_non_null = df[source_col].notna().sum()
+        source_non_empty = (df[source_col].astype(str).str.strip() != '').sum()
+        logger.info(f"  {source_col_name} column stats:")
+        logger.info(f"     Non-null values: {source_non_null}/{len(df)}")
+        logger.info(f"     Non-empty values: {source_non_empty}/{len(df)}")
         
-        if description_non_empty == 0:
-            logger.error(f"  ❌ Description column is EMPTY - cannot backfill JSON column")
-            logger.error(f"     All Description values are null or empty")
+        if source_non_empty == 0:
+            logger.error(f"  ❌ {source_col_name} column is EMPTY - cannot backfill JSON column")
+            logger.error(f"     All {source_col_name} values are null or empty")
             return {}
         
-        # Sample a few Description values to verify they're not Product Names
+        # Sample a few source column values to verify they're not Product Names
         # (Now that product_name_col is defined, we can safely use it)
-        sample_descriptions = df[description_col].dropna().head(5).tolist()
+        sample_source_values = df[source_col].dropna().head(5).tolist()
         sample_product_names = df[product_name_col].head(5).tolist()
-        logger.info(f"  Sample Description values (from '{description_col}' column):")
-        for i, desc in enumerate(sample_descriptions[:5]):
-            desc_str = str(desc)[:100]
-            logger.info(f"     {i+1}. '{desc_str}'")
+        logger.info(f"  Sample {source_col_name} values (from '{source_col}' column):")
+        for i, val in enumerate(sample_source_values[:5]):
+            val_str = str(val)[:100]
+            logger.info(f"     {i+1}. '{val_str}'")
         logger.info(f"  Sample Product Name values (from '{product_name_col}' column, for comparison):")
         for i, pname in enumerate(sample_product_names[:5]):
             pname_str = str(pname)[:100]
             logger.info(f"     {i+1}. '{pname_str}'")
         
-        # Check if Description values look transformed (shortened)
-        desc_lengths = [len(str(d).strip()) for d in sample_descriptions if d]
+        # Check if source values look transformed (shortened)
+        source_lengths = [len(str(d).strip()) for d in sample_source_values if d]
         pname_lengths = [len(str(p).strip()) for p in sample_product_names if p]
-        avg_desc_len = sum(desc_lengths) / len(desc_lengths) if desc_lengths else 0
+        avg_source_len = sum(source_lengths) / len(source_lengths) if source_lengths else 0
         avg_pname_len = sum(pname_lengths) / len(pname_lengths) if pname_lengths else 0
         
-        if avg_desc_len > 0 and avg_pname_len > 0:
-            if avg_desc_len < avg_pname_len * 0.7:
-                logger.warning(f"  ⚠️  WARNING: Description values are shorter than Product Names")
-                logger.warning(f"     Avg Description length: {avg_desc_len:.1f} chars")
+        if avg_source_len > 0 and avg_pname_len > 0:
+            if avg_source_len < avg_pname_len * 0.7:
+                logger.warning(f"  ⚠️  WARNING: {source_col_name} values are shorter than Product Names")
+                logger.warning(f"     Avg {source_col_name} length: {avg_source_len:.1f} chars")
                 logger.warning(f"     Avg Product Name length: {avg_pname_len:.1f} chars")
-                logger.warning(f"     ⚠️  Description column may be TRANSFORMED")
-                logger.warning(f"     ⚠️  Using Description values anyway - make sure you're using ORIGINAL Excel file")
-                logger.warning(f"     ⚠️  Original Description should contain raw SKU format like:")
-                logger.warning(f"        'Apple Fritter Full Spectrum Hash Rosin by Collections Cannabis - 1g'")
-            elif avg_desc_len >= avg_pname_len:
-                logger.info(f"  ✅ Description values look complete (avg length: {avg_desc_len:.1f} chars)")
+                if json_col:
+                    logger.info(f"  ✅ Using JSON column (contains original Description values before transformation)")
+                else:
+                    logger.warning(f"  ⚠️  {source_col_name} column may be TRANSFORMED")
+                    logger.warning(f"  ⚠️  Consider using an Excel file with JSON column (original Description values)")
+            elif avg_source_len >= avg_pname_len:
+                logger.info(f"  ✅ {source_col_name} values look complete (avg length: {avg_source_len:.1f} chars)")
             else:
-                logger.info(f"  ℹ️  Description values (avg length: {avg_desc_len:.1f} chars) - proceeding")
+                logger.info(f"  ℹ️  {source_col_name} values (avg length: {avg_source_len:.1f} chars) - proceeding")
 
         products_data = {}  # Store ALL products with product names
         skipped_empty_name = 0
@@ -216,11 +231,12 @@ def load_excel_descriptions(excel_path):
                 skipped_empty_name += 1
                 continue
             
-            # CRITICAL: Read from Description column (pre-transformed values)
-            # Description column contains values like: "Pure Prana Pulse AIO Disposable - Rainbow Belts Live Resin - Hybrid - 1mL"
+            # CRITICAL: Read from source column (JSON if available, otherwise Description)
+            # JSON column contains original Description values before transformation (from excel_processor line 1998)
+            # Description column may contain transformed values if Excel was processed
             # Product Name* column contains raw SKU like: "Rainbow Belts Pure Live Resin Disposable Vape by Bodhi High - 1g"
-            # We want Description column values moved to JSON column
-            description_raw = row.get(description_col, '')
+            # We want source column values moved to JSON column
+            description_raw = row.get(source_col, '')
             raw_description = ''
             
             if description_raw is not None:
@@ -253,16 +269,16 @@ def load_excel_descriptions(excel_path):
             if rows_with_descriptions <= 3:
                 logger.info(f"  📝 Sample row {rows_with_descriptions}:")
                 logger.info(f"     Product Name* (raw SKU): '{product_name[:80]}'")
-                logger.info(f"     Description (pre-transformed): '{row.get(description_col, '')[:80] if description_col else 'N/A'}'")
+                logger.info(f"     {source_col_name} (source): '{row.get(source_col, '')[:80] if source_col else 'N/A'}'")
                 logger.info(f"     JSON value to store: '{description[:80]}'")
-                logger.info(f"     ✅ Moving Description column (pre-transformed) to JSON column")
+                logger.info(f"     ✅ Moving {source_col_name} column to JSON column")
 
             # Store by normalized product name - ONLY store if we have a description
             # products_data format: {product_name_lower: (product_name, description)}
             # - product_name = Product Name* column (raw SKU) - used ONLY for matching
-            # - description = Description column (pre-transformed) - moved to JSON column
+            # - description = {source_col_name} column value - moved to JSON column
             product_name_lower = product_name.lower()
-            if description:  # Only store if we have a Description value (no fallbacks)
+            if description:  # Only store if we have a source value (no fallbacks)
                 if product_name_lower in products_data:
                     existing_desc = products_data[product_name_lower][1]
                     # Keep the one with longer description (more likely to be complete)
@@ -272,12 +288,17 @@ def load_excel_descriptions(excel_path):
                 else:
                     products_data[product_name_lower] = (product_name, description)
         
-        logger.info(f"  ✅ Loaded {len(products_data)} products with Description values from Excel")
-        logger.info(f"  📊 Products with descriptions: {rows_with_descriptions}")
-        logger.info(f"  📊 Products without descriptions (skipped): {rows_without_descriptions}")
+        logger.info(f"  ✅ Loaded {len(products_data)} products with {source_col_name} values from Excel")
+        logger.info(f"  📊 Products with {source_col_name.lower()}s: {rows_with_descriptions}")
+        logger.info(f"  📊 Products without {source_col_name.lower()}s (skipped): {rows_without_descriptions}")
         logger.info(f"  📈 Coverage: {len(products_data)}/{len(df)} rows ({100*len(products_data)/max(len(df),1):.1f}%)")
-        logger.info(f"  ✅ CRITICAL: Using EXACT Description column values from Excel (pre-processed)")
-        logger.info(f"     These are the same values that excel_processor.py copies to JSON at line 2125")
+        if json_col:
+            logger.info(f"  ✅ CRITICAL: Using JSON column values (original Description before transformation)")
+            logger.info(f"     These are the same values that excel_processor.py copies to JSON at line 1998")
+        else:
+            logger.info(f"  ✅ CRITICAL: Using Description column values from Excel")
+            logger.warning(f"  ⚠️  WARNING: If Excel was processed, Description may be transformed")
+            logger.warning(f"  ⚠️  Consider using an Excel file with JSON column for original values")
         if skipped_empty_name > 0:
             logger.info(f"  ℹ️  Skipped {skipped_empty_name} rows with empty product names")
 
@@ -328,11 +349,16 @@ def update_json_column(db_path, products_data):
         matched_samples = []
         unmatched_samples = []
         update_errors = []
+        updated_product_ids = []  # Track IDs of products we update for verification
 
         # Simple matching: Match Excel Product Name to DB Product Name (case-insensitive)
         logger.info(f"  🔄 Matching Excel products to database products...")
-        logger.info(f"  ✅ Using PRE-PROCESSED Description values from Excel for JSON column")
-        logger.info(f"     (Same as excel_processor.py line 2125: self.df['JSON'] = self.df['Description'])")
+        if json_col:
+            logger.info(f"  ✅ Using JSON column values from Excel (original Description before transformation)")
+            logger.info(f"     (Same as excel_processor.py line 1998: self.df['JSON'] = self.df['Description'])")
+        else:
+            logger.info(f"  ✅ Using Description column values from Excel for JSON column")
+            logger.warning(f"  ⚠️  WARNING: If Excel was processed, Description may be transformed")
         
         for excel_name_lower, (original_name, json_value) in products_data.items():
             # Validate JSON value is not empty
@@ -353,6 +379,7 @@ def update_json_column(db_path, products_data):
                     )
                     if cursor.rowcount > 0:
                         updated_from_excel += 1
+                        updated_product_ids.append(product_id)  # Track for verification
                     else:
                         logger.warning(f"  ⚠️  No rows updated for product ID {product_id} ({original_name})")
                     
@@ -392,6 +419,38 @@ def update_json_column(db_path, products_data):
             logger.error(f"  ❌ {len(update_errors)} errors during updates - rolling back transaction")
             conn.rollback()
             raise Exception(f"Update failed with {len(update_errors)} errors. First error: {update_errors[0]}")
+        
+        # Verify updates BEFORE committing - check the products we actually updated
+        verification_passed = True
+        if updated_from_excel > 0 and len(updated_product_ids) > 0:
+            # Check a sample of the products we actually updated (up to 100, or all if less than 100)
+            sample_size = min(100, len(updated_product_ids))
+            sample_ids = updated_product_ids[:sample_size]
+            placeholders = ','.join(['?'] * len(sample_ids))
+            cursor.execute(
+                f'SELECT COUNT(*) FROM products WHERE id IN ({placeholders}) AND "JSON" IS NOT NULL AND "JSON" != ""',
+                sample_ids
+            )
+            sample_with_json = cursor.fetchone()[0]
+            
+            # If we updated many products but none of our sample have JSON, something is wrong
+            # Only fail if we updated more than 10 products and got 0 matches
+            if sample_with_json == 0 and updated_from_excel > 10:
+                logger.error(f"  ❌ VERIFICATION FAILED: Updated {updated_from_excel} products but verification check shows 0 with JSON")
+                logger.error(f"     Checked {len(sample_ids)} sample product IDs from updated set")
+                # Log a few sample IDs for debugging
+                logger.error(f"     Sample IDs checked: {sample_ids[:5]}")
+                verification_passed = False
+            elif sample_with_json > 0:
+                logger.info(f"  ✅ Verification passed: {sample_with_json}/{len(sample_ids)} sampled updated products have JSON")
+            else:
+                # Few updates (< 10), verification not critical
+                logger.info(f"  ✅ Updated {updated_from_excel} products (verification skipped for small batch)")
+        
+        if not verification_passed:
+            logger.error(f"  ❌ VERIFICATION FAILED - rolling back transaction")
+            conn.rollback()
+            raise Exception("Verification failed - transaction rolled back")
         
         # Commit updates first
         conn.commit()
@@ -467,28 +526,14 @@ def update_json_column(db_path, products_data):
         
         total_processed = updated_from_excel + inserted_new_products
         
-        # Verify updates by checking JSON column
+        # Verify final state by checking JSON column
         cursor.execute('SELECT COUNT(*) FROM products WHERE "JSON" IS NOT NULL AND "JSON" != ""')
         products_with_json = cursor.fetchone()[0]
-        
-        # Verify that our updates actually worked - spot check a few
-        verification_passed = True
-        if updated_from_excel > 0:
-            cursor.execute('SELECT COUNT(*) FROM products WHERE "JSON" IS NOT NULL AND "JSON" != "" AND id IN (SELECT id FROM products LIMIT 100)')
-            sample_with_json = cursor.fetchone()[0]
-            if sample_with_json == 0 and updated_from_excel > 10:
-                logger.error(f"  ❌ VERIFICATION FAILED: Updated {updated_from_excel} products but sample check shows 0 with JSON")
-                verification_passed = False
         
         logger.info(f"  ✅ Updated {updated_from_excel} existing products from Excel")
         logger.info(f"  ✅ Inserted {inserted_new_products} new products from Excel")
         logger.info(f"  📊 Total processed: {total_processed} products")
         logger.info(f"  📊 Products with JSON column populated: {products_with_json}/{total_products} ({100*products_with_json/max(total_products,1):.1f}%)")
-        
-        if not verification_passed:
-            logger.error(f"  ❌ VERIFICATION FAILED - data may not have been saved correctly")
-            conn.rollback()
-            raise Exception("Verification failed - transaction rolled back")
         
         conn.close()
         
