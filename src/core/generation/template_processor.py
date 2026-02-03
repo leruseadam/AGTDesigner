@@ -1920,7 +1920,8 @@ class TemplateProcessor:
             price_str = str(price_val).strip()
             if price_str and price_str.lower() not in ('nan', 'none', 'null', ''):
                 label_context['Price'] = price_str
-        if not label_context.get('Price'):
+        # Ensure Price is never NaN in context (web/request rows can have NaN from DataFrame)
+        if not label_context.get('Price') or (hasattr(pd, 'isna') and pd.isna(label_context.get('Price'))):
             label_context['Price'] = ''
 
         # DEBUG: Log Product Brand from record vs label_context

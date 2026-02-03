@@ -8594,6 +8594,20 @@ def generate_labels():
             logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly - SKIPPING ALL FILE I/O")
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
+            # CRITICAL: Ensure Price is populated for DOCX (web sends full tag objects; UI may have Price* only)
+            _df = excel_processor.df
+            if _df is not None and not _df.empty:
+                if 'Price*' in _df.columns and ('Price' not in _df.columns or _df['Price'].isna().all()):
+                    if 'Price' not in _df.columns:
+                        _df['Price'] = _df['Price*']
+                    else:
+                        _df['Price'] = _df['Price'].fillna(_df['Price*'])
+                if 'Price' in _df.columns:
+                    # Fill NaN in Price from Price* where available
+                    if 'Price*' in _df.columns:
+                        _df['Price'] = _df['Price'].fillna(_df['Price*'])
+                    if 'Price* (Tier Name for Bulk)' in _df.columns:
+                        _df['Price'] = _df['Price'].fillna(_df['Price* (Tier Name for Bulk)'])
             excel_processor._last_loaded_file = file_path or 'direct_from_request'
             excel_processor._skip_enrichment = True  # Skip database enrichment for speed
             logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time)")
@@ -9088,6 +9102,7 @@ def generate_labels():
                                 # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
                                 # This ensures DOCX uses the same lineage shown in the UI
                                 ui_lineage_map = {}
+                                ui_price_map = {}  # Price from UI (selected tags) - DOCX must match what user sees
                                 for tag in selected_tags_from_request:
                                     if isinstance(tag, dict):
                                         product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
@@ -9095,6 +9110,15 @@ def generate_labels():
                                         ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
                                         if product_name and ui_lineage:
                                             ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
+                                        # Price from UI - same source as "Selected Tags" display (incl. best_match)
+                                        ui_price = (
+                                            tag.get('Price') or tag.get('Price*') or tag.get('Price* (Tier Name for Bulk)') or tag.get('Med Price') or
+                                            (tag.get('best_match') or {}).get('Price') or (tag.get('best_match') or {}).get('Price*')
+                                        )
+                                        if product_name and ui_price and str(ui_price).strip() and str(ui_price).strip().lower() not in ('nan', 'none', 'null', ''):
+                                            key = str(product_name).strip()
+                                            ui_price_map[key] = str(ui_price).strip()
+                                            ui_price_map[key.lower()] = str(ui_price).strip()
                                 
                                 # PERFORMANCE FIX: Batch query all lineages at once instead of N+1 queries
                                 # This replaces individual get_product_lineage() calls which were causing 5-minute delays
@@ -9229,28 +9253,36 @@ def generate_labels():
                                         is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
                                         docx_lineage = 'HYBRID' if is_classic else 'MIXED'
                                     
-                                    # Extract price from Excel cache first, then database
-                                    if product_name_for_record in price_cache_from_excel:
-                                        extracted_price = price_cache_from_excel[product_name_for_record]
-                                        logging.info(f"💰 Using price from Excel cache: '{product_name_debug}' -> '{extracted_price}'")
+                                    # Extract price: UI first (what user sees), then Excel cache, then database
+                                    extracted_price = None
+                                    if ui_price_map:
+                                        key = product_name_for_record.strip()
+                                        extracted_price = ui_price_map.get(key) or ui_price_map.get(key.lower())
+                                    if extracted_price is not None:
+                                        logging.info(f"💰 Using price from UI (selected tags): '{product_name_for_record[:50]}' -> '{extracted_price}'")
+                                    elif price_cache_from_excel and (product_name_for_record in price_cache_from_excel or product_name_for_record.strip().lower() in price_cache_from_excel):
+                                        extracted_price = price_cache_from_excel.get(product_name_for_record) or price_cache_from_excel.get(product_name_for_record.strip().lower())
+                                        logging.info(f"💰 Using price from Excel cache: '{product_name_for_record[:50]}' -> '{extracted_price}'")
                                     else:
                                         extracted_price = _extract_price_from_database_product(processed_record)
+                                    if not extracted_price:
+                                        raw_price = db_record.get('Price') or db_record.get('Price*') or db_record.get('Med Price')
+                                        if raw_price and str(raw_price).strip() and str(raw_price).strip().lower() not in ('none', 'nan', ''):
+                                            extracted_price = str(raw_price).strip()
+                                            logging.info(f"💰 Using price from raw db_record: '{product_name_for_record[:50]}' -> '{extracted_price}'")
                                     
                                     formatted_price = _format_price_value(extracted_price)
-                                    
-                                    # CRITICAL FIX: Ensure Price is always set - use fallback if empty
                                     if not formatted_price or str(formatted_price).strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']:
-                                        # Try to get price from other fields
                                         price_fallback = (
                                             processed_record.get('Price', '') or
                                             processed_record.get('Price*', '') or
                                             processed_record.get('Med Price', '') or
                                             ''
                                         )
-                                        if price_fallback:
+                                        if price_fallback and str(price_fallback).strip():
                                             formatted_price = _format_price_value(price_fallback)
-                                        else:
-                                            formatted_price = ''  # Leave empty instead of $0.00
+                                        if not formatted_price:
+                                            formatted_price = ''
                                     
                                     # CRITICAL FIX: Ensure DescAndWeight is always set - use fallback if empty
                                     desc_and_weight = processed_record.get('DescAndWeight', '')
@@ -9517,15 +9549,22 @@ def generate_labels():
             # PERFORMANCE: Fast validation loop - only process records that need fixing
             for record in records:
                 # CRITICAL FIX: NEVER set default prices - preserve existing price or leave empty
-                # Only use existing price fields, never fallback to $0.00 or any default
-                price = record.get('Price', '') or record.get('Price*', '') or record.get('Med Price', '')
-                if price and price.strip() and price.strip().lower() not in ['none', 'nan', 'n/a', '']:
+                # Treat NaN as missing so we fall back to Price* (web/UI may have Price* only)
+                def _safe_price_val(r, key, default=''):
+                    v = r.get(key, default)
+                    if v is None: return default
+                    if hasattr(pd, 'isna') and pd.isna(v): return default
+                    s = str(v).strip()
+                    if not s or s.lower() in ('nan', 'none', 'null', 'n/a', ''): return default
+                    return s
+                price = _safe_price_val(record, 'Price') or _safe_price_val(record, 'Price*') or _safe_price_val(record, 'Med Price')
+                if price:
                     # Only set price if we have a valid value from Excel
-                    if not record.get('Price'):
+                    if not _safe_price_val(record, 'Price'):
                         record['Price'] = price
-                    if not record.get('Price*'):
+                    if not _safe_price_val(record, 'Price*'):
                         record['Price*'] = price
-                    if not record.get('Price* (Tier Name for Bulk)'):
+                    if not record.get('Price* (Tier Name for Bulk)') or (hasattr(pd, 'isna') and pd.isna(record.get('Price* (Tier Name for Bulk)'))):
                         record['Price* (Tier Name for Bulk)'] = price
                 
                 # Ensure DescAndWeight is always set (fast check)
