@@ -564,6 +564,7 @@ class ProductDatabase:
                         "Vendor/Supplier*" TEXT,
                         "Product Brand" TEXT,
                         "Description" TEXT,
+                        "JSON" TEXT,  -- Original Description value from Excel BEFORE any transformations
                         "Weight*" TEXT,
                         "Units" TEXT,
                         "Price" TEXT,
@@ -758,7 +759,8 @@ class ProductDatabase:
                 'qty',
                 '"Weight Unit* (grams/gm or ounces/oz)"',
                 'Vendor',
-                'Source'  # Add Source column for compatibility
+                'Source',  # Add Source column for compatibility
+                '"JSON"'  # Original Description value from Excel BEFORE transformations
             ]
             
             advanced_columns = [
