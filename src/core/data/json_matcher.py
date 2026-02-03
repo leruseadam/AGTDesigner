@@ -1133,7 +1133,126 @@ class JSONMatcher:
         except Exception as e:
             logging.warning(f"Direct database match search failed: {e}")
         return None
-    
+
+    def _get_product_line_signature(self, item: dict) -> tuple:
+        """
+        Build a signature for "same product line" grouping: items with same vendor, weight, price,
+        and product type are treated as siblings (e.g. same cartridge line, different strains).
+        """
+        if not isinstance(item, dict):
+            return ()
+        vendor = str(item.get("vendor", "") or item.get("Vendor/Supplier*", "")).strip().lower()
+        weight_raw = str(item.get("unit_weight", item.get("weight", ""))).strip()
+        try:
+            weight_norm = str(float(weight_raw.replace(",", ".").replace("g", "").replace("mg", "").strip() or "0"))
+        except (ValueError, TypeError):
+            weight_norm = weight_raw or "0"
+        price = str(item.get("line_price", item.get("price", ""))).strip()
+        inv_type = str(item.get("inventory_type", item.get("product_type", ""))).strip().lower()
+        inv_cat = str(item.get("inventory_category", "")).strip().lower()
+        product_type = (inv_type or inv_cat or "").lower()
+        return (vendor or "", weight_norm, price or "", product_type or "")
+
+    def _find_cache_product_by_strain_variant(
+        self, template_product: dict, strain: str, vendor: str, weight: str, product_type: str
+    ) -> Optional[dict]:
+        """
+        Find a cache/DB product that is the same "line" as template (vendor, weight, type)
+        but with the given strain in the name/description. Used when a sibling JSON item
+        already matched and the current item differs only by strain.
+        """
+        if not strain or not self._sheet_cache:
+            return None
+        strain_lower = strain.lower().strip()
+        strain_tokens = set(re.sub(r"[^\w\s]", " ", strain_lower).split()) - {"", "and", "or", "x", "lr"}
+        if not strain_tokens:
+            return None
+        template_vendor = str(template_product.get("Vendor/Supplier*", "") or template_product.get("vendor", "")).strip().lower()
+        template_weight = str(template_product.get("Weight*", "") or "").strip()
+        try:
+            tw = float(template_weight.replace(",", ".").replace("g", "").replace("mg", "").split()[0] or "0")
+        except (ValueError, TypeError):
+            tw = None
+        template_type = str(template_product.get("Product Type*", "") or template_product.get("product_type", "")).strip().lower()
+        for cache_item in self._sheet_cache:
+            excel_vendor = str(cache_item.get("vendor", "")).strip().lower()
+            if template_vendor and excel_vendor and not self._is_vendor_match(template_vendor, excel_vendor):
+                continue
+            excel_weight = str(cache_item.get("Weight*", "") or (cache_item.get("_db_product") or {}).get("Weight*", "")).strip()
+            try:
+                ew = float(excel_weight.replace(",", ".").replace("g", "").replace("mg", "").split()[0] or "0")
+            except (ValueError, TypeError):
+                ew = None
+            if tw is not None and ew is not None and abs(tw - ew) > 0.01:
+                continue
+            excel_type = str(cache_item.get("product_type", "") or (cache_item.get("_db_product") or {}).get("Product Type*", "")).strip().lower()
+            if template_type and excel_type and template_type not in excel_type and excel_type not in template_type:
+                continue
+            name_and_desc = (
+                str(cache_item.get("original_name", "") or cache_item.get("Product Name*", "") or "").lower()
+                + " "
+                + str(cache_item.get("Description", "") or (cache_item.get("_db_product") or {}).get("Description", "") or "").lower()
+            )
+            if not any(t in name_and_desc for t in strain_tokens if len(t) >= 2):
+                continue
+            if "_db_product" in cache_item:
+                return cache_item["_db_product"]
+            return cache_item
+        return None
+
+    def _find_db_product_by_strain_variant(
+        self, template_product: dict, strain: str, product_db
+    ) -> Optional[dict]:
+        """
+        Find a DB product that is the same line as template (vendor, weight, type) but with
+        the given strain in name/description. Uses direct DB query to narrow by vendor + strain + weight.
+        """
+        if not strain or not product_db or not hasattr(product_db, "_get_connection"):
+            return None
+        try:
+            conn = product_db._get_connection()
+            cursor = conn.cursor()
+            vendor = str(template_product.get("Vendor/Supplier*", "") or template_product.get("vendor", "")).strip()
+            weight = str(template_product.get("Weight*", "") or "").strip()
+            ptype = str(template_product.get("Product Type*", "") or template_product.get("product_type", "")).strip()
+            strain_lower = strain.strip().lower()
+            vendor_lower = vendor.lower()
+            sql = (
+                'SELECT * FROM products '
+                'WHERE LOWER("Vendor/Supplier*") LIKE ? '
+                'AND (LOWER("Product Name*") LIKE ? OR LOWER(COALESCE("Description", "")) LIKE ?) '
+                'AND ("Product Name*" NOT LIKE "%*VOID*%" AND (COALESCE("Description","") NOT LIKE "%*VOID*%")) '
+                'AND ("Product Name*" NOT LIKE "%trade sample%" AND (COALESCE("Description","") NOT LIKE "%trade sample%")) '
+                'LIMIT 20'
+            )
+            params = [f"%{vendor_lower}%", f"%{strain_lower}%", f"%{strain_lower}%"]
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            if not rows:
+                return None
+            columns = [col[0] for col in cursor.description]
+            def parse_w(s):
+                try:
+                    return float(str(s).replace(",", ".").replace("g", "").replace("mg", "").split()[0] or "0")
+                except (ValueError, TypeError):
+                    return None
+            tw = parse_w(weight)
+            for row in rows:
+                row_dict = dict(zip(columns, row))
+                db_weight = str(row_dict.get("Weight*", "") or "").strip()
+                ew = parse_w(db_weight)
+                if tw is not None and ew is not None and abs(tw - ew) > 0.01:
+                    continue
+                if ptype:
+                    db_type = str(row_dict.get("Product Type*", "") or "").lower()
+                    if db_type and ptype.lower() not in db_type and db_type not in ptype.lower():
+                        continue
+                return row_dict
+            return dict(zip(columns, rows[0])) if rows else None
+        except Exception as e:
+            logging.debug(f"Strain-variant DB lookup failed: {e}")
+        return None
+
     def _build_cache_from_database(self):
         """Build sheet cache from ProductDatabase when Excel data is not available."""
         try:
@@ -2459,7 +2578,8 @@ class JSONMatcher:
             items_matched = 0
             items_fallback = 0
             items_failed = 0
-            
+            sibling_matches = {}  # same product line (vendor, weight, price, type) -> matched product for strain-variant lookup
+
             for i, item in enumerate(unique_items):
                 items_processed += 1
                 # Ensure product name exists
@@ -2515,9 +2635,22 @@ class JSONMatcher:
                 # SIMPLIFIED MATCHING: Try matching against sheet cache (from Excel or Database)
                 best_match = None
                 best_score = 0.0
+                signature = self._get_product_line_signature(item)
+
+                # SIBLING STRAIN MATCH: If a similar JSON item (same vendor, weight, price, type) already matched,
+                # find the same product line with this item's strain so identical products other than strain match.
+                if signature in sibling_matches and strain and strain.strip():
+                    sibling_match = self._find_cache_product_by_strain_variant(
+                        sibling_matches[signature], strain, effective_vendor, weight, product_type
+                    )
+                    if sibling_match:
+                        best_match = sibling_match
+                        best_score = 95.0
+                        logging.info(f"✅ SIBLING STRAIN MATCH: '{product_name}' → same line, strain '{strain}'")
+                        print(f"✅ SIBLING STRAIN MATCH: '{product_name}' → DB '{best_match.get('Product Name*', '') or best_match.get('Description', '')}' (strain: {strain})")
                  
                 # Use sheet cache for matching (works with both Excel data and Database data)
-                if self._sheet_cache and len(self._sheet_cache) > 0:
+                if best_match is None and self._sheet_cache and len(self._sheet_cache) > 0:
                     # PERFORMANCE OPTIMIZATION: Pre-filter candidates by vendor to reduce search space
                     candidates_to_check = []
                     
@@ -2796,6 +2929,7 @@ class JSONMatcher:
                 
                 if best_match is not None and validated:  # Only use validated matches
                     try:
+                        sibling_matches[signature] = best_match  # so same-line items can match by strain variant
                         product = self._create_product_from_excel_match(best_match, item, effective_vendor)
                         if product:
                             matched_products.append(product)
@@ -5332,6 +5466,8 @@ class JSONMatcher:
                         if product_db:
                             db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
                             if db_direct_match:
+                                signature = self._get_product_line_signature(item)
+                                sibling_matches[signature] = db_direct_match
                                 tag = self._create_tag_from_database_info(db_direct_match, vendor, item)
                                 all_tags.append(tag)
                                 matched_count += 1
@@ -5346,7 +5482,9 @@ class JSONMatcher:
                             valid_products = [p for p in matched_products if self._is_valid_product(p)]
                             if len(valid_products) != len(matched_products):
                                 print(f"🔍 DEBUG: Filtered out {len(matched_products) - len(valid_products)} invalid products (void/sample)")
-                            
+                            if valid_products:
+                                signature = self._get_product_line_signature(item)
+                                sibling_matches[signature] = valid_products[0]
                             for product in valid_products:
                                 tag = self._create_tag_from_product(product, item, global_vendor)
                                 all_tags.append(tag)
@@ -5470,6 +5608,20 @@ class JSONMatcher:
                         except Exception as guess_error:
                             logging.warning(f"Educated guess error for '{product_name}': {guess_error}")
                     
+                    # SIBLING STRAIN MATCH: If a similar JSON item (same vendor, weight, price, type) already matched,
+                    # find the same product line in DB with this item's strain so identical products other than strain match.
+                    signature = self._get_product_line_signature(item)
+                    if signature in sibling_matches and strain and strain.strip() and product_db:
+                        db_sibling_match = self._find_db_product_by_strain_variant(
+                            sibling_matches[signature], strain, product_db
+                        )
+                        if db_sibling_match:
+                            tag = self._create_tag_from_database_info(db_sibling_match, vendor, item)
+                            all_tags.append(tag)
+                            matched_count += 1
+                            logging.info(f"✅ SIBLING STRAIN MATCH (DB): '{product_name}' → same line, strain '{strain}'")
+                            continue
+
                     # PRIORITY 4: If no match found, force creation of faux tag for novel product
                     new_product_count += 1
                     logging.info(f"🎨 NO MATCH FOUND - Forcing faux tag creation for novel product: {product_name}")
