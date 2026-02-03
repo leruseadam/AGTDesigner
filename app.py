@@ -17214,12 +17214,17 @@ def database_export():
     """Export the database to Excel."""
     try:
         # Check disk space before creating temporary files
-        disk_ok, disk_message = check_disk_space()
-        if not disk_ok:
-            emergency_cleanup()
+        try:
             disk_ok, disk_message = check_disk_space()
             if not disk_ok:
-                return jsonify({'error': f'Insufficient disk space for export: {disk_message}'}), 507
+                emergency_cleanup()
+                disk_ok, disk_message = check_disk_space()
+                if not disk_ok:
+                    return jsonify({'error': f'Insufficient disk space for export: {disk_message}'}), 507
+        except Exception as disk_check_err:
+            import traceback
+            logging.warning(f"Disk space check failed (continuing anyway): {disk_check_err}\n{traceback.format_exc()}")
+            # Continue with export even if disk check fails - let the export itself fail if needed
         
         import tempfile
         import os
@@ -17366,13 +17371,27 @@ def database_export():
         import traceback
         error_trace = traceback.format_exc()
         error_msg = str(e)
+        error_type = type(e).__name__
         logging.error(f"Error exporting database: {error_msg}\n{error_trace}")
-        # Return detailed error for debugging
-        return jsonify({
-            'error': f'Export failed: {error_msg}',
-            'type': type(e).__name__,
-            'details': error_trace[:2000]  # Include traceback in response for debugging
-        }), 500
+        
+        # Clean up any temp file that might have been created
+        try:
+            if 'temp_file' in locals() and temp_file and os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)
+        except Exception:
+            pass
+        
+        # Return detailed error for debugging - ensure it's JSON
+        try:
+            return jsonify({
+                'error': f'Export failed: {error_msg}',
+                'type': error_type,
+                'details': error_trace[:2000] if len(error_trace) > 2000 else error_trace
+            }), 500
+        except Exception as json_err:
+            # Fallback if jsonify fails
+            logging.error(f"Failed to create JSON error response: {json_err}")
+            return jsonify({'error': f'Export failed: {error_msg}'}), 500
 
 @app.route('/api/database-view', methods=['GET'])
 def database_view():

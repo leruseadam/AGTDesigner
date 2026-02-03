@@ -353,14 +353,37 @@ async function exportDatabase() {
     if (!response.ok) {
       // Try to read detailed error message from JSON response
       let errorMessage = `Export failed: ${response.status} ${response.statusText}`;
+      let errorDetails = null;
       try {
-        const data = await response.json();
-        if (data && (data.error || data.message)) {
-          errorMessage = data.error || data.message;
+        const responseText = await response.text();
+        try {
+          const data = JSON.parse(responseText);
+          if (data && data.error) {
+            errorMessage = data.error;
+            if (data.details) {
+              errorDetails = data.details;
+            }
+            if (data.type) {
+              errorMessage += ` (${data.type})`;
+            }
+          } else if (data && data.message) {
+            errorMessage = data.message;
+          }
+        } catch (parseError) {
+          // If response isn't JSON, try to extract error from text
+          if (responseText && responseText.length < 500) {
+            errorMessage = responseText;
+          }
         }
-      } catch (parseError) {
-        // If response isn't JSON, keep the default message
+      } catch (readError) {
+        console.error('Error reading error response:', readError);
       }
+      
+      console.error('Database export error:', errorMessage);
+      if (errorDetails) {
+        console.error('Error details:', errorDetails);
+      }
+      
       throw new Error(errorMessage);
     }
     
