@@ -1831,6 +1831,17 @@ class ProductDatabase:
                         else:
                             row_dict[col] = str(value).strip() if isinstance(value, str) else value
                     
+                    # CRITICAL: Ensure JSON column has raw Description value (captured by Excel processor)
+                    # The Excel processor puts raw Description into JSON column BEFORE any transformations
+                    # If JSON is empty but Description exists, copy raw Description to JSON
+                    if 'JSON' in row_dict and row_dict['JSON']:
+                        # JSON already has raw Description from Excel processor - keep it
+                        pass
+                    elif 'Description' in row_dict and row_dict['Description']:
+                        # JSON is empty but Description exists - use raw Description for JSON
+                        # This handles cases where JSON column wasn't populated
+                        row_dict['JSON'] = str(row_dict['Description']).strip()
+                    
                     # Map to database columns correctly
                     # CRITICAL FIX: Preserve actual Excel weight values, don't use fallbacks
                     excel_weight = row_dict.get('Weight*', row_dict.get('Weight', ''))
@@ -1882,6 +1893,10 @@ class ProductDatabase:
                             row_dict.get('Product Name*', ''), 
                             row_dict.get('Description', '')
                         ),
+                        # CRITICAL: Store raw Description value in JSON column BEFORE transformation
+                        # The Excel processor captures raw Description into JSON column (line 2123 in excel_processor.py)
+                        # Use JSON column value (raw Description) if available, otherwise use raw Description
+                        'JSON': str(row_dict.get('JSON', '') or row_dict.get('Description', '')).strip(),
                         'Weight*': weight_value,
                         'Units': units_value,
                         'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
