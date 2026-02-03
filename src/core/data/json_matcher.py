@@ -7841,17 +7841,11 @@ class JSONMatcher:
 
     def _find_json_column_match(self, json_description: str) -> Optional[dict]:
         """
-        Find match by comparing incoming JSON description against the Description column in database/excel.
-        Uses the raw Description column values (not the transformed JSON column).
-
-        Matching strategy:
-        1. Try exact match first (highest confidence)
-        2. Try normalized match
-        3. Try fuzzy match
-        4. Try strain-based match
+        Simple match: Compare incoming JSON product_name against JSON column value in database/excel.
+        Uses simple case-insensitive matching only.
 
         Args:
-            json_description: The description field from the incoming JSON URL
+            json_description: The product_name field from the incoming JSON URL
 
         Returns:
             The matched product dict with all fields, or None if no match
@@ -7860,299 +7854,52 @@ class JSONMatcher:
             return None
 
         description_lower = json_description.strip().lower()
-        description_normalized = self._normalize_name(description_lower)
-        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{description_lower[:50]}...' (normalized: '{description_normalized[:50]}...')")
-
-        # Extract strain from JSON product name (e.g., "Pure - Live Resin Prana AIO - Liquid Diamonds - Northern Lights - Indica - 1mL")
-        # The strain is typically the 4th component or can be extracted from the name
-        extracted_strain = self._extract_strain_from_bamboo_name(json_description)
-        
-        # Also try extracting strain from common patterns in JSON names
-        # Pattern: "Brand - Type - Subtype - STRAIN - Effects - Weight"
-        strain_from_name = None
-        parts = [p.strip() for p in description_lower.split(' - ')]
-        if len(parts) >= 4:
-            # Strain is often the 4th part (index 3)
-            potential_strain = parts[3]
-            # Validate it's a strain (not a weight like "1ml" or effect like "indica")
-            if potential_strain and 'ml' not in potential_strain and potential_strain not in ['indica', 'sativa', 'hybrid']:
-                strain_from_name = potential_strain
-        
-        # Use extracted strain or strain from name
-        if not extracted_strain and strain_from_name:
-            extracted_strain = strain_from_name
-        
-        logging.debug(f"   Extracted strain: '{extracted_strain}'")
-
-        # PERFORMANCE: Use indexed JSON column lookup instead of iterating
-        excel_strain_matches = []
-        db_strain_matches = []
+        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{description_lower[:50]}...'")
         
         # Check indexed cache first (fast O(1) lookup)
         if self._indexed_cache and 'json_column_lookup' in self._indexed_cache:
             json_lookup = self._indexed_cache['json_column_lookup']
             
-            # Try exact match first
+            # Simple exact match (case-insensitive)
             if description_lower in json_lookup:
                 matched_products = json_lookup[description_lower]
                 if matched_products:
                     product = matched_products[0]
                     product['_source'] = 'database'
                     product['_match_type'] = 'json_column_exact'
-                    logging.info(f"✅ JSON COLUMN EXACT MATCH (Indexed Cache): Found '{product.get('Product Name*', 'Unknown')}'")
+                    logging.info(f"✅ JSON COLUMN EXACT MATCH: Found '{product.get('Product Name*', 'Unknown')}'")
                     return product
-            
-            # Try normalized match
-            if description_normalized in json_lookup:
-                matched_products = json_lookup[description_normalized]
-                if matched_products:
-                    product = matched_products[0]
-                    product['_source'] = 'database'
-                    product['_match_type'] = 'json_column_normalized'
-                    logging.info(f"✅ JSON COLUMN NORMALIZED MATCH (Indexed Cache): Found '{product.get('Product Name*', 'Unknown')}'")
-                    return product
-            
-            # Try fuzzy matching on full name
-            try:
-                from fuzzywuzzy import fuzz
-                best_fuzzy_match = None
-                best_fuzzy_score = 0.0
-                for json_col_value, products in json_lookup.items():
-                    similarity = fuzz.token_sort_ratio(description_lower, json_col_value)
-                    if similarity >= 85 and similarity > best_fuzzy_score:
-                        best_fuzzy_score = similarity
-                        best_fuzzy_match = products[0]
-                
-                if best_fuzzy_match and best_fuzzy_score >= 85:
-                    best_fuzzy_match['_source'] = 'database'
-                    best_fuzzy_match['_match_type'] = f'json_column_fuzzy_{best_fuzzy_score}'
-                    logging.info(f"✅ JSON COLUMN FUZZY MATCH (Indexed Cache): '{description_lower[:50]}...' → '{best_fuzzy_match.get('Product Name*', 'Unknown')}' (score: {best_fuzzy_score})")
-                    return best_fuzzy_match
-            except ImportError:
-                pass
-            
-            # CRITICAL: If no exact/fuzzy match found, try matching by strain name
-            # Many JSON column values contain just the strain name or strain + brand
-            if extracted_strain and len(extracted_strain) >= 3:
-                strain_lower = extracted_strain.lower().strip()
-                strain_normalized = self._normalize_name(strain_lower)
-                
-                # Try exact strain match in JSON column values
-                for json_col_value, products in json_lookup.items():
-                    json_col_lower = json_col_value.lower()
-                    # Check if strain appears in JSON column value
-                    if strain_lower in json_col_lower or strain_normalized in json_col_lower:
-                        # Also check if it's a good match (not just a substring of a longer name)
-                        json_words = set(json_col_lower.split())
-                        strain_words = set(strain_lower.split())
-                        # If strain words are significant part of JSON column, it's a match
-                        if len(strain_words & json_words) >= len(strain_words) * 0.7:  # 70% of strain words match
-                            product = products[0]
-                            product['_source'] = 'database'
-                            product['_match_type'] = f'json_column_strain_match_{strain_lower}'
-                            logging.info(f"✅ JSON COLUMN STRAIN MATCH (Indexed Cache): Strain '{strain_lower}' found in '{json_col_value[:50]}...' → '{product.get('Product Name*', 'Unknown')}'")
-                            return product
-                
-                # Try fuzzy strain matching
-                try:
-                    from fuzzywuzzy import fuzz
-                    best_strain_match = None
-                    best_strain_score = 0.0
-                    for json_col_value, products in json_lookup.items():
-                        # Check if strain appears in JSON column value with fuzzy matching
-                        similarity = fuzz.partial_ratio(strain_lower, json_col_value.lower())
-                        if similarity >= 80:  # High threshold for strain matching
-                            # Also check token sort ratio for better matching
-                            token_similarity = fuzz.token_sort_ratio(strain_lower, json_col_value.lower())
-                            combined_score = max(similarity, token_similarity)
-                            if combined_score > best_strain_score:
-                                best_strain_score = combined_score
-                                best_strain_match = products[0]
-                    
-                    if best_strain_match and best_strain_score >= 80:
-                        best_strain_match['_source'] = 'database'
-                        best_strain_match['_match_type'] = f'json_column_strain_fuzzy_{best_strain_score}'
-                        logging.info(f"✅ JSON COLUMN STRAIN FUZZY MATCH (Indexed Cache): Strain '{strain_lower}' → '{best_strain_match.get('Product Name*', 'Unknown')}' (score: {best_strain_score})")
-                        return best_strain_match
-                except ImportError:
-                    pass
         
         # Fallback: Check Excel data (current session data)
         if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
             try:
                 df = self.excel_processor.df
                 if 'JSON' in df.columns:
-                    # PERFORMANCE: Build lookup dict once if not exists
-                    # Use Description column to populate JSON column, then use JSON column for matching
+                    # Build lookup dict once if not exists
                     if not hasattr(self, '_excel_json_lookup'):
                         self._excel_json_lookup = {}
                         for _, row in df.iterrows():
-                            # Get Description value (raw Excel)
-                            desc_value = str(row.get('Description', '')).strip()
                             json_value = str(row.get('JSON', '')).strip()
-                            
-                            # Use Description if available, otherwise use JSON
-                            value_to_use = desc_value if desc_value else json_value
-                            
-                            if value_to_use:
-                                # Copy Description to JSON column in the row dict
+                            if json_value:
                                 row_dict = row.to_dict()
-                                if desc_value:
-                                    row_dict['JSON'] = desc_value
-                                
-                                value_lower = value_to_use.lower()
+                                value_lower = json_value.lower()
                                 if value_lower not in self._excel_json_lookup:
                                     self._excel_json_lookup[value_lower] = []
                                 self._excel_json_lookup[value_lower].append(row_dict)
                     
-                    # Fast lookup - try exact match first
+                    # Simple exact match (case-insensitive)
                     if description_lower in self._excel_json_lookup:
                         match = self._excel_json_lookup[description_lower][0]
                         match['_source'] = 'excel'
                         match['_match_type'] = 'json_column_exact'
                         logging.info(f"✅ JSON COLUMN EXACT MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
                         return match
-                    
-                    # Try normalized match
-                    if description_normalized in self._excel_json_lookup:
-                        match = self._excel_json_lookup[description_normalized][0]
-                        match['_source'] = 'excel'
-                        match['_match_type'] = 'json_column_normalized'
-                        logging.info(f"✅ JSON COLUMN NORMALIZED MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
-                        return match
-                    
-                    # Try fuzzy matching
-                    try:
-                        from fuzzywuzzy import fuzz
-                        best_excel_fuzzy = None
-                        best_excel_score = 0.0
-                        for json_col_value, rows in self._excel_json_lookup.items():
-                            similarity = fuzz.token_sort_ratio(description_lower, json_col_value)
-                            if similarity >= 85 and similarity > best_excel_score:
-                                best_excel_score = similarity
-                                best_excel_fuzzy = rows[0]
-                        
-                        if best_excel_fuzzy and best_excel_score >= 85:
-                            match = dict(best_excel_fuzzy)
-                            match['_source'] = 'excel'
-                            match['_match_type'] = f'json_column_fuzzy_{best_excel_score}'
-                            logging.info(f"✅ JSON COLUMN FUZZY MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}' (score: {best_excel_score})")
-                            return match
-                    except ImportError:
-                        pass
-                    
-                    # Collect strain matches for fallback (only if needed)
-                    if extracted_strain and len(extracted_strain) >= 5:
-                        for desc_lower, rows in self._excel_json_lookup.items():
-                            for row in rows:
-                                # Use Description column, fallback to JSON
-                                desc_value = str(row.get('Description', '') or row.get('JSON', '')).strip()
-                                db_strain = self._extract_strain_from_bamboo_name(desc_value)
-                                if db_strain and extracted_strain == db_strain:
-                                    match = dict(row)
-                                    match['_source'] = 'excel'
-                                    match['_match_type'] = 'json_column_strain'
-                                    excel_strain_matches.append(match)
             except Exception as e:
                 logging.debug(f"Error checking Excel JSON column: {e}")
         
-        # Fallback: Check database products (only if indexed cache not available)
-        if not self._indexed_cache or 'json_column_lookup' not in self._indexed_cache:
-            try:
-                from app import get_product_database
-                product_db = get_product_database()
-                if product_db:
-                    db_products = product_db.get_all_products()
-                    if db_products:
-                        for product in db_products[:1000]:  # Limit to 1000 for performance
-                            # Use Description to populate JSON, then use JSON column for matching
-                            desc_value = str(product.get('Description', '')).strip()
-                            json_value = str(product.get('JSON', '')).strip()
-                            
-                            # Copy Description to JSON if JSON is empty
-                            if desc_value and (not json_value or json_value != desc_value):
-                                product['JSON'] = desc_value
-                                json_value = desc_value
-                            
-                            value_to_use = json_value if json_value else desc_value
-                            if not value_to_use:
-                                continue
-                            value_lower = value_to_use.lower()
-
-                            # Try exact match first
-                            if value_lower == description_lower:
-                                product['_source'] = 'database'
-                                product['_match_type'] = 'json_column_exact'
-                                logging.info(f"✅ JSON COLUMN EXACT MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
-                                return product
-
-                            # Collect strain matches for fallback
-                            if extracted_strain and len(extracted_strain) >= 5:
-                                db_strain = self._extract_strain_from_bamboo_name(value_to_use)
-                                if db_strain and extracted_strain == db_strain:
-                                    product_copy = dict(product)
-                                    product_copy['_source'] = 'database'
-                                    product_copy['_match_type'] = 'json_column_strain'
-                                    db_strain_matches.append(product_copy)
-            except Exception as e:
-                logging.debug(f"Error checking database JSON column: {e}")
-
-        # If no exact match, try strain-based matches (prefer database over excel)
-        # Score matches by product type similarity
-        def score_product_type_match(match_json: str, input_name: str) -> int:
-            """Score how well product types match between input and database."""
-            score = 0
-            input_lower = input_name.lower()
-            match_lower = match_json.lower()
-
-            # Product type keywords to check
-            type_keywords = [
-                ('sugar cone', 20),
-                ('pre-roll', 15),
-                ('preroll', 15),
-                ('cartridge', 15),
-                ('cart', 10),
-                ('vape', 10),
-                ('vaporizer', 10),
-                ('disposable', 10),
-                ('aio', 10),
-                ('live resin', 8),
-                ('liquid diamond', 8),
-                ('flower', 5),
-            ]
-
-            for keyword, points in type_keywords:
-                in_input = keyword in input_lower
-                in_match = keyword in match_lower
-                if in_input and in_match:
-                    score += points
-                elif in_input != in_match:
-                    score -= points // 2  # Penalty for mismatch
-
-            return score
-
-        if db_strain_matches:
-            # Score and sort matches by product type similarity
-            for m in db_strain_matches:
-                m['_type_score'] = score_product_type_match(m.get('JSON', ''), json_description)
-            db_strain_matches.sort(key=lambda x: x.get('_type_score', 0), reverse=True)
-
-            best_match = db_strain_matches[0]
-            logging.info(f"✅ JSON COLUMN STRAIN MATCH (Database): '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}' (type_score: {best_match.get('_type_score', 0)})")
-            return best_match
-
-        if excel_strain_matches:
-            # Score and sort matches by product type similarity
-            for m in excel_strain_matches:
-                m['_type_score'] = score_product_type_match(m.get('JSON', ''), json_description)
-            excel_strain_matches.sort(key=lambda x: x.get('_type_score', 0), reverse=True)
-
-            best_match = excel_strain_matches[0]
-            logging.info(f"✅ JSON COLUMN STRAIN MATCH (Excel): '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}'")
-            return best_match
-
         logging.debug(f"❌ No JSON column match found for '{description_lower[:50]}...'")
         return None
+    
 
     def _find_exact_name_matches(self, json_name: str) -> List[dict]:
         """Find exact name matches in the cache using indexed lookup."""
