@@ -17416,11 +17416,11 @@ def database_export():
 
         # Schedule background cleanup of the temporary file to avoid relying on response.call_on_close
         try:
-            import threading, time
+            import threading
 
             def _del_later(path, delay=8):
                 try:
-                    time.sleep(delay)
+                    time.sleep(delay)  # Use the time module imported at top of file
                     if os.path.exists(path):
                         os.unlink(path)
                 except Exception as cleanup_error:
