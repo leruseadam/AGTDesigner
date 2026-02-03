@@ -120,22 +120,26 @@ def update_json_column(db_path, descriptions):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
-        # Get all products
-        cursor.execute('SELECT id, "Product Name*" FROM products')
+        # Get all products (id + name) so we can control exactly which rows we touch
+        cursor.execute('SELECT id, "Product Name*", COALESCE("Description","") FROM products')
         products = cursor.fetchall()
         logger.info(f"Found {len(products)} products in database")
 
         updated_from_excel = 0
+        updated_from_db = 0
+        updated_from_name = 0
 
-        # First pass: Match from Excel descriptions
+        # Track which product IDs we've already updated in this run so we don't
+        # overwrite a better source (e.g. Excel Description) with a fallback.
+        updated_ids = set()
+
+        # First pass: use ORIGINAL Excel descriptions (best possible source)
         if descriptions:
-            for product_id, product_name in products:
+            for product_id, product_name, _desc in products:
                 if not product_name:
                     continue
 
                 product_name_lower = product_name.strip().lower()
-
-                # Look for matching description
                 if product_name_lower in descriptions:
                     description = descriptions[product_name_lower]
                     cursor.execute(
@@ -143,29 +147,55 @@ def update_json_column(db_path, descriptions):
                         (description, product_id)
                     )
                     updated_from_excel += 1
+                    updated_ids.add(product_id)
 
             conn.commit()
-            logger.info(f"✅ Updated {updated_from_excel} products from Excel descriptions")
+            logger.info(f"✅ Updated {updated_from_excel} products from Excel descriptions (pre-transform)")
 
-        # Second pass: For products still without JSON, copy from Description column
-        # This handles historical products not in current Excel
-        cursor.execute('''
-            UPDATE products
-            SET "JSON" = "Description"
-            WHERE ("JSON" IS NULL OR "JSON" = "")
-              AND "Description" IS NOT NULL
-              AND "Description" != ""
-        ''')
-        updated_from_db = cursor.rowcount
+        # Second pass: for any product NOT touched above, overwrite JSON with the
+        # current Description column (better than stale/incorrect JSON or blanks).
+        for product_id, _name, db_description in products:
+            if product_id in updated_ids:
+                continue  # keep the canonical Excel-based JSON we just wrote
+            if not db_description:
+                continue
+
+            cursor.execute(
+                'UPDATE products SET "JSON" = ? WHERE id = ?',
+                (db_description, product_id)
+            )
+            if cursor.rowcount:
+                updated_from_db += 1
+                updated_ids.add(product_id)
+
         conn.commit()
-
         if updated_from_db > 0:
             logger.info(f"✅ Updated {updated_from_db} products from existing Description column")
 
+        # Third pass: final fallback – for any remaining products with no update
+        # in this run, force JSON to Product Name* so every product has a value.
+        for product_id, product_name, _desc in products:
+            if product_id in updated_ids:
+                continue
+            if not product_name or not str(product_name).strip():
+                continue
+
+            cursor.execute(
+                'UPDATE products SET "JSON" = "Product Name*" WHERE id = ?',
+                (product_id,)
+            )
+            if cursor.rowcount:
+                updated_from_name += 1
+                updated_ids.add(product_id)
+
+        conn.commit()
+        if updated_from_name > 0:
+            logger.info(f"✅ Updated {updated_from_name} products from Product Name* as fallback")
+
         conn.close()
 
-        total_updated = updated_from_excel + updated_from_db
-        logger.info(f"✅ Total: {total_updated} products with JSON values")
+        total_updated = updated_from_excel + updated_from_db + updated_from_name
+        logger.info(f"✅ Total this run: {total_updated} products (Excel: {updated_from_excel}, DB Description: {updated_from_db}, Name: {updated_from_name})")
         return total_updated
 
     except Exception as e:

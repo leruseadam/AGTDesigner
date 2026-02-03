@@ -2620,6 +2620,7 @@ class JSONMatcher:
             # Extract vendor information from root level if available
             vendor_meta = "Unknown Vendor"
             json_vendor_filter = None
+            is_conscious_manifest = False
             if isinstance(payload, dict) and "from_license_name" in payload:
                 vendor_meta = payload.get('from_license_name', '')
                 if vendor_meta and vendor_meta != "Unknown Vendor":
@@ -2635,6 +2636,16 @@ class JSONMatcher:
                     logging.info(f"🔍 VENDOR FILTER: Will only match products from vendor '{json_vendor_filter}'")
                     print(f"🔍 VENDOR FILTER: Will only match products from vendor '{json_vendor_filter}'")
                 
+                # Flag Conscious Cannabis processor manifests so vendor/brand
+                # grouping logic can treat Bodhi High, Honey Tree, etc. as part
+                # of the same vendor family.
+                license_name_lower = str(payload.get("from_license_name", "")).lower()
+                license_number = str(payload.get("from_license_number", "")).strip()
+                if "conscious cannabis" in license_name_lower or license_number == "416008":
+                    is_conscious_manifest = True
+                    logging.info("🛡️  CONSCIOUS CANNABIS MANIFEST DETECTED - enabling vendor group matching for Conscious/Bodhi/Honey Tree family")
+                    print("🛡️  CONSCIOUS CANNABIS MANIFEST DETECTED - vendor group matching enabled")
+            
             raw_date = datetime.now().strftime("%Y-%m-%d")
             if isinstance(payload, dict) and "est_arrival_at" in payload:
                 raw_date = payload.get("est_arrival_at", "").split("T")[0]
@@ -2739,20 +2750,28 @@ class JSONMatcher:
                  
                 # Use sheet cache for matching (works with both Excel data and Database data)
                 if best_match is None and self._sheet_cache and len(self._sheet_cache) > 0:
-                    # PERFORMANCE OPTIMIZATION: Pre-filter candidates by vendor to reduce search space
+                    # PERFORMANCE OPTIMIZATION: Pre-filter candidates by vendor to reduce search space.
+                    # IMPORTANT: The JSON's from_license_name *is* the true vendor/license holder
+                    # (e.g. CONSCIOUS CANNABIS Proc), NOT the retail store. We therefore ALWAYS
+                    # treat the current_vendor_filter as a real vendor signal across all product
+                    # types, including concentrates/vapes.
                     candidates_to_check = []
                     
-                    # First pass: Filter by vendor if available (much faster than checking all items)
-                    # BUT for concentrate/vape JSON items we must allow cross‑vendor matches, because the
-                    # JSON vendor is often the store (from_license_name), not the grower/processor.
-                    if current_vendor_filter and not is_concentrate_vape_json:
+                    if current_vendor_filter:
+                        # Primary pass: restrict to products whose vendor matches the license name.
                         for cache_item in self._sheet_cache:
                             excel_vendor = cache_item.get('vendor', '').strip()
                             if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
                                 candidates_to_check.append(cache_item)
-                        # For non‑concentrate items we keep strict vendor isolation to avoid bad matches.
+                        
+                        # Safety valve: if nothing matches this vendor (new vendor with no DB
+                        # products yet, or mis-entered vendor in Excel), fall back to ALL items
+                        # so that JSON fallback logic can still create tags instead of silently
+                        # dropping products.
+                        if not candidates_to_check:
+                            candidates_to_check = self._sheet_cache
                     else:
-                        # No (or relaxed) vendor filter - check all items
+                        # No vendor filter available – check all items.
                         candidates_to_check = self._sheet_cache
 
                     # PERFORMANCE: Limit candidates to check (max 1000 for better coverage)
@@ -2782,7 +2801,11 @@ class JSONMatcher:
                             # but RELAXED for concentrate/vape JSON items.
                             excel_vendor = cache_item.get('vendor', '').strip()
                             vendor_match_bonus = 0.0
-                            if current_vendor_filter and not is_concentrate_vape_json:
+                            if current_vendor_filter:
+                                # STRICT vendor isolation: when JSON knows the vendor/license
+                                # (from_license_name), only consider DB rows from that vendor.
+                                # This keeps brands (Honey Tree, Bodhi High, etc.) properly
+                                # grouped under their upstream license like Conscious Cannabis.
                                 if not excel_vendor:
                                     # JSON has vendor but DB product has no vendor - skip to prevent wrong matches
                                     continue
@@ -2790,11 +2813,8 @@ class JSONMatcher:
                                 if vendor_matches:
                                     vendor_match_bonus = 50.0  # Strong bonus for vendor match
                                 else:
+                                    # Different vendor – do not allow cross‑vendor matches here.
                                     continue  # Skip this candidate entirely
-                            elif current_vendor_filter and is_concentrate_vape_json:
-                                # For concentrates/vapes, treat vendor as a soft signal only
-                                if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
-                                    vendor_match_bonus = 10.0  # Small nudge but NOT a hard requirement
                             
                             # 1. STRAIN OVERLAP: When JSON has strain_name, DB product must share strain
                             if strain and len(strain.strip()) >= 2:
@@ -12494,6 +12514,25 @@ class JSONMatcher:
         
         return variations
     
+    # Vendor group aliases for licenses that own multiple public-facing brands.
+    # Example: Conscious Cannabis is the processor/license behind Bodhi High,
+    # Honey Tree, Pure, Original, Ultra Pure, Honey Stixx, etc.
+    _VENDOR_GROUP_ALIASES = {
+        "conscious_cannabis": [
+            "conscious cannabis",
+            "conscious cannabis proc",
+            "conscious cannabis processor",
+            "conscious cannabis llc",
+            "bodhi high",
+            "honey tree",
+            "pure",
+            "original",
+            "ultra pure",
+            "honey stixx",
+            "honey stixx",
+        ],
+    }
+    
     def _is_vendor_match_flexible(self, vendor1: str, vendor2: str) -> bool:
         """Check if two vendor names represent the same vendor using various patterns."""
         if not vendor1 or not vendor2:
@@ -12527,6 +12566,19 @@ class JSONMatcher:
         import re
         v1_clean = re.sub(r'\s+', ' ', v1_clean).strip()
         v2_clean = re.sub(r'\s+', ' ', v2_clean).strip()
+        
+        # Check for explicit vendor groups (e.g., Conscious Cannabis + Bodhi High).
+        def _get_group_id(name: str) -> Optional[str]:
+            for gid, aliases in self._VENDOR_GROUP_ALIASES.items():
+                for alias in aliases:
+                    if alias and alias in name:
+                        return gid
+            return None
+        
+        g1 = _get_group_id(v1_clean)
+        g2 = _get_group_id(v2_clean)
+        if g1 and g1 == g2:
+            return True
         
         # Check if cleaned names match exactly
         if v1_clean == v2_clean:

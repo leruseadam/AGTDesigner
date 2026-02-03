@@ -100,14 +100,20 @@ def update_json_column(db_path, descriptions):
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute('SELECT id, "Product Name*" FROM products')
+        cursor.execute('SELECT id, "Product Name*", COALESCE("Description","") FROM products')
         products = cursor.fetchall()
 
         updated_from_excel = 0
+        updated_from_db = 0
+        updated_from_name = 0
 
-        # First pass: Match from Excel descriptions
+        # Track which rows we've updated this run so we don't overwrite a better
+        # source (Excel) with a weaker fallback.
+        updated_ids = set()
+
+        # First pass: Match from Excel descriptions (canonical, pre-transform)
         if descriptions:
-            for product_id, product_name in products:
+            for product_id, product_name, _desc in products:
                 if not product_name:
                     continue
 
@@ -118,26 +124,53 @@ def update_json_column(db_path, descriptions):
                         (descriptions[product_name_lower], product_id)
                     )
                     updated_from_excel += 1
+                    updated_ids.add(product_id)
 
             conn.commit()
-            logger.info(f"  From Excel: {updated_from_excel}")
+            logger.info(f"  From Excel (pre-transform): {updated_from_excel}")
 
-        # Second pass: Copy Description to JSON for remaining products
-        cursor.execute('''
-            UPDATE products
-            SET "JSON" = "Description"
-            WHERE ("JSON" IS NULL OR "JSON" = "")
-              AND "Description" IS NOT NULL
-              AND "Description" != ""
-        ''')
-        updated_from_db = cursor.rowcount
+        # Second pass: For products not touched above, overwrite JSON from
+        # the current Description column (better than stale/incorrect JSON).
+        for product_id, _name, db_description in products:
+            if product_id in updated_ids:
+                continue
+            if not db_description:
+                continue
+
+            cursor.execute(
+                'UPDATE products SET "JSON" = ? WHERE id = ?',
+                (db_description, product_id)
+            )
+            if cursor.rowcount:
+                updated_from_db += 1
+                updated_ids.add(product_id)
+
         conn.commit()
-
         if updated_from_db > 0:
             logger.info(f"  From DB Description: {updated_from_db}")
 
+        # Third pass: final fallback – for any remaining products, set JSON to
+        # Product Name* so that every product has some JSON value.
+        for product_id, product_name, _desc in products:
+            if product_id in updated_ids:
+                continue
+            if not product_name or not str(product_name).strip():
+                continue
+
+            cursor.execute(
+                'UPDATE products SET "JSON" = "Product Name*" WHERE id = ?',
+                (product_id,)
+            )
+            if cursor.rowcount:
+                updated_from_name += 1
+                updated_ids.add(product_id)
+
+        conn.commit()
+        if updated_from_name > 0:
+            logger.info(f"  From Product Name*: {updated_from_name}")
+
         conn.close()
-        return updated_from_excel + updated_from_db
+        return updated_from_excel + updated_from_db + updated_from_name
     except Exception as e:
         logger.error(f"Error: {e}")
         return 0

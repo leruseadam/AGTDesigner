@@ -17194,26 +17194,66 @@ def database_export():
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         filename = f"AGT_Product_Database_{timestamp}.xlsx"
-        response = send_file(
-            temp_file.name,
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            as_attachment=True,
-            download_name=filename
-        )
-        
-        # Set proper download filename with headers
-        response = set_download_filename(response, filename)
-        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        
-        # Clean up the temporary file after sending
-        @response.call_on_close
-        def cleanup():
+        # Try to send file by path first; if that fails (context issues), fall back to in-memory send
+        try:
+            response = send_file(
+                temp_file.name,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=filename
+            )
+
+            # Set proper download filename with headers
+            response = set_download_filename(response, filename)
+            response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+        except Exception as send_err:
+            # send_file can fail if called outside a proper request context or for other IO reasons.
+            logging.error(f"send_file failed, attempting in-memory fallback: {send_err}")
+            try:
+                with open(temp_file.name, 'rb') as f:
+                    data = f.read()
+                mem = BytesIO(data)
+                mem.seek(0)
+                response = send_file(
+                    mem,
+                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    as_attachment=True,
+                    download_name=filename
+                )
+                response = set_download_filename(response, filename)
+                response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            except Exception as mem_err:
+                logging.error(f"In-memory send_file fallback also failed: {mem_err}")
+                # Attempt best-effort cleanup then return error
+                try:
+                    if os.path.exists(temp_file.name):
+                        os.unlink(temp_file.name)
+                except Exception:
+                    pass
+                return jsonify({'error': f'Export failed during send: {mem_err}'}), 500
+
+        # Schedule background cleanup of the temporary file to avoid relying on response.call_on_close
+        try:
+            import threading, time
+
+            def _del_later(path, delay=8):
+                try:
+                    time.sleep(delay)
+                    if os.path.exists(path):
+                        os.unlink(path)
+                except Exception as cleanup_error:
+                    logging.warning(f"Failed to cleanup temp file {path}: {cleanup_error}")
+
+            threading.Thread(target=_del_later, args=(temp_file.name,), daemon=True).start()
+        except Exception:
+            # If background scheduling fails, attempt immediate cleanup (best-effort)
             try:
                 if os.path.exists(temp_file.name):
                     os.unlink(temp_file.name)
-            except Exception as cleanup_error:
-                logging.warning(f"Failed to cleanup temp file {temp_file.name}: {cleanup_error}")
-        
+            except Exception:
+                pass
+
         return response
         
     except Exception as e:
@@ -20106,9 +20146,29 @@ def json_match_detailed():
             return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
             
         # Fetch JSON items first
+        # Use a generous timeout here because large Cultivera transfer JSONs can legitimately
+        # take longer than 30s to stream, especially over PythonAnywhere / slow networks.
         import requests
-        response = requests.get(url, timeout=30)
-        payload = response.json()
+        try:
+            # Increase timeout to handle large remote JSON files (e.g. Cultivera transfers)
+            response = requests.get(url, timeout=90)  # was 30s
+            response.raise_for_status()
+            payload = response.json()
+        except requests.exceptions.Timeout:
+            logging.error(f"Error in detailed JSON matching: timeout fetching URL {url}")
+            return jsonify({
+                "error": "json_fetch_timeout",
+                "message": (
+                    "Fetching the JSON from the remote server took too long (timeout after 90s). "
+                    "Please try again in a moment, or download the JSON file and re-run using a local data: URL."
+                )
+            }), 504
+        except Exception as fetch_err:
+            logging.error(f"Error in detailed JSON matching while fetching URL {url}: {fetch_err}")
+            return jsonify({
+                "error": "json_fetch_error",
+                "message": f"Failed to fetch JSON from the provided URL: {fetch_err}"
+            }), 502
         
         if isinstance(payload, list):
             json_items = payload

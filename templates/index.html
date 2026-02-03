@@ -14056,14 +14056,14 @@
   </div>
 
   <script>
-    // Background Toggle Functions (Lava + neutral solid colors)
+    // Background Toggle Functions (Lava + softer themed solids)
     const BACKGROUND_THEMES = [
       { id: 'lava', label: 'Lava', type: 'lava' },
-      // Neutral solids inspired by app theme (desaturated / darker)
-      { id: 'soft-slate',   label: 'Soft Slate',   type: 'solid', color: '#181924' }, // muted base
-      { id: 'deep-slate',   label: 'Deep Slate',   type: 'solid', color: '#1f2430' }, // slightly lighter than cards
-      { id: 'warm-graphite',label: 'Warm Graphite',type: 'solid', color: '#262933' }, // warm neutral
-      { id: 'plum-charcoal',label: 'Plum Charcoal',type: 'solid', color: '#23192b' }  // from dark gradient, but reads neutral
+      // Softer, desaturated theme colors (still blue / green / purple)
+      { id: 'midnight-blue', label: 'Midnight Blue', type: 'solid', color: '#1E7FC9' },   // deep, muted blue
+      { id: 'forest-teal',   label: 'Forest Teal',   type: 'solid', color: '#1E7F48' },   // dark teal/green
+      { id: 'plum-velvet',   label: 'Plum Velvet',   type: 'solid', color: '#7F120C' },   // muted purple
+      { id: 'ember-slate',   label: 'Ember Slate',   type: 'solid', color: '#441248' }    // neutral with a hint of warmth
     ];
     
     let currentBackgroundIndex = 0; // 0 = lava, others = solid theme colors
