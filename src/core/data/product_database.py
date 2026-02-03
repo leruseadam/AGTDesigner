@@ -3150,13 +3150,26 @@ class ProductDatabase:
                     logger.warning(f"Could not export strains table: {strains_err}")
                     strains_df = pd.DataFrame()
 
+            # Check if products table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+            products_table_exists = cursor.fetchone() is not None
+            
+            if not products_table_exists:
+                raise ValueError("Products table does not exist in database")
+            
             # Get available columns dynamically
             cursor.execute("PRAGMA table_info(products)")
             available_columns = [row[1] for row in cursor.fetchall()]
+            
+            if not available_columns:
+                raise ValueError("Products table has no columns")
 
             # Filter columns to export
             exclude_cols = {'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id'}
             columns_to_export = [col for col in available_columns if col not in exclude_cols]
+            
+            if not columns_to_export:
+                raise ValueError("No columns available to export after filtering")
 
             # Build SELECT query with proper quoting
             select_columns = ', '.join([f'"{col}"' for col in columns_to_export])
@@ -3167,6 +3180,12 @@ class ProductDatabase:
                 FROM products
                 ORDER BY id
             ''', conn)
+            
+            # Ensure we have at least an empty DataFrame with correct columns
+            if products_df.empty:
+                logger.warning("Products table is empty - exporting empty table with column structure")
+                # Create empty DataFrame with correct columns
+                products_df = pd.DataFrame(columns=columns_to_export)
 
             logger.info(f"Exporting {len(products_df)} products and {len(strains_df)} strains")
 
