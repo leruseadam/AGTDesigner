@@ -1423,9 +1423,18 @@ class JSONMatcher:
                 json_col_value = str(product.get('JSON', '')).strip()
                 if json_col_value:
                     json_col_lower = json_col_value.lower()
+                    json_col_normalized = self._normalize_name(json_col_lower)
+                    
+                    # Store both exact and normalized versions for flexible matching
                     if json_col_lower not in indexed_cache['json_column_lookup']:
                         indexed_cache['json_column_lookup'][json_col_lower] = []
                     indexed_cache['json_column_lookup'][json_col_lower].append(product)
+                    
+                    # Also store normalized version if different
+                    if json_col_normalized != json_col_lower:
+                        if json_col_normalized not in indexed_cache['json_column_lookup']:
+                            indexed_cache['json_column_lookup'][json_col_normalized] = []
+                        indexed_cache['json_column_lookup'][json_col_normalized].append(product)
                 
                 if vendor:
                     # CRITICAL FIX: Use consistent key format {name}|{vendor} to match lookup in _find_vendor_exact_name_matches
@@ -1446,6 +1455,7 @@ class JSONMatcher:
             logging.info(f"📊 Successfully built sheet cache from database with {len(cache)} products")
             logging.info(f"📊 Indexed {len(indexed_cache['exact_names'])} exact names")
             logging.info(f"📊 Indexed {len(indexed_cache['vendor_groups'])} vendor groups")
+            logging.info(f"📊 Indexed {len(indexed_cache['json_column_lookup'])} JSON column values for fast matching")
             
         except Exception as e:
             logging.error(f"📊 Error building cache from database: {e}")
@@ -2745,6 +2755,18 @@ class JSONMatcher:
                 
                 # CRITICAL FIX: Transform SKU to readable name BEFORE matching
                 product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
+                
+                # CRITICAL: Try JSON column matching FIRST before other matching
+                # This matches JSON product_name to JSON column values
+                json_column_match = self._find_json_column_match(product_name)
+                if json_column_match:
+                    logging.info(f"✅ JSON COLUMN MATCH FOUND: '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
+                    matched_product = json_column_match.copy()
+                    matched_product['_source'] = 'JSON Column Match'
+                    matched_product['_match_score'] = 100.0
+                    matched_products.append(matched_product)
+                    items_matched += 1
+                    continue  # Skip to next item since we found a match
 
                 # CRITICAL: Detect concentrate/vape JSON items (1mL / Prana AIO / Live Resin / Vape / Cartridge)
                 # For these, vendor metadata (from_license_name) is often the STORE, not the PRODUCT VENDOR,
@@ -7829,13 +7851,41 @@ class JSONMatcher:
                                     self._excel_json_lookup[json_col_lower] = []
                                 self._excel_json_lookup[json_col_lower].append(row.to_dict())
                     
-                    # Fast lookup
+                    # Fast lookup - try exact match first
                     if description_lower in self._excel_json_lookup:
                         match = self._excel_json_lookup[description_lower][0]
                         match['_source'] = 'excel'
                         match['_match_type'] = 'json_column_exact'
                         logging.info(f"✅ JSON COLUMN EXACT MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
                         return match
+                    
+                    # Try normalized match
+                    if description_normalized in self._excel_json_lookup:
+                        match = self._excel_json_lookup[description_normalized][0]
+                        match['_source'] = 'excel'
+                        match['_match_type'] = 'json_column_normalized'
+                        logging.info(f"✅ JSON COLUMN NORMALIZED MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
+                        return match
+                    
+                    # Try fuzzy matching
+                    try:
+                        from fuzzywuzzy import fuzz
+                        best_excel_fuzzy = None
+                        best_excel_score = 0.0
+                        for json_col_value, rows in self._excel_json_lookup.items():
+                            similarity = fuzz.token_sort_ratio(description_lower, json_col_value)
+                            if similarity >= 85 and similarity > best_excel_score:
+                                best_excel_score = similarity
+                                best_excel_fuzzy = rows[0]
+                        
+                        if best_excel_fuzzy and best_excel_score >= 85:
+                            match = dict(best_excel_fuzzy)
+                            match['_source'] = 'excel'
+                            match['_match_type'] = f'json_column_fuzzy_{best_excel_score}'
+                            logging.info(f"✅ JSON COLUMN FUZZY MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}' (score: {best_excel_score})")
+                            return match
+                    except ImportError:
+                        pass
                     
                     # Collect strain matches for fallback (only if needed)
                     if extracted_strain and len(extracted_strain) >= 5:
