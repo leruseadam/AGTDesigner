@@ -15315,6 +15315,11 @@ const TagManager = {
             });
             if (!response.ok) {
                 const error = await response.json();
+                // Handle stale upload error - prompt user to upload fresh Excel
+                if (error.error === 'stale_upload' || error.message?.includes('stale')) {
+                    this.showStaleUploadModal(error.message || error.stale_reason || 'Your Excel data is stale. Please upload a fresh Excel file.');
+                    throw new Error('STALE_UPLOAD'); // Special error to prevent further processing
+                }
                 throw new Error(error.error || 'Failed to generate labels');
             }
             const blob = await response.blob();
@@ -15378,6 +15383,18 @@ const TagManager = {
             }
         } catch (error) {
             console.error('Error generating labels:', error);
+            // Handle stale upload - don't show generic error, modal already shown
+            if (error.message === 'STALE_UPLOAD') {
+                // Modal already shown, just return
+                return;
+            }
+            // Show error toast for other errors
+            const errorMsg = error.message || 'Failed to generate labels. Please try again.';
+            if (typeof showToast === 'function') {
+                showToast('error', errorMsg);
+            } else {
+                alert(errorMsg);
+            }
             // CRITICAL FIX: Even on error, mark generation time to preserve selections
             // This prevents tags from disappearing if generation partially succeeded
             this._lastTagSelectionTime = Date.now();
@@ -16528,6 +16545,103 @@ const TagManager = {
             verboseLog('✅ Splash hidden');
         } else {
             console.error('❌ Could not find splash element to hide');
+        }
+    },
+
+    showStaleUploadModal(message) {
+        verboseLog('⚠️ Showing stale upload modal:', message);
+        
+        // Create or get modal element
+        let modal = document.getElementById('staleUploadModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'staleUploadModal';
+            modal.className = 'modal fade';
+            modal.setAttribute('tabindex', '-1');
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-labelledby', 'staleUploadModalLabel');
+            modal.setAttribute('aria-hidden', 'true');
+            modal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header bg-warning text-dark">
+                            <h5 class="modal-title" id="staleUploadModalLabel">
+                                <i class="fas fa-exclamation-triangle me-2"></i>Stale Data Detected
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-3">${message || 'Your Excel data is stale. Please upload a fresh Excel file before generating tags.'}</p>
+                            <p class="text-muted small">This prevents generating tags with outdated product information.</p>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="staleUploadModalUploadBtn">
+                                <i class="fas fa-upload me-2"></i>Upload Fresh Excel File
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Handle upload button click
+            const uploadBtn = modal.querySelector('#staleUploadModalUploadBtn');
+            if (uploadBtn) {
+                uploadBtn.addEventListener('click', () => {
+                    const fileInput = document.getElementById('fileInput');
+                    if (fileInput) {
+                        // Close modal first
+                        const bsModal = bootstrap.Modal.getInstance(modal);
+                        if (bsModal) {
+                            bsModal.hide();
+                        }
+                        // Trigger file input click
+                        setTimeout(() => {
+                            fileInput.click();
+                        }, 300);
+                    } else {
+                        console.error('File input not found');
+                        alert('Please use the upload button in the header to upload a new Excel file.');
+                    }
+                });
+            }
+        }
+        
+        // Update message if modal already exists
+        const bodyText = modal.querySelector('.modal-body p');
+        if (bodyText && message) {
+            bodyText.textContent = message;
+        }
+        
+        // Show modal using Bootstrap
+        try {
+            const bsModal = new bootstrap.Modal(modal);
+            bsModal.show();
+        } catch (e) {
+            // Fallback if Bootstrap not available
+            console.warn('Bootstrap Modal not available, using fallback:', e);
+            modal.style.display = 'block';
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+    },
+    
+    hideStaleUploadModal() {
+        const modal = document.getElementById('staleUploadModal');
+        if (modal) {
+            try {
+                const bsModal = bootstrap.Modal.getInstance(modal);
+                if (bsModal) {
+                    bsModal.hide();
+                } else {
+                    modal.style.display = 'none';
+                    modal.classList.remove('show');
+                    modal.setAttribute('aria-hidden', 'true');
+                }
+            } catch (e) {
+                modal.style.display = 'none';
+            }
         }
     },
 
