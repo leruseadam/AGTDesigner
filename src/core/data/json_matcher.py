@@ -1420,32 +1420,31 @@ class JSONMatcher:
                 indexed_cache['exact_names'][exact_name] = cache_item
                 
                 # PERFORMANCE: Build JSON column lookup for fast matching
-                # Use Description column to populate JSON column (raw Excel values)
+                # CRITICAL: Prefer JSON column value for the lookup key - that's what the feed sends as product_name
+                # (Backfill puts feed-style descriptions into JSON; Description may be different or empty)
                 description_value = str(product.get('Description', '')).strip()
                 json_value = str(product.get('JSON', '')).strip()
                 
-                # Use Description if JSON is empty, otherwise use JSON (which should have Description copied)
-                value_to_use = description_value if description_value else json_value
-                if not value_to_use:
-                    value_to_use = description_value  # Fallback to Description
+                value_to_use = json_value if json_value else description_value
                 
                 if value_to_use:
-                    value_lower = value_to_use.lower()
+                    value_lower = value_to_use.lower().strip()
                     value_normalized = self._normalize_name(value_lower)
+                    # Collapse whitespace so "A  -  B" and "A - B" match
+                    value_ws = re.sub(r'\s+', ' ', value_lower).strip()
                     
-                    # Store both exact and normalized versions for flexible matching
-                    if value_lower not in indexed_cache['json_column_lookup']:
-                        indexed_cache['json_column_lookup'][value_lower] = []
-                    indexed_cache['json_column_lookup'][value_lower].append(product)
+                    # Store under all key forms for reliable matching (no duplicates per key)
+                    seen_keys = set()
+                    for key in (value_lower, value_normalized, value_ws):
+                        if not key or key in seen_keys:
+                            continue
+                        seen_keys.add(key)
+                        if key not in indexed_cache['json_column_lookup']:
+                            indexed_cache['json_column_lookup'][key] = []
+                        indexed_cache['json_column_lookup'][key].append(product)
                     
-                    # Also store normalized version if different
-                    if value_normalized != value_lower:
-                        if value_normalized not in indexed_cache['json_column_lookup']:
-                            indexed_cache['json_column_lookup'][value_normalized] = []
-                        indexed_cache['json_column_lookup'][value_normalized].append(product)
-                    
-                    # CRITICAL: Ensure JSON column has Description value
-                    if description_value and (not json_value or json_value != description_value):
+                    # If DB had no JSON but has Description, keep product in-memory JSON for display
+                    if description_value and not json_value:
                         product['JSON'] = description_value
                 
                 if vendor:
@@ -7912,21 +7911,26 @@ class JSONMatcher:
             return None
 
         description_lower = json_description.strip().lower()
-        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{description_lower[:50]}...'")
+        # Normalize whitespace (collapse multiple spaces) so "A  -  B" matches "A - B"
+        description_norm = re.sub(r'\s+', ' ', description_lower).strip()
+        # Same normalized form used when building the index (strip punctuation for robustness)
+        description_normalized = self._normalize_name(description_lower)
+        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{description_norm[:50]}...'")
         
         # Check indexed cache first (fast O(1) lookup)
         if self._indexed_cache and 'json_column_lookup' in self._indexed_cache:
             json_lookup = self._indexed_cache['json_column_lookup']
             
-            # Simple exact match (case-insensitive)
-            if description_lower in json_lookup:
-                matched_products = json_lookup[description_lower]
-                if matched_products:
-                    product = matched_products[0]
-                    product['_source'] = 'database'
-                    product['_match_type'] = 'json_column_exact'
-                    logging.info(f"✅ JSON COLUMN EXACT MATCH: Found '{product.get('Product Name*', 'Unknown')}'")
-                    return product
+            # Try all key forms we store in the index: lower, ws-collapsed, normalized
+            for key in (description_lower, description_norm, description_normalized):
+                if key and key in json_lookup:
+                    matched_products = json_lookup[key]
+                    if matched_products:
+                        product = matched_products[0]
+                        product['_source'] = 'database'
+                        product['_match_type'] = 'json_column_exact'
+                        logging.info(f"✅ JSON COLUMN EXACT MATCH: Found '{product.get('Product Name*', 'Unknown')}'")
+                        return product
         
         # Fallback: Check Excel data (current session data)
         if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
@@ -7940,14 +7944,22 @@ class JSONMatcher:
                             json_value = str(row.get('JSON', '')).strip()
                             if json_value:
                                 row_dict = row.to_dict()
-                                value_lower = json_value.lower()
-                                if value_lower not in self._excel_json_lookup:
-                                    self._excel_json_lookup[value_lower] = []
-                                self._excel_json_lookup[value_lower].append(row_dict)
+                                value_lower = json_value.lower().strip()
+                                value_ws = re.sub(r'\s+', ' ', value_lower).strip()
+                                value_normalized = self._normalize_name(value_lower)
+                                for key in (value_lower, value_ws, value_normalized):
+                                    if key and key not in self._excel_json_lookup:
+                                        self._excel_json_lookup[key] = []
+                                    if key:
+                                        self._excel_json_lookup[key].append(row_dict)
                     
-                    # Simple exact match (case-insensitive)
-                    if description_lower in self._excel_json_lookup:
-                        match = self._excel_json_lookup[description_lower][0]
+                    # Simple exact match (case-insensitive); try all key forms
+                    match = None
+                    for key in (description_lower, description_norm, description_normalized):
+                        if key and key in self._excel_json_lookup:
+                            match = self._excel_json_lookup[key][0]
+                            break
+                    if match:
                         match['_source'] = 'excel'
                         match['_match_type'] = 'json_column_exact'
                         logging.info(f"✅ JSON COLUMN EXACT MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")

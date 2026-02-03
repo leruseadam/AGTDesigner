@@ -273,20 +273,18 @@ def load_excel_descriptions(excel_path):
                 logger.info(f"     JSON value to store: '{description[:80]}'")
                 logger.info(f"     ✅ Moving {source_col_name} column to JSON column")
 
-            # Store by normalized product name - ONLY store if we have a description
-            # products_data format: {product_name_lower: (product_name, description)}
-            # - product_name = Product Name* column (raw SKU) - used ONLY for matching
-            # - description = {source_col_name} column value - moved to JSON column
-            product_name_lower = product_name.lower()
-            if description:  # Only store if we have a source value (no fallbacks)
-                if product_name_lower in products_data:
-                    existing_desc = products_data[product_name_lower][1]
-                    # Keep the one with longer description (more likely to be complete)
+            # Store by normalized product name (strip, lower, collapse spaces) so matching is reliable
+            # products_data format: {norm_key: (product_name, json_value)}
+            def _norm(s):
+                return re.sub(r'\s+', ' ', str(s).strip().lower()) if s else ""
+            key = _norm(product_name)
+            if description and key:  # Only store if we have a source value (no fallbacks)
+                if key in products_data:
+                    existing_desc = products_data[key][1]
                     if len(description) > len(existing_desc):
-                        products_data[product_name_lower] = (product_name, description)
-                        logger.debug(f"  Replaced duplicate '{product_name}' with longer description")
+                        products_data[key] = (product_name, description)
                 else:
-                    products_data[product_name_lower] = (product_name, description)
+                    products_data[key] = (product_name, description)
         
         logger.info(f"  ✅ Loaded {len(products_data)} products with {source_col_name} values from Excel")
         logger.info(f"  📊 Products with {source_col_name.lower()}s: {rows_with_descriptions}")
@@ -333,14 +331,18 @@ def update_json_column(db_path, products_data):
         logger.info(f"  Found {total_products} total products in database")
         logger.info(f"  Loaded {len(products_data)} Excel products to process")
 
-        # Simple matching: Build lookup by Product Name (case-insensitive)
+        # Normalize key for matching: strip, lower, collapse multiple spaces
+        def norm_key(s):
+            if not s:
+                return ""
+            return re.sub(r'\s+', ' ', str(s).strip().lower())
+        
+        # Simple matching: Build lookup by Product Name (case-insensitive, normalized whitespace)
         existing_products = {}
         for product_id, product_name in products:
             if product_name:
-                # Simple case-insensitive lookup
-                key = str(product_name).strip().lower()
-                # Handle duplicates - keep first occurrence
-                if key not in existing_products:
+                key = norm_key(product_name)
+                if key and key not in existing_products:
                     existing_products[key] = product_id
 
         updated_from_excel = 0
@@ -353,21 +355,15 @@ def update_json_column(db_path, products_data):
 
         # Simple matching: Match Excel Product Name to DB Product Name (case-insensitive)
         logger.info(f"  🔄 Matching Excel products to database products...")
-        if json_col:
-            logger.info(f"  ✅ Using JSON column values from Excel (original Description before transformation)")
-            logger.info(f"     (Same as excel_processor.py line 1998: self.df['JSON'] = self.df['Description'])")
-        else:
-            logger.info(f"  ✅ Using Description column values from Excel for JSON column")
-            logger.warning(f"  ⚠️  WARNING: If Excel was processed, Description may be transformed")
         
-        for excel_name_lower, (original_name, json_value) in products_data.items():
+        for excel_key, (original_name, json_value) in products_data.items():
             # Validate JSON value is not empty
             if not json_value or not str(json_value).strip():
                 logger.warning(f"  ⚠️  Skipping empty JSON value for '{original_name}'")
                 continue
             
-            # Simple match: case-insensitive Product Name match
-            product_id = existing_products.get(excel_name_lower)
+            # Simple match: excel_key is already normalized (strip, lower, collapse spaces)
+            product_id = existing_products.get(excel_key)
             
             if product_id:
                 # Product exists - update JSON column with PRE-PROCESSED Description from Excel
@@ -399,7 +395,7 @@ def update_json_column(db_path, products_data):
                     update_errors.append(error_msg)
             else:
                 # Product doesn't exist - will insert after updates
-                unmatched_excel.add(excel_name_lower)
+                unmatched_excel.add(excel_key)
                 if len(unmatched_samples) < 5:
                     unmatched_samples.append({'excel_name': original_name})
         
