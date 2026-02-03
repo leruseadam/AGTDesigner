@@ -111,12 +111,19 @@ def run_dedupe(db_path: str, dry_run: bool = False) -> dict:
 
     for row in duplicate_groups:
         norm_name, vendor, brand = row[0], row[1], row[2]
+        # Skip groups with NULL keys: WHERE col = NULL matches no rows in SQL
+        if norm_name is None or vendor is None or brand is None:
+            logger.debug("Skipping duplicate group with NULL key")
+            continue
         cursor.execute(f"""
             SELECT {select_cols}
             FROM products
             WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
         """, (norm_name, vendor, brand))
         entries = cursor.fetchall()
+        if not entries:
+            logger.warning("Duplicate group returned no rows (skipping): %r", (norm_name, vendor, brand))
+            continue
 
         def sort_key(e):
             accepted = e.get("Accepted Date") if has_accepted else None
