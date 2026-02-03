@@ -17213,6 +17213,8 @@ def search_products():
 def database_export():
     """Export the database to Excel."""
     try:
+        logging.info("=== DATABASE EXPORT REQUEST START ===")
+        
         # Check disk space before creating temporary files
         try:
             disk_ok, disk_message = check_disk_space()
@@ -17220,10 +17222,12 @@ def database_export():
                 emergency_cleanup()
                 disk_ok, disk_message = check_disk_space()
                 if not disk_ok:
+                    logging.error(f"Insufficient disk space: {disk_message}")
                     return jsonify({'error': f'Insufficient disk space for export: {disk_message}'}), 507
         except Exception as disk_check_err:
             import traceback
-            logging.warning(f"Disk space check failed (continuing anyway): {disk_check_err}\n{traceback.format_exc()}")
+            error_trace = traceback.format_exc()
+            logging.warning(f"Disk space check failed (continuing anyway): {disk_check_err}\n{error_trace}")
             # Continue with export even if disk check fails - let the export itself fail if needed
         
         import tempfile
@@ -17258,8 +17262,10 @@ def database_export():
         
         # Create temporary file in a writable directory (important for web servers like PythonAnywhere)
         try:
+            logging.info("Starting temp file creation...")
             # Try to use a writable directory - check if we're on PythonAnywhere or similar
             is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
+            logging.info(f"PythonAnywhere detected: {is_pythonanywhere}")
             
             # Try multiple directories in order of preference
             temp_dir = None
@@ -17280,20 +17286,25 @@ def database_export():
                     os.getcwd()
                 ]
             
+            logging.info(f"Trying temp directories: {temp_dir_candidates}")
+            
             # Find first writable directory
             for candidate_dir in temp_dir_candidates:
                 try:
                     os.makedirs(candidate_dir, exist_ok=True)
                     if os.access(candidate_dir, os.W_OK):
                         temp_dir = candidate_dir
+                        logging.info(f"Using writable temp directory: {temp_dir}")
                         break
-                except Exception:
+                except Exception as dir_err:
+                    logging.debug(f"Directory {candidate_dir} not writable: {dir_err}")
                     continue
             
             if not temp_dir:
                 # Last resort: use current directory
                 temp_dir = os.getcwd()
                 os.makedirs(temp_dir, exist_ok=True)
+                logging.warning(f"Using current directory as temp: {temp_dir}")
             
             # Create temp file in the writable directory
             temp_file_path = os.path.join(temp_dir, f"export_{int(time.time())}_{uuid.uuid4().hex[:8]}.xlsx")
@@ -17417,26 +17428,39 @@ def database_export():
         error_trace = traceback.format_exc()
         error_msg = str(e)
         error_type = type(e).__name__
-        logging.error(f"Error exporting database: {error_msg}\n{error_trace}")
+        logging.error(f"=== DATABASE EXPORT ERROR ===")
+        logging.error(f"Error type: {error_type}")
+        logging.error(f"Error message: {error_msg}")
+        logging.error(f"Full traceback:\n{error_trace}")
         
         # Clean up any temp file that might have been created
         try:
             if 'temp_file_name' in locals() and temp_file_name and os.path.exists(temp_file_name):
                 os.unlink(temp_file_name)
-        except Exception:
-            pass
+                logging.info(f"Cleaned up temp file: {temp_file_name}")
+        except Exception as cleanup_err:
+            logging.warning(f"Failed to cleanup temp file: {cleanup_err}")
         
         # Return detailed error for debugging - ensure it's JSON
         try:
-            return jsonify({
+            error_response = {
                 'error': f'Export failed: {error_msg}',
                 'type': error_type,
                 'details': error_trace[:2000] if len(error_trace) > 2000 else error_trace
-            }), 500
+            }
+            logging.info(f"Returning error response: {error_response}")
+            return jsonify(error_response), 500
         except Exception as json_err:
             # Fallback if jsonify fails
             logging.error(f"Failed to create JSON error response: {json_err}")
-            return jsonify({'error': f'Export failed: {error_msg}'}), 500
+            try:
+                from flask import Response
+                error_json = f'{{"error": "Export failed: {error_msg}", "type": "{error_type}"}}'
+                return Response(error_json, status=500, mimetype='application/json')
+            except Exception as response_err:
+                logging.error(f"Failed to create fallback response: {response_err}")
+                # Last resort - return minimal JSON
+                return Response('{"error": "Export failed: Internal server error"}', status=500, mimetype='application/json')
 
 @app.route('/api/database-view', methods=['GET'])
 def database_view():
