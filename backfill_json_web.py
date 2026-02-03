@@ -69,30 +69,78 @@ def ensure_json_column_exists(db_path):
 def load_excel_descriptions(excel_path):
     try:
         df = pd.read_excel(excel_path, engine='openpyxl')
+        
+        logger.info(f"  Excel columns found: {list(df.columns)}")
+        logger.info(f"  Total rows in Excel: {len(df)}")
 
-        if 'Description' not in df.columns:
+        # Find Description column - be flexible with name matching
+        description_col = None
+        for col in df.columns:
+            col_clean = str(col).strip().lower()
+            if 'description' in col_clean:
+                description_col = col
+                logger.info(f"  Found Description column: '{col}'")
+                break
+        
+        if not description_col:
+            logger.error(f"  ❌ No Description column found in Excel file")
+            logger.error(f"  Available columns: {list(df.columns)}")
             return {}
 
+        # Find Product Name column - be flexible
         product_name_col = None
-        for col in ['Product Name*', 'ProductName', 'Product Name']:
-            if col in df.columns:
-                product_name_col = col
+        for col_name in ['Product Name*', 'ProductName', 'Product Name', 'ProductName*']:
+            if col_name in df.columns:
+                product_name_col = col_name
+                logger.info(f"  Found Product Name column: '{col_name}'")
                 break
+        
+        # If still not found, try case-insensitive match
+        if not product_name_col:
+            for col in df.columns:
+                col_clean = str(col).strip().lower()
+                if 'product' in col_clean and 'name' in col_clean:
+                    product_name_col = col
+                    logger.info(f"  Found Product Name column (flexible match): '{col}'")
+                    break
 
         if not product_name_col:
+            logger.error(f"  ❌ No Product Name column found in Excel file")
+            logger.error(f"  Available columns: {list(df.columns)}")
             return {}
 
         descriptions = {}
-        for _, row in df.iterrows():
+        skipped_empty = 0
+        skipped_nan = 0
+        
+        for idx, row in df.iterrows():
             product_name = str(row.get(product_name_col, '')).strip()
-            description = str(row.get('Description', '')).strip()
+            description = str(row.get(description_col, '')).strip()
+            
+            # Skip empty or NaN values
+            if not product_name:
+                skipped_empty += 1
+                continue
+            
+            if not description or description.lower() in ['nan', 'none', '']:
+                skipped_nan += 1
+                continue
 
-            if product_name and description and description.lower() != 'nan':
-                descriptions[product_name.lower()] = description
+            # Store by normalized product name
+            product_name_lower = product_name.lower()
+            descriptions[product_name_lower] = description
+        
+        logger.info(f"  ✅ Loaded {len(descriptions)} valid product descriptions")
+        if skipped_empty > 0:
+            logger.info(f"  ⚠️  Skipped {skipped_empty} rows with empty product names")
+        if skipped_nan > 0:
+            logger.info(f"  ⚠️  Skipped {skipped_nan} rows with empty/NaN descriptions")
 
         return descriptions
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"Error loading Excel: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {}
 
 
@@ -133,6 +181,7 @@ def update_json_column(db_path, descriptions):
         unmatched_db = []
 
         # Match products from Excel descriptions
+        logger.info(f"  Matching products...")
         for product_id, product_name in products:
             if not product_name:
                 unmatched_db.append((product_id, None))
@@ -142,19 +191,23 @@ def update_json_column(db_path, descriptions):
             
             # Try exact match first
             if db_name_normalized in normalized_descriptions:
+                desc_value = normalized_descriptions[db_name_normalized]
                 cursor.execute(
                     'UPDATE products SET "JSON" = ? WHERE id = ?',
-                    (normalized_descriptions[db_name_normalized], product_id)
+                    (desc_value, product_id)
                 )
                 updated_from_excel += 1
                 unmatched_excel.discard(db_name_normalized)
             else:
                 unmatched_db.append((product_id, product_name))
-
+        
+        # Commit all updates at once
         conn.commit()
+
         conn.close()
         
         logger.info(f"  ✅ Updated {updated_from_excel} products from Excel")
+        logger.info(f"  📊 Match rate: {updated_from_excel}/{total_products} products ({100*updated_from_excel/max(total_products,1):.1f}%)")
         
         # Show diagnostics for unmatched products
         if unmatched_excel:
