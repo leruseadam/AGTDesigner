@@ -17225,25 +17225,43 @@ def database_export():
         import os
         
         store_name = get_current_store_name()
+        if not store_name:
+            return jsonify({'error': 'No store selected. Please select a store first.'}), 400
+        
         product_db = get_product_database(store_name)
+        if not product_db:
+            return jsonify({'error': f'Failed to get database for store: {store_name}'}), 500
+        
+        # Verify database exists
+        if not hasattr(product_db, 'db_path') or not product_db.db_path:
+            return jsonify({'error': 'Database path not configured'}), 500
+        
+        if not os.path.exists(product_db.db_path):
+            return jsonify({'error': f'Database file not found: {product_db.db_path}'}), 404
         
         # Create temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
-        temp_file.close()
+        try:
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+            temp_file.close()
+        except Exception as temp_err:
+            import traceback
+            logging.error(f"Error creating temp file: {temp_err}\n{traceback.format_exc()}")
+            return jsonify({'error': f'Failed to create temporary file: {temp_err}'}), 500
         
         # Export database
         try:
             product_db.export_database(temp_file.name)
         except Exception as export_err:
             import traceback
-            logging.error(f"Error calling export_database: {export_err}\n{traceback.format_exc()}")
+            error_trace = traceback.format_exc()
+            logging.error(f"Error calling export_database: {export_err}\n{error_trace}")
             # Clean up temp file
             try:
                 if os.path.exists(temp_file.name):
                     os.unlink(temp_file.name)
             except Exception:
                 pass
-            return jsonify({'error': f'Export failed: {export_err}'}), 500
+            return jsonify({'error': f'Export failed: {str(export_err)}', 'details': error_trace[:500]}), 500
         
         # Verify file was created
         if not os.path.exists(temp_file.name):
