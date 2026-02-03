@@ -112,12 +112,12 @@ def load_excel_descriptions(excel_path):
             logger.error(f"  Available columns: {list(df.columns)}")
             return {}
 
-        descriptions = {}
+        products_data = {}  # Store ALL products with product names
         skipped_empty_name = 0
-        skipped_empty_desc = 0
-        processed = 0
+        rows_with_descriptions = 0
+        rows_without_descriptions = 0
         
-        # Process EVERY SINGLE ROW - don't skip anything
+        # Process EVERY SINGLE ROW - add ALL products with names, even without descriptions
         for idx, row in df.iterrows():
             # Get product name - handle NaN/empty properly
             product_name_raw = row.get(product_name_col, '')
@@ -126,6 +126,11 @@ def load_excel_descriptions(excel_path):
             else:
                 product_name = str(product_name_raw).strip()
             
+            # Skip if no product name (can't add product without a name)
+            if not product_name:
+                skipped_empty_name += 1
+                continue
+            
             # Get description - handle NaN/empty properly  
             description_raw = row.get(description_col, '')
             if description_raw is None or (isinstance(description_raw, float) and pd.isna(description_raw)):
@@ -133,30 +138,25 @@ def load_excel_descriptions(excel_path):
             else:
                 description = str(description_raw).strip()
             
-            # Skip ONLY if description is truly empty
+            # If no description, use product name as fallback
             if not description or description.lower() in ['nan', 'none', '']:
-                skipped_empty_desc += 1
-                continue
-            
-            # If no product name, skip this row (can't match without product name)
-            if not product_name:
-                skipped_empty_name += 1
-                continue
+                description = product_name  # Use product name as JSON value if no description
+                rows_without_descriptions += 1
+            else:
+                rows_with_descriptions += 1
 
-            # Store by normalized product name - keep original name and description
+            # Store by normalized product name - keep original name and description (or product name as fallback)
             product_name_lower = product_name.lower()
-            descriptions[product_name_lower] = (product_name, description)  # Store (original_name, description)
-            processed += 1
+            products_data[product_name_lower] = (product_name, description)
         
-        logger.info(f"  ✅ Loaded {len(descriptions)} product descriptions from Excel")
-        logger.info(f"  📊 Processed {processed} valid rows out of {len(df)} total rows")
-        logger.info(f"  📈 Description coverage: {len(descriptions)}/{len(df)} rows ({100*len(descriptions)/max(len(df),1):.1f}%)")
+        logger.info(f"  ✅ Loaded {len(products_data)} products from Excel")
+        logger.info(f"  📊 Products with descriptions: {rows_with_descriptions}")
+        logger.info(f"  📊 Products without descriptions (using product name): {rows_without_descriptions}")
+        logger.info(f"  📈 Total products to process: {len(products_data)}/{len(df)} rows ({100*len(products_data)/max(len(df),1):.1f}%)")
         if skipped_empty_name > 0:
-            logger.warning(f"  ⚠️  Skipped {skipped_empty_name} rows with empty product names (had descriptions but can't match)")
-        if skipped_empty_desc > 0:
-            logger.info(f"  ℹ️  Skipped {skipped_empty_desc} rows with empty descriptions")
+            logger.info(f"  ℹ️  Skipped {skipped_empty_name} rows with empty product names")
 
-        return descriptions
+        return products_data
     except Exception as e:
         logger.error(f"Error loading Excel: {e}")
         import traceback
@@ -173,11 +173,11 @@ def normalize_name(name):
     return normalized
 
 
-def update_json_column(db_path, descriptions):
-    """Update JSON column from Excel descriptions AND INSERT missing products."""
+def update_json_column(db_path, products_data):
+    """Update JSON column from Excel data AND INSERT missing products."""
     try:
-        if not descriptions:
-            logger.warning("No Excel descriptions provided - skipping update")
+        if not products_data:
+            logger.warning("No Excel products provided - skipping update")
             return 0
 
         conn = sqlite3.connect(db_path)
@@ -187,14 +187,14 @@ def update_json_column(db_path, descriptions):
         
         total_products = len(products)
         logger.info(f"  Found {total_products} total products in database")
-        logger.info(f"  Loaded {len(descriptions)} Excel products with descriptions")
+        logger.info(f"  Loaded {len(products_data)} Excel products to process")
 
         # Normalize Excel data for matching
         normalized_excel_data = {}
-        for excel_name_lower, (original_name, desc) in descriptions.items():
+        for excel_name_lower, (original_name, json_value) in products_data.items():
             normalized_key = normalize_name(excel_name_lower)
             if normalized_key:
-                normalized_excel_data[normalized_key] = (original_name, desc)
+                normalized_excel_data[normalized_key] = (original_name, json_value)
 
         updated_from_excel = 0
         inserted_new_products = 0
@@ -210,13 +210,13 @@ def update_json_column(db_path, descriptions):
 
         # Match and update existing products
         logger.info(f"  Matching and updating existing products...")
-        for normalized_name, (original_name, desc) in normalized_excel_data.items():
+        for normalized_name, (original_name, json_value) in normalized_excel_data.items():
             if normalized_name in existing_products:
                 # Product exists - update JSON column
                 product_id = existing_products[normalized_name]
                 cursor.execute(
                     'UPDATE products SET "JSON" = ? WHERE id = ?',
-                    (desc, product_id)
+                    (json_value, product_id)
                 )
                 updated_from_excel += 1
                 unmatched_excel.discard(normalized_name)
@@ -233,7 +233,7 @@ def update_json_column(db_path, descriptions):
         today = datetime.now().strftime('%Y-%m-%d')
         
         for normalized_name in list(unmatched_excel):
-            original_name, desc = normalized_excel_data[normalized_name]
+            original_name, json_value = normalized_excel_data[normalized_name]
             
             # Insert new product with minimal required fields
             try:
@@ -261,8 +261,8 @@ def update_json_column(db_path, descriptions):
                     original_name,           # Product Name*
                     normalized_name,         # normalized_name
                     'Unknown',               # Product Type* (required)
-                    desc,                    # Description
-                    desc,                    # JSON (same as description)
+                    json_value,              # Description (could be product name if no description)
+                    json_value,              # JSON (same value)
                     today,                   # first_seen_date
                     today,                   # last_seen_date
                     now,                     # created_at
@@ -284,7 +284,7 @@ def update_json_column(db_path, descriptions):
                 cursor.execute('SELECT id FROM products WHERE normalized_name = ?', (normalized_name,))
                 result = cursor.fetchone()
                 if result:
-                    cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (desc, result[0]))
+                    cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (json_value, result[0]))
                     updated_from_excel += 1
         
         # Commit inserts
@@ -334,22 +334,22 @@ def main():
     logger.info(f"Found {len(bothell_excel_files)} Bothell Excel file(s)")
 
     # Process Bothell Excel files - REQUIRED
-    descriptions = {}
+    products_data = {}
     for excel_path in bothell_excel_files:
         logger.info(f"\nProcessing Excel: {excel_path.name}")
-        excel_descriptions = load_excel_descriptions(str(excel_path))
-        if excel_descriptions:
-            descriptions.update(excel_descriptions)
-            logger.info(f"  Loaded {len(excel_descriptions)} product descriptions")
+        excel_products = load_excel_descriptions(str(excel_path))
+        if excel_products:
+            products_data.update(excel_products)
+            logger.info(f"  Loaded {len(excel_products)} products")
 
-    if not descriptions:
-        logger.error("❌ No descriptions found in Bothell Excel file(s) - nothing to backfill")
+    if not products_data:
+        logger.error("❌ No products found in Bothell Excel file(s) - nothing to backfill")
         return
 
-    # Update Bothell database - ONLY from Excel, no database fallbacks
+    # Update Bothell database - process ALL products from Excel
     ensure_json_column_exists(str(db_path))
-    updated = update_json_column(str(db_path), descriptions)
-    logger.info(f"✅ Updated {updated} products in Bothell database from Excel")
+    updated = update_json_column(str(db_path), products_data)
+    logger.info(f"✅ Processed {updated} products in Bothell database from Excel")
 
     logger.info("\n✅ Bothell backfill complete!")
 
