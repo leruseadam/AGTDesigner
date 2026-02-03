@@ -131,24 +131,28 @@ def load_excel_descriptions(excel_path):
                 skipped_empty_name += 1
                 continue
             
-            # Get description - handle NaN/empty properly, be more lenient
+            # Get RAW Description value directly from Excel (before any transformation)
+            # CRITICAL: This is the untransformed raw Description that should go in JSON column
             description_raw = row.get(description_col, '')
-            description = ''
+            raw_description = ''
             
             if description_raw is not None:
                 if isinstance(description_raw, float):
                     if not pd.isna(description_raw):
-                        description = str(description_raw).strip()
+                        raw_description = str(description_raw).strip()
                 else:
-                    description = str(description_raw).strip()
+                    raw_description = str(description_raw).strip()
             
             # More lenient check - only skip if truly empty or just whitespace
-            description_lower = description.lower().strip()
-            if not description or description_lower in ['nan', 'none', '', 'null', 'n/a', 'na']:
-                description = product_name  # Use product name as JSON value if no description
+            description_lower = raw_description.lower().strip()
+            if not raw_description or description_lower in ['nan', 'none', '', 'null', 'n/a', 'na']:
+                raw_description = product_name  # Use product name as JSON value if no description
                 rows_without_descriptions += 1
             else:
                 rows_with_descriptions += 1
+            
+            # Store the RAW Description value (untransformed) - this goes in JSON column
+            description = raw_description
 
             # Store by normalized product name - keep original name and description (or product name as fallback)
             # If duplicate product name exists, prefer the one with a longer description (more complete)
@@ -225,11 +229,11 @@ def update_json_column(db_path, products_data):
         logger.info(f"  Matching and updating existing products...")
         for normalized_name, (original_name, json_value) in normalized_excel_data.items():
             if normalized_name in existing_products:
-                # Product exists - update BOTH Description and JSON columns with raw Excel Description values
+                # Product exists - update JSON column
                 product_id = existing_products[normalized_name]
                 cursor.execute(
-                    'UPDATE products SET "Description" = ?, "JSON" = ? WHERE id = ?',
-                    (json_value, json_value, product_id)
+                    'UPDATE products SET "JSON" = ? WHERE id = ?',
+                    (json_value, product_id)
                 )
                 updated_from_excel += 1
                 unmatched_excel.discard(normalized_name)
@@ -274,8 +278,8 @@ def update_json_column(db_path, products_data):
                     original_name,           # Product Name*
                     normalized_name,         # normalized_name
                     'Unknown',               # Product Type* (required)
-                    json_value,              # Description (could be product name if no description)
-                    json_value,              # JSON (same value)
+                    json_value,              # Description (raw value - will be transformed by database later)
+                    json_value,              # JSON (raw Description value from Excel - UNTRANSFORMED)
                     today,                   # first_seen_date
                     today,                   # last_seen_date
                     now,                     # created_at
@@ -297,7 +301,7 @@ def update_json_column(db_path, products_data):
                 cursor.execute('SELECT id FROM products WHERE normalized_name = ?', (normalized_name,))
                 result = cursor.fetchone()
                 if result:
-                    cursor.execute('UPDATE products SET "Description" = ?, "JSON" = ? WHERE id = ?', (json_value, json_value, result[0]))
+                    cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (json_value, result[0]))
                     updated_from_excel += 1
         
         # Commit inserts

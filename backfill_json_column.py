@@ -97,13 +97,22 @@ def load_excel_descriptions(excel_path):
             logger.warning(f"No Product Name column in {excel_path}")
             return {}
 
-        # Create mapping: Product Name -> Description
+        # Create mapping: Product Name -> Raw Description (before any transformation)
+        # CRITICAL: Read raw Description values directly from Excel - these are untransformed
         descriptions = {}
         for _, row in df.iterrows():
             product_name = str(row.get(product_name_col, '')).strip()
-            description = str(row.get('Description', '')).strip()
+            # Get raw Description value directly from Excel (before any processing)
+            description_raw = row.get('Description', '')
+            
+            # Handle NaN/None properly
+            if pd.isna(description_raw) or description_raw is None:
+                description = ''
+            else:
+                description = str(description_raw).strip()
 
-            if product_name and description and description.lower() != 'nan':
+            if product_name and description and description.lower() not in ['nan', 'none', '', 'null']:
+                # Store raw Description value (untransformed)
                 descriptions[product_name.lower()] = description
 
         logger.info(f"Extracted {len(descriptions)} descriptions")
@@ -152,25 +161,10 @@ def update_json_column(db_path, descriptions):
             conn.commit()
             logger.info(f"✅ Updated {updated_from_excel} products from Excel descriptions (pre-transform)")
 
-        # Second pass: for any product NOT touched above, overwrite JSON with the
-        # current Description column (better than stale/incorrect JSON or blanks).
-        for product_id, _name, db_description in products:
-            if product_id in updated_ids:
-                continue  # keep the canonical Excel-based JSON we just wrote
-            if not db_description:
-                continue
-
-            cursor.execute(
-                'UPDATE products SET "JSON" = ? WHERE id = ?',
-                (db_description, product_id)
-            )
-            if cursor.rowcount:
-                updated_from_db += 1
-                updated_ids.add(product_id)
-
-        conn.commit()
-        if updated_from_db > 0:
-            logger.info(f"✅ Updated {updated_from_db} products from existing Description column")
+        # Second pass: Skip - don't copy transformed Description column to JSON
+        # JSON column should ONLY contain raw Excel Description values, not transformed values
+        # If a product doesn't have a raw Excel Description, leave JSON empty rather than using transformed Description
+        updated_from_db = 0
 
         # Third pass: final fallback – for any remaining products with no update
         # in this run, force JSON to Product Name* so every product has a value.
