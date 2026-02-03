@@ -2118,10 +2118,12 @@ class ExcelProcessor:
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
 
             # CRITICAL: Capture original Description values into JSON column BEFORE any transformations
-            # This preserves the original Excel Description for JSON URL matching later
+            # This preserves the original Excel Description (pre-transformed values) for JSON URL matching
+            # Description column contains pre-transformed values like "Pure Prana Pulse AIO Disposable - Rainbow Belts Live Resin - Hybrid - 1mL"
+            # These will be replaced with transformed Product Name values later, so we save them to JSON now
             if "Description" in self.df.columns:
                 self.df["JSON"] = self.df["Description"].astype(str).str.strip()
-                self.logger.info(f"✅ Captured {len(self.df)} original Description values into JSON column for matching")
+                self.logger.info(f"✅ Captured {len(self.df)} original Description values into JSON column (before transformation)")
             else:
                 self.df["JSON"] = ""
                 self.logger.debug("No Description column found - JSON column initialized empty")

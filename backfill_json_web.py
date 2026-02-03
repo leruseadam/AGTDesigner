@@ -92,6 +92,7 @@ def load_excel_descriptions(excel_path):
         logger.info(f"     If descriptions look shortened, the file may have been processed already")
 
         # Find Description column - be flexible with name matching
+        # Also check if Product Name column contains full descriptions (may be mislabeled)
         description_col = None
         for col in df.columns:
             col_clean = str(col).strip().lower()
@@ -100,7 +101,34 @@ def load_excel_descriptions(excel_path):
                 logger.info(f"  Found Description column: '{col}'")
                 break
         
+        # If no Description column found, check if Product Name column has full descriptions
+        # (Sometimes the full descriptions are in Product Name column)
         if not description_col:
+            logger.warning(f"  ⚠️  No 'Description' column found")
+            logger.info(f"  Checking if Product Name column contains full descriptions...")
+            
+            # Try to find Product Name column first to check its content
+            temp_product_name_col = None
+            for col_name in ['Product Name*', 'ProductName', 'Product Name', 'ProductName*']:
+                if col_name in df.columns:
+                    temp_product_name_col = col_name
+                    break
+            
+            if temp_product_name_col:
+                # Sample Product Name values to see if they look like full descriptions
+                sample_pnames = df[temp_product_name_col].dropna().head(3).tolist()
+                avg_len = sum(len(str(p).strip()) for p in sample_pnames) / len(sample_pnames) if sample_pnames else 0
+                
+                # If Product Name values are long (like "Product by Vendor - Weight"), 
+                # they might actually be the descriptions
+                if avg_len > 30:  # Full descriptions are usually longer
+                    logger.warning(f"  ⚠️  Product Name column contains long values (avg {avg_len:.1f} chars)")
+                    logger.warning(f"     These may be the full descriptions")
+                    logger.warning(f"     Sample: '{str(sample_pnames[0])[:80] if sample_pnames else 'N/A'}'")
+                    logger.error(f"  ❌ Cannot proceed - need a 'Description' column with full product descriptions")
+                    logger.error(f"  Available columns: {list(df.columns)}")
+                    return {}
+            
             logger.error(f"  ❌ No Description column found in Excel file")
             logger.error(f"  Available columns: {list(df.columns)}")
             return {}
@@ -141,14 +169,36 @@ def load_excel_descriptions(excel_path):
         
         # Sample a few Description values to verify they're not Product Names
         # (Now that product_name_col is defined, we can safely use it)
-        sample_descriptions = df[description_col].dropna().head(3).tolist()
-        sample_product_names = df[product_name_col].head(3).tolist()
-        logger.info(f"  Sample Description values:")
-        for i, desc in enumerate(sample_descriptions[:3]):
-            logger.info(f"     {i+1}. '{str(desc)[:80]}'")
-        logger.info(f"  Sample Product Name values (for comparison):")
-        for i, pname in enumerate(sample_product_names[:3]):
-            logger.info(f"     {i+1}. '{str(pname)[:80]}'")
+        sample_descriptions = df[description_col].dropna().head(5).tolist()
+        sample_product_names = df[product_name_col].head(5).tolist()
+        logger.info(f"  Sample Description values (from '{description_col}' column):")
+        for i, desc in enumerate(sample_descriptions[:5]):
+            desc_str = str(desc)[:100]
+            logger.info(f"     {i+1}. '{desc_str}'")
+        logger.info(f"  Sample Product Name values (from '{product_name_col}' column, for comparison):")
+        for i, pname in enumerate(sample_product_names[:5]):
+            pname_str = str(pname)[:100]
+            logger.info(f"     {i+1}. '{pname_str}'")
+        
+        # Check if Description values look transformed (shortened)
+        desc_lengths = [len(str(d).strip()) for d in sample_descriptions if d]
+        pname_lengths = [len(str(p).strip()) for p in sample_product_names if p]
+        avg_desc_len = sum(desc_lengths) / len(desc_lengths) if desc_lengths else 0
+        avg_pname_len = sum(pname_lengths) / len(pname_lengths) if pname_lengths else 0
+        
+        if avg_desc_len > 0 and avg_pname_len > 0:
+            if avg_desc_len < avg_pname_len * 0.7:
+                logger.warning(f"  ⚠️  WARNING: Description values are shorter than Product Names")
+                logger.warning(f"     Avg Description length: {avg_desc_len:.1f} chars")
+                logger.warning(f"     Avg Product Name length: {avg_pname_len:.1f} chars")
+                logger.warning(f"     ⚠️  Description column may be TRANSFORMED")
+                logger.warning(f"     ⚠️  Using Description values anyway - make sure you're using ORIGINAL Excel file")
+                logger.warning(f"     ⚠️  Original Description should contain raw SKU format like:")
+                logger.warning(f"        'Apple Fritter Full Spectrum Hash Rosin by Collections Cannabis - 1g'")
+            elif avg_desc_len >= avg_pname_len:
+                logger.info(f"  ✅ Description values look complete (avg length: {avg_desc_len:.1f} chars)")
+            else:
+                logger.info(f"  ℹ️  Description values (avg length: {avg_desc_len:.1f} chars) - proceeding")
 
         products_data = {}  # Store ALL products with product names
         skipped_empty_name = 0
@@ -171,9 +221,10 @@ def load_excel_descriptions(excel_path):
                 skipped_empty_name += 1
                 continue
             
-            # CRITICAL: Get RAW Description value directly from Excel Description column
-            # This MUST be the ORIGINAL untransformed Description that excel_processor captures into JSON
-            # DO NOT use Product Name - we want EXACTLY what's in the Description column
+            # CRITICAL: Read from Description column (pre-transformed values)
+            # Description column contains values like: "Pure Prana Pulse AIO Disposable - Rainbow Belts Live Resin - Hybrid - 1mL"
+            # Product Name* column contains raw SKU like: "Rainbow Belts Pure Live Resin Disposable Vape by Bodhi High - 1g"
+            # We want Description column values moved to JSON column
             description_raw = row.get(description_col, '')
             raw_description = ''
             
@@ -184,52 +235,42 @@ def load_excel_descriptions(excel_path):
                 else:
                     raw_description = str(description_raw).strip()
             
-            # CRITICAL VALIDATION: Ensure we're NOT accidentally using Product Name
-            # If description matches product name exactly, it might be wrong (Excel Description should be different)
-            if raw_description and raw_description.strip() == product_name.strip():
-                logger.warning(f"  ⚠️  WARNING: Description matches Product Name for '{product_name[:50]}'")
-                logger.warning(f"     This suggests Description column may contain Product Name values")
-                logger.warning(f"     Product Name: '{product_name[:80]}'")
-                logger.warning(f"     Description: '{raw_description[:80]}'")
-                logger.warning(f"     ⚠️  Skipping this row - Description should be different from Product Name")
-                rows_without_descriptions += 1
-                continue
-            
-            # CRITICAL: NO FALLBACKS - Only use the RAW Excel Description value
-            # If description is empty/transformed, we still use it (or empty string)
-            # DO NOT fall back to Product Name - user wants EXACTLY what's in Excel Description column
+            # CRITICAL: Use Description column value AS-IS (no validation, no skipping)
+            # Description may match Product Name - that's fine, use it anyway
+            # Only skip if Description is truly empty/null
             
             # Clean up the raw description value
             description_lower = raw_description.lower().strip() if raw_description else ''
             if not raw_description or description_lower in ['nan', 'none', '', 'null', 'n/a', 'na']:
-                # NO FALLBACK - use empty string if no description
-                raw_description = ''
+                # Empty Description - skip this row
                 rows_without_descriptions += 1
+                continue
             else:
                 rows_with_descriptions += 1
             
-            # Store ONLY the RAW Description value from Excel (no fallbacks)
-            # This goes EXACTLY into JSON column - no transformations, no fallbacks
-            # CRITICAL: description comes from Excel Description column, NOT Product Name
+            # Store ONLY the Description column value in JSON
+            # CRITICAL: Moving Description column values (pre-transformed) to JSON column
+            # Description contains values like: "Pure Prana Pulse AIO Disposable - Rainbow Belts Live Resin - Hybrid - 1mL"
+            # NOT Product Name values like: "Rainbow Belts Pure Live Resin Disposable Vape by Bodhi High - 1g"
             description = raw_description
             
-            # Debug logging for first few rows to verify we're reading Description correctly
+            # Debug logging for first few rows to verify what we're storing
             if rows_with_descriptions <= 3:
                 logger.info(f"  📝 Sample row {rows_with_descriptions}:")
-                logger.info(f"     Product Name: '{product_name[:80]}'")
-                logger.info(f"     Description (JSON): '{description[:80]}'")
-                logger.info(f"     ✅ Using Description column value (NOT Product Name)")
+                logger.info(f"     Product Name* (raw SKU): '{product_name[:80]}'")
+                logger.info(f"     Description (pre-transformed): '{row.get(description_col, '')[:80] if description_col else 'N/A'}'")
+                logger.info(f"     JSON value to store: '{description[:80]}'")
+                logger.info(f"     ✅ Moving Description column (pre-transformed) to JSON column")
 
             # Store by normalized product name - ONLY store if we have a description
-            # NO FALLBACKS - only products with actual Excel Description values
             # products_data format: {product_name_lower: (product_name, description)}
-            # - product_name is used ONLY for matching and required "Product Name*" field
-            # - description is Excel Description ONLY - NEVER Product Name
+            # - product_name = Product Name* column (raw SKU) - used ONLY for matching
+            # - description = Description column (pre-transformed) - moved to JSON column
             product_name_lower = product_name.lower()
-            if description:  # Only store if we have a description (no fallbacks)
+            if description:  # Only store if we have a Description value (no fallbacks)
                 if product_name_lower in products_data:
                     existing_desc = products_data[product_name_lower][1]
-                    # Keep the one with longer description (more likely to be complete/original)
+                    # Keep the one with longer description (more likely to be complete)
                     if len(description) > len(existing_desc):
                         products_data[product_name_lower] = (product_name, description)
                         logger.debug(f"  Replaced duplicate '{product_name}' with longer description")
