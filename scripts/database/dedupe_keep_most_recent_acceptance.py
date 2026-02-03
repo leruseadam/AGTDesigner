@@ -94,35 +94,36 @@ def run_dedupe(db_path: str, dry_run: bool = False) -> dict:
     if not has_accepted:
         logger.warning(f"DB has no 'Accepted Date' column; using updated_at only: {db_path}")
 
-    # Duplicate key: same normalized_name, vendor, brand
+    # Duplicate key: same Product Name + Vendor + Brand (works even when normalized_name is NULL)
     cursor.execute("""
-        SELECT normalized_name, "Vendor/Supplier*", "Product Brand", COUNT(*) AS cnt
+        SELECT "Product Name*", "Vendor/Supplier*", "Product Brand", COUNT(*) AS cnt
         FROM products
-        GROUP BY normalized_name, "Vendor/Supplier*", "Product Brand"
+        GROUP BY "Product Name*", "Vendor/Supplier*", "Product Brand"
         HAVING cnt > 1
     """)
     duplicate_groups = cursor.fetchall()
     total_groups = len(duplicate_groups)
     deleted_count = 0
+    if total_groups == 0:
+        logger.info(f"No duplicate groups found (by Product Name + Vendor + Brand): {db_path}")
 
     select_cols = 'id, "Product Name*", updated_at'
     if has_accepted:
         select_cols = 'id, "Product Name*", "Accepted Date", updated_at'
 
     for row in duplicate_groups:
-        norm_name, vendor, brand = row[0], row[1], row[2]
-        # Skip groups with NULL keys: WHERE col = NULL matches no rows in SQL
-        if norm_name is None or vendor is None or brand is None:
+        product_name, vendor, brand = row[0], row[1], row[2]
+        if product_name is None or vendor is None or brand is None:
             logger.debug("Skipping duplicate group with NULL key")
             continue
         cursor.execute(f"""
             SELECT {select_cols}
             FROM products
-            WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-        """, (norm_name, vendor, brand))
+            WHERE "Product Name*" = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
+        """, (product_name, vendor, brand))
         entries = [dict(r) for r in cursor.fetchall()]
         if not entries:
-            logger.warning("Duplicate group returned no rows (skipping): %r", (norm_name, vendor, brand))
+            logger.warning("Duplicate group returned no rows (skipping): %r", (product_name, vendor, brand))
             continue
 
         def sort_key(e):
