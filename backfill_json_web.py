@@ -70,26 +70,21 @@ def ensure_json_column_exists(db_path):
 
 def load_excel_descriptions(excel_path):
     """
-    Load ORIGINAL Excel Description values (before any transformation).
+    Load PRE-PROCESSED Excel Description values DIRECTLY from Excel file.
     
-    CRITICAL: This function reads the RAW Excel file BEFORE excel_processor transforms it.
-    The Description values here should be the FULL original descriptions (e.g., "Product Name by Vendor - 1g"),
-    NOT the shortened transformed versions (e.g., "Product Name").
-    
-    If the Excel file has already been processed and saved with transformed descriptions,
-    this function will read transformed values. Make sure to use the ORIGINAL uploaded Excel file.
+    CRITICAL: This reads the Description column EXACTLY as it appears in the Excel file.
+    This is the SAME value that excel_processor.py copies to JSON at line 2125.
+    NO TRANSFORMATION, NO PROCESSING - just read Description column and use it for JSON.
     """
     try:
-        # Read Excel - get ALL rows DIRECTLY from file (no processing)
-        # This should be the ORIGINAL Excel file before excel_processor transforms it
+        # Read Excel file DIRECTLY - no processing, no transformation
         df = pd.read_excel(excel_path, engine='openpyxl')
         
-        logger.info(f"  Reading Excel file: {Path(excel_path).name}")
-        logger.info(f"  Excel columns found: {list(df.columns)}")
-        logger.info(f"  Total rows in Excel file: {len(df)}")
-        logger.info(f"  Non-null rows: {df.notna().any(axis=1).sum()}")
-        logger.info(f"  ⚠️  IMPORTANT: This must be the ORIGINAL Excel file (before processing)")
-        logger.info(f"     If descriptions look shortened, the file may have been processed already")
+        logger.info(f"  📄 Reading Excel file: {Path(excel_path).name}")
+        logger.info(f"  📋 Excel columns: {list(df.columns)}")
+        logger.info(f"  📊 Total rows: {len(df)}")
+        logger.info(f"  ✅ Reading Description column DIRECTLY from Excel (pre-processed values)")
+        logger.info(f"     This matches excel_processor.py line 2125: self.df['JSON'] = self.df['Description']")
 
         # Find Description column - be flexible with name matching
         # Also check if Product Name column contains full descriptions (may be mislabeled)
@@ -277,12 +272,12 @@ def load_excel_descriptions(excel_path):
                 else:
                     products_data[product_name_lower] = (product_name, description)
         
-        logger.info(f"  ✅ Loaded {len(products_data)} products from Excel")
+        logger.info(f"  ✅ Loaded {len(products_data)} products with Description values from Excel")
         logger.info(f"  📊 Products with descriptions: {rows_with_descriptions}")
-        logger.info(f"  📊 Products without descriptions (skipped - no fallback): {rows_without_descriptions}")
-        logger.info(f"  📈 Total products with descriptions: {len(products_data)}/{len(df)} rows ({100*len(products_data)/max(len(df),1):.1f}%)")
-        logger.info(f"  ⚠️  IMPORTANT: Only products with Excel Description values will be updated")
-        logger.info(f"     Products without descriptions will be skipped (no Product Name fallback)")
+        logger.info(f"  📊 Products without descriptions (skipped): {rows_without_descriptions}")
+        logger.info(f"  📈 Coverage: {len(products_data)}/{len(df)} rows ({100*len(products_data)/max(len(df),1):.1f}%)")
+        logger.info(f"  ✅ CRITICAL: Using EXACT Description column values from Excel (pre-processed)")
+        logger.info(f"     These are the same values that excel_processor.py copies to JSON at line 2125")
         if skipped_empty_name > 0:
             logger.info(f"  ℹ️  Skipped {skipped_empty_name} rows with empty product names")
 
@@ -294,25 +289,9 @@ def load_excel_descriptions(excel_path):
         return {}
 
 
-def normalize_name(name):
-    """Normalize product name for better matching - matches database normalization."""
-    if not isinstance(name, str):
-        return ""
-    # Use the same normalization as excel_processor and product_database
-    # Lowercase, strip, replace multiple spaces/hyphens, remove non-breaking hyphens, etc.
-    import re
-    normalized = name.lower().strip()
-    # Normalize synonyms for vaping hardware to improve token overlap matching
-    normalized = normalized.replace('vaporiser', 'disposable vape')
-    normalized = normalized.replace('vaporizer', 'disposable vape')
-    normalized = normalized.replace('\u2011', '-')  # non-breaking hyphen to normal
-    normalized = re.sub(r'[-\s]+', ' ', normalized)  # collapse hyphens and spaces
-    normalized = re.sub(r'[^\w\s-]', '', normalized)  # remove non-alphanumeric except hyphen/space
-    return normalized
-
-
 def update_json_column(db_path, products_data):
     """Update JSON column from Excel data AND INSERT missing products."""
+    conn = None
     try:
         if not products_data:
             logger.warning("No Excel products provided - skipping update")
@@ -321,138 +300,81 @@ def update_json_column(db_path, products_data):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # Check if normalized_name column exists
-        cursor.execute("PRAGMA table_info(products)")
-        columns = [row[1] for row in cursor.fetchall()]
-        has_normalized_column = 'normalized_name' in columns
+        # Enable foreign keys and set timeout for better reliability
+        cursor.execute("PRAGMA foreign_keys = ON")
+        cursor.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
         
-        # Get products with both Product Name* and normalized_name (if available)
-        if has_normalized_column:
-            cursor.execute('SELECT id, "Product Name*", normalized_name FROM products')
-            products = cursor.fetchall()
-        else:
-            cursor.execute('SELECT id, "Product Name*" FROM products')
-            products = [(row[0], row[1], None) for row in cursor.fetchall()]
+        # Get all products - simple Product Name lookup
+        cursor.execute('SELECT id, "Product Name*" FROM products')
+        products = cursor.fetchall()
         
         total_products = len(products)
         logger.info(f"  Found {total_products} total products in database")
         logger.info(f"  Loaded {len(products_data)} Excel products to process")
-        logger.info(f"  Database has normalized_name column: {has_normalized_column}")
 
-        # Normalize Excel data for matching
-        normalized_excel_data = {}
-        for excel_name_lower, (original_name, json_value) in products_data.items():
-            normalized_key = normalize_name(excel_name_lower)
-            if normalized_key:
-                normalized_excel_data[normalized_key] = (original_name, json_value)
+        # Simple matching: Build lookup by Product Name (case-insensitive)
+        existing_products = {}
+        for product_id, product_name in products:
+            if product_name:
+                # Simple case-insensitive lookup
+                key = str(product_name).strip().lower()
+                # Handle duplicates - keep first occurrence
+                if key not in existing_products:
+                    existing_products[key] = product_id
 
         updated_from_excel = 0
         inserted_new_products = 0
-        unmatched_excel = set(normalized_excel_data.keys())
-        unmatched_db = []
+        unmatched_excel = set()
+        matched_samples = []
+        unmatched_samples = []
+        update_errors = []
 
-        # Build a set of existing product names for quick lookup
-        # Use normalized_name column if available, otherwise compute it
-        existing_products = {}
-        for product_row in products:
-            product_id = product_row[0]
-            product_name = product_row[1]
-            db_normalized = product_row[2] if len(product_row) > 2 else None
-            
-            if product_name:
-                # Use existing normalized_name if available, otherwise compute it
-                if db_normalized:
-                    db_name_normalized = db_normalized
-                else:
-                    db_name_normalized = normalize_name(product_name)
-                
-                # Store by normalized name
-                existing_products[db_name_normalized] = product_id
-                
-                # Also store by original name (lowercase) for fuzzy matching fallback
-                if product_name.lower() not in existing_products:
-                    existing_products[product_name.lower()] = product_id
-
-        # Match and update existing products
-        logger.info(f"  Matching and updating existing products...")
-        matched_samples = []  # Track first few matches for diagnostics
-        unmatched_samples = []  # Track first few unmatched for diagnostics
+        # Simple matching: Match Excel Product Name to DB Product Name (case-insensitive)
+        logger.info(f"  🔄 Matching Excel products to database products...")
+        logger.info(f"  ✅ Using PRE-PROCESSED Description values from Excel for JSON column")
+        logger.info(f"     (Same as excel_processor.py line 2125: self.df['JSON'] = self.df['Description'])")
         
-        for normalized_name, (original_name, json_value) in normalized_excel_data.items():
-            # CRITICAL: original_name is ONLY used for matching, NEVER as JSON value
-            # json_value comes from Excel Description column ONLY
+        for excel_name_lower, (original_name, json_value) in products_data.items():
+            # Validate JSON value is not empty
+            if not json_value or not str(json_value).strip():
+                logger.warning(f"  ⚠️  Skipping empty JSON value for '{original_name}'")
+                continue
             
-            product_id = None
+            # Simple match: case-insensitive Product Name match
+            product_id = existing_products.get(excel_name_lower)
             
-            # Strategy 1: Try exact normalized match
-            if normalized_name in existing_products:
-                product_id = existing_products[normalized_name]
-            
-            # Strategy 2: Try case-insensitive match on original name
-            if not product_id and original_name.lower() in existing_products:
-                product_id = existing_products[original_name.lower()]
-            
-            # Strategy 3: Try fuzzy match (check if normalized name contains significant words)
-            # Only do this if we have a reasonable number of products (avoid performance issues)
-            if not product_id and len(existing_products) < 50000:
-                excel_words = set(normalized_name.split())
-                # Remove very short words and common stop words
-                excel_words = {w for w in excel_words if len(w) > 2 and w not in {'the', 'and', 'or', 'of', 'a', 'an', 'by', 'for', 'with'}}
-                
-                if len(excel_words) >= 3:  # Only fuzzy match if we have enough words
-                    best_match = None
-                    best_score = 0
-                    # Only check normalized names (skip lowercase duplicates)
-                    checked_ids = set()
-                    for db_normalized, db_id in existing_products.items():
-                        # Skip if we already checked this product_id
-                        if db_id in checked_ids:
-                            continue
-                        checked_ids.add(db_id)
-                        
-                        db_words = set(db_normalized.split())
-                        db_words = {w for w in db_words if len(w) > 2 and w not in {'the', 'and', 'or', 'of', 'a', 'an', 'by', 'for', 'with'}}
-                        
-                        # Calculate word overlap
-                        common_words = excel_words.intersection(db_words)
-                        if len(excel_words) > 0:
-                            overlap_score = len(common_words) / len(excel_words)
-                            # Require at least 70% word overlap and at least 3 common words
-                            if overlap_score >= 0.7 and len(common_words) >= 3:
-                                if overlap_score > best_score:
-                                    best_score = overlap_score
-                                    best_match = db_id
-            
-            if product_id or best_match:
-                # Product exists - update JSON column with Excel Description ONLY
-                if best_match:
-                    product_id = best_match
-                
-                cursor.execute(
-                    'UPDATE products SET "JSON" = ? WHERE id = ?',
-                    (json_value, product_id)  # json_value = Excel Description, NOT Product Name
-                )
-                updated_from_excel += 1
-                unmatched_excel.discard(normalized_name)
-                
-                # Log first few matches for verification
-                if len(matched_samples) < 5:
-                    cursor.execute('SELECT "Product Name*" FROM products WHERE id = ?', (product_id,))
-                    result = cursor.fetchone()
-                    db_product_name = result[0] if result else 'N/A'
-                    matched_samples.append({
-                        'excel_name': original_name,
-                        'db_name': db_product_name,
-                        'json_value': json_value[:60]
-                    })
+            if product_id:
+                # Product exists - update JSON column with PRE-PROCESSED Description from Excel
+                try:
+                    json_value_clean = str(json_value).strip()
+                    cursor.execute(
+                        'UPDATE products SET "JSON" = ? WHERE id = ?',
+                        (json_value_clean, product_id)
+                    )
+                    if cursor.rowcount > 0:
+                        updated_from_excel += 1
+                    else:
+                        logger.warning(f"  ⚠️  No rows updated for product ID {product_id} ({original_name})")
+                    
+                    # Log first few matches for verification
+                    if len(matched_samples) < 5:
+                        cursor.execute('SELECT "Product Name*" FROM products WHERE id = ?', (product_id,))
+                        result = cursor.fetchone()
+                        db_product_name = result[0] if result else 'N/A'
+                        matched_samples.append({
+                            'excel_name': original_name,
+                            'db_name': db_product_name,
+                            'json_value': str(json_value)[:60]
+                        })
+                except Exception as e:
+                    error_msg = f"Error updating product '{original_name}': {e}"
+                    logger.error(f"  ❌ {error_msg}")
+                    update_errors.append(error_msg)
             else:
                 # Product doesn't exist - will insert after updates
-                # Log first few unmatched for diagnostics
+                unmatched_excel.add(excel_name_lower)
                 if len(unmatched_samples) < 5:
-                    unmatched_samples.append({
-                        'excel_name': original_name,
-                        'normalized': normalized_name
-                    })
+                    unmatched_samples.append({'excel_name': original_name})
         
         # Log diagnostic information
         if matched_samples:
@@ -464,28 +386,32 @@ def update_json_column(db_path, products_data):
         if unmatched_samples:
             logger.warning(f"  ⚠️  Sample unmatched products (first {len(unmatched_samples)}):")
             for i, sample in enumerate(unmatched_samples, 1):
-                logger.warning(f"     {i}. Excel: '{sample['excel_name'][:60]}' (normalized: '{sample['normalized'][:60]}')")
-                # Try to find similar matches in DB for diagnostics
-                similar_matches = [db_norm for db_norm in existing_products.keys() 
-                                 if sample['normalized'][:30] in db_norm or db_norm[:30] in sample['normalized']]
-                if similar_matches:
-                    logger.warning(f"        Similar DB names found: {similar_matches[:3]}")
+                logger.warning(f"     {i}. Excel: '{sample['excel_name'][:60]}'")
+        
+        if update_errors:
+            logger.error(f"  ❌ {len(update_errors)} errors during updates - rolling back transaction")
+            conn.rollback()
+            raise Exception(f"Update failed with {len(update_errors)} errors. First error: {update_errors[0]}")
         
         # Commit updates first
         conn.commit()
+        logger.info(f"  ✅ Committed {updated_from_excel} updates to database")
         
         # Now INSERT all products that don't exist
         logger.info(f"  Inserting {len(unmatched_excel)} new products from Excel...")
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         today = datetime.now().strftime('%Y-%m-%d')
         
-        for normalized_name in list(unmatched_excel):
-            original_name, json_value = normalized_excel_data[normalized_name]
+        for excel_name_lower in unmatched_excel:
+            original_name, json_value = products_data[excel_name_lower]
             # CRITICAL: original_name is Product Name (used for matching and required "Product Name*" field)
             # json_value is Excel Description ONLY - NEVER use Product Name as JSON value
             
             # Insert new product with minimal required fields
             try:
+                # Simple normalized name for insert (just lowercase)
+                simple_normalized = original_name.strip().lower() if original_name else ''
+                
                 cursor.execute('''
                     INSERT INTO products (
                         "Product Name*", 
@@ -507,11 +433,11 @@ def update_json_column(db_path, products_data):
                         "Source"
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    original_name,           # Product Name* (required field - NOT used as JSON)
-                    normalized_name,         # normalized_name (for matching - NOT used as JSON)
-                    'Unknown',               # Product Type* (required)
-                    json_value,              # Description (Excel Description - NOT Product Name)
-                    json_value,              # JSON (Excel Description ONLY - NEVER Product Name)
+                    original_name,           # Product Name*
+                    simple_normalized,        # normalized_name (simple lowercase)
+                    'Unknown',               # Product Type*
+                    json_value,              # Description
+                    json_value,              # JSON (from Excel Description)
                     today,                   # first_seen_date
                     today,                   # last_seen_date
                     now,                     # created_at
@@ -529,8 +455,8 @@ def update_json_column(db_path, products_data):
             except sqlite3.IntegrityError as e:
                 # Product might already exist (race condition or unique constraint)
                 logger.warning(f"  ⚠️  Could not insert '{original_name}': {e}")
-                # Try to update it instead
-                cursor.execute('SELECT id FROM products WHERE normalized_name = ?', (normalized_name,))
+                # Try to update it instead - simple match by Product Name
+                cursor.execute('SELECT id FROM products WHERE LOWER("Product Name*") = ?', (excel_name_lower,))
                 result = cursor.fetchone()
                 if result:
                     cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (json_value, result[0]))
@@ -538,7 +464,6 @@ def update_json_column(db_path, products_data):
         
         # Commit inserts
         conn.commit()
-        conn.close()
         
         total_processed = updated_from_excel + inserted_new_products
         
@@ -546,21 +471,78 @@ def update_json_column(db_path, products_data):
         cursor.execute('SELECT COUNT(*) FROM products WHERE "JSON" IS NOT NULL AND "JSON" != ""')
         products_with_json = cursor.fetchone()[0]
         
+        # Verify that our updates actually worked - spot check a few
+        verification_passed = True
+        if updated_from_excel > 0:
+            cursor.execute('SELECT COUNT(*) FROM products WHERE "JSON" IS NOT NULL AND "JSON" != "" AND id IN (SELECT id FROM products LIMIT 100)')
+            sample_with_json = cursor.fetchone()[0]
+            if sample_with_json == 0 and updated_from_excel > 10:
+                logger.error(f"  ❌ VERIFICATION FAILED: Updated {updated_from_excel} products but sample check shows 0 with JSON")
+                verification_passed = False
+        
         logger.info(f"  ✅ Updated {updated_from_excel} existing products from Excel")
         logger.info(f"  ✅ Inserted {inserted_new_products} new products from Excel")
         logger.info(f"  📊 Total processed: {total_processed} products")
         logger.info(f"  📊 Products with JSON column populated: {products_with_json}/{total_products} ({100*products_with_json/max(total_products,1):.1f}%)")
         
-        if len(unmatched_excel) > 0:
-            logger.warning(f"  ⚠️  {len(unmatched_excel)} Excel products could not be matched to database")
-            logger.warning(f"     These will be inserted as new products")
+        if not verification_passed:
+            logger.error(f"  ❌ VERIFICATION FAILED - data may not have been saved correctly")
+            conn.rollback()
+            raise Exception("Verification failed - transaction rolled back")
         
+        conn.close()
+        
+        if len(unmatched_excel) > inserted_new_products:
+            logger.warning(f"  ⚠️  {len(unmatched_excel) - inserted_new_products} Excel products could not be matched or inserted")
+        
+        logger.info(f"  ✅ Backfill completed successfully!")
         return total_processed
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"❌ Error in update_json_column: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        if conn:
+            try:
+                conn.rollback()
+                logger.info("  ✅ Transaction rolled back due to error")
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
         return 0
+
+
+def validate_database(db_path):
+    """Validate database is accessible and has required structure."""
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Check if products table exists
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+        if not cursor.fetchone():
+            conn.close()
+            raise Exception("Products table not found in database")
+        
+        # Check if Product Name* column exists
+        cursor.execute("PRAGMA table_info(products)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "Product Name*" not in columns:
+            conn.close()
+            raise Exception("Required column 'Product Name*' not found in products table")
+        
+        # Get product count
+        cursor.execute("SELECT COUNT(*) FROM products")
+        count = cursor.fetchone()[0]
+        
+        conn.close()
+        logger.info(f"  ✅ Database validation passed: {count} products found")
+        return True
+    except Exception as e:
+        logger.error(f"  ❌ Database validation failed: {e}")
+        return False
 
 
 def main():
@@ -580,6 +562,11 @@ def main():
         return
 
     logger.info(f"Processing Bothell database only: {db_path.name}")
+    
+    # Validate database before proceeding
+    if not validate_database(str(db_path)):
+        logger.error("❌ Database validation failed - aborting backfill")
+        return
 
     # Find Excel files that match Bothell - REQUIRED
     excel_files = list(uploads_dir.glob('*.xlsx')) + list(uploads_dir.glob('*.xls'))
