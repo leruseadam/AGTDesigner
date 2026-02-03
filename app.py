@@ -17224,13 +17224,25 @@ def database_export():
         import tempfile
         import os
         
-        store_name = get_current_store_name()
-        if not store_name:
-            return jsonify({'error': 'No store selected. Please select a store first.'}), 400
+        # Get store name with error handling
+        try:
+            store_name = get_current_store_name()
+            if not store_name:
+                return jsonify({'error': 'No store selected. Please select a store first.'}), 400
+        except Exception as store_err:
+            import traceback
+            logging.error(f"Error getting store name: {store_err}\n{traceback.format_exc()}")
+            return jsonify({'error': f'Failed to get store name: {str(store_err)}'}), 500
         
-        product_db = get_product_database(store_name)
-        if not product_db:
-            return jsonify({'error': f'Failed to get database for store: {store_name}'}), 500
+        # Get product database with error handling
+        try:
+            product_db = get_product_database(store_name)
+            if not product_db:
+                return jsonify({'error': f'Failed to get database for store: {store_name}'}), 500
+        except Exception as db_err:
+            import traceback
+            logging.error(f"Error getting product database: {db_err}\n{traceback.format_exc()}")
+            return jsonify({'error': f'Failed to get database: {str(db_err)}'}), 500
         
         # Verify database exists
         if not hasattr(product_db, 'db_path') or not product_db.db_path:
@@ -17246,7 +17258,7 @@ def database_export():
         except Exception as temp_err:
             import traceback
             logging.error(f"Error creating temp file: {temp_err}\n{traceback.format_exc()}")
-            return jsonify({'error': f'Failed to create temporary file: {temp_err}'}), 500
+            return jsonify({'error': f'Failed to create temporary file: {str(temp_err)}'}), 500
         
         # Export database
         try:
@@ -17261,7 +17273,12 @@ def database_export():
                     os.unlink(temp_file.name)
             except Exception:
                 pass
-            return jsonify({'error': f'Export failed: {str(export_err)}', 'details': error_trace[:500]}), 500
+            # Return detailed error message
+            error_msg = str(export_err)
+            return jsonify({
+                'error': f'Export failed: {error_msg}',
+                'details': error_trace[:1000] if len(error_trace) > 1000 else error_trace
+            }), 500
         
         # Verify file was created
         if not os.path.exists(temp_file.name):
@@ -17347,8 +17364,15 @@ def database_export():
         
     except Exception as e:
         import traceback
-        logging.error(f"Error exporting database: {str(e)}\n" + traceback.format_exc())
-        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+        error_trace = traceback.format_exc()
+        error_msg = str(e)
+        logging.error(f"Error exporting database: {error_msg}\n{error_trace}")
+        # Return detailed error for debugging
+        return jsonify({
+            'error': f'Export failed: {error_msg}',
+            'type': type(e).__name__,
+            'details': error_trace[:2000]  # Include traceback in response for debugging
+        }), 500
 
 @app.route('/api/database-view', methods=['GET'])
 def database_view():
