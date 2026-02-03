@@ -1370,6 +1370,7 @@ class JSONMatcher:
                 'vendor_groups': defaultdict(list),
                 'key_terms': defaultdict(list),
                 'normalized_names': defaultdict(list),
+                'json_column_lookup': {},  # PERFORMANCE: Fast JSON column lookup
             }
             
             for product in all_products:
@@ -1417,6 +1418,14 @@ class JSONMatcher:
                 # Build indexes
                 exact_name = desc.lower().strip()
                 indexed_cache['exact_names'][exact_name] = cache_item
+                
+                # PERFORMANCE: Build JSON column lookup for fast matching
+                json_col_value = str(product.get('JSON', '')).strip()
+                if json_col_value:
+                    json_col_lower = json_col_value.lower()
+                    if json_col_lower not in indexed_cache['json_column_lookup']:
+                        indexed_cache['json_column_lookup'][json_col_lower] = []
+                    indexed_cache['json_column_lookup'][json_col_lower].append(product)
                 
                 if vendor:
                     # CRITICAL FIX: Use consistent key format {name}|{vendor} to match lookup in _find_vendor_exact_name_matches
@@ -2666,6 +2675,28 @@ class JSONMatcher:
             items_failed = 0
             sibling_matches = {}  # same product line (vendor, weight, price, type) -> matched product for strain-variant lookup
 
+            # PERFORMANCE: Pre-filter cache by vendor ONCE before the loop (not per-item)
+            vendor_filtered_cache = None
+            if json_vendor_filter and self._sheet_cache:
+                vendor_filtered_cache = [
+                    cache_item for cache_item in self._sheet_cache
+                    if cache_item.get('vendor', '').strip() and 
+                       self._is_vendor_match(json_vendor_filter, cache_item.get('vendor', '').strip())
+                ]
+                logging.info(f"⚡ PERFORMANCE: Pre-filtered cache by vendor '{json_vendor_filter}': {len(self._sheet_cache)} -> {len(vendor_filtered_cache)} items")
+            
+            # PERFORMANCE: Build exact name lookup dictionary for O(1) matching
+            exact_name_lookup = {}
+            cache_to_search = vendor_filtered_cache if vendor_filtered_cache else (self._sheet_cache or [])
+            for cache_item in cache_to_search[:2000]:  # Limit to 2000 for performance
+                name = cache_item.get('original_name', '').strip().lower()
+                if name:
+                    if name not in exact_name_lookup:
+                        exact_name_lookup[name] = []
+                    exact_name_lookup[name].append(cache_item)
+            
+            logging.info(f"⚡ PERFORMANCE: Built exact name lookup with {len(exact_name_lookup)} unique names from {len(cache_to_search)} cache items")
+
             for i, item in enumerate(unique_items):
                 items_processed += 1
                 # Ensure product name exists
@@ -2749,36 +2780,26 @@ class JSONMatcher:
                         print(f"✅ SIBLING STRAIN MATCH: '{product_name}' → DB '{best_match.get('Product Name*', '') or best_match.get('Description', '')}' (strain: {strain})")
                  
                 # Use sheet cache for matching (works with both Excel data and Database data)
-                if best_match is None and self._sheet_cache and len(self._sheet_cache) > 0:
-                    # PERFORMANCE OPTIMIZATION: Pre-filter candidates by vendor to reduce search space.
-                    # IMPORTANT: The JSON's from_license_name *is* the true vendor/license holder
-                    # (e.g. CONSCIOUS CANNABIS Proc), NOT the retail store. We therefore ALWAYS
-                    # treat the current_vendor_filter as a real vendor signal across all product
-                    # types, including concentrates/vapes.
-                    candidates_to_check = []
+                if best_match is None and cache_to_search and len(cache_to_search) > 0:
+                    # PERFORMANCE: Try exact name lookup first (O(1) instead of O(n))
+                    product_name_lower = product_name.lower()
+                    if product_name_lower in exact_name_lookup:
+                        exact_matches = exact_name_lookup[product_name_lower]
+                        if exact_matches:
+                            best_match = exact_matches[0].get('_db_product', exact_matches[0])
+                            best_score = 200.0
+                            logging.debug(f"⚡ EXACT MATCH (fast lookup): '{product_name}'")
                     
-                    if current_vendor_filter:
-                        # Primary pass: restrict to products whose vendor matches the license name.
-                        for cache_item in self._sheet_cache:
-                            excel_vendor = cache_item.get('vendor', '').strip()
-                            if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
-                                candidates_to_check.append(cache_item)
+                    # If no exact match, fall back to fuzzy matching with limited candidates
+                    if best_match is None:
+                        # Use pre-filtered cache or fallback to full cache
+                        candidates_to_check = cache_to_search
                         
-                        # Safety valve: if nothing matches this vendor (new vendor with no DB
-                        # products yet, or mis-entered vendor in Excel), fall back to ALL items
-                        # so that JSON fallback logic can still create tags instead of silently
-                        # dropping products.
-                        if not candidates_to_check:
-                            candidates_to_check = self._sheet_cache
-                    else:
-                        # No vendor filter available – check all items.
-                        candidates_to_check = self._sheet_cache
-
-                    # PERFORMANCE: Limit candidates to check (max 1000 for better coverage)
-                    candidates_to_check = candidates_to_check[:1000]
-                    
-                    # Match against filtered candidates
-                    for cache_item in candidates_to_check:
+                        # PERFORMANCE: Limit candidates to check (max 300 for speed)
+                        candidates_to_check = candidates_to_check[:300]
+                        
+                        # Match against filtered candidates
+                        for cache_item in candidates_to_check:
                         try:
                             excel_product_name = cache_item.get('original_name', '').strip().lower()
                             
@@ -2936,7 +2957,7 @@ class JSONMatcher:
                                 score += 15.0
                             
                             # PERFORMANCE: Early termination if we found a very high confidence match
-                            if score >= 150.0:
+                            if score >= 120.0:  # Lowered threshold for faster termination
                                 best_score = score
                                 if '_db_product' in cache_item:
                                     best_match = cache_item['_db_product']
@@ -7776,68 +7797,92 @@ class JSONMatcher:
         extracted_strain = self._extract_strain_from_bamboo_name(json_description)
         logging.debug(f"   Extracted strain: '{extracted_strain}'")
 
-        # Check Excel data first (current session data)
+        # PERFORMANCE: Use indexed JSON column lookup instead of iterating
         excel_strain_matches = []
+        db_strain_matches = []
+        
+        # Check indexed cache first (fast O(1) lookup)
+        if self._indexed_cache and 'json_column_lookup' in self._indexed_cache:
+            json_lookup = self._indexed_cache['json_column_lookup']
+            if description_lower in json_lookup:
+                # Found exact match in indexed cache
+                matched_products = json_lookup[description_lower]
+                if matched_products:
+                    product = matched_products[0]
+                    product['_source'] = 'database'
+                    product['_match_type'] = 'json_column_exact'
+                    logging.info(f"✅ JSON COLUMN EXACT MATCH (Indexed Cache): Found '{product.get('Product Name*', 'Unknown')}'")
+                    return product
+        
+        # Fallback: Check Excel data (current session data)
         if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
             try:
                 df = self.excel_processor.df
                 if 'JSON' in df.columns:
-                    for _, row in df.iterrows():
-                        json_col_value = str(row.get('JSON', '')).strip()
-                        if not json_col_value:
-                            continue
-                        json_col_lower = json_col_value.lower()
-
-                        # Try exact match first
-                        if json_col_lower == description_lower:
-                            match = row.to_dict()
-                            match['_source'] = 'excel'
-                            match['_match_type'] = 'json_column_exact'
-                            logging.info(f"✅ JSON COLUMN EXACT MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
-                            return match
-
-                        # Collect strain matches for fallback
-                        if extracted_strain and len(extracted_strain) >= 5:
-                            db_strain = self._extract_strain_from_bamboo_name(json_col_value)
-                            if db_strain and extracted_strain == db_strain:
-                                match = row.to_dict()
-                                match['_source'] = 'excel'
-                                match['_match_type'] = 'json_column_strain'
-                                excel_strain_matches.append(match)
+                    # PERFORMANCE: Build lookup dict once if not exists
+                    if not hasattr(self, '_excel_json_lookup'):
+                        self._excel_json_lookup = {}
+                        for _, row in df.iterrows():
+                            json_col_value = str(row.get('JSON', '')).strip()
+                            if json_col_value:
+                                json_col_lower = json_col_value.lower()
+                                if json_col_lower not in self._excel_json_lookup:
+                                    self._excel_json_lookup[json_col_lower] = []
+                                self._excel_json_lookup[json_col_lower].append(row.to_dict())
+                    
+                    # Fast lookup
+                    if description_lower in self._excel_json_lookup:
+                        match = self._excel_json_lookup[description_lower][0]
+                        match['_source'] = 'excel'
+                        match['_match_type'] = 'json_column_exact'
+                        logging.info(f"✅ JSON COLUMN EXACT MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
+                        return match
+                    
+                    # Collect strain matches for fallback (only if needed)
+                    if extracted_strain and len(extracted_strain) >= 5:
+                        for json_col_lower, rows in self._excel_json_lookup.items():
+                            for row in rows:
+                                json_col_value = str(row.get('JSON', '')).strip()
+                                db_strain = self._extract_strain_from_bamboo_name(json_col_value)
+                                if db_strain and extracted_strain == db_strain:
+                                    match = dict(row)
+                                    match['_source'] = 'excel'
+                                    match['_match_type'] = 'json_column_strain'
+                                    excel_strain_matches.append(match)
             except Exception as e:
                 logging.debug(f"Error checking Excel JSON column: {e}")
+        
+        # Fallback: Check database products (only if indexed cache not available)
+        if not self._indexed_cache or 'json_column_lookup' not in self._indexed_cache:
+            try:
+                from app import get_product_database
+                product_db = get_product_database()
+                if product_db:
+                    db_products = product_db.get_all_products()
+                    if db_products:
+                        for product in db_products[:1000]:  # Limit to 1000 for performance
+                            json_col_value = str(product.get('JSON', '')).strip()
+                            if not json_col_value:
+                                continue
+                            json_col_lower = json_col_value.lower()
 
-        # Check database products
-        db_strain_matches = []
-        try:
-            from app import get_product_database
-            product_db = get_product_database()
-            if product_db:
-                db_products = product_db.get_all_products()
-                if db_products:
-                    for product in db_products:
-                        json_col_value = str(product.get('JSON', '')).strip()
-                        if not json_col_value:
-                            continue
-                        json_col_lower = json_col_value.lower()
+                            # Try exact match first
+                            if json_col_lower == description_lower:
+                                product['_source'] = 'database'
+                                product['_match_type'] = 'json_column_exact'
+                                logging.info(f"✅ JSON COLUMN EXACT MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
+                                return product
 
-                        # Try exact match first
-                        if json_col_lower == description_lower:
-                            product['_source'] = 'database'
-                            product['_match_type'] = 'json_column_exact'
-                            logging.info(f"✅ JSON COLUMN EXACT MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
-                            return product
-
-                        # Collect strain matches for fallback
-                        if extracted_strain and len(extracted_strain) >= 5:
-                            db_strain = self._extract_strain_from_bamboo_name(json_col_value)
-                            if db_strain and extracted_strain == db_strain:
-                                product_copy = dict(product)
-                                product_copy['_source'] = 'database'
-                                product_copy['_match_type'] = 'json_column_strain'
-                                db_strain_matches.append(product_copy)
-        except Exception as e:
-            logging.debug(f"Error checking database JSON column: {e}")
+                            # Collect strain matches for fallback
+                            if extracted_strain and len(extracted_strain) >= 5:
+                                db_strain = self._extract_strain_from_bamboo_name(json_col_value)
+                                if db_strain and extracted_strain == db_strain:
+                                    product_copy = dict(product)
+                                    product_copy['_source'] = 'database'
+                                    product_copy['_match_type'] = 'json_column_strain'
+                                    db_strain_matches.append(product_copy)
+            except Exception as e:
+                logging.debug(f"Error checking database JSON column: {e}")
 
         # If no exact match, try strain-based matches (prefer database over excel)
         # Score matches by product type similarity
