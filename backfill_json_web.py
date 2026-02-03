@@ -225,11 +225,11 @@ def update_json_column(db_path, products_data):
         logger.info(f"  Matching and updating existing products...")
         for normalized_name, (original_name, json_value) in normalized_excel_data.items():
             if normalized_name in existing_products:
-                # Product exists - update JSON column
+                # Product exists - update BOTH Description and JSON columns with raw Excel Description values
                 product_id = existing_products[normalized_name]
                 cursor.execute(
-                    'UPDATE products SET "JSON" = ? WHERE id = ?',
-                    (json_value, product_id)
+                    'UPDATE products SET "Description" = ?, "JSON" = ? WHERE id = ?',
+                    (json_value, json_value, product_id)
                 )
                 updated_from_excel += 1
                 unmatched_excel.discard(normalized_name)
@@ -297,7 +297,7 @@ def update_json_column(db_path, products_data):
                 cursor.execute('SELECT id FROM products WHERE normalized_name = ?', (normalized_name,))
                 result = cursor.fetchone()
                 if result:
-                    cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (json_value, result[0]))
+                    cursor.execute('UPDATE products SET "Description" = ?, "JSON" = ? WHERE id = ?', (json_value, json_value, result[0]))
                     updated_from_excel += 1
         
         # Commit inserts
