@@ -295,11 +295,19 @@ def load_excel_descriptions(excel_path):
 
 
 def normalize_name(name):
-    """Normalize product name for better matching."""
-    if not name:
+    """Normalize product name for better matching - matches database normalization."""
+    if not isinstance(name, str):
         return ""
-    # Lowercase, strip, normalize whitespace
-    normalized = " ".join(str(name).strip().lower().split())
+    # Use the same normalization as excel_processor and product_database
+    # Lowercase, strip, replace multiple spaces/hyphens, remove non-breaking hyphens, etc.
+    import re
+    normalized = name.lower().strip()
+    # Normalize synonyms for vaping hardware to improve token overlap matching
+    normalized = normalized.replace('vaporiser', 'disposable vape')
+    normalized = normalized.replace('vaporizer', 'disposable vape')
+    normalized = normalized.replace('\u2011', '-')  # non-breaking hyphen to normal
+    normalized = re.sub(r'[-\s]+', ' ', normalized)  # collapse hyphens and spaces
+    normalized = re.sub(r'[^\w\s-]', '', normalized)  # remove non-alphanumeric except hyphen/space
     return normalized
 
 
@@ -312,12 +320,24 @@ def update_json_column(db_path, products_data):
 
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute('SELECT id, "Product Name*" FROM products')
-        products = cursor.fetchall()
+        
+        # Check if normalized_name column exists
+        cursor.execute("PRAGMA table_info(products)")
+        columns = [row[1] for row in cursor.fetchall()]
+        has_normalized_column = 'normalized_name' in columns
+        
+        # Get products with both Product Name* and normalized_name (if available)
+        if has_normalized_column:
+            cursor.execute('SELECT id, "Product Name*", normalized_name FROM products')
+            products = cursor.fetchall()
+        else:
+            cursor.execute('SELECT id, "Product Name*" FROM products')
+            products = [(row[0], row[1], None) for row in cursor.fetchall()]
         
         total_products = len(products)
         logger.info(f"  Found {total_products} total products in database")
         logger.info(f"  Loaded {len(products_data)} Excel products to process")
+        logger.info(f"  Database has normalized_name column: {has_normalized_column}")
 
         # Normalize Excel data for matching
         normalized_excel_data = {}
@@ -332,29 +352,124 @@ def update_json_column(db_path, products_data):
         unmatched_db = []
 
         # Build a set of existing product names for quick lookup
+        # Use normalized_name column if available, otherwise compute it
         existing_products = {}
-        for product_id, product_name in products:
+        for product_row in products:
+            product_id = product_row[0]
+            product_name = product_row[1]
+            db_normalized = product_row[2] if len(product_row) > 2 else None
+            
             if product_name:
-                db_name_normalized = normalize_name(product_name)
+                # Use existing normalized_name if available, otherwise compute it
+                if db_normalized:
+                    db_name_normalized = db_normalized
+                else:
+                    db_name_normalized = normalize_name(product_name)
+                
+                # Store by normalized name
                 existing_products[db_name_normalized] = product_id
+                
+                # Also store by original name (lowercase) for fuzzy matching fallback
+                if product_name.lower() not in existing_products:
+                    existing_products[product_name.lower()] = product_id
 
         # Match and update existing products
         logger.info(f"  Matching and updating existing products...")
+        matched_samples = []  # Track first few matches for diagnostics
+        unmatched_samples = []  # Track first few unmatched for diagnostics
+        
         for normalized_name, (original_name, json_value) in normalized_excel_data.items():
             # CRITICAL: original_name is ONLY used for matching, NEVER as JSON value
             # json_value comes from Excel Description column ONLY
+            
+            product_id = None
+            
+            # Strategy 1: Try exact normalized match
             if normalized_name in existing_products:
-                # Product exists - update JSON column with Excel Description ONLY
                 product_id = existing_products[normalized_name]
+            
+            # Strategy 2: Try case-insensitive match on original name
+            if not product_id and original_name.lower() in existing_products:
+                product_id = existing_products[original_name.lower()]
+            
+            # Strategy 3: Try fuzzy match (check if normalized name contains significant words)
+            # Only do this if we have a reasonable number of products (avoid performance issues)
+            if not product_id and len(existing_products) < 50000:
+                excel_words = set(normalized_name.split())
+                # Remove very short words and common stop words
+                excel_words = {w for w in excel_words if len(w) > 2 and w not in {'the', 'and', 'or', 'of', 'a', 'an', 'by', 'for', 'with'}}
+                
+                if len(excel_words) >= 3:  # Only fuzzy match if we have enough words
+                    best_match = None
+                    best_score = 0
+                    # Only check normalized names (skip lowercase duplicates)
+                    checked_ids = set()
+                    for db_normalized, db_id in existing_products.items():
+                        # Skip if we already checked this product_id
+                        if db_id in checked_ids:
+                            continue
+                        checked_ids.add(db_id)
+                        
+                        db_words = set(db_normalized.split())
+                        db_words = {w for w in db_words if len(w) > 2 and w not in {'the', 'and', 'or', 'of', 'a', 'an', 'by', 'for', 'with'}}
+                        
+                        # Calculate word overlap
+                        common_words = excel_words.intersection(db_words)
+                        if len(excel_words) > 0:
+                            overlap_score = len(common_words) / len(excel_words)
+                            # Require at least 70% word overlap and at least 3 common words
+                            if overlap_score >= 0.7 and len(common_words) >= 3:
+                                if overlap_score > best_score:
+                                    best_score = overlap_score
+                                    best_match = db_id
+            
+            if product_id or best_match:
+                # Product exists - update JSON column with Excel Description ONLY
+                if best_match:
+                    product_id = best_match
+                
                 cursor.execute(
                     'UPDATE products SET "JSON" = ? WHERE id = ?',
                     (json_value, product_id)  # json_value = Excel Description, NOT Product Name
                 )
                 updated_from_excel += 1
                 unmatched_excel.discard(normalized_name)
+                
+                # Log first few matches for verification
+                if len(matched_samples) < 5:
+                    cursor.execute('SELECT "Product Name*" FROM products WHERE id = ?', (product_id,))
+                    result = cursor.fetchone()
+                    db_product_name = result[0] if result else 'N/A'
+                    matched_samples.append({
+                        'excel_name': original_name,
+                        'db_name': db_product_name,
+                        'json_value': json_value[:60]
+                    })
             else:
                 # Product doesn't exist - will insert after updates
-                pass
+                # Log first few unmatched for diagnostics
+                if len(unmatched_samples) < 5:
+                    unmatched_samples.append({
+                        'excel_name': original_name,
+                        'normalized': normalized_name
+                    })
+        
+        # Log diagnostic information
+        if matched_samples:
+            logger.info(f"  ✅ Sample matches (first {len(matched_samples)}):")
+            for i, sample in enumerate(matched_samples, 1):
+                logger.info(f"     {i}. Excel: '{sample['excel_name'][:60]}' → DB: '{sample['db_name'][:60]}'")
+                logger.info(f"        JSON: '{sample['json_value']}...'")
+        
+        if unmatched_samples:
+            logger.warning(f"  ⚠️  Sample unmatched products (first {len(unmatched_samples)}):")
+            for i, sample in enumerate(unmatched_samples, 1):
+                logger.warning(f"     {i}. Excel: '{sample['excel_name'][:60]}' (normalized: '{sample['normalized'][:60]}')")
+                # Try to find similar matches in DB for diagnostics
+                similar_matches = [db_norm for db_norm in existing_products.keys() 
+                                 if sample['normalized'][:30] in db_norm or db_norm[:30] in sample['normalized']]
+                if similar_matches:
+                    logger.warning(f"        Similar DB names found: {similar_matches[:3]}")
         
         # Commit updates first
         conn.commit()
@@ -426,9 +541,19 @@ def update_json_column(db_path, products_data):
         conn.close()
         
         total_processed = updated_from_excel + inserted_new_products
+        
+        # Verify updates by checking JSON column
+        cursor.execute('SELECT COUNT(*) FROM products WHERE "JSON" IS NOT NULL AND "JSON" != ""')
+        products_with_json = cursor.fetchone()[0]
+        
         logger.info(f"  ✅ Updated {updated_from_excel} existing products from Excel")
         logger.info(f"  ✅ Inserted {inserted_new_products} new products from Excel")
         logger.info(f"  📊 Total processed: {total_processed} products")
+        logger.info(f"  📊 Products with JSON column populated: {products_with_json}/{total_products} ({100*products_with_json/max(total_products,1):.1f}%)")
+        
+        if len(unmatched_excel) > 0:
+            logger.warning(f"  ⚠️  {len(unmatched_excel)} Excel products could not be matched to database")
+            logger.warning(f"     These will be inserted as new products")
         
         return total_processed
     except Exception as e:

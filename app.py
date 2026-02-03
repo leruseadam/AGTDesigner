@@ -17256,26 +17256,71 @@ def database_export():
         if not os.path.exists(product_db.db_path):
             return jsonify({'error': f'Database file not found: {product_db.db_path}'}), 404
         
-        # Create temporary file
+        # Create temporary file in a writable directory (important for web servers like PythonAnywhere)
         try:
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+            # Try to use a writable directory - check if we're on PythonAnywhere or similar
+            is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
+            
+            # Try multiple directories in order of preference
+            temp_dir = None
+            temp_dir_candidates = []
+            
+            if is_pythonanywhere:
+                # On PythonAnywhere, prefer UPLOADS_DIR (known to be writable)
+                temp_dir_candidates = [
+                    UPLOADS_DIR,  # Known writable directory
+                    os.path.join(os.path.expanduser('~'), 'tmp'),
+                    os.getcwd()
+                ]
+            else:
+                # Local development - try system temp first
+                temp_dir_candidates = [
+                    tempfile.gettempdir(),
+                    UPLOADS_DIR,
+                    os.getcwd()
+                ]
+            
+            # Find first writable directory
+            for candidate_dir in temp_dir_candidates:
+                try:
+                    os.makedirs(candidate_dir, exist_ok=True)
+                    if os.access(candidate_dir, os.W_OK):
+                        temp_dir = candidate_dir
+                        break
+                except Exception:
+                    continue
+            
+            if not temp_dir:
+                # Last resort: use current directory
+                temp_dir = os.getcwd()
+                os.makedirs(temp_dir, exist_ok=True)
+            
+            # Create temp file in the writable directory
+            temp_file_path = os.path.join(temp_dir, f"export_{int(time.time())}_{uuid.uuid4().hex[:8]}.xlsx")
+            temp_file = open(temp_file_path, 'wb')
             temp_file.close()
+            temp_file_name = temp_file_path
+            logging.info(f"Created temp export file at: {temp_file_name}")
         except Exception as temp_err:
             import traceback
-            logging.error(f"Error creating temp file: {temp_err}\n{traceback.format_exc()}")
-            return jsonify({'error': f'Failed to create temporary file: {str(temp_err)}'}), 500
+            error_trace = traceback.format_exc()
+            logging.error(f"Error creating temp file: {temp_err}\n{error_trace}")
+            return jsonify({
+                'error': f'Failed to create temporary file: {str(temp_err)}',
+                'details': error_trace[:1000] if len(error_trace) > 1000 else error_trace
+            }), 500
         
         # Export database
         try:
-            product_db.export_database(temp_file.name)
+            product_db.export_database(temp_file_name)
         except Exception as export_err:
             import traceback
             error_trace = traceback.format_exc()
             logging.error(f"Error calling export_database: {export_err}\n{error_trace}")
             # Clean up temp file
             try:
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
+                if os.path.exists(temp_file_name):
+                    os.unlink(temp_file_name)
             except Exception:
                 pass
             # Return detailed error message
@@ -17286,7 +17331,7 @@ def database_export():
             }), 500
         
         # Verify file was created
-        if not os.path.exists(temp_file.name):
+        if not os.path.exists(temp_file_name):
             return jsonify({'error': 'Export file was not created'}), 500
         
         # Send file with proper cleanup
@@ -17299,7 +17344,7 @@ def database_export():
         # Try to send file by path first; if that fails (context issues), fall back to in-memory send
         try:
             response = send_file(
-                temp_file.name,
+                temp_file_name,
                 mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 as_attachment=True,
                 download_name=filename
@@ -17313,7 +17358,7 @@ def database_export():
             # send_file can fail if called outside a proper request context or for other IO reasons.
             logging.error(f"send_file failed, attempting in-memory fallback: {send_err}")
             try:
-                with open(temp_file.name, 'rb') as f:
+                with open(temp_file_name, 'rb') as f:
                     data = f.read()
                 mem = BytesIO(data)
                 mem.seek(0)
@@ -17329,8 +17374,8 @@ def database_export():
                 logging.error(f"In-memory send_file fallback also failed: {mem_err}")
                 # Attempt best-effort cleanup then return error
                 try:
-                    if os.path.exists(temp_file.name):
-                        os.unlink(temp_file.name)
+                    if os.path.exists(temp_file_name):
+                        os.unlink(temp_file_name)
                 except Exception:
                     pass
                 return jsonify({'error': f'Export failed during send: {mem_err}'}), 500
@@ -17338,8 +17383,8 @@ def database_export():
         if response is None:
             # Clean up temp file
             try:
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
+                if os.path.exists(temp_file_name):
+                    os.unlink(temp_file_name)
             except Exception:
                 pass
             return jsonify({'error': 'Failed to create response'}), 500
@@ -17356,12 +17401,12 @@ def database_export():
                 except Exception as cleanup_error:
                     logging.warning(f"Failed to cleanup temp file {path}: {cleanup_error}")
 
-            threading.Thread(target=_del_later, args=(temp_file.name,), daemon=True).start()
+            threading.Thread(target=_del_later, args=(temp_file_name,), daemon=True).start()
         except Exception:
             # If background scheduling fails, attempt immediate cleanup (best-effort)
             try:
-                if os.path.exists(temp_file.name):
-                    os.unlink(temp_file.name)
+                if os.path.exists(temp_file_name):
+                    os.unlink(temp_file_name)
             except Exception:
                 pass
 
@@ -17376,8 +17421,8 @@ def database_export():
         
         # Clean up any temp file that might have been created
         try:
-            if 'temp_file' in locals() and temp_file and os.path.exists(temp_file.name):
-                os.unlink(temp_file.name)
+            if 'temp_file_name' in locals() and temp_file_name and os.path.exists(temp_file_name):
+                os.unlink(temp_file_name)
         except Exception:
             pass
         

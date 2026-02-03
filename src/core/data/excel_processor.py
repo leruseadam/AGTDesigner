@@ -2389,6 +2389,17 @@ class ExcelProcessor:
                         # Debug: Check if product_names is a Series or DataFrame
                         self.logger.debug(f"product_names type: {type(product_names)}, shape: {getattr(product_names, 'shape', 'N/A')}")
                         
+                        # CRITICAL: Copy Description to JSON BEFORE replacing Description
+                        if "Description" in self.df.columns and "JSON" not in self.df.columns:
+                            self.df["JSON"] = self.df["Description"].astype(str).str.strip()
+                            self.logger.info(f"✅ Copied {len(self.df)} Description values to JSON column (before Description replacement)")
+                        elif "Description" in self.df.columns:
+                            # JSON column exists - only update if JSON is empty/null
+                            mask_empty_json = (self.df["JSON"].isna() | (self.df["JSON"].astype(str).str.strip() == ""))
+                            if mask_empty_json.any():
+                                self.df.loc[mask_empty_json, "JSON"] = self.df.loc[mask_empty_json, "Description"].astype(str).str.strip()
+                                self.logger.info(f"✅ Copied {mask_empty_json.sum()} Description values to JSON column (filling empty JSON)")
+                        
                         # Ensure product_names is a Series before calling .str
                         if isinstance(product_names, pd.Series):
                             # CRITICAL FIX: Replace ALL Description values with processed Product Name
@@ -8505,6 +8516,17 @@ class ExcelProcessor:
             # Ensure we have a Description column
             if "Description" not in self.df.columns:
                 self.df["Description"] = ""
+            
+            # CRITICAL: Copy Description to JSON BEFORE replacing Description
+            if "Description" in self.df.columns and "JSON" not in self.df.columns:
+                self.df["JSON"] = self.df["Description"].astype(str).str.strip()
+                self.logger.info(f"✅ Copied {len(self.df)} Description values to JSON column (before Description replacement)")
+            elif "Description" in self.df.columns:
+                # JSON column exists - only update if JSON is empty/null
+                mask_empty_json = (self.df["JSON"].isna() | (self.df["JSON"].astype(str).str.strip() == ""))
+                if mask_empty_json.any():
+                    self.df.loc[mask_empty_json, "JSON"] = self.df.loc[mask_empty_json, "Description"].astype(str).str.strip()
+                    self.logger.info(f"✅ Copied {mask_empty_json.sum()} Description values to JSON column (filling empty JSON)")
             
             # Replace ALL Description values with processed Product Name
             self.df["Description"] = self.df[product_name_col].astype(str).str.strip()

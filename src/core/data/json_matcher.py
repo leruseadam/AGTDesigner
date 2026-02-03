@@ -2853,8 +2853,12 @@ class JSONMatcher:
                         # Use pre-filtered cache or fallback to full cache
                         candidates_to_check = cache_to_search
                         
-                        # PERFORMANCE: Limit candidates to check (max 300 for speed)
-                        candidates_to_check = candidates_to_check[:300]
+                        # PERFORMANCE: Limit candidates to check (max 100 for speed - reduced from 300)
+                        candidates_to_check = candidates_to_check[:100]
+                        
+                        # PERFORMANCE: Pre-compute product name lower once
+                        product_name_lower = product_name.lower()
+                        product_name_words = set(product_name_lower.split())
                         
                         # Match against filtered candidates
                         for cache_item in candidates_to_check:
@@ -2864,8 +2868,8 @@ class JSONMatcher:
                                 if not excel_product_name:
                                     continue
                                 
-                                # PERFORMANCE: Early termination for exact matches
-                                if product_name.lower() == excel_product_name:
+                                # PERFORMANCE: Early termination for exact matches (use pre-computed lower)
+                                if product_name_lower == excel_product_name:
                                     best_score = 200.0
                                     if '_db_product' in cache_item:
                                         best_match = cache_item['_db_product']
@@ -2937,7 +2941,8 @@ class JSONMatcher:
                                             continue
 
                                 # 4. STRICT word-by-word matching to prevent incorrect matches
-                                json_words = set(product_name.lower().split())
+                                # PERFORMANCE: reuse precomputed product_name_words instead of recomputing
+                                json_words = product_name_words
                                 excel_words = set(excel_product_name.split())
                                 
                                 # PROFESSIONAL-GRADE ACCURACY: Critical product identifiers that MUST NOT mismatch
@@ -2977,28 +2982,32 @@ class JSONMatcher:
                                         continue  # Not a match - different products
                                 
                                 # 5. Partial name match only if words align
-                                if product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
+                                if product_name_lower in excel_product_name or excel_product_name in product_name_lower:
                                     word_overlap = len(json_words & excel_words) / max(len(json_words), len(excel_words))
                                     if word_overlap >= 0.5:
                                         score += 80.0
                                     else:
                                         score += 30.0
                                 
-                                # 6. Enhanced fuzzy matching
-                                try:
-                                    from fuzzywuzzy import fuzz
-                                    
-                                    # Use token_sort_ratio for better word-order-independent matching
-                                    token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
-                                    
-                                    # More lenient thresholds for better product discovery
-                                    if token_sort_score >= 60:  # Lowered from 70 for more matches
-                                        score += token_sort_score * 0.6  # Increased weight
-                                    elif token_sort_score >= 50:
-                                        score += token_sort_score * 0.4  # Increased weight for marginal matches
+                                # PERFORMANCE: Only run expensive fuzzy matching when we still have a weak score.
+                                # If word overlap and other checks already gave us a good score, skip fuzzy.
+                                if score < 80.0:
+                                    # 6. Enhanced fuzzy matching (token_sort_ratio)
+                                    try:
+                                        from fuzzywuzzy import fuzz
                                         
-                                except ImportError:
-                                    pass
+                                        # Use token_sort_ratio for better word-order-independent matching
+                                        token_sort_score = fuzz.token_sort_ratio(product_name_lower, excel_product_name)
+                                        
+                                        # More lenient thresholds for better product discovery
+                                        if token_sort_score >= 60:  # Lowered from 70 for more matches
+                                            score += token_sort_score * 0.6  # Increased weight
+                                        elif token_sort_score >= 50:
+                                            score += token_sort_score * 0.4  # Increased weight for marginal matches
+                                            
+                                    except ImportError:
+                                        # If fuzzywuzzy is not available, just skip fuzzy scoring
+                                        pass
                                 
                                 # 5. Brand matching bonus
                                 excel_brand = cache_item.get('brand', '').lower().strip()
@@ -3015,7 +3024,8 @@ class JSONMatcher:
                                     score += 15.0
                                 
                                 # PERFORMANCE: Early termination if we found a very high confidence match
-                                if score >= 120.0:  # Lowered threshold for faster termination
+                                # Slightly lower threshold so we bail out sooner once we have a strong candidate.
+                                if score >= 100.0:
                                     best_score = score
                                     if '_db_product' in cache_item:
                                         best_match = cache_item['_db_product']
