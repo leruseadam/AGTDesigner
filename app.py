@@ -16630,6 +16630,34 @@ def database_stats():
         vendor_stats = {}
         try:
             import sqlite3
+            if not product_db or not hasattr(product_db, 'db_path') or not product_db.db_path:
+                logging.error("Product database or db_path is not available")
+                return jsonify({
+                    'stats': {
+                        'total_products': 0,
+                        'unique_vendors': 0,
+                        'unique_brands': 0,
+                        'unique_product_types': 0,
+                        'product_type_distribution': {}
+                    },
+                    'vendor_stats': {'vendors': [], 'brands': []},
+                    'error': 'Database path not available'
+                }), 500
+            
+            if not os.path.exists(product_db.db_path):
+                logging.error(f"Database file does not exist: {product_db.db_path}")
+                return jsonify({
+                    'stats': {
+                        'total_products': 0,
+                        'unique_vendors': 0,
+                        'unique_brands': 0,
+                        'unique_product_types': 0,
+                        'product_type_distribution': {}
+                    },
+                    'vendor_stats': {'vendors': [], 'brands': []},
+                    'error': f'Database file not found: {product_db.db_path}'
+                }), 500
+            
             with db_connection(product_db.db_path) as conn:
                 # Get basic counts
                 cursor = conn.cursor()
@@ -16711,9 +16739,13 @@ def database_stats():
                     logging.warning(f"Auto-cleanup failed: {cleanup_error}")
                 
         except Exception as db_error:
+            import traceback
+            error_trace = traceback.format_exc()
             logging.error(f"Error querying database: {db_error}")
-            logging.error(f"Database path: {product_db.db_path}")
-            logging.error(f"Database exists: {os.path.exists(product_db.db_path)}")
+            logging.error(f"Traceback: {error_trace}")
+            if product_db and hasattr(product_db, 'db_path'):
+                logging.error(f"Database path: {product_db.db_path}")
+                logging.error(f"Database exists: {os.path.exists(product_db.db_path) if product_db.db_path else 'N/A'}")
             stats = {
                 'total_products': 0,
                 'unique_vendors': 0,
@@ -16729,8 +16761,21 @@ def database_stats():
         })
         
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
         logging.error(f"Error getting database stats: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        logging.error(f"Traceback: {error_trace}")
+        return jsonify({
+            'error': str(e),
+            'stats': {
+                'total_products': 0,
+                'unique_vendors': 0,
+                'unique_brands': 0,
+                'unique_product_types': 0,
+                'product_type_distribution': {}
+            },
+            'vendor_stats': {'vendors': [], 'brands': []}
+        }), 500
 
 @app.route('/api/database-schema', methods=['GET'])
 def database_schema():
