@@ -104,6 +104,29 @@ def load_excel_descriptions(excel_path):
             logger.error(f"  ❌ No Description column found in Excel file")
             logger.error(f"  Available columns: {list(df.columns)}")
             return {}
+        
+        # CRITICAL: Verify Description column has actual values (not empty)
+        description_non_null = df[description_col].notna().sum()
+        description_non_empty = (df[description_col].astype(str).str.strip() != '').sum()
+        logger.info(f"  Description column stats:")
+        logger.info(f"     Non-null values: {description_non_null}/{len(df)}")
+        logger.info(f"     Non-empty values: {description_non_empty}/{len(df)}")
+        
+        # Sample a few Description values to verify they're not Product Names
+        sample_descriptions = df[description_col].dropna().head(3).tolist()
+        sample_product_names = df[product_name_col].head(3).tolist() if product_name_col else []
+        logger.info(f"  Sample Description values:")
+        for i, desc in enumerate(sample_descriptions[:3]):
+            logger.info(f"     {i+1}. '{str(desc)[:80]}'")
+        if sample_product_names:
+            logger.info(f"  Sample Product Name values (for comparison):")
+            for i, pname in enumerate(sample_product_names[:3]):
+                logger.info(f"     {i+1}. '{str(pname)[:80]}'")
+        
+        if description_non_empty == 0:
+            logger.error(f"  ❌ Description column is EMPTY - cannot backfill JSON column")
+            logger.error(f"     All Description values are null or empty")
+            return {}
 
         # Find Product Name column - be flexible
         product_name_col = None
@@ -143,19 +166,14 @@ def load_excel_descriptions(excel_path):
             else:
                 product_name = str(product_name_raw).strip()
             
-            # CRITICAL: Get RAW Description value directly from Excel (untransformed)
-            # This should be the original full description BEFORE excel_processor transforms it
-            description_raw = row.get(description_col, '')
-            
             # Skip if no product name (can't add product without a name)
             if not product_name:
                 skipped_empty_name += 1
                 continue
             
-            # CRITICAL: Get RAW Description value directly from Excel (before any transformation)
+            # CRITICAL: Get RAW Description value directly from Excel Description column
             # This MUST be the ORIGINAL untransformed Description that excel_processor captures into JSON
-            # If the Excel file has already been processed, the Description column may be transformed
-            # In that case, we need to read from the ORIGINAL Excel file, not a processed one
+            # DO NOT use Product Name - we want EXACTLY what's in the Description column
             description_raw = row.get(description_col, '')
             raw_description = ''
             
@@ -165,6 +183,17 @@ def load_excel_descriptions(excel_path):
                         raw_description = str(description_raw).strip()
                 else:
                     raw_description = str(description_raw).strip()
+            
+            # CRITICAL VALIDATION: Ensure we're NOT accidentally using Product Name
+            # If description matches product name exactly, it might be wrong (Excel Description should be different)
+            if raw_description and raw_description.strip() == product_name.strip():
+                logger.warning(f"  ⚠️  WARNING: Description matches Product Name for '{product_name[:50]}'")
+                logger.warning(f"     This suggests Description column may contain Product Name values")
+                logger.warning(f"     Product Name: '{product_name[:80]}'")
+                logger.warning(f"     Description: '{raw_description[:80]}'")
+                logger.warning(f"     ⚠️  Skipping this row - Description should be different from Product Name")
+                rows_without_descriptions += 1
+                continue
             
             # CRITICAL: NO FALLBACKS - Only use the RAW Excel Description value
             # If description is empty/transformed, we still use it (or empty string)
@@ -183,6 +212,13 @@ def load_excel_descriptions(excel_path):
             # This goes EXACTLY into JSON column - no transformations, no fallbacks
             # CRITICAL: description comes from Excel Description column, NOT Product Name
             description = raw_description
+            
+            # Debug logging for first few rows to verify we're reading Description correctly
+            if rows_with_descriptions <= 3:
+                logger.info(f"  📝 Sample row {rows_with_descriptions}:")
+                logger.info(f"     Product Name: '{product_name[:80]}'")
+                logger.info(f"     Description (JSON): '{description[:80]}'")
+                logger.info(f"     ✅ Using Description column value (NOT Product Name)")
 
             # Store by normalized product name - ONLY store if we have a description
             # NO FALLBACKS - only products with actual Excel Description values
