@@ -6926,15 +6926,76 @@ class JSONMatcher:
             if not json_name:
                 return None, 0.0, "No product name provided"
 
-            # Step 0: HIGHEST PRIORITY - Match product_name against JSON column in database
-            # The JSON column contains original Excel Description values (which are the same product_name values)
-            # Bamboo JSON uses product_name as the description field
+            # Step 0: ONLY METHOD - Match product_name against JSON column in database
+            # Simple matching: only use JSON column exact match, no fallbacks
             json_column_match = self._find_json_column_match(json_name)
             if json_column_match:
                 source = json_column_match.get('_source', 'database')
                 logging.info(f"✅ JSON COLUMN MATCH: '{json_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}' ({source})")
                 return json_column_match, 1.0, f"JSON column exact match ({source})"
-
+            
+            # No match found - return None (no fallback matching)
+            logging.debug(f"❌ No JSON column match found for '{json_name[:50]}...'")
+            return None, 0.0, "No JSON column match found"
+            
+        except Exception as e:
+            logging.error(f"Error in intelligent_match_product: {e}")
+            return None, 0.0, f"Error during matching: {str(e)}"
+    
+    def _find_exact_name_matches(self, json_name: str) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_vendor_exact_name_matches(self, json_name: str, json_vendor: str) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_keyword_matches(self, json_name_normalized: str, json_vendor: str, json_brand: str) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_fuzzy_name_matches(self, json_name: str, json_vendor: str = None, threshold: int = 50) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_enhanced_fuzzy_matches(self, json_item: dict) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_cultivera_specialized_matches(self, json_item: dict) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_ceres_specialized_matches(self, json_item: dict) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_strain_based_matches(self, json_strain: str, json_vendor: str = None, json_type: str = None) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_brand_type_weight_matches(self, json_brand: str, json_type: str, json_weight: str, json_vendor: str = None) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_weight_based_matches(self, json_weight: str, json_type: str, json_vendor: str = None) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_strain_weight_matches(self, json_strain: str, json_weight: str, json_vendor: str = None) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_partial_field_matches(self, json_item: dict) -> List[dict]:
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    def _find_advanced_matches(self, json_item: dict):
+        """DISABLED - Only JSON column matching is used now"""
+        return []
+    
+    # OLD MATCHING CODE BELOW - DISABLED FOR SIMPLICITY
+    """
             # Step 0.5: Try exact name matching with normalized names
             exact_matches = self._find_exact_name_matches(json_name)
             if exact_matches:
@@ -7104,13 +7165,10 @@ class JSONMatcher:
             # This was the main source of "Fried Strawberry Honey Crystal" → "Blue Dream Cured Resin Disposable Vape" errors
             logging.debug(f"🚫 DISABLED: Final fallback fuzzy matching to prevent cross-vendor contamination")
             
+            # DISABLED - All fallback matching removed
             # No match found
-            logging.debug(f"❌ NO MATCH FOUND: '{json_name}' - tried all matching strategies")
-            return None, 0.0, "No suitable match found"
-            
-        except Exception as e:
-            logging.error(f"Error in intelligent_match_product: {e}")
-            return None, 0.0, f"Error during matching: {str(e)}"
+            logging.debug(f"❌ NO MATCH FOUND: '{json_name}' - JSON column matching only")
+            return None, 0.0, "No JSON column match found"
     
     def _find_comprehensive_matches(self, json_item: dict) -> List[dict]:
         """
