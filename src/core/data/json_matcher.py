@@ -2800,182 +2800,181 @@ class JSONMatcher:
                         
                         # Match against filtered candidates
                         for cache_item in candidates_to_check:
-                        try:
-                            excel_product_name = cache_item.get('original_name', '').strip().lower()
-                            
-                            if not excel_product_name:
-                                continue
-                            
-                            # PERFORMANCE: Early termination for exact matches
-                            if product_name.lower() == excel_product_name:
-                                best_score = 200.0
-                                if '_db_product' in cache_item:
-                                    best_match = cache_item['_db_product']
-                                else:
-                                    best_match = cache_item
-                                break  # Found perfect match, stop searching
-                            
-                            # ENHANCED SCORING: Multi-factor matching with PRECISION FOCUS
-                            score = 0.0
-                            
-                            # 0. VENDOR FILTER: STRICT vendor isolation for most products,
-                            # but RELAXED for concentrate/vape JSON items.
-                            excel_vendor = cache_item.get('vendor', '').strip()
-                            vendor_match_bonus = 0.0
-                            if current_vendor_filter:
-                                # STRICT vendor isolation: when JSON knows the vendor/license
-                                # (from_license_name), only consider DB rows from that vendor.
-                                # This keeps brands (Honey Tree, Bodhi High, etc.) properly
-                                # grouped under their upstream license like Conscious Cannabis.
-                                if not excel_vendor:
-                                    # JSON has vendor but DB product has no vendor - skip to prevent wrong matches
-                                    continue
-                                vendor_matches = self._is_vendor_match(current_vendor_filter, excel_vendor)
-                                if vendor_matches:
-                                    vendor_match_bonus = 50.0  # Strong bonus for vendor match
-                                else:
-                                    # Different vendor – do not allow cross‑vendor matches here.
-                                    continue  # Skip this candidate entirely
-                            
-                            # 1. STRAIN OVERLAP: When JSON has strain_name, DB product must share strain
-                            if strain and len(strain.strip()) >= 2:
-                                strain_tokens = set(re.sub(r'[^\w\s]', ' ', strain.lower()).split())
-                                strain_tokens -= {'lr', 'x', 'and', 'or', 'hybrid', 'indica', 'sativa', 'mixed', ''}
-                                excel_strain = (cache_item.get('strain', '') or '').lower()
-                                excel_name_and_strain = excel_product_name + ' ' + excel_strain
-                                if strain_tokens:
-                                    # Require at least one significant strain token in DB name/strain
-                                    if not any(t in excel_name_and_strain for t in strain_tokens if len(t) >= 2):
-                                        continue
-
-                            # 2. WEIGHT COMPATIBILITY: When JSON has unit_weight, reject different weights
-                            if weight and str(weight).strip():
-                                try:
-                                    json_w = float(str(weight).replace(',', '.').strip())
-                                    db_weight_raw = (cache_item.get('_db_product') or cache_item).get('Weight*') or (cache_item.get('_db_product') or cache_item).get('weight') or ''
-                                    db_weight_str = str(db_weight_raw).strip()
-                                    db_w = None
-                                    if db_weight_str and db_weight_str.replace('.', '').replace(',', '').isdigit():
-                                        db_w = float(db_weight_str.replace(',', '.'))
-                                    else:
-                                        m = re.search(r'(\d+(?:\.\d+)?)\s*g', excel_product_name + ' ' + db_weight_str)
-                                        if m:
-                                            db_w = float(m.group(1))
-                                    if db_w is not None and abs(json_w - db_w) > 0.01:
-                                        continue
-                                except (ValueError, TypeError):
-                                    pass
-
-                            # 3. PRODUCT TYPE COMPATIBILITY: Reject clearly different categories
-                            if inventory_type:
-                                json_type_lower = (inventory_type or '').lower()
-                                excel_type = (cache_item.get('product_type', '') or '').lower()
-                                # Cross-category: edible vs concentrate/flower
-                                if 'edible' in json_type_lower or 'solid edible' in json_type_lower:
-                                    if 'concentrate' in excel_type or 'flower' in excel_type or 'preroll' in excel_type or 'pre-roll' in excel_type or 'vape' in excel_type:
-                                        continue
-                                if 'concentrate' in json_type_lower and 'inhalation' in json_type_lower:
-                                    if 'edible' in excel_type or 'gummy' in excel_type or 'chocolate' in excel_type:
-                                        continue
-
-                            # 4. STRICT word-by-word matching to prevent incorrect matches
-                            json_words = set(product_name.lower().split())
-                            excel_words = set(excel_product_name.split())
-                            
-                            # PROFESSIONAL-GRADE ACCURACY: Critical product identifiers that MUST NOT mismatch
-                            product_identifiers = {
-                                'bath', 'salt', 'salts', 'jar', 'balm', 'lotion', 'cream',
-                                'cherry', 'cherries', 'chew', 'chews', 'freeze', 'dried', 
-                                'ball', 'balls', 'chocolate', 'malt', 'dragon', 'assorted',
-                                'fruit', 'watermelon', 'sour', 'apple', 'mixed', 'berry',
-                                'cookies', 'capsule', 'capsules', 'squeeze', 'roll',
-                                'tincture', 'single', 'dark', 'milk', 'caramel', 'guava',
-                                'tropical', 'mango', 'lifted', 'chill', 'balance', 'relief'
-                            }
-                            
-                            # CRITICAL: Detect mutually exclusive products
-                            # "dragon jar" and "bath salt" are completely different products
-                            json_identifiers = json_words & product_identifiers
-                            excel_identifiers = excel_words & product_identifiers
-                            
-                            if json_identifiers and excel_identifiers:
-                                # Check for contradicting product types
-                                contradictions = [
-                                    ({'jar', 'dragon'}, {'bath', 'salt', 'salts'}),  # Jar vs Bath Salt
-                                    ({'ball', 'balls'}, {'chew', 'chews'}),  # Balls vs Chews
-                                    ({'bite', 'bites'}, {'ball', 'balls'}),  # Bites vs Balls
-                                    ({'capsule', 'capsules'}, {'tincture', 'tinctures'}),  # Capsule vs Tincture
-                                    ({'squeeze'}, {'roll', 'rollup'}),  # Squeeze Tube vs Roll-On
-                                ]
-                                
-                                for json_set, excel_set in contradictions:
-                                    if (json_identifiers & json_set) and (excel_identifiers & excel_set):
-                                        # Contradicting product types - reject match
-                                        continue
-                                
-                                # If both have identifiers, they MUST overlap significantly
-                                identifier_overlap = len(json_identifiers & excel_identifiers) / max(len(json_identifiers), len(excel_identifiers))
-                                if identifier_overlap < 0.5:  # Less than 50% overlap of product identifiers
-                                    continue  # Not a match - different products
-                            
-                            # 5. Partial name match only if words align
-                            if product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
-                                word_overlap = len(json_words & excel_words) / max(len(json_words), len(excel_words))
-                                if word_overlap >= 0.5:
-                                    score += 80.0
-                                else:
-                                    score += 30.0
-                            
-                            # 6. Enhanced fuzzy matching
                             try:
-                                from fuzzywuzzy import fuzz
+                                excel_product_name = cache_item.get('original_name', '').strip().lower()
                                 
-                                # Use token_sort_ratio for better word-order-independent matching
-                                token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
+                                if not excel_product_name:
+                                    continue
                                 
-                                # More lenient thresholds for better product discovery
-                                if token_sort_score >= 60:  # Lowered from 70 for more matches
-                                    score += token_sort_score * 0.6  # Increased weight
-                                elif token_sort_score >= 50:
-                                    score += token_sort_score * 0.4  # Increased weight for marginal matches
+                                # PERFORMANCE: Early termination for exact matches
+                                if product_name.lower() == excel_product_name:
+                                    best_score = 200.0
+                                    if '_db_product' in cache_item:
+                                        best_match = cache_item['_db_product']
+                                    else:
+                                        best_match = cache_item
+                                    break  # Found perfect match, stop searching
+                                
+                                # ENHANCED SCORING: Multi-factor matching with PRECISION FOCUS
+                                score = 0.0
+                                
+                                # 0. VENDOR FILTER: STRICT vendor isolation for most products,
+                                # but RELAXED for concentrate/vape JSON items.
+                                excel_vendor = cache_item.get('vendor', '').strip()
+                                vendor_match_bonus = 0.0
+                                if current_vendor_filter:
+                                    # STRICT vendor isolation: when JSON knows the vendor/license
+                                    # (from_license_name), only consider DB rows from that vendor.
+                                    # This keeps brands (Honey Tree, Bodhi High, etc.) properly
+                                    # grouped under their upstream license like Conscious Cannabis.
+                                    if not excel_vendor:
+                                        # JSON has vendor but DB product has no vendor - skip to prevent wrong matches
+                                        continue
+                                    vendor_matches = self._is_vendor_match(current_vendor_filter, excel_vendor)
+                                    if vendor_matches:
+                                        vendor_match_bonus = 50.0  # Strong bonus for vendor match
+                                    else:
+                                        # Different vendor – do not allow cross‑vendor matches here.
+                                        continue  # Skip this candidate entirely
+                                
+                                # 1. STRAIN OVERLAP: When JSON has strain_name, DB product must share strain
+                                if strain and len(strain.strip()) >= 2:
+                                    strain_tokens = set(re.sub(r'[^\w\s]', ' ', strain.lower()).split())
+                                    strain_tokens -= {'lr', 'x', 'and', 'or', 'hybrid', 'indica', 'sativa', 'mixed', ''}
+                                    excel_strain = (cache_item.get('strain', '') or '').lower()
+                                    excel_name_and_strain = excel_product_name + ' ' + excel_strain
+                                    if strain_tokens:
+                                        # Require at least one significant strain token in DB name/strain
+                                        if not any(t in excel_name_and_strain for t in strain_tokens if len(t) >= 2):
+                                            continue
+
+                                # 2. WEIGHT COMPATIBILITY: When JSON has unit_weight, reject different weights
+                                if weight and str(weight).strip():
+                                    try:
+                                        json_w = float(str(weight).replace(',', '.').strip())
+                                        db_weight_raw = (cache_item.get('_db_product') or cache_item).get('Weight*') or (cache_item.get('_db_product') or cache_item).get('weight') or ''
+                                        db_weight_str = str(db_weight_raw).strip()
+                                        db_w = None
+                                        if db_weight_str and db_weight_str.replace('.', '').replace(',', '').isdigit():
+                                            db_w = float(db_weight_str.replace(',', '.'))
+                                        else:
+                                            m = re.search(r'(\d+(?:\.\d+)?)\s*g', excel_product_name + ' ' + db_weight_str)
+                                            if m:
+                                                db_w = float(m.group(1))
+                                        if db_w is not None and abs(json_w - db_w) > 0.01:
+                                            continue
+                                    except (ValueError, TypeError):
+                                        pass
+
+                                # 3. PRODUCT TYPE COMPATIBILITY: Reject clearly different categories
+                                if inventory_type:
+                                    json_type_lower = (inventory_type or '').lower()
+                                    excel_type = (cache_item.get('product_type', '') or '').lower()
+                                    # Cross-category: edible vs concentrate/flower
+                                    if 'edible' in json_type_lower or 'solid edible' in json_type_lower:
+                                        if 'concentrate' in excel_type or 'flower' in excel_type or 'preroll' in excel_type or 'pre-roll' in excel_type or 'vape' in excel_type:
+                                            continue
+                                    if 'concentrate' in json_type_lower and 'inhalation' in json_type_lower:
+                                        if 'edible' in excel_type or 'gummy' in excel_type or 'chocolate' in excel_type:
+                                            continue
+
+                                # 4. STRICT word-by-word matching to prevent incorrect matches
+                                json_words = set(product_name.lower().split())
+                                excel_words = set(excel_product_name.split())
+                                
+                                # PROFESSIONAL-GRADE ACCURACY: Critical product identifiers that MUST NOT mismatch
+                                product_identifiers = {
+                                    'bath', 'salt', 'salts', 'jar', 'balm', 'lotion', 'cream',
+                                    'cherry', 'cherries', 'chew', 'chews', 'freeze', 'dried', 
+                                    'ball', 'balls', 'chocolate', 'malt', 'dragon', 'assorted',
+                                    'fruit', 'watermelon', 'sour', 'apple', 'mixed', 'berry',
+                                    'cookies', 'capsule', 'capsules', 'squeeze', 'roll',
+                                    'tincture', 'single', 'dark', 'milk', 'caramel', 'guava',
+                                    'tropical', 'mango', 'lifted', 'chill', 'balance', 'relief'
+                                }
+                                
+                                # CRITICAL: Detect mutually exclusive products
+                                # "dragon jar" and "bath salt" are completely different products
+                                json_identifiers = json_words & product_identifiers
+                                excel_identifiers = excel_words & product_identifiers
+                                
+                                if json_identifiers and excel_identifiers:
+                                    # Check for contradicting product types
+                                    contradictions = [
+                                        ({'jar', 'dragon'}, {'bath', 'salt', 'salts'}),  # Jar vs Bath Salt
+                                        ({'ball', 'balls'}, {'chew', 'chews'}),  # Balls vs Chews
+                                        ({'bite', 'bites'}, {'ball', 'balls'}),  # Bites vs Balls
+                                        ({'capsule', 'capsules'}, {'tincture', 'tinctures'}),  # Capsule vs Tincture
+                                        ({'squeeze'}, {'roll', 'rollup'}),  # Squeeze Tube vs Roll-On
+                                    ]
                                     
-                            except ImportError:
-                                pass
-                            
-                            # 5. Brand matching bonus
-                            excel_brand = cache_item.get('brand', '').lower().strip()
-                            json_brand = str(item.get('brand', '')).lower().strip()
-                            if excel_brand and json_brand and excel_brand in json_brand or json_brand in excel_brand:
-                                score += 20.0
-                            
-                            # 6. Add vendor matching bonus
-                            score += vendor_match_bonus
-                            
-                            # 7. Product type matching bonus
-                            excel_type = cache_item.get('product_type', '').lower().strip()
-                            if product_type and excel_type and any(word in excel_type for word in product_type.lower().split()):
-                                score += 15.0
-                            
-                            # PERFORMANCE: Early termination if we found a very high confidence match
-                            if score >= 120.0:  # Lowered threshold for faster termination
-                                best_score = score
-                                if '_db_product' in cache_item:
-                                    best_match = cache_item['_db_product']
-                                else:
-                                    best_match = cache_item
-                                break  # High confidence match found, stop searching
-                            
-                            # Store best match
-                            if score > best_score:
-                                best_score = score
-                                # CRITICAL: Extract _db_product from cache_item
-                                if '_db_product' in cache_item:
-                                    best_match = cache_item['_db_product']
-                                else:
-                                    best_match = cache_item
+                                    for json_set, excel_set in contradictions:
+                                        if (json_identifiers & json_set) and (excel_identifiers & excel_set):
+                                            # Contradicting product types - reject match
+                                            continue
+                                    
+                                    # If both have identifiers, they MUST overlap significantly
+                                    identifier_overlap = len(json_identifiers & excel_identifiers) / max(len(json_identifiers), len(excel_identifiers))
+                                    if identifier_overlap < 0.5:  # Less than 50% overlap of product identifiers
+                                        continue  # Not a match - different products
                                 
-                        except Exception as e:
-                            continue
+                                # 5. Partial name match only if words align
+                                if product_name.lower() in excel_product_name or excel_product_name in product_name.lower():
+                                    word_overlap = len(json_words & excel_words) / max(len(json_words), len(excel_words))
+                                    if word_overlap >= 0.5:
+                                        score += 80.0
+                                    else:
+                                        score += 30.0
+                                
+                                # 6. Enhanced fuzzy matching
+                                try:
+                                    from fuzzywuzzy import fuzz
+                                    
+                                    # Use token_sort_ratio for better word-order-independent matching
+                                    token_sort_score = fuzz.token_sort_ratio(product_name.lower(), excel_product_name)
+                                    
+                                    # More lenient thresholds for better product discovery
+                                    if token_sort_score >= 60:  # Lowered from 70 for more matches
+                                        score += token_sort_score * 0.6  # Increased weight
+                                    elif token_sort_score >= 50:
+                                        score += token_sort_score * 0.4  # Increased weight for marginal matches
+                                        
+                                except ImportError:
+                                    pass
+                                
+                                # 5. Brand matching bonus
+                                excel_brand = cache_item.get('brand', '').lower().strip()
+                                json_brand = str(item.get('brand', '')).lower().strip()
+                                if excel_brand and json_brand and excel_brand in json_brand or json_brand in excel_brand:
+                                    score += 20.0
+                                
+                                # 6. Add vendor matching bonus
+                                score += vendor_match_bonus
+                                
+                                # 7. Product type matching bonus
+                                excel_type = cache_item.get('product_type', '').lower().strip()
+                                if product_type and excel_type and any(word in excel_type for word in product_type.lower().split()):
+                                    score += 15.0
+                                
+                                # PERFORMANCE: Early termination if we found a very high confidence match
+                                if score >= 120.0:  # Lowered threshold for faster termination
+                                    best_score = score
+                                    if '_db_product' in cache_item:
+                                        best_match = cache_item['_db_product']
+                                    else:
+                                        best_match = cache_item
+                                    break  # High confidence match found, stop searching
+                                
+                                # Store best match
+                                if score > best_score:
+                                    best_score = score
+                                    # CRITICAL: Extract _db_product from cache_item
+                                    if '_db_product' in cache_item:
+                                        best_match = cache_item['_db_product']
+                                    else:
+                                        best_match = cache_item
+                            except Exception as e:
+                                continue
                 
                 # If we found a good match, create a product
                 # PROFESSIONAL-GRADE ACCURACY: Strict threshold (90.0) for high confidence
