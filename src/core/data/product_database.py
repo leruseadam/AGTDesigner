@@ -3127,23 +3127,17 @@ class ProductDatabase:
     
     def export_database(self, output_path: str):
         """Export database to Excel file - optimized for large datasets."""
-        conn = None
         try:
             self.init_database()  # Ensure DB is initialized
-
-            # Ensure output directory exists
-            output_dir = os.path.dirname(output_path)
-            if output_dir and not os.path.exists(output_dir):
-                os.makedirs(output_dir, exist_ok=True)
 
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Check if strains table exists
+            # Export strains directly using pandas read_sql_query (fast)
+            # Check if strains table exists first
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
             strains_table_exists = cursor.fetchone() is not None
-
-            # Export strains if table exists
+            
             strains_df = pd.DataFrame()
             if strains_table_exists:
                 try:
@@ -3152,31 +3146,17 @@ class ProductDatabase:
                         FROM strains
                         ORDER BY total_occurrences DESC
                     ''', conn)
-                    logger.info(f"Exported {len(strains_df)} strains")
                 except Exception as strains_err:
                     logger.warning(f"Could not export strains table: {strains_err}")
                     strains_df = pd.DataFrame()
-
-            # Check if products table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-            products_table_exists = cursor.fetchone() is not None
-
-            if not products_table_exists:
-                raise ValueError("Products table does not exist in database")
 
             # Get available columns dynamically
             cursor.execute("PRAGMA table_info(products)")
             available_columns = [row[1] for row in cursor.fetchall()]
 
-            if not available_columns:
-                raise ValueError("Products table has no columns")
-
             # Filter columns to export
             exclude_cols = {'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id'}
             columns_to_export = [col for col in available_columns if col not in exclude_cols]
-
-            if not columns_to_export:
-                raise ValueError("No columns available to export after filtering")
 
             # Build SELECT query with proper quoting
             select_columns = ', '.join([f'"{col}"' for col in columns_to_export])
@@ -3190,45 +3170,78 @@ class ProductDatabase:
 
             logger.info(f"Exporting {len(products_df)} products and {len(strains_df)} strains")
 
-            # Export to Excel using xlsxwriter (much faster than openpyxl for large files)
+            # Check which Excel engines are available
+            xlsxwriter_available = False
+            openpyxl_available = False
+            
             try:
-                with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                    if not strains_df.empty:
-                        strains_df.to_excel(writer, sheet_name='Strains', index=False)
-                    products_df.to_excel(writer, sheet_name='Products', index=False)
-                logger.info(f"Successfully exported using xlsxwriter engine")
-            except Exception as xlsx_err:
-                logger.warning(f"xlsxwriter failed ({xlsx_err}), trying openpyxl fallback...")
-                # Fallback to openpyxl if xlsxwriter fails
+                import xlsxwriter
+                xlsxwriter_available = True
+            except ImportError:
+                logger.debug("xlsxwriter not available, will use openpyxl")
+            
+            try:
+                import openpyxl
+                openpyxl_available = True
+            except ImportError:
+                logger.debug("openpyxl not available")
+            
+            if not xlsxwriter_available and not openpyxl_available:
+                raise ImportError("Neither xlsxwriter nor openpyxl is installed. Please install at least one: pip install openpyxl")
+
+            # Export to Excel - try xlsxwriter first (faster), then openpyxl
+            export_success = False
+            last_error = None
+            
+            if xlsxwriter_available:
                 try:
+                    logger.info("Attempting export with xlsxwriter engine...")
+                    with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                        if not strains_df.empty:
+                            strains_df.to_excel(writer, sheet_name='Strains', index=False)
+                        products_df.to_excel(writer, sheet_name='Products', index=False)
+                    export_success = True
+                    logger.info("Successfully exported using xlsxwriter")
+                except Exception as xlsx_err:
+                    last_error = xlsx_err
+                    logger.warning(f"xlsxwriter export failed: {xlsx_err}, trying openpyxl...")
+            
+            if not export_success and openpyxl_available:
+                try:
+                    logger.info("Attempting export with openpyxl engine...")
                     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                         if not strains_df.empty:
                             strains_df.to_excel(writer, sheet_name='Strains', index=False)
                         products_df.to_excel(writer, sheet_name='Products', index=False)
-                    logger.info(f"Successfully exported using openpyxl engine")
+                    export_success = True
+                    logger.info("Successfully exported using openpyxl")
                 except Exception as openpyxl_err:
-                    logger.error(f"Both xlsxwriter and openpyxl failed. xlsxwriter: {xlsx_err}, openpyxl: {openpyxl_err}")
-                    raise ValueError(f"Failed to export to Excel: xlsxwriter error: {xlsx_err}, openpyxl error: {openpyxl_err}")
-
-            # Verify file was created
-            if not os.path.exists(output_path):
-                raise ValueError(f"Export file was not created at {output_path}")
-
-            file_size = os.path.getsize(output_path)
-            logger.info(f"Database exported to {output_path} ({file_size} bytes)")
+                    last_error = openpyxl_err
+                    logger.error(f"openpyxl export also failed: {openpyxl_err}")
             
+            if not export_success:
+                error_msg = "Failed to export to Excel"
+                if last_error:
+                    error_msg += f": {str(last_error)}"
+                raise RuntimeError(error_msg)
+
+            logger.info(f"Database exported to {output_path}")
+            
+            # Ensure connection is closed
+            if conn:
+                conn.close()
+
         except Exception as e:
             logger.error(f"Error exporting database: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            raise
-        finally:
             # Ensure connection is closed even on error
-            if conn:
-                try:
+            try:
+                if 'conn' in locals() and conn:
                     conn.close()
-                except Exception:
-                    pass
+            except Exception:
+                pass
+            raise
     
     def update_all_descriptions(self) -> Dict[str, Any]:
         """Update ALL Description column values with formula-created values from Product Name*."""
