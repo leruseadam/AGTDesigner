@@ -3995,65 +3995,89 @@ class JSONMatcher:
 
     def _enrich_product_with_strain_info(self, product: dict) -> dict:
         """
-        Enrich a product with lineage information from the strain database.
-
-        This looks up the product's strain in the strains table and fills in
-        the canonical lineage if the product doesn't already have one.
+        Enrich a product with lineage information using the SAME canonical
+        (user-edited) lineage logic as the main tag manager route.
+        
+        Priority:
+        1) Product-level lineage from ProductDatabase.get_product_lineage()
+           (uses sovereign_lineage/canonical_lineage + sativa-hybrid overrides)
+        2) Strain-level lineage from strains table (get_strain_info)
+        3) Vendor-specific strain lineage as final fallback
         """
         if not product:
             return product
 
         try:
-            # Get strain name from product
-            strain_name = (product.get('Product Strain') or
-                          product.get('ProductStrain') or
-                          product.get('strain_name') or '').strip()
-
-            # If no strain name, try to extract from product name
-            if not strain_name:
-                product_name = product.get('Product Name*', '')
-                strain_name = self._extract_strain_from_product_name(product_name)
-
-            if not strain_name:
-                return product
-
-            # Get existing lineage
-            existing_lineage = (product.get('Lineage') or
-                               product.get('lineage') or
-                               product.get('canonical_lineage') or '').strip().upper()
-
-            # Skip if already has a good lineage (not MIXED/HYBRID or empty)
-            if existing_lineage and existing_lineage not in ['', 'MIXED', 'HYBRID', 'UNKNOWN']:
-                logging.debug(f"🧬 Strain '{strain_name}' already has lineage: {existing_lineage}")
-                return product
-
-            # Look up strain in database
             product_db = self._get_product_database()
             if not product_db:
                 return product
 
-            strain_info = product_db.get_strain_info(strain_name)
-            if strain_info:
-                display_lineage = strain_info.get('display_lineage') or strain_info.get('canonical_lineage')
-                if display_lineage and display_lineage.strip().upper() not in ['', 'MIXED', 'UNKNOWN']:
-                    # Enrich the product with strain database lineage
-                    product['Lineage'] = display_lineage
-                    product['lineage'] = display_lineage
-                    product['canonical_lineage'] = display_lineage
-                    product['_strain_enriched'] = True
-                    logging.info(f"🧬 STRAIN ENRICHMENT: '{strain_name}' → lineage '{display_lineage}'")
-            else:
-                # Try vendor-specific lineage lookup
+            # 1) PRODUCT-LEVEL LINEAGE (matches /api/available-tags canonical logic)
+            product_name = (
+                product.get('Product Name*')
+                or product.get('ProductName')
+                or product.get('product_name')
+                or ''
+            )
+            lineage_from_product = None
+            if product_name:
+                try:
+                    lineage_from_product = product_db.get_product_lineage(product_name)
+                except Exception:
+                    lineage_from_product = None
+
+            def _apply_lineage(value: str) -> bool:
+                """Apply a lineage value to the product dict if it's valid."""
+                if not value:
+                    return False
+                lineage_clean = str(value).strip().upper()
+                if lineage_clean in ['', 'NONE', 'NULL', 'NAN']:
+                    return False
+                product['Lineage'] = lineage_clean
+                product['lineage'] = lineage_clean
+                product['canonical_lineage'] = lineage_clean
+                product['currentLineage'] = lineage_clean
+                product['_strain_enriched'] = True
+                return True
+
+            if _apply_lineage(lineage_from_product):
+                logging.debug(f"🧬 PRODUCT LINEAGE ENRICHMENT: '{product_name}' → lineage '{product.get('Lineage')}'")
+                return product
+
+            # 2) STRAIN-LEVEL LINEAGE (same canonical/sovereign data as tag manager, but keyed by strain)
+            strain_name = (product.get('Product Strain') or
+                           product.get('ProductStrain') or
+                           product.get('strain_name') or '').strip()
+
+            # If no strain name, try to extract from product name
+            if not strain_name and product_name:
+                strain_name = self._extract_strain_from_product_name(product_name)
+
+            if strain_name:
+                try:
+                    strain_info = product_db.get_strain_info(strain_name)
+                except Exception:
+                    strain_info = None
+
+                if strain_info:
+                    display_lineage = strain_info.get('display_lineage') or strain_info.get('canonical_lineage')
+                    if _apply_lineage(display_lineage):
+                        logging.info(f"🧬 STRAIN ENRICHMENT: '{strain_name}' → lineage '{product.get('Lineage')}'")
+                        return product
+
+                # 3) Vendor-specific strain lineage as final fallback
                 vendor = product.get('Vendor/Supplier*') or product.get('Vendor') or ''
                 brand = product.get('Product Brand') or ''
 
-                vendor_lineage = product_db.get_vendor_strain_lineage(strain_name, vendor, brand)
-                if vendor_lineage and vendor_lineage.strip().upper() not in ['', 'MIXED', 'UNKNOWN']:
-                    product['Lineage'] = vendor_lineage
-                    product['lineage'] = vendor_lineage
-                    product['canonical_lineage'] = vendor_lineage
-                    product['_strain_enriched'] = True
-                    logging.info(f"🧬 VENDOR STRAIN ENRICHMENT: '{strain_name}' + vendor '{vendor}' → lineage '{vendor_lineage}'")
+                try:
+                    vendor_lineage = product_db.get_vendor_strain_lineage(strain_name, vendor, brand)
+                except Exception:
+                    vendor_lineage = None
+
+                if _apply_lineage(vendor_lineage):
+                    logging.info(
+                        f"🧬 VENDOR STRAIN ENRICHMENT: '{strain_name}' + vendor '{vendor}' → lineage '{product.get('Lineage')}'"
+                    )
 
             return product
 
@@ -4107,7 +4131,10 @@ class JSONMatcher:
                 # Skip common product type segments that come before strain
                 product_type_words = {'live resin', 'liquid diamonds', 'hte', '510 vape', 'aio',
                                      'disposable', 'cartridge', 'cart', 'vape', 'prana', 'flower',
-                                     'pre-roll', 'preroll', 'concentrate', 'edible', 'tincture'}
+                                     'pre-roll', 'preroll', 'concentrate', 'edible', 'tincture',
+                                     'high potency', 'crystal', 'batter', 'extract', 'flavored',
+                                     'live resin prana aio', 'live resin 510 vape', 'live resin extract',
+                                     'flavored prana aio', 'flavored 510 vape'}
                 if part_lower in product_type_words:
                     continue
 
@@ -4115,7 +4142,7 @@ class JSONMatcher:
                 brand_words = {'ultra pure', 'pure', 'bodhi high', 'honey tree', 'phat panda',
                               'sticky frog', 'dabstract', 'crystal clear', 'geez', 'fkit labs',
                               'thunderchief', 'baker boys', 'ceres', 'snickle fritz', 'leafwerx',
-                              'noble farms', 'homegrown', 'kushco'}
+                              'noble farms', 'homegrown', 'kushco', 'original'}
                 if i == 0 or part_lower in brand_words:
                     continue
 
@@ -8312,9 +8339,48 @@ class JSONMatcher:
                     logging.info(f"✅ JSON COLUMN MATCH (apostrophe-normalized): '{key_no_apostrophe[:50]}'")
                     return product
 
-            # NOTE: Strain-based fuzzy matching removed - it caused incorrect matches
-            # (e.g., "Rainbow Runtz" matching "Rainbow Belts" because both contain "Rainbow")
-            # JSON column matching now requires exact or normalized match only
+            # 4) Strain-based matching: EXACT strain match only (not partial word overlap)
+            # This handles format changes like "510 Vape" vs "Prana AIO" for the same strain
+            incoming_strain = self._extract_strain_from_product_name(json_description)
+            if incoming_strain and len(incoming_strain) >= 3:
+                incoming_strain_lower = incoming_strain.lower().strip()
+                incoming_strain_no_apos = re.sub(r"[''`]", '', incoming_strain_lower)
+
+                # Build strain-based lookup (keyed by EXACT strain name)
+                if not hasattr(self, '_strain_to_json_lookup') or self._strain_to_json_lookup is None:
+                    self._strain_to_json_lookup = {}
+                    for stored_key, products in json_lookup.items():
+                        if not products or not stored_key:
+                            continue
+                        stored_strain = self._extract_strain_from_product_name(stored_key)
+                        if stored_strain and len(stored_strain) >= 3:
+                            strain_key = stored_strain.lower().strip()
+                            strain_key_no_apos = re.sub(r"[''`]", '', strain_key)
+                            for sk in (strain_key, strain_key_no_apos):
+                                if sk not in self._strain_to_json_lookup:
+                                    self._strain_to_json_lookup[sk] = []
+                                self._strain_to_json_lookup[sk].append((stored_key, products))
+                    logging.debug(f"⚡ Built strain-based lookup with {len(self._strain_to_json_lookup)} strains")
+
+                # Look up by EXACT strain name (e.g., "northern lights" matches "northern lights" only)
+                for strain_key in (incoming_strain_lower, incoming_strain_no_apos):
+                    if strain_key in self._strain_to_json_lookup:
+                        candidates = self._strain_to_json_lookup[strain_key]
+                        # Filter by vendor/brand - first segment must match
+                        json_parts = [p.strip().lower() for p in json_description.split(' - ')]
+                        json_first = json_parts[0] if json_parts else ''
+
+                        for stored_key, products in candidates:
+                            stored_parts = [p.strip().lower() for p in stored_key.split(' - ')]
+                            stored_first = stored_parts[0] if stored_parts else ''
+
+                            # Require first segment (brand) to match
+                            if json_first and stored_first and json_first == stored_first:
+                                product = dict(products[0])
+                                product['_source'] = 'database'
+                                product['_match_type'] = 'json_column_strain'
+                                logging.info(f"✅ JSON COLUMN MATCH (exact strain '{incoming_strain}'): '{stored_key[:50]}'")
+                                return product
 
         # Excel fallback: exact then normalized
         if hasattr(self, 'excel_processor') and self.excel_processor and getattr(self.excel_processor, 'df', None) is not None:
