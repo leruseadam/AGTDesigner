@@ -15567,12 +15567,25 @@ def get_web_available_tags():
     """Web-optimized version - uses same fast path as regular endpoint but always with fast_load=1"""
     try:
         start_time = time.time()
-        
+
         # WEB OPTIMIZATION: Always use fast_load=1 and skip prefer_db for maximum speed
         # This skips slow database queries that cause timeouts on web servers
         fast_load = True  # Always fast for web
         prefer_db = False  # Skip database queries for speed
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
+        # Optional: limit number of tags for initial web load to avoid timeouts
+        max_tags_param = request.args.get('max_tags')
+        max_tags: Optional[int] = None
+        try:
+            if max_tags_param is not None:
+                parsed = int(str(max_tags_param).strip())
+                if parsed > 0:
+                    max_tags = parsed
+        except (TypeError, ValueError):
+            max_tags = None
+        # Sensible default for web: cap initial payload unless caller explicitly requests unlimited
+        DEFAULT_WEB_MAX_TAGS = 400
+        effective_max_tags = max_tags or DEFAULT_WEB_MAX_TAGS
         
         # CRITICAL FIX: Check for recent lineage updates - ALWAYS skip cache if lineage was recently updated
         # This ensures UI shows fresh database lineage, not stale cached Excel lineage
@@ -15684,11 +15697,17 @@ def get_web_available_tags():
         logging.info("🔄 WEB: Building tags with Excel data, aligning with database lineage...")
         
         # Excel processor already loaded and validated above - just use it
-        # Get tags from Excel
+        # Get tags from Excel (respect web max_tags limit to prevent huge payloads/timeouts)
         try:
             logging.info("WEB: Calling excel_processor.get_available_tags() - starting")
-            excel_tags = excel_processor.get_available_tags()
-            logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
+            excel_tags = excel_processor.get_available_tags(max_tags=effective_max_tags)
+            total_rows = len(excel_processor.df) if getattr(excel_processor, "df", None) is not None else None
+            logging.info(
+                "WEB: excel_processor.get_available_tags() returned - count=%s (effective_max_tags=%s, total_rows=%s)",
+                (len(excel_tags) if excel_tags else 0),
+                effective_max_tags,
+                total_rows,
+            )
             
             # Enforce database-as-source-of-truth: always align Excel tags with DB lineage
             # before returning to the web UI. This ensures Excel data cannot override

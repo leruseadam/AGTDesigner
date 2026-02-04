@@ -4284,11 +4284,16 @@ class JSONMatcher:
                 overlap = json_words & db_words
                 # Require at least one meaningful word overlap
                 if overlap:
-                    # CRITICAL: Reject when only overlap is a common strain suffix (e.g. Rainbow Runtz vs White Runtz, Blueberry Cookies vs Cookies & Cream)
-                    COMMON_STRAIN_SUFFIXES = {'runtz', 'kush', 'cookies', 'haze', 'diesel', 'sherbet', 'cream', 'banana', 'cake'}
-                    if len(json_words) >= 2 and len(db_words) >= 2 and len(overlap) == 1 and overlap.issubset(COMMON_STRAIN_SUFFIXES):
-                        logging.warning(f"🧬 STRAIN MISMATCH (suffix-only overlap): JSON '{json_strain_name}' ≠ DB '{db_strain_name}' (overlap: {overlap})")
-                        return False
+                    # CRITICAL: Reject when only overlap is a common word that doesn't indicate same strain
+                    COMMON_STRAIN_WORDS = {'runtz', 'kush', 'cookies', 'haze', 'diesel', 'sherbet', 'cream',
+                                          'banana', 'cake', 'rainbow', 'purple', 'blue', 'lemon', 'orange',
+                                          'grape', 'strawberry', 'blueberry', 'og', 'dream', 'pie', 'gelato'}
+                    # If both strains have 2+ words and only 1 overlaps, it might be different strains
+                    if len(json_words) >= 2 and len(db_words) >= 2 and len(overlap) == 1:
+                        single_overlap = list(overlap)[0]
+                        if single_overlap in COMMON_STRAIN_WORDS:
+                            logging.warning(f"🧬 STRAIN MISMATCH (single common word): JSON '{json_strain_name}' ≠ DB '{db_strain_name}' (overlap: {overlap})")
+                            return False
                     logging.debug(f"🧬 STRAIN VALID (overlap): '{json_strain_name}' ~ '{db_strain_name}' (common: {overlap})")
                     return True
 
@@ -8610,43 +8615,29 @@ class JSONMatcher:
         return matches[:5]  # Return only top 5 matches
     
     def _find_strain_based_matches(self, json_strain: str, json_vendor: str = None, json_type: str = None) -> List[dict]:
-        """Find matches based on strain name with enhanced strain recognition."""
+        """Find matches based on EXACT strain name only - no fuzzy/partial matching."""
         matches = []
-        
-        # Enhanced strain normalization
-        normalized_strain = self._normalize_strain_name(json_strain)
-        
+
+        if not json_strain:
+            return matches
+
+        # Normalize strain for exact comparison
+        json_strain_lower = json_strain.lower().strip()
+
         for cache_item in self._sheet_cache:
-            cache_name = str(cache_item.get("original_name", "")).lower()
-            cache_vendor = str(cache_item.get("vendor", ""))
-            cache_strain = str(cache_item.get("strain", "")).lower()
-            
-            # Check multiple strain matching strategies
-            strain_match = False
-            
-            # Strategy 1: Direct strain name match
-            if json_strain in cache_name or json_strain in cache_strain:
-                strain_match = True
-            # Strategy 2: Normalized strain match
-            elif normalized_strain and (normalized_strain in cache_name or normalized_strain in cache_strain):
-                strain_match = True
-            # Strategy 3: Partial strain match (for compound names like "Blue Dream")
-            elif self._partial_strain_match(json_strain, cache_name):
-                strain_match = True
-            
-            if strain_match:
+            cache_strain = str(cache_item.get("strain", "")).lower().strip()
+
+            # EXACT MATCH ONLY - no substring or partial matching
+            if json_strain_lower == cache_strain:
+                cache_vendor = str(cache_item.get("vendor", ""))
                 # Apply vendor filtering if specified
                 if not json_vendor or self._validate_vendor_match(json_vendor, cache_vendor):
                     # Apply product type filtering if specified
                     if not json_type or self._product_types_compatible(json_type, cache_item):
-                        # Calculate strain match score
-                        strain_score = self._calculate_strain_match_score(json_strain, cache_name, cache_strain)
                         cache_item_copy = cache_item.copy()
-                        cache_item_copy['strain_score'] = strain_score
+                        cache_item_copy['strain_score'] = 1.0  # Exact match
                         matches.append(cache_item_copy)
-        
-        # Sort by strain match score
-        matches.sort(key=lambda x: x.get('strain_score', 0), reverse=True)
+
         return matches
     
     def _find_brand_type_weight_matches(self, json_brand: str, json_type: str, json_weight: str, json_vendor: str = None) -> List[dict]:
