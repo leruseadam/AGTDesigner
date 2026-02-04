@@ -4035,9 +4035,10 @@ class JSONMatcher:
     def _extract_strain_from_product_name(self, product_name: str) -> str:
         """
         Extract strain name from a product name.
-        Examples:
-            "Blue Dream Flower by Vendor - 3.5g" -> "Blue Dream"
-            "OG Kush Cartridge by Brand - 1g" -> "OG Kush"
+
+        Handles TWO formats:
+        1. DB-style: "Blue Dream Flower by Vendor - 3.5g" -> "Blue Dream"
+        2. JSON-style (dash-separated): "Ultra Pure - Live Resin 510 Vape - Liquid Diamonds - Rainbow Runtz - Hybrid - 1mL" -> "Rainbow Runtz"
         """
         if not product_name:
             return ''
@@ -4045,6 +4046,61 @@ class JSONMatcher:
         import re
         name = product_name.strip()
 
+        # Check if this is a JSON-style dash-separated format
+        # Pattern: "Brand - Product Type - Details - STRAIN - Lineage - Weight"
+        # Key indicators: multiple " - " separators, weight at end, lineage indicator before weight
+        parts = [p.strip() for p in name.split(' - ')]
+
+        if len(parts) >= 4:
+            # This looks like JSON format - extract strain from the segments
+            # Lineage indicators that come AFTER the strain
+            lineage_indicators = {'hybrid', 'indica', 'sativa', 'indica dominant', 'sativa dominant',
+                                  'hybrid dominant', 'indica/hybrid', 'sativa/hybrid', 'hybrid/indica',
+                                  'hybrid/sativa'}
+            # Weight patterns at the end
+            weight_pattern = re.compile(r'^\d+(\.\d+)?\s*(g|mg|ml|oz|pack|pk|ml)$', re.IGNORECASE)
+
+            # Work backwards to find the strain
+            # Expected order: ... - STRAIN - LINEAGE - WEIGHT
+            strain_idx = None
+
+            for i in range(len(parts) - 1, -1, -1):
+                part_lower = parts[i].lower().strip()
+
+                # Skip weight at end
+                if weight_pattern.match(parts[i]):
+                    continue
+
+                # Skip lineage indicators
+                if part_lower in lineage_indicators:
+                    continue
+
+                # Skip common product type segments that come before strain
+                product_type_words = {'live resin', 'liquid diamonds', 'hte', '510 vape', 'aio',
+                                     'disposable', 'cartridge', 'cart', 'vape', 'prana', 'flower',
+                                     'pre-roll', 'preroll', 'concentrate', 'edible', 'tincture'}
+                if part_lower in product_type_words:
+                    continue
+
+                # Skip brand names (first segment or common vendor names)
+                brand_words = {'ultra pure', 'pure', 'bodhi high', 'honey tree', 'phat panda',
+                              'sticky frog', 'dabstract', 'crystal clear', 'geez', 'fkit labs',
+                              'thunderchief', 'baker boys', 'ceres', 'snickle fritz', 'leafwerx',
+                              'noble farms', 'homegrown', 'kushco'}
+                if i == 0 or part_lower in brand_words:
+                    continue
+
+                # This is likely the strain name
+                strain_idx = i
+                break
+
+            if strain_idx is not None and strain_idx > 0:
+                extracted = parts[strain_idx].strip()
+                # Validate it's not too short and not a weight/lineage
+                if len(extracted) >= 3 and not weight_pattern.match(extracted):
+                    return extracted
+
+        # Fall back to DB-style extraction for non-dash-separated names
         # Remove vendor suffix (e.g., "by Vendor Name")
         name = re.sub(r'\s+by\s+[\w\s]+$', '', name, flags=re.IGNORECASE)
 
@@ -4091,6 +4147,8 @@ class JSONMatcher:
             if not json_strain_name:
                 json_product_name = str(json_item.get('product_name', '')).strip()
                 json_strain_name = self._extract_strain_from_product_name(json_product_name)
+                if json_strain_name:
+                    logging.debug(f"🧬 Extracted JSON strain: '{json_strain_name}' from '{json_product_name}'")
 
             # Get strain from database match
             db_strain_name = (str(db_match.get('Product Strain', '') or
@@ -4102,14 +4160,21 @@ class JSONMatcher:
                 db_product_name = str(db_match.get('Product Name*', '') or
                                      db_match.get('Description', '')).strip()
                 db_strain_name = self._extract_strain_from_product_name(db_product_name)
+                if db_strain_name:
+                    logging.debug(f"🧬 Extracted DB strain: '{db_strain_name}' from '{db_product_name}'")
+
+            # Log what we're comparing
+            logging.debug(f"🧬 STRAIN VALIDATION: JSON='{json_strain_name}' vs DB='{db_strain_name}'")
 
             # If neither has a strain, can't validate - allow the match
             if not json_strain_name and not db_strain_name:
+                logging.debug(f"🧬 STRAIN VALIDATION: No strains found - allowing match")
                 return True
 
             # If only one has a strain, be lenient - allow the match
             # (the other product might just not have strain data)
             if not json_strain_name or not db_strain_name:
+                logging.debug(f"🧬 STRAIN VALIDATION: Only one strain found - allowing match")
                 return True
 
             # Both have strains - check if they match
