@@ -4130,19 +4130,39 @@ class JSONMatcher:
                     return extracted
 
         # Fall back to DB-style extraction for non-dash-separated names
-        # Remove vendor suffix (e.g., "by Vendor Name")
-        name = re.sub(r'\s+by\s+[\w\s]+$', '', name, flags=re.IGNORECASE)
-
-        # Remove weight suffix (e.g., "- 3.5g", "- 1mL")
+        # Remove weight suffix FIRST (e.g., "- 3.5g", "- 1mL") - must be before vendor removal
         name = re.sub(r'\s*-\s*[\d.]+\s*(g|mg|ml|oz)\s*$', '', name, flags=re.IGNORECASE)
         name = re.sub(r'\s*-\s*[\d.]+\s*(g|mg|ml|oz)\s*x\s*\d+\s*(pack)?\s*$', '', name, flags=re.IGNORECASE)
+
+        # Remove vendor suffix (e.g., "by Vendor Name") - after weight removal
+        name = re.sub(r'\s+by\s+[\w\s]+$', '', name, flags=re.IGNORECASE)
+
+        # Remove product type compound phrases (order matters - longer phrases first)
+        compound_types = [
+            'live resin disposable vape',
+            'live resin prana aio',
+            'live resin prana pulse aio disposable',
+            'live resin 510 vape',
+            'live resin cartridge',
+            'live resin cart',
+            'live resin disposable',
+            'live resin vape',
+            'liquid diamonds disposable',
+            'liquid diamonds cartridge',
+            'liquid diamonds vape',
+            'disposable vape',
+            'live resin',
+            'liquid diamonds',
+        ]
+        for ctype in compound_types:
+            name = re.sub(rf'\s+{re.escape(ctype)}s?\s*$', '', name, flags=re.IGNORECASE)
 
         # Remove product type suffixes
         product_types = [
             'flower', 'pre-roll', 'preroll', 'pre roll', 'joint', 'blunt',
             'cartridge', 'cart', 'vape', 'disposable', 'aio',
             'concentrate', 'wax', 'shatter', 'budder', 'batter', 'sugar', 'sauce', 'diamonds',
-            'live resin', 'rosin', 'badder', 'crumble',
+            'rosin', 'badder', 'crumble',
             'edible', 'gummy', 'gummies', 'chocolate', 'cookie', 'brownie',
             'tincture', 'capsule', 'capsules', 'topical', 'balm', 'lotion'
         ]
@@ -8321,12 +8341,22 @@ class JSONMatcher:
                         candidates = self._strain_to_json_lookup[strain_key]
                         # Filter candidates by vendor/brand similarity
                         for stored_key, products in candidates:
-                            # Quick check: both should have similar vendor indicator
                             json_lower = json_description.lower()
                             stored_lower = stored_key.lower()
-                            # Check for common vendor terms
-                            vendors = ['honey tree', 'bodhi', 'phat panda', 'dabstract', 'sticky frog', 'dose oil']
+
+                            # Check 1: Both have the same vendor/brand name
+                            vendors = ['honey tree', 'bodhi', 'phat panda', 'dabstract', 'sticky frog',
+                                      'dose oil', 'pure', 'ultra pure', 'crystal clear', 'geez', 'fkit',
+                                      'thunderchief', 'baker', 'ceres', 'snickle', 'kushco', 'leafwerx', 'noble']
                             vendor_match = any(v in json_lower and v in stored_lower for v in vendors)
+
+                            # Check 2: First segment (brand/line) matches for dash-separated formats
+                            if not vendor_match:
+                                json_parts = [p.strip().lower() for p in json_description.split(' - ')]
+                                stored_parts = [p.strip().lower() for p in stored_key.split(' - ')]
+                                if json_parts and stored_parts and json_parts[0] == stored_parts[0]:
+                                    vendor_match = True
+
                             if vendor_match:
                                 product = dict(products[0])
                                 product['_source'] = 'database'
