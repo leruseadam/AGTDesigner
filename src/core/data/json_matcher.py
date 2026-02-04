@@ -8292,9 +8292,47 @@ class JSONMatcher:
                     logging.info(f"✅ JSON COLUMN MATCH (apostrophe-normalized): '{key_no_apostrophe[:50]}'")
                     return product
 
-            # NOTE: Token-similar matching REMOVED for performance
-            # It was O(n) for each product and caused strain mismatches
-            # Only exact and normalized matches are now used
+            # 4) Strain-based matching: Extract strain from JSON name and find matching DB product
+            # This handles format changes like "Honey Tree Live Resin Prana Pulse AIO" vs "Honey Tree - Live Resin Prana AIO - HTE"
+            incoming_strain = self._extract_strain_from_product_name(json_description)
+            if incoming_strain and len(incoming_strain) >= 3:
+                incoming_strain_lower = incoming_strain.lower().strip()
+                incoming_strain_no_apos = re.sub(r"[''`]", '', incoming_strain_lower)
+
+                # Build a strain-based lookup if not already built
+                if not hasattr(self, '_strain_to_json_lookup') or self._strain_to_json_lookup is None:
+                    self._strain_to_json_lookup = {}
+                    for stored_key, products in json_lookup.items():
+                        if not products or not stored_key:
+                            continue
+                        stored_strain = self._extract_strain_from_product_name(stored_key)
+                        if stored_strain and len(stored_strain) >= 3:
+                            strain_key = stored_strain.lower().strip()
+                            strain_key_no_apos = re.sub(r"[''`]", '', strain_key)
+                            for sk in (strain_key, strain_key_no_apos):
+                                if sk not in self._strain_to_json_lookup:
+                                    self._strain_to_json_lookup[sk] = []
+                                self._strain_to_json_lookup[sk].append((stored_key, products))
+                    logging.debug(f"⚡ Built strain-based lookup with {len(self._strain_to_json_lookup)} strains")
+
+                # Look up by strain
+                for strain_key in (incoming_strain_lower, incoming_strain_no_apos):
+                    if strain_key in self._strain_to_json_lookup:
+                        candidates = self._strain_to_json_lookup[strain_key]
+                        # Filter candidates by vendor/brand similarity
+                        for stored_key, products in candidates:
+                            # Quick check: both should have similar vendor indicator
+                            json_lower = json_description.lower()
+                            stored_lower = stored_key.lower()
+                            # Check for common vendor terms
+                            vendors = ['honey tree', 'bodhi', 'phat panda', 'dabstract', 'sticky frog', 'dose oil']
+                            vendor_match = any(v in json_lower and v in stored_lower for v in vendors)
+                            if vendor_match:
+                                product = dict(products[0])
+                                product['_source'] = 'database'
+                                product['_match_type'] = 'json_column_strain'
+                                logging.info(f"✅ JSON COLUMN MATCH (strain '{incoming_strain}'): '{stored_key[:50]}'")
+                                return product
 
         # Excel fallback: exact then normalized
         if hasattr(self, 'excel_processor') and self.excel_processor and getattr(self.excel_processor, 'df', None) is not None:
