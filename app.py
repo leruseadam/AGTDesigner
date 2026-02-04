@@ -20441,12 +20441,37 @@ def json_match_detailed():
             
         available_tags = excel_processor.df.to_dict('records')
         
-        # FIXED: Use regular JSON Matcher with Excel-priority system
-        logging.info("Using regular JSON Matcher with Excel-priority approach")
+        # OPTIMIZATION: Convert fetched payload to data URL to avoid re-fetching in fetch_and_match
+        # This prevents double-fetching the same JSON and reduces timeout risk
+        import json
+        import base64
+        payload_json_str = json.dumps(payload)
+        payload_base64 = base64.b64encode(payload_json_str.encode('utf-8')).decode('utf-8')
+        data_url = f"data:application/json;base64,{payload_base64}"
+        
+        # Limit items to prevent timeout (process max 500 items for detailed match)
+        MAX_ITEMS_FOR_DETAILED = 500
+        if len(json_items) > MAX_ITEMS_FOR_DETAILED:
+            logging.warning(f"Limiting detailed match to first {MAX_ITEMS_FOR_DETAILED} items (total: {len(json_items)}) to prevent timeout")
+            json_items = json_items[:MAX_ITEMS_FOR_DETAILED]
+            # Update payload to only include limited items
+            if isinstance(payload, dict):
+                payload = {**payload, "inventory_transfer_items": json_items}
+            elif isinstance(payload, list):
+                payload = json_items
+            payload_json_str = json.dumps(payload)
+            payload_base64 = base64.b64encode(payload_json_str.encode('utf-8')).decode('utf-8')
+            data_url = f"data:application/json;base64,{payload_base64}"
+        
+        logging.info(f"Using data URL to avoid re-fetch (payload size: {len(payload_json_str)} bytes, {len(json_items)} items)")
         
         # Use the Enhanced JSON Matcher to get database-enhanced results
-        enhanced_matches = json_matcher.fetch_and_match(url)
-        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
+        # Pass data URL instead of original URL to skip re-fetch
+        import time
+        match_start = time.time()
+        enhanced_matches = json_matcher.fetch_and_match(data_url)
+        match_duration = time.time() - match_start
+        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products in {match_duration:.2f}s")
         
         # NOTE: Do NOT reorder `enhanced_matches` here — they are expected to align
         # with the incoming `json_items` order so each JSON item maps to its
@@ -20534,9 +20559,22 @@ def json_match_detailed():
             }
         })
         
+    except requests.exceptions.Timeout:
+        logging.error(f"Timeout in detailed JSON matching (likely gateway timeout)")
+        return jsonify({
+            'error': 'gateway_timeout',
+            'message': 'The matching process took too long and timed out. Try with a smaller JSON file or fewer items.'
+        }), 504
     except Exception as e:
-        logging.error(f"Error in detailed JSON matching: {str(e)}")
-        return jsonify({'error': f'Detailed matching failed: {str(e)}'}), 500
+        error_msg = str(e)
+        logging.error(f"Error in detailed JSON matching: {error_msg}")
+        # Check if it's a timeout-related error
+        if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
+            return jsonify({
+                'error': 'timeout',
+                'message': f'Matching timed out: {error_msg}'
+            }), 504
+        return jsonify({'error': f'Detailed matching failed: {error_msg}'}), 500
 
 @app.route('/api/match-json-tags', methods=['POST'])
 def match_json_tags():
