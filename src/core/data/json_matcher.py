@@ -2706,10 +2706,9 @@ class JSONMatcher:
             vendor_override_logged = set()
             
             # SIMPLIFIED APPROACH: Process each JSON item with basic matching for maximum results
-            print(f"🔍 DEBUG: SIMPLIFIED MATCHING - Processing {len(unique_items)} items for maximum matches")
-            print(f"🎯 GOAL: Match ALL {len(unique_items)} items - ZERO should be lost!")
+            logging.info(f"🔍 SIMPLIFIED MATCHING - Processing {len(unique_items)} items")
             if json_vendor_filter:
-                print(f"🔍 VENDOR ISOLATION: Strict vendor filter active - ONLY matching products from vendor '{json_vendor_filter}'")
+                logging.info(f"🔍 VENDOR ISOLATION: vendor filter '{json_vendor_filter}'")
             
             items_processed = 0
             items_matched = 0
@@ -2816,7 +2815,6 @@ class JSONMatcher:
                 # CRITICAL: Detect concentrate/vape JSON items (1mL / Prana AIO / Live Resin / Vape / Cartridge)
                 # For these, vendor metadata (from_license_name) is often the STORE, not the PRODUCT VENDOR,
                 # so strict vendor isolation will hide real matches. We turn vendor into a SOFT hint only.
-                import re
                 product_name_lower = product_name.lower()
                 weight_lower = str(weight or "").lower()
                 has_ml_weight = bool(re.search(r"\d+(?:\.\d+)?\s*ml", product_name_lower)) or "ml" in weight_lower
@@ -2825,9 +2823,10 @@ class JSONMatcher:
                     or "concentrate for inhalation" in inventory_type.lower()
                     or any(x in product_name_lower for x in ["live resin", "aio", "prana aio", "vape", "cartridge", "disposable", "liquid diamonds"])
                 )
-                
-                print(f"🔍 DEBUG: ENHANCED MATCH - Processing item {i+1}/{len(unique_items)}: '{raw_product_name}' → '{product_name}'")
-                print(f"🔍 DEBUG: ENHANCED MATCH - Extracted values: weight='{weight}', price='{price}', strain='{strain}', brand='{brand}'")
+
+                # PERFORMANCE: Only log every 50th item to reduce I/O overhead
+                if i % 50 == 0:
+                    logging.debug(f"🔍 Processing item {i+1}/{len(unique_items)}: '{product_name[:40]}...'")
                 
                 # SIMPLIFIED MATCHING: Try matching against sheet cache (from Excel or Database)
                 best_match = None
@@ -2843,8 +2842,7 @@ class JSONMatcher:
                     if sibling_match:
                         best_match = sibling_match
                         best_score = 95.0
-                        logging.info(f"✅ SIBLING STRAIN MATCH: '{product_name}' → same line, strain '{strain}'")
-                        print(f"✅ SIBLING STRAIN MATCH: '{product_name}' → DB '{best_match.get('Product Name*', '') or best_match.get('Description', '')}' (strain: {strain})")
+                        logging.debug(f"✅ SIBLING STRAIN MATCH: '{product_name}' → strain '{strain}'")
                  
                 # Use sheet cache for matching (works with both Excel data and Database data)
                 if best_match is None and cache_to_search and len(cache_to_search) > 0:
@@ -3153,13 +3151,13 @@ class JSONMatcher:
                             matched_products.append(product)
                             items_matched += 1
                             db_name = str(best_match.get('Product Name*', '') or best_match.get('Description', '')).strip()
-                            print(f"✅ DB MATCH #{items_matched}: JSON '{product_name}' → DB '{db_name}' (score: {best_score:.1f})")
+                            logging.debug(f"✅ DB MATCH #{items_matched}: '{product_name[:40]}' → '{db_name[:40]}'")
                             logging.info(f"✅ Matched: '{product_name}' → '{db_name}' (score: {best_score:.1f})")
                         else:
-                            print(f"⚠️  Match found but product creation failed for '{product_name}'")
+                            logging.warning(f"⚠️  Match found but product creation failed for '{product_name[:40]}'")
                             items_failed += 1
                     except Exception as e:
-                        print(f"❌ Exception creating matched product for '{product_name}': {e}")
+                        logging.error(f"❌ Exception creating matched product for '{product_name[:40]}': {e}")
                         items_failed += 1
                         # DON'T continue - try fallback instead
                         try:
@@ -3167,9 +3165,9 @@ class JSONMatcher:
                             if fallback_product and fallback_product.get('Product Name*'):
                                 matched_products.append(fallback_product)
                                 items_fallback += 1
-                                print(f"🔄 RECOVERED with fallback: '{product_name}'")
+                                logging.debug(f"🔄 RECOVERED with fallback: '{product_name[:40]}'")
                         except Exception as fallback_error:
-                            print(f"❌ Fallback also failed: {fallback_error}")
+                            logging.error(f"❌ Fallback also failed: {fallback_error}")
                             items_failed += 1
                 else:
                     # FALLBACK: Create product from JSON data directly if no Excel/DB match
@@ -3179,18 +3177,18 @@ class JSONMatcher:
                         if product and product.get('Product Name*'):  # Ensure it's valid
                             matched_products.append(product)
                             items_fallback += 1
-                            print(f"🆕 FALLBACK #{items_fallback}: '{product_name}' (no DB match, score: {best_score:.1f})")
+                            logging.debug(f"🆕 FALLBACK #{items_fallback}: '{product_name[:40]}'")
                             logging.info(f"✅ Fallback tag created successfully for product that doesn't exist in database")
                         else:
                             # This should NEVER happen with our improved fallback
                             items_failed += 1
                             logging.error(f"❌ CRITICAL: Fallback returned empty product for '{product_name}'")
                             logging.error(f"   Item data: {item}")
-                            print(f"❌ CRITICAL FAILURE #{items_failed}: Fallback empty for '{product_name}'")
+                            logging.error(f"❌ CRITICAL FAILURE #{items_failed}: Fallback empty for '{product_name[:40]}'")
                     except Exception as e:
                         items_failed += 1
                         logging.exception("❌ CRITICAL: Exception in fallback for '%s': %s", product_name, e)
-                        print(f"❌ CRITICAL FAILURE #{items_failed}: Exception in fallback for '{product_name}': {e}")
+                        logging.error(f"❌ CRITICAL FAILURE #{items_failed}: Exception in fallback for '{product_name[:40]}': {e}")
                         
                         # EMERGENCY: Try absolute minimal product creation
                         try:
@@ -3211,28 +3209,16 @@ class JSONMatcher:
                             }
                             matched_products.append(emergency_product)
                             items_fallback += 1
-                            print(f"🚨 EMERGENCY RECOVERY #{items_fallback}: Created minimal product for '{product_name}'")
+                            logging.debug(f"🚨 EMERGENCY RECOVERY #{items_fallback}: Created minimal product for '{product_name[:40]}'")
                         except:
-                            print(f"💀 TOTAL FAILURE: Could not create ANY product for '{product_name}'")
+                            logging.error(f"💀 TOTAL FAILURE: Could not create ANY product for '{product_name[:40]}'")
             
             # Return all matched products
-            print(f"\n{'='*80}")
-            print(f"📊 MATCHING SUMMARY:")
-            print(f"   Items Processed: {items_processed}")
-            print(f"   ✅ DB Matches: {items_matched}")
-            print(f"   🆕 Fallbacks: {items_fallback}")
-            print(f"   ❌ Failed: {items_failed}")
-            print(f"   📦 Total Products: {len(matched_products)}")
-            print(f"{'='*80}\n")
-            
+            logging.info(f"📊 MATCHING SUMMARY: {items_processed} processed, {items_matched} DB matches, {items_fallback} fallbacks, {items_failed} failed, {len(matched_products)} total")
+
             if len(matched_products) < len(unique_items):
                 missing = len(unique_items) - len(matched_products)
-                print(f"⚠️  WARNING: {missing} items were LOST during matching!")
                 logging.error(f"⚠️  CRITICAL: {missing} out of {len(unique_items)} items were lost!")
-            else:
-                print(f"✅ SUCCESS: ALL {len(matched_products)} items matched/created!")
-            
-            print(f"🔍 DEBUG: ENHANCED MATCHING COMPLETE - Found {len(matched_products)} total matches")
             
             # OPTIONAL DEDUPLICATION: Only if explicitly requested
             if deduplicate:
@@ -8247,27 +8233,9 @@ class JSONMatcher:
                         logging.info(f"✅ JSON COLUMN MATCH (normalized): '{key[:50]}'")
                         return product
 
-            # 3) Token-similar: assume names are similar (same product, different wording)
-            incoming_tokens = self._tokens_for_json_match(json_description)
-            if len(incoming_tokens) >= 3:
-                best_ratio = 0.0
-                best_product = None
-                for stored_key, products in json_lookup.items():
-                    if not products or not stored_key:
-                        continue
-                    stored_tokens = self._tokens_for_json_match(stored_key)
-                    if not stored_tokens:
-                        continue
-                    overlap = len(incoming_tokens & stored_tokens) / min(len(incoming_tokens), len(stored_tokens))
-                    if overlap >= 0.55 and overlap > best_ratio:
-                        best_ratio = overlap
-                        best_product = products[0]
-                if best_product is not None:
-                    product = dict(best_product)
-                    product['_source'] = 'database'
-                    product['_match_type'] = 'json_column_similar'
-                    logging.info(f"✅ JSON COLUMN MATCH (similar, {best_ratio:.0%}): '{key_ws[:40]}'")
-                    return product
+            # NOTE: Token-similar matching REMOVED for performance
+            # It was O(n) for each product and caused strain mismatches
+            # Only exact and normalized matches are now used
 
         # Excel fallback: exact then normalized
         if hasattr(self, 'excel_processor') and self.excel_processor and getattr(self.excel_processor, 'df', None) is not None:
