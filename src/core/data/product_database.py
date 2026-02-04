@@ -1325,8 +1325,8 @@ class ProductDatabase:
     
     @timed_operation("add_or_update_product")
     @retry_on_lock(max_retries=3, delay=0.5)
-    def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
-        """Add a new product or update existing product information."""
+    def add_or_update_product(self, product_data: Dict[str, Any], insert_only: bool = False) -> int:
+        """Add a new product or update existing product information. If insert_only=True, skip updating existing rows."""
         try:
             self.init_database()  # Ensure DB is initialized
             
@@ -1423,10 +1423,11 @@ class ProductDatabase:
                 
                 if existing:
                     product_id, occurrences, existing_name = existing
-                    
+                    if insert_only:
+                        logger.debug(f"Found existing product: '{existing_name}' (ID: {product_id}) - skipping (insert_only)")
+                        return product_id
                     # Log duplicate detection and update
                     logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
-                    
                     # Update existing product with new data (new data always replaces old values)
                     try:
                         self._update_existing_product(cursor, product_id, product_data)
@@ -1440,7 +1441,7 @@ class ProductDatabase:
                             conn.rollback()
                             # Close connection and retry from the beginning
                             self.close_all_connections()
-                            return self.add_or_update_product(product_data)
+                            return self.add_or_update_product(product_data, insert_only=insert_only)
                         raise
                 
                 # If no exact match, check by name and vendor only (ignore brand differences)
@@ -1455,6 +1456,9 @@ class ProductDatabase:
                 vendor_match = cursor.fetchone()
                 if vendor_match:
                     product_id, occurrences, existing_name, existing_brand = vendor_match
+                    if insert_only:
+                        logger.debug(f"Found similar product: '{existing_name}' (ID: {product_id}) - skipping (insert_only)")
+                        return product_id
                     logger.info(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
                     try:
                         self._update_existing_product(cursor, product_id, product_data)
@@ -1468,7 +1472,7 @@ class ProductDatabase:
                             conn.rollback()
                             # Close connection and retry from the beginning
                             self.close_all_connections()
-                            return self.add_or_update_product(product_data)
+                            return self.add_or_update_product(product_data, insert_only=insert_only)
                         raise
                 
                 # Check for similar products (same name + vendor, different brand)
@@ -1699,8 +1703,8 @@ class ProductDatabase:
             logger.info(f"   Missing product type: {self._rejected_missing_type}")
             logger.info(f"   Total rejected: {total_rejected}")
     
-    def store_excel_data(self, df: pd.DataFrame, source_file: str = None, _retry_on_schema_error: bool = True) -> Dict[str, Any]:
-        """Store Excel data in the database. New data replaces existing data when duplicates are found."""
+    def store_excel_data(self, df: pd.DataFrame, source_file: str = None, _retry_on_schema_error: bool = True, insert_only: bool = False) -> Dict[str, Any]:
+        """Store Excel data in the database. If insert_only=True, only add new products (do not update existing)."""
         try:
             self.init_database()  # Ensure DB is initialized
             logger.info(f"Starting to store Excel data with {len(df)} rows from {source_file}")
@@ -2268,7 +2272,7 @@ class ProductDatabase:
                         logger.warning(f"   Available vendor columns in row_dict: {[k for k in row_dict.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]}")
                     
                     try:
-                        product_id = self.add_or_update_product(product_data)
+                        product_id = self.add_or_update_product(product_data, insert_only=insert_only)
                     
                         if product_id:
                             cursor_temp = conn.cursor()
@@ -2319,7 +2323,7 @@ class ProductDatabase:
                             'Units': product_data.get('Units', 'g'),
                             'Price': product_data.get('Price', '0.00')
                         }
-                        fallback_id = self.add_or_update_product(minimal_product_data)
+                        fallback_id = self.add_or_update_product(minimal_product_data, insert_only=insert_only)
                         if fallback_id:
                             stored_count += 1
                             logger.info(f"✅ FALLBACK: Added product '{product_name}' with minimal data after error")
