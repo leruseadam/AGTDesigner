@@ -1460,9 +1460,7 @@ class JSONMatcher:
             logging.info(f"📊 JSON column: {products_with_json} products with non-empty JSON, {json_lookup_count} lookup keys for matching")
             
         except Exception as e:
-            logging.error(f"📊 Error building cache from database: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
+            logging.exception("📊 Error building cache from database: %s", e)
             # Set empty caches as fallback
             self._sheet_cache = []
             self._indexed_cache = {}
@@ -3175,10 +3173,8 @@ class JSONMatcher:
                             print(f"❌ CRITICAL FAILURE #{items_failed}: Fallback empty for '{product_name}'")
                     except Exception as e:
                         items_failed += 1
-                        logging.error(f"❌ CRITICAL: Exception in fallback for '{product_name}': {e}")
+                        logging.exception("❌ CRITICAL: Exception in fallback for '%s': %s", product_name, e)
                         print(f"❌ CRITICAL FAILURE #{items_failed}: Exception in fallback for '{product_name}': {e}")
-                        import traceback
-                        logging.error(traceback.format_exc())
                         
                         # EMERGENCY: Try absolute minimal product creation
                         try:
@@ -3281,8 +3277,7 @@ class JSONMatcher:
                 
                 return self._upgrade_fallback_products(matched_products, global_vendor)
         except Exception as e:
-            logging.error(f"Error in fetch_and_match: {e}")
-            logging.error(f"Traceback: {traceback.format_exc()}")
+            logging.exception("Error in fetch_and_match: %s", e)
             return []
     
     def _extract_brand_from_product_name(self, product_name: str) -> str:
@@ -3662,10 +3657,7 @@ class JSONMatcher:
             return product
             
         except Exception as e:
-            logging.error(f"❌ Error creating fallback product from JSON: {e}")
-            import traceback
-            logging.error(f"Traceback: {traceback.format_exc()}")
-            
+            logging.exception("❌ Error creating fallback product from JSON: %s", e)
             # EMERGENCY FALLBACK: Create minimal but valid product
             try:
                 emergency_name = str(item.get("product_name", f"Product-{hash(str(item)) % 10000}"))
@@ -9591,8 +9583,8 @@ class JSONMatcher:
             return []  # No good match found
             
         except Exception as e:
-            logging.warning(f"Error in main matching logic: {e}")
-            logging.debug(traceback.format_exc())
+            logging.warning("Error in main matching logic: %s", e)
+            logging.exception("Error in main matching logic (traceback)")
             return []
     
     def _create_product_from_advanced_match(self, advanced_match: Dict, item: Dict, global_vendor: str) -> Dict:
@@ -11340,7 +11332,7 @@ class JSONMatcher:
             product_type = product.get('Product Type*') or ''
             
             upgraded = False
-            if product.get('Source', '').startswith('JSON - No DB Match') and product_db and isinstance(original_item, dict):
+            if (product.get('Source') or '').startswith('JSON - No DB Match') and product_db and isinstance(original_item, dict):
                 variations, type_override = self._generate_excel_style_variations(original_item, vendor_norm, product_type)
                 if type_override:
                     product_type = type_override
