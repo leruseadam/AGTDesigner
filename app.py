@@ -8710,7 +8710,7 @@ def generate_labels():
             generate_labels._processing_requests.discard(request_fingerprint)
             return jsonify({
                 'error': 'stale_upload',
-                'message': f'Your Excel data is stale ({stale_reason}). Please upload a fresh Excel file before generating tags.',
+                'message': 'Session Expired. Please upload a fresh Excel file to prevent stale or outdated product information.',
                 'stale_reason': stale_reason,
                 'upload_timestamp': upload_timestamp,
                 'current_time': current_time

@@ -15321,7 +15321,7 @@ const TagManager = {
                 const error = await response.json();
                 // Handle stale upload error - prompt user to upload fresh Excel
                 if (error.error === 'stale_upload' || error.message?.includes('stale')) {
-                    this.showStaleUploadModal(error.message || error.stale_reason || 'Your Excel data is stale. Please upload a fresh Excel file.');
+                    this.showStaleUploadModal(error.message || error.stale_reason || 'Session Expired. Please upload a fresh Excel file to prevent stale or outdated product information.');
                     throw new Error('STALE_UPLOAD'); // Special error to prevent further processing
                 }
                 throw new Error(error.error || 'Failed to generate labels');
@@ -16575,8 +16575,8 @@ const TagManager = {
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
                         <div class="modal-body">
-                            <p class="mb-3">${message || 'Your Excel data is stale. Please upload a fresh Excel file before generating tags.'}</p>
-                            <p class="text-muted small">This prevents generating tags with outdated product information.</p>
+                            <p class="mb-3">${message || 'Session Expired. Please upload a fresh Excel file to prevent stale or outdated product information.'}</p>
+                            <p class="text-muted small">Upload a new file to continue generating tags.</p>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
