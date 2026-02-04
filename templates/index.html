@@ -11246,7 +11246,12 @@
           if (activeElement && !modal.contains(activeElement)) {
             activeElement.setAttribute('data-bs-focus-prev', 'true');
           }
-          
+
+          // CRITICAL FIX: Remove inert IMMEDIATELY when modal starts showing
+          // This prevents Bootstrap from closing the modal due to inert state
+          this.removeAttribute('inert');
+          this.removeAttribute('aria-hidden');
+
           console.log('Modal show event triggered:', this.id);
         };
         
