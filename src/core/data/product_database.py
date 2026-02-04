@@ -7483,6 +7483,23 @@ class ProductDatabase:
             logger.error(f"Error getting all products: {e}")
             return []
 
+    def update_product_json_column(self, product_id: int, json_value: str) -> bool:
+        """Set the JSON column for a product to the given value (e.g. latest feed description)."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(products)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'JSON' not in columns:
+                return False
+            cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (str(json_value).strip() if json_value else '', product_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.warning(f"Failed to update JSON column for product {product_id}: {e}")
+            return False
+
     def get_products_dataframe(self, limit: Optional[int] = 10000) -> Optional[pd.DataFrame]:
         """Get products as DataFrame (fast path for export/download). Uses single read_sql_query."""
         try:

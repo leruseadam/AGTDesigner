@@ -2801,6 +2801,10 @@ class JSONMatcher:
                     matched_product['_match_score'] = 100.0
                     matched_products.append(matched_product)
                     items_matched += 1
+                    # Keep JSON column up to date with latest feed value for future exact matches
+                    pid = matched_product.get('id')
+                    if pid is not None and product_name:
+                        self._update_matched_product_json(pid, product_name)
                     continue  # Skip to next item since we found a match
 
                 # CRITICAL: Detect concentrate/vape JSON items (1mL / Prana AIO / Live Resin / Vape / Cartridge)
@@ -7897,32 +7901,86 @@ class JSONMatcher:
 
         return strain.strip()
 
+    def _tokens_for_json_match(self, s: str) -> set:
+        """Meaningful tokens for similar-name matching: lower, split on non-alphanumeric, drop stop words and very short."""
+        if not s or not isinstance(s, str):
+            return set()
+        s = s.lower().strip()
+        s = re.sub(r'\s+', ' ', s)
+        # Split on spaces and common separators; keep alphanumeric + hyphen
+        tokens = re.sub(r'[^\w\s-]', ' ', s).split()
+        stop = {'and', 'or', 'the', 'for', 'of', 'in', 'a', 'an', 'to', 'by', 'with', 'dominant'}
+        out = set()
+        for t in tokens:
+            t = t.strip(' -')
+            if not t or len(t) < 2 or t in stop:
+                continue
+            # Normalize 1ml / 1 ml style
+            if re.match(r'^[\d.]+m?l$', t):
+                t = t.replace(' ', '') if ' ' in t else t
+            out.add(t)
+        return out
+
     def _find_json_column_match(self, json_description: str) -> Optional[dict]:
         """
-        Direct exact match: compare incoming JSON name to JSON column value.
-        Incoming names match perfectly with column values - no normalization needed.
+        Match incoming name to JSON column: exact, then normalized, then token-similar.
+        Similar names (e.g. same brand/strain/weight, different wording) can match.
         """
         if not json_description:
             return None
 
-        # Use exact value as-is (strip only)
         exact_key = json_description.strip()
-        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for exact '{exact_key[:60]}...'")
+        key_lower = exact_key.lower().strip()
+        key_ws = re.sub(r'\s+', ' ', key_lower).strip()
+        logging.debug(f"🔍 JSON COLUMN MATCH: '{key_ws[:60]}...'")
 
         if self._indexed_cache and 'json_column_lookup' in self._indexed_cache:
             json_lookup = self._indexed_cache['json_column_lookup']
 
-            # Direct exact match - no normalization
+            # 1) Exact match (as-is)
             if exact_key in json_lookup:
                 matched = json_lookup[exact_key]
                 if matched:
                     product = dict(matched[0])
                     product['_source'] = 'database'
                     product['_match_type'] = 'json_column_exact'
-                    logging.info(f"✅ JSON COLUMN MATCH: '{exact_key[:50]}' -> '{product.get('Product Name*', 'Unknown')}'")
+                    logging.info(f"✅ JSON COLUMN MATCH (exact): '{exact_key[:50]}'")
                     return product
 
-        # Excel fallback: direct exact match
+            # 2) Normalized (lower + collapse whitespace)
+            for key in (key_lower, key_ws):
+                if key and key in json_lookup:
+                    matched = json_lookup[key]
+                    if matched:
+                        product = dict(matched[0])
+                        product['_source'] = 'database'
+                        product['_match_type'] = 'json_column_normalized'
+                        logging.info(f"✅ JSON COLUMN MATCH (normalized): '{key[:50]}'")
+                        return product
+
+            # 3) Token-similar: assume names are similar (same product, different wording)
+            incoming_tokens = self._tokens_for_json_match(json_description)
+            if len(incoming_tokens) >= 3:
+                best_ratio = 0.0
+                best_product = None
+                for stored_key, products in json_lookup.items():
+                    if not products or not stored_key:
+                        continue
+                    stored_tokens = self._tokens_for_json_match(stored_key)
+                    if not stored_tokens:
+                        continue
+                    overlap = len(incoming_tokens & stored_tokens) / min(len(incoming_tokens), len(stored_tokens))
+                    if overlap >= 0.55 and overlap > best_ratio:
+                        best_ratio = overlap
+                        best_product = products[0]
+                if best_product is not None:
+                    product = dict(best_product)
+                    product['_source'] = 'database'
+                    product['_match_type'] = 'json_column_similar'
+                    logging.info(f"✅ JSON COLUMN MATCH (similar, {best_ratio:.0%}): '{key_ws[:40]}'")
+                    return product
+
+        # Excel fallback: exact then normalized
         if hasattr(self, 'excel_processor') and self.excel_processor and getattr(self.excel_processor, 'df', None) is not None:
             try:
                 df = self.excel_processor.df
@@ -7933,18 +7991,32 @@ class JSONMatcher:
                             j = str(row.get('JSON', '') or '').strip()
                             if j:
                                 self._excel_json_lookup[j] = row.to_dict()
-                    if exact_key in self._excel_json_lookup:
-                        match = self._excel_json_lookup[exact_key]
-                        match = dict(match) if not isinstance(match, dict) else match
-                        match['_source'] = 'excel'
-                        match['_match_type'] = 'json_column_exact'
-                        logging.info(f"✅ JSON COLUMN MATCH (Excel): '{exact_key[:50]}'")
-                        return match
+                                jlo = j.lower().strip()
+                                jws = re.sub(r'\s+', ' ', jlo).strip()
+                                for k in (jlo, jws):
+                                    if k and k not in self._excel_json_lookup:
+                                        self._excel_json_lookup[k] = row.to_dict()
+                    for key in (exact_key, key_lower, key_ws):
+                        if key and key in self._excel_json_lookup:
+                            match = dict(self._excel_json_lookup[key]) if not isinstance(self._excel_json_lookup[key], dict) else self._excel_json_lookup[key].copy()
+                            match['_source'] = 'excel'
+                            match['_match_type'] = 'json_column_exact'
+                            return match
             except Exception as e:
                 logging.debug(f"Error checking Excel JSON column: {e}")
 
-        logging.debug(f"❌ No JSON column match for '{exact_key[:50]}...'")
+        logging.debug(f"❌ No JSON column match for '{key_ws[:50]}...'")
         return None
+
+    def _update_matched_product_json(self, product_id: int, json_value: str) -> None:
+        """Update the database JSON column for a matched product to the latest feed value."""
+        try:
+            product_db = self._get_product_database()
+            if product_db and product_id is not None and json_value:
+                if product_db.update_product_json_column(product_id, json_value):
+                    logging.debug(f"Updated JSON column for product id={product_id} to latest feed value")
+        except Exception as e:
+            logging.debug(f"Could not update JSON column for product {product_id}: {e}")
     
 
     def _find_exact_name_matches(self, json_name: str) -> List[dict]:
