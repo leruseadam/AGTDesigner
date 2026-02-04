@@ -1424,10 +1424,17 @@ class JSONMatcher:
                 json_value = str(product.get('JSON') or product.get('json') or '').strip()
                 if json_value:
                     products_with_json += 1
-                    # Use exact value as key - no normalization needed
-                    if json_value not in indexed_cache['json_column_lookup']:
-                        indexed_cache['json_column_lookup'][json_value] = []
-                    indexed_cache['json_column_lookup'][json_value].append(product)
+                    lu = indexed_cache['json_column_lookup']
+                    if json_value not in lu:
+                        lu[json_value] = []
+                    lu[json_value].append(product)
+                    # Apostrophe-normalized keys so "God's Gift" JSON matches DB "Gods Gift"
+                    key_lo = json_value.lower().strip()
+                    key_ws = re.sub(r'\s+', ' ', key_lo).strip()
+                    key_no_ap = re.sub(r"[''`]", '', key_ws).strip()
+                    for k in (key_lo, key_ws, key_no_ap):
+                        if k and k not in lu:
+                            lu[k] = lu[json_value]
                 # If DB had no JSON but has Description, keep product in-memory for display only (not for matching)
                 description_value = str(product.get('Description', '')).strip()
                 if description_value and not json_value:
@@ -1484,10 +1491,17 @@ class JSONMatcher:
                 json_value = str(product.get('JSON') or product.get('json') or '').strip()
                 if not json_value:
                     continue
-                # Use exact value as key - no normalization needed (perfect match)
-                if json_value not in self._indexed_cache['json_column_lookup']:
-                    self._indexed_cache['json_column_lookup'][json_value] = []
-                self._indexed_cache['json_column_lookup'][json_value].append(product)
+                lu = self._indexed_cache['json_column_lookup']
+                if json_value not in lu:
+                    lu[json_value] = []
+                lu[json_value].append(product)
+                # Apostrophe-normalized keys so "God's Gift" JSON matches DB "Gods Gift"
+                key_lo = json_value.lower().strip()
+                key_ws = re.sub(r'\s+', ' ', key_lo).strip()
+                key_no_ap = re.sub(r"[''`]", '', key_ws).strip()
+                for k in (key_lo, key_ws, key_no_ap):
+                    if k and k not in lu:
+                        lu[k] = lu[json_value]
                 count += 1
             if count:
                 logging.info(f"📊 Populated JSON column lookup from DB: {count} products, {len(self._indexed_cache['json_column_lookup'])} keys")
@@ -2727,8 +2741,14 @@ class JSONMatcher:
                 logging.info(f"⚡ PERFORMANCE: Pre-filtered cache by vendor '{json_vendor_filter}': {len(self._sheet_cache)} -> {len(vendor_filtered_cache)} items")
             
             # PERFORMANCE: Build exact name lookup dictionary for O(1) matching
+            # VENDOR ISOLATION: When license from JSON URL is set, only search within vendor-filtered cache (never fall back to full cache)
             exact_name_lookup = {}
-            cache_to_search = vendor_filtered_cache if vendor_filtered_cache else (self._sheet_cache or [])
+            if json_vendor_filter:
+                cache_to_search = vendor_filtered_cache if (vendor_filtered_cache is not None) else []
+                if not cache_to_search:
+                    logging.info(f"🔒 VENDOR ISOLATION: No products from vendor '{json_vendor_filter}' in cache - search restricted to license only")
+            else:
+                cache_to_search = self._sheet_cache or []
             for cache_item in cache_to_search[:2000]:  # Limit to 2000 for performance
                 name = cache_item.get('original_name', '').strip().lower()
                 if name:
@@ -2792,29 +2812,53 @@ class JSONMatcher:
                 if not json_column_match and raw_product_name != product_name:
                     json_column_match = self._find_json_column_match(raw_product_name)
                 if json_column_match:
-                    # STRAIN VALIDATION: Even for JSON column matches, validate strain alignment
-                    strain_valid = self._validate_strain_match(item, json_column_match, strain)
-                    if not strain_valid:
-                        logging.warning(f"🚫 JSON COLUMN MATCH REJECTED: Strain mismatch for '{product_name[:50]}'")
-                        json_column_match = None  # Reject and fall through to fuzzy matching
-                    else:
-                        logging.info(f"✅ JSON COLUMN MATCH FOUND: '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
-                        matched_product = json_column_match.copy()
-                        matched_product['_source'] = 'JSON Column Match'
-                        matched_product['_match_score'] = 100.0
-                        # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database
-                        matched_product = self._enrich_product_with_strain_info(matched_product)
-                        matched_products.append(matched_product)
-                        items_matched += 1
-                        # Keep JSON column up to date with latest feed value for future exact matches
-                        pid = matched_product.get('id')
-                        if pid is not None and product_name:
-                            self._update_matched_product_json(pid, product_name)
-                        continue  # Skip to next item since we found a match
+                    # VENDOR ISOLATION: When license from JSON URL is set, matched product must be from that vendor
+                    if current_vendor_filter:
+                        db_vendor = str(json_column_match.get('Vendor/Supplier*', '') or json_column_match.get('Vendor', '')).strip()
+                        db_brand = str(json_column_match.get('Product Brand', '')).strip()
+                        if not db_vendor and not db_brand:
+                            logging.warning(f"🚫 JSON COLUMN MATCH REJECTED: No vendor/brand on DB product (license filter '{current_vendor_filter}')")
+                            json_column_match = None
+                        elif not self._is_vendor_match(current_vendor_filter, db_vendor or db_brand):
+                            logging.warning(f"🚫 JSON COLUMN MATCH REJECTED: Vendor mismatch for '{product_name[:50]}' (license '{current_vendor_filter}' vs DB '{db_vendor or db_brand}')")
+                            json_column_match = None
+                    if json_column_match:
+                        # STRAIN VALIDATION: Even for JSON column matches, validate strain alignment
+                        strain_valid = self._validate_strain_match(item, json_column_match, strain)
+                        if not strain_valid:
+                            logging.warning(f"🚫 JSON COLUMN MATCH REJECTED: Strain mismatch for '{product_name[:50]}'")
+                            json_column_match = None  # Reject and fall through to fuzzy matching
+                        else:
+                            logging.info(f"✅ JSON COLUMN MATCH FOUND: '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
+                            matched_product = json_column_match.copy()
+                            matched_product['_source'] = 'JSON Column Match'
+                            matched_product['_match_score'] = 100.0
 
-                # CRITICAL: Detect concentrate/vape JSON items (1mL / Prana AIO / Live Resin / Vape / Cartridge)
-                # For these, vendor metadata (from_license_name) is often the STORE, not the PRODUCT VENDOR,
-                # so strict vendor isolation will hide real matches. We turn vendor into a SOFT hint only.
+                            # CRITICAL: Override database price/weight with JSON manifest values
+                            # The JSON manifest has the CURRENT prices for this shipment
+                            json_price = str(item.get("line_price", "") or item.get("price", "")).strip()
+                            if json_price and json_price not in ('0', '0.0', '0.00'):
+                                matched_product['Price*'] = json_price
+                                matched_product['Price'] = json_price
+                                logging.debug(f"💰 Using JSON price: {json_price}")
+
+                            json_weight = str(item.get("unit_weight", "") or item.get("weight", "")).strip()
+                            if json_weight and json_weight not in ('0', '0.0', '0.00'):
+                                matched_product['Weight*'] = json_weight
+                                matched_product['Weight'] = json_weight
+
+                            # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database
+                            matched_product = self._enrich_product_with_strain_info(matched_product)
+                            matched_products.append(matched_product)
+                            items_matched += 1
+                            # Keep JSON column up to date with latest feed value for future exact matches
+                            pid = matched_product.get('id')
+                            if pid is not None and product_name:
+                                self._update_matched_product_json(pid, product_name)
+                            continue  # Skip to next item since we found a match
+
+                # Concentrate/vape detection (for type/weight checks). Vendor isolation is always enforced
+                # when from_license_name is present (json_vendor_filter) - no relaxation for concentrate/vape.
                 product_name_lower = product_name.lower()
                 weight_lower = str(weight or "").lower()
                 has_ml_weight = bool(re.search(r"\d+(?:\.\d+)?\s*ml", product_name_lower)) or "ml" in weight_lower
@@ -2875,6 +2919,20 @@ class JSONMatcher:
                                 if not excel_product_name:
                                     continue
                                 
+                                # CRITICAL: Reject Pre-Roll when JSON is vape/concentrate (e.g. GMO Cookies Live Resin → GMO Pre-Roll)
+                                db_product = cache_item.get('_db_product') or cache_item
+                                db_type_raw = str(db_product.get('Product Type*') or db_product.get('product_type') or cache_item.get('product_type') or '').strip().lower()
+                                if is_concentrate_vape_json and db_type_raw:
+                                    if 'pre-roll' in db_type_raw or 'preroll' in db_type_raw or 'pre roll' in db_type_raw:
+                                        continue
+                                # CRITICAL: Reject Vape Cartridge when JSON is dab extract only (e.g. Apple MAC Extract Crystal → cart)
+                                is_json_extract_only = (
+                                    'extract' in product_name_lower and ('crystal' in product_name_lower or 'batter' in product_name_lower)
+                                    and not any(x in product_name_lower for x in ['510', 'aio', 'prana aio', 'disposable'])
+                                )
+                                if is_json_extract_only and db_type_raw and ('vape' in db_type_raw or 'cartridge' in db_type_raw):
+                                    continue
+                                
                                 # PERFORMANCE: Early termination for exact matches (use pre-computed lower)
                                 if product_name_lower == excel_product_name:
                                     best_score = 200.0
@@ -2887,13 +2945,11 @@ class JSONMatcher:
                                 # ENHANCED SCORING: Multi-factor matching with PRECISION FOCUS
                                 score = 0.0
                                 
-                                # 0. VENDOR FILTER: STRICT vendor isolation for most products,
-                                # but RELAXED for concentrate/vape JSON items.
+                                # 0. VENDOR FILTER: Strict vendor isolation when license/vendor is set (from_license_name or item vendor).
                                 excel_vendor = cache_item.get('vendor', '').strip()
                                 vendor_match_bonus = 0.0
                                 if current_vendor_filter:
-                                    # STRICT vendor isolation: when JSON knows the vendor/license
-                                    # (from_license_name), only consider DB rows from that vendor.
+                                    # Only consider DB rows from the same vendor/license (isolate by JSON URL license).
                                     # This keeps brands (Honey Tree, Bodhi High, etc.) properly
                                     # grouped under their upstream license like Conscious Cannabis.
                                     if not excel_vendor:
@@ -3777,26 +3833,36 @@ class JSONMatcher:
             # CRITICAL FIX: Ensure brand, price, and weight are always populated
             # Get brand with multiple fallbacks
             excel_brand = safe_row_get(excel_row, 'Product Brand') or safe_row_get(excel_row, 'ProductBrand') or vendor or 'CERES'
-            
-            # CRITICAL FIX: Prioritize database price, then JSON price, never use fallback
-            # Database prices are more reliable than JSON prices
-            excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or safe_row_get(excel_row, 'Price* (Tier Name for Bulk)') or ''
-            # Only use JSON price if database price is missing - use comprehensive field extraction
+
+            # CRITICAL FIX: Prioritize JSON price over database price
+            # The JSON manifest has CURRENT prices for this shipment - database prices may be stale
+            excel_price = ''
+            if json_item:
+                # Try JSON price fields first (the manifest has current prices)
+                json_price = str(json_item.get("line_price", "") or json_item.get("price", "") or
+                               json_item.get("retail_price", "") or json_item.get("unit_price", "")).strip()
+                if json_price and json_price not in ('0', '0.0', '0.00'):
+                    excel_price = json_price
+                    logging.debug(f"💰 Using JSON manifest price: {excel_price}")
+
+            # Only fall back to database price if JSON price is missing
             if not excel_price or excel_price in ('0', '0.0', '0.00', ''):
-                if json_item:
-                    excel_price = _extract_field_from_json_item_comprehensive(json_item, "Price* (Tier Name for Bulk)") or ''
-                else:
-                    excel_price = ''  # NO DEFAULT PRICE - leave empty if not found
-            
-            # CRITICAL FIX: Prioritize database weight, then JSON weight, never use fallback
-            # Database weights are more reliable than JSON weights
-            excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or ''
-            # Only use JSON weight if database weight is missing - use comprehensive field extraction
+                excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or safe_row_get(excel_row, 'Price* (Tier Name for Bulk)') or ''
+                if excel_price and excel_price not in ('0', '0.0', '0.00', ''):
+                    logging.debug(f"💰 Using database price (no JSON price): {excel_price}")
+
+            # CRITICAL FIX: Prioritize JSON weight over database weight
+            # The JSON manifest has CURRENT weights for this shipment
+            excel_weight = ''
+            if json_item:
+                # Try JSON weight fields first
+                json_weight = str(json_item.get("unit_weight", "") or json_item.get("weight", "")).strip()
+                if json_weight and json_weight not in ('0', '0.0', '0.00'):
+                    excel_weight = json_weight
+
+            # Only fall back to database weight if JSON weight is missing
             if not excel_weight or excel_weight in ('0', '0.0', '0.00', ''):
-                if json_item:
-                    excel_weight = _extract_field_from_json_item_comprehensive(json_item, "Weight*") or ''
-                else:
-                    excel_weight = ''  # NO DEFAULT WEIGHT - leave empty if not found
+                excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or ''
             
             # Get units with JSON override and fallback - use comprehensive field extraction
             excel_units = safe_row_get(excel_row, 'Units') or safe_row_get(excel_row, 'Weight Unit* (grams/gm or ounces/oz)') or 'g'
@@ -4194,6 +4260,11 @@ class JSONMatcher:
                 overlap = json_words & db_words
                 # Require at least one meaningful word overlap
                 if overlap:
+                    # CRITICAL: Reject when only overlap is a common strain suffix (e.g. Rainbow Runtz vs White Runtz, Blueberry Cookies vs Cookies & Cream)
+                    COMMON_STRAIN_SUFFIXES = {'runtz', 'kush', 'cookies', 'haze', 'diesel', 'sherbet', 'cream', 'banana', 'cake'}
+                    if len(json_words) >= 2 and len(db_words) >= 2 and len(overlap) == 1 and overlap.issubset(COMMON_STRAIN_SUFFIXES):
+                        logging.warning(f"🧬 STRAIN MISMATCH (suffix-only overlap): JSON '{json_strain_name}' ≠ DB '{db_strain_name}' (overlap: {overlap})")
+                        return False
                     logging.debug(f"🧬 STRAIN VALID (overlap): '{json_strain_name}' ~ '{db_strain_name}' (common: {overlap})")
                     return True
 
@@ -8232,6 +8303,17 @@ class JSONMatcher:
                         product['_match_type'] = 'json_column_normalized'
                         logging.info(f"✅ JSON COLUMN MATCH (normalized): '{key[:50]}'")
                         return product
+
+            # 3) Apostrophe-normalized (God's Gift → Gods Gift) so DB "Gods Gift" matches JSON "God's Gift"
+            key_no_apostrophe = re.sub(r"[''`]", '', key_ws).strip()
+            if key_no_apostrophe and key_no_apostrophe != key_ws and key_no_apostrophe in json_lookup:
+                matched = json_lookup[key_no_apostrophe]
+                if matched:
+                    product = dict(matched[0])
+                    product['_source'] = 'database'
+                    product['_match_type'] = 'json_column_normalized'
+                    logging.info(f"✅ JSON COLUMN MATCH (apostrophe-normalized): '{key_no_apostrophe[:50]}'")
+                    return product
 
             # NOTE: Token-similar matching REMOVED for performance
             # It was O(n) for each product and caused strain mismatches
