@@ -8366,21 +8366,43 @@ class JSONMatcher:
                 for strain_key in (incoming_strain_lower, incoming_strain_no_apos):
                     if strain_key in self._strain_to_json_lookup:
                         candidates = self._strain_to_json_lookup[strain_key]
-                        # Filter by vendor/brand - first segment must match
                         json_parts = [p.strip().lower() for p in json_description.split(' - ')]
                         json_first = json_parts[0] if json_parts else ''
+                        json_full_lower = json_description.lower()
+
+                        # Determine product type from incoming JSON
+                        # 510 = cartridge, AIO/Prana = disposable - these are DIFFERENT products
+                        json_is_510 = '510' in json_full_lower
+                        json_is_aio = 'aio' in json_full_lower or 'prana' in json_full_lower or 'disposable' in json_full_lower
 
                         for stored_key, products in candidates:
                             stored_parts = [p.strip().lower() for p in stored_key.split(' - ')]
                             stored_first = stored_parts[0] if stored_parts else ''
+                            stored_lower = stored_key.lower()
 
                             # Require first segment (brand) to match
-                            if json_first and stored_first and json_first == stored_first:
-                                product = dict(products[0])
-                                product['_source'] = 'database'
-                                product['_match_type'] = 'json_column_strain'
-                                logging.info(f"✅ JSON COLUMN MATCH (exact strain '{incoming_strain}'): '{stored_key[:50]}'")
-                                return product
+                            if not (json_first and stored_first and json_first == stored_first):
+                                continue
+
+                            # Require product type to match (510 vs AIO/disposable)
+                            stored_is_510 = '510' in stored_lower
+                            stored_is_aio = 'aio' in stored_lower or 'prana' in stored_lower or 'disposable' in stored_lower
+
+                            # Both must be same type
+                            if json_is_510 and not stored_is_510:
+                                continue
+                            if json_is_aio and not stored_is_aio:
+                                continue
+                            if stored_is_510 and not json_is_510:
+                                continue
+                            if stored_is_aio and not json_is_aio:
+                                continue
+
+                            product = dict(products[0])
+                            product['_source'] = 'database'
+                            product['_match_type'] = 'json_column_strain'
+                            logging.info(f"✅ JSON COLUMN MATCH (exact strain '{incoming_strain}'): '{stored_key[:50]}'")
+                            return product
 
         # Excel fallback: exact then normalized
         if hasattr(self, 'excel_processor') and self.excel_processor and getattr(self.excel_processor, 'df', None) is not None:
