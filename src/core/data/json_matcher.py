@@ -2797,6 +2797,8 @@ class JSONMatcher:
                     matched_product = json_column_match.copy()
                     matched_product['_source'] = 'JSON Column Match'
                     matched_product['_match_score'] = 100.0
+                    # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database
+                    matched_product = self._enrich_product_with_strain_info(matched_product)
                     matched_products.append(matched_product)
                     items_matched += 1
                     # Keep JSON column up to date with latest feed value for future exact matches
@@ -3645,15 +3647,20 @@ class JSONMatcher:
                 '__json_item__': item
             }
             
-            # ===== STEP 11: Log creation =====
+            # ===== STEP 11: Strain database enrichment =====
+            # Enrich lineage from strain database if available
+            product = self._enrich_product_with_strain_info(product)
+
+            # ===== STEP 12: Log creation =====
+            final_lineage = product.get('Lineage', lineage)
             logging.info(f"✅ Created VALID fallback tag:")
             logging.info(f"   📝 Product: '{product_name}'")
             logging.info(f"   🏷️  Brand: '{brand}'")
             logging.info(f"   💰 Price: '{price}'")
             logging.info(f"   ⚖️  Weight: '{weight}{weight_units}'")
-            logging.info(f"   🧬 Lineage: '{lineage}'")
+            logging.info(f"   🧬 Lineage: '{final_lineage}'" + (" (enriched)" if product.get('_strain_enriched') else ""))
             logging.info(f"   📦 Type: '{product_type}'")
-            
+
             return product
             
         except Exception as e:
@@ -3934,12 +3941,123 @@ class JSONMatcher:
             
             # DEBUG: Log the critical fields
             logging.info(f"🔍 EXCEL MATCH - Product: '{product_name}', Brand: '{excel_brand}', Price: '{excel_price}', Weight: '{excel_weight}'")
-            
+
+            # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database if available
+            product = self._enrich_product_with_strain_info(product)
+
             return product
         except Exception as e:
             logging.error(f"Error creating product from Excel match: {e}")
             return {}
-    
+
+    def _enrich_product_with_strain_info(self, product: dict) -> dict:
+        """
+        Enrich a product with lineage information from the strain database.
+
+        This looks up the product's strain in the strains table and fills in
+        the canonical lineage if the product doesn't already have one.
+        """
+        if not product:
+            return product
+
+        try:
+            # Get strain name from product
+            strain_name = (product.get('Product Strain') or
+                          product.get('ProductStrain') or
+                          product.get('strain_name') or '').strip()
+
+            # If no strain name, try to extract from product name
+            if not strain_name:
+                product_name = product.get('Product Name*', '')
+                strain_name = self._extract_strain_from_product_name(product_name)
+
+            if not strain_name:
+                return product
+
+            # Get existing lineage
+            existing_lineage = (product.get('Lineage') or
+                               product.get('lineage') or
+                               product.get('canonical_lineage') or '').strip().upper()
+
+            # Skip if already has a good lineage (not MIXED/HYBRID or empty)
+            if existing_lineage and existing_lineage not in ['', 'MIXED', 'HYBRID', 'UNKNOWN']:
+                logging.debug(f"🧬 Strain '{strain_name}' already has lineage: {existing_lineage}")
+                return product
+
+            # Look up strain in database
+            product_db = self._get_product_database()
+            if not product_db:
+                return product
+
+            strain_info = product_db.get_strain_info(strain_name)
+            if strain_info:
+                display_lineage = strain_info.get('display_lineage') or strain_info.get('canonical_lineage')
+                if display_lineage and display_lineage.strip().upper() not in ['', 'MIXED', 'UNKNOWN']:
+                    # Enrich the product with strain database lineage
+                    product['Lineage'] = display_lineage
+                    product['lineage'] = display_lineage
+                    product['canonical_lineage'] = display_lineage
+                    product['_strain_enriched'] = True
+                    logging.info(f"🧬 STRAIN ENRICHMENT: '{strain_name}' → lineage '{display_lineage}'")
+            else:
+                # Try vendor-specific lineage lookup
+                vendor = product.get('Vendor/Supplier*') or product.get('Vendor') or ''
+                brand = product.get('Product Brand') or ''
+
+                vendor_lineage = product_db.get_vendor_strain_lineage(strain_name, vendor, brand)
+                if vendor_lineage and vendor_lineage.strip().upper() not in ['', 'MIXED', 'UNKNOWN']:
+                    product['Lineage'] = vendor_lineage
+                    product['lineage'] = vendor_lineage
+                    product['canonical_lineage'] = vendor_lineage
+                    product['_strain_enriched'] = True
+                    logging.info(f"🧬 VENDOR STRAIN ENRICHMENT: '{strain_name}' + vendor '{vendor}' → lineage '{vendor_lineage}'")
+
+            return product
+
+        except Exception as e:
+            logging.warning(f"Error enriching product with strain info: {e}")
+            return product
+
+    def _extract_strain_from_product_name(self, product_name: str) -> str:
+        """
+        Extract strain name from a product name.
+        Examples:
+            "Blue Dream Flower by Vendor - 3.5g" -> "Blue Dream"
+            "OG Kush Cartridge by Brand - 1g" -> "OG Kush"
+        """
+        if not product_name:
+            return ''
+
+        import re
+        name = product_name.strip()
+
+        # Remove vendor suffix (e.g., "by Vendor Name")
+        name = re.sub(r'\s+by\s+[\w\s]+$', '', name, flags=re.IGNORECASE)
+
+        # Remove weight suffix (e.g., "- 3.5g", "- 1mL")
+        name = re.sub(r'\s*-\s*[\d.]+\s*(g|mg|ml|oz)\s*$', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\s*-\s*[\d.]+\s*(g|mg|ml|oz)\s*x\s*\d+\s*(pack)?\s*$', '', name, flags=re.IGNORECASE)
+
+        # Remove product type suffixes
+        product_types = [
+            'flower', 'pre-roll', 'preroll', 'pre roll', 'joint', 'blunt',
+            'cartridge', 'cart', 'vape', 'disposable', 'aio',
+            'concentrate', 'wax', 'shatter', 'budder', 'batter', 'sugar', 'sauce', 'diamonds',
+            'live resin', 'rosin', 'badder', 'crumble',
+            'edible', 'gummy', 'gummies', 'chocolate', 'cookie', 'brownie',
+            'tincture', 'capsule', 'capsules', 'topical', 'balm', 'lotion'
+        ]
+
+        for ptype in product_types:
+            # Remove product type at end of name
+            name = re.sub(rf'\s+{re.escape(ptype)}s?\s*$', '', name, flags=re.IGNORECASE)
+
+        # Clean up extra whitespace and dashes
+        name = re.sub(r'\s*-\s*$', '', name)
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        return name
+
     def _convert_database_match_to_excel_format(self, db_match):
         """Convert a Product Database match to Excel row format for compatibility."""
         try:
