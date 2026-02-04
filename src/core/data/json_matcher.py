@@ -2833,20 +2833,7 @@ class JSONMatcher:
                             matched_product = json_column_match.copy()
                             matched_product['_source'] = 'JSON Column Match'
                             matched_product['_match_score'] = 100.0
-
-                            # CRITICAL: Override database price/weight with JSON manifest values
-                            # The JSON manifest has the CURRENT prices for this shipment
-                            json_price = str(item.get("line_price", "") or item.get("price", "")).strip()
-                            if json_price and json_price not in ('0', '0.0', '0.00'):
-                                matched_product['Price*'] = json_price
-                                matched_product['Price'] = json_price
-                                logging.debug(f"💰 Using JSON price: {json_price}")
-
-                            json_weight = str(item.get("unit_weight", "") or item.get("weight", "")).strip()
-                            if json_weight and json_weight not in ('0', '0.0', '0.00'):
-                                matched_product['Weight*'] = json_weight
-                                matched_product['Weight'] = json_weight
-
+                            # Database prices are the correct retail prices - keep them
                             # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database
                             matched_product = self._enrich_product_with_strain_info(matched_product)
                             matched_products.append(matched_product)
@@ -3834,35 +3821,25 @@ class JSONMatcher:
             # Get brand with multiple fallbacks
             excel_brand = safe_row_get(excel_row, 'Product Brand') or safe_row_get(excel_row, 'ProductBrand') or vendor or 'CERES'
 
-            # CRITICAL FIX: Prioritize JSON price over database price
-            # The JSON manifest has CURRENT prices for this shipment - database prices may be stale
-            excel_price = ''
-            if json_item:
-                # Try JSON price fields first (the manifest has current prices)
-                json_price = str(json_item.get("line_price", "") or json_item.get("price", "") or
-                               json_item.get("retail_price", "") or json_item.get("unit_price", "")).strip()
-                if json_price and json_price not in ('0', '0.0', '0.00'):
-                    excel_price = json_price
-                    logging.debug(f"💰 Using JSON manifest price: {excel_price}")
-
-            # Only fall back to database price if JSON price is missing
+            # CRITICAL FIX: Prioritize database price (retail price), then JSON price as fallback
+            # Database prices are the correct retail prices set by the store
+            excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or safe_row_get(excel_row, 'Price* (Tier Name for Bulk)') or ''
+            # Only use JSON price if database price is missing
             if not excel_price or excel_price in ('0', '0.0', '0.00', ''):
-                excel_price = safe_row_get(excel_row, 'Price*') or safe_row_get(excel_row, 'Price') or safe_row_get(excel_row, 'Price* (Tier Name for Bulk)') or ''
-                if excel_price and excel_price not in ('0', '0.0', '0.00', ''):
-                    logging.debug(f"💰 Using database price (no JSON price): {excel_price}")
+                if json_item:
+                    excel_price = _extract_field_from_json_item_comprehensive(json_item, "Price* (Tier Name for Bulk)") or ''
+                else:
+                    excel_price = ''  # NO DEFAULT PRICE - leave empty if not found
 
-            # CRITICAL FIX: Prioritize JSON weight over database weight
-            # The JSON manifest has CURRENT weights for this shipment
-            excel_weight = ''
-            if json_item:
-                # Try JSON weight fields first
-                json_weight = str(json_item.get("unit_weight", "") or json_item.get("weight", "")).strip()
-                if json_weight and json_weight not in ('0', '0.0', '0.00'):
-                    excel_weight = json_weight
-
-            # Only fall back to database weight if JSON weight is missing
+            # CRITICAL FIX: Prioritize database weight, then JSON weight as fallback
+            # Database weights are more reliable
+            excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or ''
+            # Only use JSON weight if database weight is missing
             if not excel_weight or excel_weight in ('0', '0.0', '0.00', ''):
-                excel_weight = safe_row_get(excel_row, 'Weight*') or safe_row_get(excel_row, 'Weight') or ''
+                if json_item:
+                    excel_weight = _extract_field_from_json_item_comprehensive(json_item, "Weight*") or ''
+                else:
+                    excel_weight = ''  # NO DEFAULT WEIGHT - leave empty if not found
             
             # Get units with JSON override and fallback - use comprehensive field extraction
             excel_units = safe_row_get(excel_row, 'Units') or safe_row_get(excel_row, 'Weight Unit* (grams/gm or ounces/oz)') or 'g'
