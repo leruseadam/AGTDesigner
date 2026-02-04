@@ -2793,19 +2793,25 @@ class JSONMatcher:
                 if not json_column_match and raw_product_name != product_name:
                     json_column_match = self._find_json_column_match(raw_product_name)
                 if json_column_match:
-                    logging.info(f"✅ JSON COLUMN MATCH FOUND: '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
-                    matched_product = json_column_match.copy()
-                    matched_product['_source'] = 'JSON Column Match'
-                    matched_product['_match_score'] = 100.0
-                    # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database
-                    matched_product = self._enrich_product_with_strain_info(matched_product)
-                    matched_products.append(matched_product)
-                    items_matched += 1
-                    # Keep JSON column up to date with latest feed value for future exact matches
-                    pid = matched_product.get('id')
-                    if pid is not None and product_name:
-                        self._update_matched_product_json(pid, product_name)
-                    continue  # Skip to next item since we found a match
+                    # STRAIN VALIDATION: Even for JSON column matches, validate strain alignment
+                    strain_valid = self._validate_strain_match(item, json_column_match, strain)
+                    if not strain_valid:
+                        logging.warning(f"🚫 JSON COLUMN MATCH REJECTED: Strain mismatch for '{product_name[:50]}'")
+                        json_column_match = None  # Reject and fall through to fuzzy matching
+                    else:
+                        logging.info(f"✅ JSON COLUMN MATCH FOUND: '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
+                        matched_product = json_column_match.copy()
+                        matched_product['_source'] = 'JSON Column Match'
+                        matched_product['_match_score'] = 100.0
+                        # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database
+                        matched_product = self._enrich_product_with_strain_info(matched_product)
+                        matched_products.append(matched_product)
+                        items_matched += 1
+                        # Keep JSON column up to date with latest feed value for future exact matches
+                        pid = matched_product.get('id')
+                        if pid is not None and product_name:
+                            self._update_matched_product_json(pid, product_name)
+                        continue  # Skip to next item since we found a match
 
                 # CRITICAL: Detect concentrate/vape JSON items (1mL / Prana AIO / Live Resin / Vape / Cartridge)
                 # For these, vendor metadata (from_license_name) is often the STORE, not the PRODUCT VENDOR,
@@ -3086,6 +3092,14 @@ class JSONMatcher:
                         else:
                             name_similarity_required = True
                 
+                # STRAIN VALIDATION: Reject matches where strains don't align
+                if best_match is not None:
+                    strain_valid = self._validate_strain_match(item, best_match, strain)
+                    if not strain_valid:
+                        logging.warning(f"🚫 STRAIN MISMATCH: JSON strain doesn't match DB product - rejecting")
+                        best_match = None
+                        best_score = 0
+
                 if best_match is not None and best_score >= 80.0:  # High confidence - auto-approve (lowered from 100)
                     validated = True
                     logging.info(f"✅ HIGH CONFIDENCE: Score {best_score:.1f} >= 80.0")
@@ -4056,6 +4070,106 @@ class JSONMatcher:
         name = re.sub(r'\s*-\s*$', '', name)
         name = re.sub(r'\s+', ' ', name).strip()
 
+        return name
+
+    def _validate_strain_match(self, json_item: dict, db_match: dict, json_strain: str = None) -> bool:
+        """
+        Validate that the strain from JSON matches the strain in the database product.
+        Returns True if valid, False if the match should be rejected.
+
+        This prevents matches like:
+        - "God's Gift Vape" JSON → "Starfighter Cartridge" DB (different strains)
+        - "Blue Dream Flower" JSON → "OG Kush Flower" DB (different strains)
+        """
+        try:
+            # Get strain from JSON item
+            json_strain_name = (json_strain or
+                               str(json_item.get('strain_name', '') or
+                                   json_item.get('strain', '')).strip())
+
+            # If no explicit strain in JSON, try to extract from product name
+            if not json_strain_name:
+                json_product_name = str(json_item.get('product_name', '')).strip()
+                json_strain_name = self._extract_strain_from_product_name(json_product_name)
+
+            # Get strain from database match
+            db_strain_name = (str(db_match.get('Product Strain', '') or
+                                 db_match.get('ProductStrain', '') or
+                                 db_match.get('strain_name', '')).strip())
+
+            # If no explicit strain in DB, try to extract from product name
+            if not db_strain_name:
+                db_product_name = str(db_match.get('Product Name*', '') or
+                                     db_match.get('Description', '')).strip()
+                db_strain_name = self._extract_strain_from_product_name(db_product_name)
+
+            # If neither has a strain, can't validate - allow the match
+            if not json_strain_name and not db_strain_name:
+                return True
+
+            # If only one has a strain, be lenient - allow the match
+            # (the other product might just not have strain data)
+            if not json_strain_name or not db_strain_name:
+                return True
+
+            # Both have strains - check if they match
+            json_normalized = self._normalize_strain_for_comparison(json_strain_name)
+            db_normalized = self._normalize_strain_for_comparison(db_strain_name)
+
+            # Check for exact match
+            if json_normalized == db_normalized:
+                logging.debug(f"🧬 STRAIN VALID: '{json_strain_name}' == '{db_strain_name}'")
+                return True
+
+            # Check for partial match (one contains the other)
+            if json_normalized in db_normalized or db_normalized in json_normalized:
+                logging.debug(f"🧬 STRAIN VALID (partial): '{json_strain_name}' ~ '{db_strain_name}'")
+                return True
+
+            # Check for word overlap (handles "God's Gift" vs "Gods Gift" etc.)
+            json_words = set(json_normalized.split())
+            db_words = set(db_normalized.split())
+
+            # Remove common filler words
+            filler = {'the', 'and', 'or', 'x', 'by', 'live', 'resin', 'hte'}
+            json_words -= filler
+            db_words -= filler
+
+            # Filter to meaningful words (3+ chars)
+            json_words = {w for w in json_words if len(w) >= 3}
+            db_words = {w for w in db_words if len(w) >= 3}
+
+            if json_words and db_words:
+                overlap = json_words & db_words
+                # Require at least one meaningful word overlap
+                if overlap:
+                    logging.debug(f"🧬 STRAIN VALID (overlap): '{json_strain_name}' ~ '{db_strain_name}' (common: {overlap})")
+                    return True
+
+                # No overlap - strains are different
+                logging.warning(f"🧬 STRAIN MISMATCH: JSON '{json_strain_name}' ≠ DB '{db_strain_name}'")
+                logging.warning(f"   JSON words: {json_words}, DB words: {db_words}")
+                return False
+
+            # Could not determine - allow the match
+            return True
+
+        except Exception as e:
+            logging.warning(f"Error validating strain match: {e}")
+            return True  # On error, allow the match
+
+    def _normalize_strain_for_comparison(self, strain_name: str) -> str:
+        """Normalize strain name for comparison."""
+        if not strain_name:
+            return ''
+        import re
+        name = strain_name.lower().strip()
+        # Remove apostrophes and special chars
+        name = re.sub(r"[''`]", '', name)
+        # Remove hyphens between words
+        name = re.sub(r'-', ' ', name)
+        # Collapse whitespace
+        name = re.sub(r'\s+', ' ', name).strip()
         return name
 
     def _convert_database_match_to_excel_format(self, db_match):
