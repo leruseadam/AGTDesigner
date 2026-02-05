@@ -3537,6 +3537,27 @@ class JSONMatcher:
             if len(matched_products) < len(unique_items):
                 missing = len(unique_items) - len(matched_products)
                 logging.error(f"⚠️  CRITICAL: {missing} out of {len(unique_items)} items were lost!")
+                # EMERGENCY: Create fallback products for missing items
+                for i in range(len(matched_products), len(unique_items)):
+                    item = unique_items[i]
+                    product_name = str(item.get("product_name", "")).strip() or f"Item-{i+1}"
+                    emergency_product = {
+                        'Product Name*': product_name,
+                        'ProductName': product_name,
+                        'Description': product_name,
+                        'displayName': product_name,
+                        'Vendor': global_vendor or 'Unknown',
+                        'Product Brand': str(item.get("brand", global_vendor or "Unknown")),
+                        'Product Type*': str(item.get("inventory_type", "Mixed")),
+                        'Lineage': 'MIXED',
+                        'Weight*': str(item.get("weight", "1")),
+                        'Units': 'g',
+                        'Price*': '',
+                        'Quantity*': '1',
+                        'Source': 'Emergency Fallback'
+                    }
+                    matched_products.append(emergency_product)
+                    logging.warning(f"🚨 EMERGENCY: Created fallback product #{i+1} for missing item: '{product_name[:50]}'")
             
             # OPTIONAL DEDUPLICATION: Only if explicitly requested
             if deduplicate:
