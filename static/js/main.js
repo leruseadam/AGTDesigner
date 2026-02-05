@@ -11912,20 +11912,7 @@ const TagManager = {
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
-                    // Replace spinner in panel so user isn't stuck with endless loading
-                    const container = document.getElementById('availableTags');
-                    if (container && !cacheUsedForDisplay) {
-                        container.innerHTML = `
-                            <div class="text-center py-4">
-                                <div class="alert alert-info mx-3">
-                                    <p class="mb-2">Loading is taking longer than usual. If you've uploaded an Excel file, wait a bit longer or retry. If not, upload an Excel file to see products.</p>
-                                    <button class="btn btn-primary btn-sm" onclick="TagManager.retryLoadTags()">
-                                        <i class="bi bi-arrow-clockwise"></i> Retry Loading Tags
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                    }
+                    // Just hide splash, don't show notification - let the actual error handler show messages if needed
                 }, safetyTimeoutMs);
             }
 
@@ -12166,6 +12153,8 @@ const TagManager = {
                     if (!response.ok) {
                         // CRITICAL FIX: Handle 503 errors gracefully - try to use cache
                         if (response.status === 503) {
+                            // Store error status for retry logic
+                            this._lastErrorStatus = 503;
                             verboseLog('⚠️ Server returned 503 (Service Unavailable), attempting to use cached data...');
                             // Try to use cached tags if available
                             const cachedTags = this.hydrateAvailableTagsFromCache();
@@ -12173,8 +12162,22 @@ const TagManager = {
                                 verboseLog('✅ Using cached tags as fallback for 503 error');
                                 return true;
                             }
+                            // Try to parse error response for better error message
+                            let errorMsg = 'Server is temporarily overloaded. Please try again in a moment.';
+                            try {
+                                const errorData = await response.clone().json();
+                                if (errorData && errorData.message) {
+                                    errorMsg = errorData.message;
+                                } else if (errorData && errorData.error) {
+                                    errorMsg = errorData.error;
+                                }
+                            } catch (parseErr) {
+                                // Use default message if parsing fails
+                            }
                             // If no cache, throw error but don't retry 503 (server is overloaded)
-                            throw new Error(`HTTP 503: Service Unavailable - Server is temporarily overloaded. Please try again in a moment.`);
+                            const error = new Error(`HTTP 503: ${errorMsg}`);
+                            error.status = 503; // Store status on error object for error handler
+                            throw error;
                         }
                         if (response.status >= 500 && retryCount < maxRetries - 1) {
                             // Server error - retry immediately
@@ -13131,16 +13134,28 @@ const TagManager = {
             if (availableTagsContainer) {
                 const errorMessage = error.message || 'Unknown error';
                 const isProcessingError = errorMessage.includes('still processing') || errorMessage.includes('processing');
+                const isMemoryError = errorMessage.includes('memory') || errorMessage.includes('Memory') || error.status === 503;
+                
+                // Extract backend message if available (remove "HTTP 503: " prefix)
+                let displayMessage = errorMessage.replace(/^HTTP \d+: /, '');
+                
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-4">
-                        <div class="alert alert-warning mx-3">
-                            <h5 class="alert-heading">Unable to Load Tags</h5>
+                        <div class="alert ${isMemoryError ? 'alert-danger' : 'alert-warning'} mx-3">
+                            <h5 class="alert-heading">${isMemoryError ? '⚠️ Server Memory Issue' : 'Unable to Load Tags'}</h5>
                             <p class="mb-3">${isProcessingError 
                                 ? 'The file is still being processed. Please wait a moment and try again, or refresh the page.' 
+                                : isMemoryError
+                                ? displayMessage + '<br><br><strong>Solution:</strong> Click "Reset Cache" in Database Tools to free up memory, then retry.'
                                 : 'There was a problem loading the product tags. This can happen if the database is temporarily unavailable or the connection timed out.'}</p>
                             <button class="btn btn-primary me-2" onclick="TagManager.retryLoadTags()">
                                 <i class="fas fa-redo"></i> Retry Loading Tags
                             </button>
+                            ${isMemoryError ? `
+                            <button class="btn btn-warning me-2" onclick="if(window.resetCache) window.resetCache(); else alert('Please use the Reset Cache button in Database Tools');">
+                                <i class="fas fa-trash-alt"></i> Reset Cache
+                            </button>
+                            ` : ''}
                             <button class="btn btn-secondary" onclick="TagManager.forceReloadTags()">
                                 <i class="fas fa-sync-alt"></i> Force Reload (Clear Cache)
                             </button>
@@ -13196,6 +13211,15 @@ const TagManager = {
             clearTimeout(this._fetchingTimeout);
             this._fetchingTimeout = null;
         }
+        
+        // Check if last error was a 503 (memory issue) - add delay to give server time to recover
+        const lastErrorWas503 = this._lastErrorStatus === 503;
+        if (lastErrorWas503) {
+            console.log('⏳ Last error was 503 (memory issue) - waiting 3 seconds before retry to give server time to recover...');
+            this.showActionSplash('Waiting a moment for server to recover, then retrying...');
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+        }
+        
         // Show loading indicator
         this.showActionSplash('Retrying tag loading...');
         // Attempt to load tags again with force flag

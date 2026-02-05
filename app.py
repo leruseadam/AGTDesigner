@@ -11125,8 +11125,14 @@ def get_available_tags():
                     'force_frontend_cache_clear': force_frontend_cache_clear
                 })
             # Only return 503 if we have no cached data
-            logging.error("Memory usage too high and no cached data available")
-            return jsonify({'error': 'Memory usage too high, please try again later'}), 503
+            memory_mb = get_memory_usage()
+            logging.error(f"Memory usage too high ({memory_mb:.1f}MB > {MAX_MEMORY_MB}MB) and no cached data available")
+            return jsonify({
+                'error': 'Server memory usage is too high',
+                'message': f'Server memory usage ({memory_mb:.0f}MB) exceeds the limit ({MAX_MEMORY_MB}MB). Please wait a moment and try again, or click "Reset Cache" in Database Tools to free up memory.',
+                'memory_mb': round(memory_mb),
+                'limit_mb': MAX_MEMORY_MB
+            }), 503
         
         # Rate limiting: prevent rapid successive requests
         client_ip = request.remote_addr

@@ -2260,10 +2260,21 @@ class JSONMatcher:
             else:
                 json_vendor = self._extract_vendor(json_name_raw)
             
+            # CRITICAL FIX: Also extract brand from JSON product name for Conscious Cannabis brands
+            if not json_vendor and " - " in json_name_raw:
+                extracted_brand = self._extract_brand_from_product_name(json_name_raw)
+                if extracted_brand:
+                    json_vendor = extracted_brand.lower()
+            
             cache_vendor = str(cache_item.get("vendor", "")).strip().lower()
             
             # Extract additional fields for enhanced matching
             json_brand = str(json_item.get("brand", "")).lower().strip()
+            # CRITICAL FIX: Also extract brand from JSON name if not in item
+            if not json_brand and " - " in json_name_raw:
+                extracted_brand = self._extract_brand_from_product_name(json_name_raw)
+                if extracted_brand:
+                    json_brand = extracted_brand.lower()
             cache_brand = str(cache_item.get("Product Brand", cache_item.get("brand", ""))).lower().strip()
             json_type = str(json_item.get("product_type", "")).lower().strip()
             cache_type = str(cache_item.get("Product Type*", cache_item.get("product_type", ""))).lower().strip()
@@ -2293,23 +2304,54 @@ class JSONMatcher:
                 vendors_match = False
                 if json_vendor == cache_vendor:
                     vendors_match = True
+                elif json_vendor == cache_brand or cache_vendor == json_brand:
+                    vendors_match = True  # Brand matches vendor or vice versa
                 else:
-                    # Check known variations
-                    for main_vendor, variations in vendor_variations.items():
-                        if (json_vendor in [main_vendor] + variations and 
-                            cache_vendor in [main_vendor] + variations):
+                    # CRITICAL FIX: Check Conscious Cannabis vendor group aliases
+                    conscious_brand_aliases = {
+                        'pure': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                        'original': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                        'honey tree': ['conscious cannabis', 'conscious cannabis proc', 'honey tree'],
+                        'ultra pure': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                        'honey stixx': ['conscious cannabis', 'conscious cannabis proc', 'honey tree']
+                    }
+                    
+                    json_vendor_lower = json_vendor.lower() if json_vendor else ''
+                    cache_vendor_lower = cache_vendor.lower() if cache_vendor else ''
+                    cache_brand_lower = cache_brand.lower() if cache_brand else ''
+                    
+                    # Check if JSON brand matches DB vendor via aliases
+                    if json_vendor_lower in conscious_brand_aliases:
+                        if cache_vendor_lower in conscious_brand_aliases[json_vendor_lower] or cache_brand_lower in conscious_brand_aliases[json_vendor_lower]:
                             vendors_match = True
-                            break
+                    
+                    # Check if DB vendor/brand matches JSON brand via aliases
+                    if not vendors_match:
+                        for brand, aliases in conscious_brand_aliases.items():
+                            if json_vendor_lower in aliases and (cache_vendor_lower == brand or cache_brand_lower == brand):
+                                vendors_match = True
+                                break
+                    
+                    # Check known variations
+                    if not vendors_match:
+                        for main_vendor, variations in vendor_variations.items():
+                            if (json_vendor in [main_vendor] + variations and 
+                                cache_vendor in [main_vendor] + variations):
+                                vendors_match = True
+                                break
                     
                     # Also check for partial matches (more lenient)
                     if not vendors_match:
                         # Check if one vendor name contains the other
-                        if json_vendor in cache_vendor or cache_vendor in json_vendor:
+                        if json_vendor and cache_vendor and (json_vendor in cache_vendor or cache_vendor in json_vendor):
                             vendors_match = True
+                        # Also try vendor group matching
+                        if not vendors_match and json_vendor and cache_vendor:
+                            vendors_match = self._is_vendor_match(json_vendor, cache_vendor) or (cache_brand and self._is_vendor_match(json_vendor, cache_brand))
                 
                 # If vendors don't match, return very low score (but not 0 to allow for edge cases)
                 if not vendors_match:
-                    logging.debug(f"Vendor mismatch: '{json_vendor}' vs '{cache_vendor}' - returning low score")
+                    logging.debug(f"Vendor mismatch: '{json_vendor}' vs '{cache_vendor}' (brand: '{cache_brand}') - returning low score")
                     return 0.05
             # --- END: Enhanced vendor matching ---
             
@@ -2788,10 +2830,45 @@ class JSONMatcher:
                         db_strain = self._extract_strain_from_product_name(db_name) or self._extract_strain_from_product_name(db_json)
                         if db_strain and len(db_strain) >= 3:
                             sk = db_strain.lower().strip()
+                            
+                            # Add to indexes with original vendor/brand
                             if db_vendor:
                                 strain_vendor_index[(db_vendor, sk)].append(product)
                             if db_brand:
                                 strain_brand_index[(db_brand, sk)].append(product)
+                            
+                            # CRITICAL FIX: Add vendor group aliases for Conscious Cannabis brands
+                            # This allows "pure" JSON to match "conscious cannabis proc" DB products
+                            conscious_brand_to_vendors = {
+                                'pure': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                                'original': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                                'honey tree': ['conscious cannabis', 'conscious cannabis proc', 'honey tree'],
+                                'ultra pure': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                                'honey stixx': ['conscious cannabis', 'conscious cannabis proc', 'honey tree']
+                            }
+                            
+                            # If DB brand is a Conscious Cannabis brand, add aliases
+                            db_brand_lower = db_brand.lower()
+                            if db_brand_lower in conscious_brand_to_vendors:
+                                for alias_vendor in conscious_brand_to_vendors[db_brand_lower]:
+                                    strain_vendor_index[(alias_vendor, sk)].append(product)
+                                    strain_brand_index[(alias_vendor, sk)].append(product)
+                            
+                            # If DB vendor is Conscious Cannabis, add brand aliases
+                            if 'conscious cannabis' in db_vendor or db_vendor == 'bodhi high':
+                                for brand_alias in ['pure', 'original', 'honey tree', 'ultra pure', 'honey stixx']:
+                                    strain_brand_index[(brand_alias, sk)].append(product)
+                            
+                            # Add normalized vendor/brand names
+                            if db_vendor:
+                                normalized_vendor = self._normalize_vendor_name(db_vendor)
+                                if normalized_vendor != db_vendor:
+                                    strain_vendor_index[(normalized_vendor, sk)].append(product)
+                            if db_brand:
+                                normalized_brand = self._normalize_vendor_name(db_brand)
+                                if normalized_brand != db_brand:
+                                    strain_brand_index[(normalized_brand, sk)].append(product)
+                            
                             strain_only_index[sk].append(product)
                     logging.info(f"⚡ PERFORMANCE: Built DB fallback index: {len(strain_vendor_index)} vendor+strain keys, {len(strain_brand_index)} brand+strain keys, {len(strain_only_index)} strain-only keys")
                 except Exception as e:
@@ -3127,9 +3204,14 @@ class JSONMatcher:
                     
                     # Extract brand from JSON item (Honey Tree, Pure, Original, Ultra Pure are brands, not vendors)
                     json_brand = str(item.get("brand", "") or "").strip().lower()
-                    # Also try to extract brand from product name (e.g., "Honey Tree - Live Resin..." -> "honey tree")
+                    # CRITICAL FIX: Also try to extract brand from product name (e.g., "Honey Tree - Live Resin..." -> "honey tree")
                     if not json_brand and " - " in product_name:
                         json_brand = product_name.split(" - ")[0].strip().lower()
+                    # Also use the dedicated brand extraction function for better accuracy
+                    if not json_brand:
+                        extracted_brand = self._extract_brand_from_product_name(product_name)
+                        if extracted_brand:
+                            json_brand = extracted_brand.lower()
                     
                     # Determine product type from JSON name
                     json_is_510 = '510' in json_name_lower or ('cartridge' in json_name_lower and 'disposable' not in json_name_lower)
@@ -3141,11 +3223,24 @@ class JSONMatcher:
                     def _type_match(p):
                         """Check if DB product matches JSON product type."""
                         dn = str(p.get("Product Name*", "") or p.get("JSON", "") or "").lower()
-                        db_510 = '510' in dn or ('cartridge' in dn and 'disposable' not in dn)
-                        db_aio = 'aio' in dn or 'prana' in dn or 'disposable' in dn
-                        db_flower = 'flower' in dn
-                        db_preroll = 'pre-roll' in dn or 'preroll' in dn or 'shorty' in dn
-                        db_conc = 'batter' in dn or 'wax' in dn or 'terp' in dn
+                        db_type = str(p.get("Product Type*", "") or "").lower()
+                        
+                        # Check both product name and product type field
+                        db_510 = '510' in dn or '510' in db_type or ('cartridge' in dn and 'disposable' not in dn) or ('cartridge' in db_type and 'disposable' not in db_type)
+                        db_aio = 'aio' in dn or 'aio' in db_type or 'prana' in dn or 'prana' in db_type or 'disposable' in dn or 'disposable' in db_type
+                        db_flower = 'flower' in dn or 'flower' in db_type
+                        db_preroll = 'pre-roll' in dn or 'preroll' in dn or 'shorty' in dn or 'pre-roll' in db_type or 'preroll' in db_type
+                        db_conc = 'batter' in dn or 'wax' in dn or 'terp' in dn or 'batter' in db_type or 'wax' in db_type or 'crystal' in dn or 'crystal' in db_type
+                        
+                        # CRITICAL FIX: Prana AIO and 510 Vape are both vape products - allow cross-matching within vape category
+                        # This handles cases where JSON says "Prana AIO" but DB has "Vape Cartridge" or vice versa
+                        json_is_vape = json_is_510 or json_is_aio
+                        db_is_vape = db_510 or db_aio or 'vape' in db_type or 'cartridge' in db_type
+                        
+                        if json_is_vape and db_is_vape:
+                            return True  # Both are vape products - allow match
+                        
+                        # Strict type matching for non-vape products
                         if json_is_510 and not db_510: return False
                         if json_is_aio and not db_aio: return False
                         if json_is_flower and not db_flower: return False
@@ -3156,14 +3251,89 @@ class JSONMatcher:
                     candidates = []
                     ev = (effective_vendor or "").strip().lower()
                     
-                    # Try vendor+strain first, then brand+strain, then strain-only
+                    # CRITICAL FIX: Try vendor+strain first, then brand+strain with vendor group aliases, then strain-only
                     if json_strain_lower and len(json_strain_lower) >= 3:
+                        # Try vendor+strain first
                         if ev and (ev, json_strain_lower) in strain_vendor_index:
                             candidates = strain_vendor_index[(ev, json_strain_lower)]
-                        elif json_brand and (json_brand, json_strain_lower) in strain_brand_index:
-                            candidates = strain_brand_index[(json_brand, json_strain_lower)]
-                        elif json_strain_lower in strain_only_index:
+                            logging.debug(f"🔍 Found {len(candidates)} candidates via vendor+strain: ({ev}, {json_strain_lower})")
+                        
+                        # Try brand+strain with exact match and vendor group aliases
+                        if not candidates and json_brand:
+                            # Try exact brand match
+                            if (json_brand, json_strain_lower) in strain_brand_index:
+                                candidates = strain_brand_index[(json_brand, json_strain_lower)]
+                                logging.debug(f"🔍 Found {len(candidates)} candidates via exact brand+strain: ({json_brand}, {json_strain_lower})")
+                            
+                            # CRITICAL FIX: Try vendor group aliases for Conscious Cannabis brands
+                            # Pure, Original, Honey Tree, Ultra Pure all map to Conscious Cannabis Proc
+                            if not candidates:
+                                conscious_brand_aliases = {
+                                    'pure': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                                    'original': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                                    'honey tree': ['conscious cannabis', 'conscious cannabis proc', 'honey tree'],
+                                    'ultra pure': ['conscious cannabis', 'conscious cannabis proc', 'bodhi high'],
+                                    'honey stixx': ['conscious cannabis', 'conscious cannabis proc', 'honey tree']
+                                }
+                                
+                                brand_lower = json_brand.lower()
+                                if brand_lower in conscious_brand_aliases:
+                                    for alias in conscious_brand_aliases[brand_lower]:
+                                        # Try as brand
+                                        if (alias, json_strain_lower) in strain_brand_index:
+                                            candidates.extend(strain_brand_index[(alias, json_strain_lower)])
+                                            logging.debug(f"🔍 Found {len(strain_brand_index[(alias, json_strain_lower)])} candidates via brand alias '{alias}'+strain")
+                                        # Try as vendor
+                                        if (alias, json_strain_lower) in strain_vendor_index:
+                                            candidates.extend(strain_vendor_index[(alias, json_strain_lower)])
+                                            logging.debug(f"🔍 Found {len(strain_vendor_index[(alias, json_strain_lower)])} candidates via vendor alias '{alias}'+strain")
+                            
+                            # Try normalized brand name variations
+                            if not candidates:
+                                normalized_brand = self._normalize_vendor_name(json_brand)
+                                if normalized_brand != json_brand and (normalized_brand, json_strain_lower) in strain_brand_index:
+                                    candidates = strain_brand_index[(normalized_brand, json_strain_lower)]
+                                    logging.debug(f"🔍 Found {len(candidates)} candidates via normalized brand '{normalized_brand}'+strain")
+                        
+                        # CRITICAL FIX: Try strain-only as fallback (more flexible)
+                        if not candidates and json_strain_lower in strain_only_index:
                             candidates = strain_only_index[json_strain_lower]
+                            logging.debug(f"🔍 Found {len(candidates)} candidates via strain-only: {json_strain_lower}")
+                        
+                        # CRITICAL FIX: Try fuzzy strain matching if exact match fails
+                        # This handles variations like "Gelato 47" vs "Gelato #47" or "God's Gift" vs "Gods Gift"
+                        if not candidates and json_strain_lower:
+                            try:
+                                from fuzzywuzzy import fuzz
+                                # Try all strains in the index with fuzzy matching
+                                for indexed_strain, strain_products in strain_only_index.items():
+                                    if len(indexed_strain) >= 3:  # Only try meaningful strains
+                                        similarity = fuzz.ratio(json_strain_lower, indexed_strain)
+                                        if similarity >= 85:  # 85% similarity threshold
+                                            candidates.extend(strain_products)
+                                            logging.debug(f"🔍 Found {len(strain_products)} candidates via fuzzy strain match: '{json_strain_lower}' ≈ '{indexed_strain}' ({similarity}%)")
+                                # Remove duplicates
+                                seen = set()
+                                unique_candidates = []
+                                for p in candidates:
+                                    p_key = (p.get('Product Name*', ''), p.get('Vendor/Supplier*', ''))
+                                    if p_key not in seen:
+                                        seen.add(p_key)
+                                        unique_candidates.append(p)
+                                candidates = unique_candidates
+                            except ImportError:
+                                pass  # fuzzywuzzy not available, skip fuzzy matching
+                    
+                    # CRITICAL FIX: Remove duplicates while preserving order
+                    seen = set()
+                    unique_candidates = []
+                    for p in candidates:
+                        # Use Product Name* as unique key
+                        p_key = (p.get('Product Name*', ''), p.get('Vendor/Supplier*', ''))
+                        if p_key not in seen:
+                            seen.add(p_key)
+                            unique_candidates.append(p)
+                    candidates = unique_candidates
                     
                     # Find first candidate that matches product type
                     for p in candidates:
@@ -3197,14 +3367,23 @@ class JSONMatcher:
                         from fuzzywuzzy import fuzz
                         name_similarity = fuzz.token_sort_ratio(json_name, db_name)
                         
-                        # Require at least 55% name similarity to reduce wrong matches (e.g. MAC x Trophy Wife → Pineapple MAC)
-                        if name_similarity < 55:
-                            logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
+                        # CRITICAL FIX: If we have brand+strain match, be more lenient with name similarity
+                        # JSON format is very different from DB format, so exact name match isn't always possible
+                        has_brand_strain_match = (json_brand and json_strain_lower and 
+                                                 best_match.get('_match_type', '').startswith('brand_strain'))
+                        has_vendor_strain_match = (ev and json_strain_lower and 
+                                                   best_match.get('_match_type', '').startswith('vendor_strain'))
+                        
+                        # Lower threshold for brand/vendor+strain matches (they're already validated)
+                        similarity_threshold = 40.0 if (has_brand_strain_match or has_vendor_strain_match) else 55.0
+                        
+                        if name_similarity < similarity_threshold:
+                            logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}% < {similarity_threshold}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
                         else:
                             name_similarity_required = True
-                            logging.debug(f"✓ Name similarity check passed: {name_similarity}%")
+                            logging.debug(f"✓ Name similarity check passed: {name_similarity}% (threshold: {similarity_threshold}%)")
                     except ImportError:
                         # If fuzzywuzzy not available, require exact or partial name match
                         if json_name not in db_name and db_name not in json_name:
@@ -3412,10 +3591,29 @@ class JSONMatcher:
         try:
             name_lower = product_name.lower()
             
+            # CRITICAL FIX: Extract brand from JSON format "Brand - Type - Details - Strain - Lineage - Weight"
+            # Examples: "Pure - Live Resin...", "Honey Tree - Live Resin...", "Original - Live Resin..."
+            if " - " in product_name:
+                first_part = product_name.split(" - ")[0].strip().lower()
+                # Known Conscious Cannabis brands
+                conscious_brands = {
+                    'pure': 'Pure',
+                    'original': 'Original',
+                    'honey tree': 'Honey Tree',
+                    'ultra pure': 'Ultra Pure',
+                    'honey stixx': 'Honey Stixx'
+                }
+                if first_part in conscious_brands:
+                    return conscious_brands[first_part]
+                # Return capitalized first part if it looks like a brand (capitalized word)
+                if first_part and len(first_part) > 2:
+                    return first_part.title()
+            
             # Look for common brand patterns
             brand_patterns = [
                 'ceres', 'dank czar', 'dcz', 'jsm', 'omega', 'airo', 'hustler', 
-                'super fog', 'moonshot', 'platinum', 'gold', 'silver'
+                'super fog', 'moonshot', 'platinum', 'gold', 'silver',
+                'pure', 'original', 'honey tree', 'ultra pure', 'honey stixx'
             ]
             
             for pattern in brand_patterns:
@@ -3427,7 +3625,7 @@ class JSONMatcher:
             if words:
                 first_word = words[0].strip()
                 if len(first_word) > 2:  # Avoid single letters
-                    return first_word
+                    return first_word.title()
             
             return ""
         except Exception as e:
