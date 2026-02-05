@@ -2921,6 +2921,7 @@ class JSONMatcher:
 
                 effective_vendor = current_vendor_filter or global_vendor
                 brand = str(item.get("brand", "")).strip()
+                json_brand = brand.lower().strip() if brand else ""
                 inventory_type = str(item.get("inventory_type", "")).strip()
                 inventory_category = str(item.get("inventory_category", "")).strip()
                 product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, raw_product_name)
