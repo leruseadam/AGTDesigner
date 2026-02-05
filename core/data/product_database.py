@@ -1381,9 +1381,9 @@ class ProductDatabase:
                         'Weight Unit* (grams/gm or ounces/oz)': product_data.get('Weight Unit* (grams/gm or ounces/oz)', product_data.get('Units', '')),
                         'THC test result': product_data.get('THC test result', ''),
                         'CBD test result': product_data.get('CBD test result', ''),
-                        'JSON': product_data.get('JSON', ''),  # Original Description for JSON URL matching
+                        'JSON': product_data.get('JSON', ''),  # Original Description from Excel for JSON matching
                     }
-
+                    
                     # Only include columns that exist in the database
                     for col_name, col_value in column_data_map.items():
                         if col_name in available_columns:
@@ -2597,53 +2597,65 @@ class ProductDatabase:
             return {}
     
     def export_database(self, output_path: str):
-        """Export database to Excel file - optimized for large datasets."""
+        """Export database to Excel file."""
         try:
             self.init_database()  # Ensure DB is initialized
-
+            
             conn = self._get_connection()
             cursor = conn.cursor()
-
-            # Export strains directly using pandas read_sql_query (fast)
+            
+            # Database should already be initialized with all required columns
+            # No need to add missing columns during export
+            
+            # Export strains
             strains_df = pd.read_sql_query('''
                 SELECT strain_name, canonical_lineage, total_occurrences, first_seen_date, last_seen_date
                 FROM strains
                 ORDER BY total_occurrences DESC
             ''', conn)
-
-            # Get available columns dynamically
+            
+            # Get available columns dynamically to avoid SQL errors
             cursor.execute("PRAGMA table_info(products)")
             available_columns = [row[1] for row in cursor.fetchall()]
-
-            # Filter columns to export
-            exclude_cols = {'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id'}
-            columns_to_export = [col for col in available_columns if col not in exclude_cols]
-
-            # Build SELECT query with proper quoting
-            select_columns = ', '.join([f'"{col}"' for col in columns_to_export])
-
-            # Use pandas read_sql_query directly - much faster than row-by-row
-            products_df = pd.read_sql_query(f'''
-                SELECT {select_columns}
-                FROM products
-                ORDER BY id
-            ''', conn)
-
-            logger.info(f"Exporting {len(products_df)} products and {len(strains_df)} strains")
-
-            # Export to Excel using xlsxwriter (much faster than openpyxl for large files)
-            try:
-                with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                    strains_df.to_excel(writer, sheet_name='Strains', index=False)
-                    products_df.to_excel(writer, sheet_name='Products', index=False)
-            except Exception:
-                # Fallback to openpyxl if xlsxwriter fails
-                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                    strains_df.to_excel(writer, sheet_name='Strains', index=False)
-                    products_df.to_excel(writer, sheet_name='Products', index=False)
-
-            logger.info(f"Database exported to {output_path}")
-
+            
+            # Filter to only columns that exist in the database (exclude id for now)
+            columns_to_export = [col for col in available_columns if col not in ['id', 'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id']]
+            
+            # Build dynamic SELECT query with proper quoting for column names with special characters
+            select_columns = ', '.join([f'p."{col}"' for col in columns_to_export])
+            
+            # Query all products with only the columns that exist
+            cursor.execute(f'''
+                SELECT p.id, {select_columns}
+                FROM products p
+                ORDER BY p.id
+            ''')
+            
+            results = cursor.fetchall()
+            products_data = []
+            
+            # Debug logging
+            logger.info(f"Number of results: {len(results)}")
+            if results:
+                logger.info(f"Number of columns in first result: {len(results[0])}")
+            
+            # Build product dictionaries dynamically based on available columns
+            for result in results:
+                product = {'id': result[0]}
+                for i, col in enumerate(columns_to_export, start=1):
+                    product[col] = result[i]
+                products_data.append(product)
+            
+            # Convert to DataFrame
+            products_df = pd.DataFrame(products_data)
+            
+            # Export to Excel
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                strains_df.to_excel(writer, sheet_name='Strains', index=False)
+                products_df.to_excel(writer, sheet_name='Products', index=False)
+            
+            logger.info(f"Database exported to {output_path} with {len(strains_df)} strains and {len(products_df)} products")
+            
         except Exception as e:
             logger.error(f"Error exporting database: {e}")
             import traceback
@@ -5077,7 +5089,7 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
-            # One row per normalized_name (latest by id) to avoid redundant DB rows slowing tag load
+            # Fixed query - use products table directly with correct column names
             cursor.execute(f'''
                 SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
                        "Product Strain" as strain_name, "Lineage" as canonical_lineage, total_occurrences, first_seen_date, last_seen_date,
@@ -5090,8 +5102,7 @@ class ProductDatabase:
                        "CombinedWeight", "Ratio_or_THC_CBD", "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN"
                 FROM products
                 WHERE normalized_name IN ({placeholders})
-                  AND id IN (SELECT MAX(id) FROM products WHERE normalized_name IN ({placeholders}) GROUP BY normalized_name)
-            ''', normalized_names + normalized_names)
+            ''', normalized_names)
             
             results = cursor.fetchall()
             

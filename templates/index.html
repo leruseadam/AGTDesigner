@@ -481,12 +481,6 @@
 
     function showStoreSelectionModal(forceClear = false) {
       try {
-        const modalElement = document.getElementById('storeSelectionModal');
-        // CRITICAL FIX: Prevent modal from loading/showing twice - skip if already visible
-        if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block')) {
-          console.log('⚠️ Store modal already visible - skipping duplicate show');
-          return;
-        }
         console.log('=== SHOWING STORE SELECTION MODAL ===');
         console.log('forceClear:', forceClear);
         console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
@@ -499,12 +493,13 @@
           sessionStorage.removeItem('selected_store');
         }
 
+        const modalElement = document.getElementById('storeSelectionModal');
+        console.log('Modal element found:', modalElement !== null);
         if (!modalElement) {
           console.error('❌ Store selection modal element not found - retrying in 500ms');
-          setTimeout(() => showStoreSelectionModal(forceClear), 500);
+          setTimeout(showStoreSelectionModal, 500);
           return;
         }
-        console.log('Modal element found');
         
         // CRITICAL: Ensure modal is visible (remove any hidden states)
         modalElement.style.visibility = 'visible';
@@ -934,9 +929,9 @@
             }, 300);
           } else {
             // NO STORE - Show modal
-            // CRITICAL FIX: Skip if modal already visible (early IIFE or previous call showed it)
-            if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block' || modalElement.getAttribute('aria-hidden') === 'false')) {
-              console.log('⚠️ checkStoreRequired: Modal already visible - skipping duplicate show');
+            // CRITICAL FIX: Check if modal is already visible to prevent duplicate modals
+            if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block')) {
+              console.log('⚠️ Modal already visible - skipping duplicate show');
               window.checkingStoreRequired = false;
               return;
             }
@@ -1203,9 +1198,10 @@
             vendor_brands: [] 
           };
           const analytics = analyticsResult.value || analyticsResult.reason || {};
-          const availableTags = availableTagsResult.value || [];
+          const availableTagsRaw = availableTagsResult.value || [];
+          const availableTags = Array.isArray(availableTagsRaw) ? availableTagsRaw : (availableTagsRaw && availableTagsRaw.tags) ? availableTagsRaw.tags : [];
           
-          const totalProducts = Array.isArray(availableTags) ? availableTags.length : 0;
+          const totalProducts = availableTags.length;
           const totalStrains = stats.total_strains || 0;
           
           console.log('Analytics data loaded:', { 
@@ -3342,8 +3338,8 @@
   <style>
     /* Saved Tag Lists Button and Modal Styles */
     .saved-lists-btn {
-      padding: 0.3rem 0.6rem;
-      font-size: 0.7rem;
+      padding: 0.6rem 0.9rem;
+      font-size: 0.5rem;
       font-weight: 600;
       border-radius: 6px;
       background: linear-gradient(135deg, #a084e8 0%, #8b6dd4 100%);
@@ -3404,10 +3400,15 @@
     }
 
     #savedTagListsModal .modal-body h6 {
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #e0e0e0;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #ffffff;
       margin-bottom: 1rem;
+    }
+
+    #savedTagListsModal .modal-body,
+    #savedTagListsModal .modal-body * {
+      color: #ffffff;
     }
 
     #savedTagListsModal .modal-footer {
@@ -3421,49 +3422,50 @@
     }
 
     .saved-list-item {
-      border: 2px solid rgba(255, 255, 255, 0.15);
+      border: 2px solid rgba(255, 255, 255, 0.2);
       border-radius: 12px;
       transition: all 0.2s ease;
       margin-bottom: 12px;
     }
 
     .saved-list-item:hover {
-      border-color: rgba(160, 132, 232, 0.5);
-      background: rgba(160, 132, 232, 0.15) !important;
+      border-color: rgba(160, 132, 232, 0.6);
+      background: rgba(160, 132, 232, 0.2) !important;
     }
 
     .saved-list-item .card-body {
-      padding: 1rem 1.25rem;
+      padding: 1.25rem 1.5rem;
     }
 
     .saved-list-item h6 {
-      font-size: 1.15rem;
-      font-weight: 600;
-      color: #fff;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #ffffff !important;
       margin-bottom: 0.5rem;
     }
 
     .saved-list-item small {
-      font-size: 0.9rem;
-      color: #aaa;
+      font-size: 1rem;
+      color: #cccccc !important;
     }
 
     .saved-list-item .btn-group .btn {
-      padding: 0.5rem 0.75rem;
+      padding: 0.6rem 1rem;
       font-size: 1rem;
+      font-weight: 600;
     }
 
     .save-list-section .form-control-modern {
-      background: rgba(255, 255, 255, 0.08);
-      border: 2px solid rgba(255, 255, 255, 0.15);
-      color: #fff;
-      font-size: 1rem;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      color: #ffffff !important;
+      font-size: 1.1rem;
+      padding: 0.85rem 1.25rem;
+      border-radius: 10px;
     }
 
     .save-list-section .form-control-modern::placeholder {
-      color: rgba(255, 255, 255, 0.5);
+      color: rgba(255, 255, 255, 0.6) !important;
     }
 
     .save-list-section .form-control-modern:focus {
@@ -5779,84 +5781,170 @@
       z-index: 1049 !important;
     }
 
-    /* JSON Match Modal Styling - Dark text on light background, scrollable */
-    #jsonMatchModal .modal-dialog,
-    #detailedJsonMatchModal .modal-dialog {
-      max-width: 95vw !important;
-      width: 95vw !important;
-      max-height: 85vh !important;
+    /* JSON Match Modal Styling - smaller initial modal */
+    #jsonMatchModal .modal-dialog {
+      max-height: auto !important;
       height: auto !important;
+      max-width: 600px !important;
+      margin: 10vh auto !important;
+    }
+
+    /* Detailed JSON Match Modal - larger for viewing results */
+    #detailedJsonMatchModal .modal-dialog {
+      max-height: 96vh !important;
+      height: 96vh !important;
+      max-width: 96vw !important;
       margin: 2vh auto !important;
     }
 
-    #jsonMatchModal .modal-content,
-    #detailedJsonMatchModal .modal-content {
-      background: rgba(255, 255, 255, 0.98) !important;
-      color: #1a1a2e !important;
+    #jsonMatchModal .modal-content {
+      background: rgba(30, 30, 50, 0.95) !important;
+      color: #ffffff !important;
       height: auto !important;
-      max-height: 85vh !important;
+      max-height: 80vh !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
+      border: 1px solid rgba(255,255,255,0.15) !important;
+      backdrop-filter: blur(12px) saturate(120%) !important;
     }
 
-    #jsonMatchModal .modal-header,
-    #detailedJsonMatchModal .modal-header {
-      background: linear-gradient(135deg, #2d3748, #1a202c) !important;
-      color: white !important;
+    /* Dark glass theme for detailed JSON modal - improves contrast on dark overlays */
+    #detailedJsonMatchModal .modal-content {
+      background: rgba(12,12,20,0.95) !important;
+      color: #ffffff !important;
+      height: 100% !important;
+      max-height: 96vh !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      border: 1px solid rgba(255,255,255,0.04) !important;
+      backdrop-filter: blur(8px) saturate(120%) !important;
+    }
+
+    #jsonMatchModal .modal-header {
+      background: transparent !important;
+      color: #ffffff !important;
       flex-shrink: 0 !important;
-      padding: 0.75rem 1rem !important;
+      border-bottom: none !important;
     }
 
-    #jsonMatchModal .modal-title,
+    #detailedJsonMatchModal .modal-header {
+      background: transparent !important;
+      color: var(--text-primary, #1a1a2e) !important;
+      flex-shrink: 0 !important;
+      border-bottom: none !important;
+    }
+
+    #jsonMatchModal .modal-title {
+      color: #ffffff !important;
+    }
+
     #detailedJsonMatchModal .modal-title {
-      color: white !important;
-      font-size: 1.1rem !important;
+      color: #ffffff !important;
     }
 
-    #jsonMatchModal .modal-body,
-    #detailedJsonMatchModal .modal-body {
-      color: #1a1a2e !important;
-      background: #f8f9fa !important;
+    #jsonMatchModal .modal-body {
+      color: #ffffff !important;
+      background: transparent !important;
       overflow-y: auto !important;
       overflow-x: hidden !important;
       flex: 1 1 auto !important;
       min-height: 0 !important;
-      max-height: calc(85vh - 140px) !important;
-      padding: 1rem !important;
+      padding: 1.25rem !important;
+    }
+
+    #detailedJsonMatchModal .modal-body {
+      color: rgba(255, 255, 255, 0.9) !important;
+      background: transparent !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      padding: 1.25rem !important;
     }
 
     #jsonMatchModal .modal-body p,
     #jsonMatchModal .modal-body h6,
     #jsonMatchModal .modal-body label,
     #jsonMatchModal .modal-body .form-text,
+    #jsonMatchModal .modal-body .text-muted,
+    #jsonMatchModal .modal-body div {
+      color: rgba(255, 255, 255, 0.9) !important;
+    }
+
     #detailedJsonMatchModal .modal-body p,
     #detailedJsonMatchModal .modal-body h6,
     #detailedJsonMatchModal .modal-body label,
+    #detailedJsonMatchModal .modal-body small,
+    #detailedJsonMatchModal .modal-body .text-muted,
     #detailedJsonMatchModal .modal-body .alert {
-      color: #1a1a2e !important;
+      color: rgba(255, 255, 255, 0.9) !important;
     }
 
-    #jsonMatchModal .modal-body .text-info,
+    #jsonMatchModal .modal-body .text-info {
+      color: #5bc0de !important;
+    }
+
     #detailedJsonMatchModal .modal-body .text-info {
-      color: #0077b3 !important;
+      color: #5bc0de !important;
     }
 
-    #jsonMatchModal .modal-body .text-success,
+    #jsonMatchModal .modal-body .text-success {
+      color: #5cb85c !important;
+    }
+
     #detailedJsonMatchModal .modal-body .text-success {
       color: #28a745 !important;
     }
 
-    #jsonMatchModal .modal-footer,
-    #detailedJsonMatchModal .modal-footer {
-      background: #f1f3f4 !important;
-      border-top: 1px solid #dee2e6 !important;
+    #jsonMatchModal .modal-footer {
+      background: rgba(30, 30, 50, 0.9) !important;
+      border-top: 1px solid rgba(255,255,255,0.1) !important;
       flex-shrink: 0;
     }
 
-    #jsonMatchModal .btn-close-white,
+    /* Make footer visually continuous with content and remove the bright divider */
+    #detailedJsonMatchModal .modal-footer {
+      background: transparent !important;
+      border-top: none !important;
+      flex-shrink: 0;
+      padding-top: 0.75rem !important;
+      padding-bottom: 0.75rem !important;
+    }
+
+    #detailedJsonMatchModal .modal-footer .btn-glass,
+    #detailedJsonMatchModal .modal-footer .btn {
+      background: #3b82f6 !important;
+      color: #ffffff !important;
+      border: 1px solid #3b82f6 !important;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25) !important;
+    }
+
+    #detailedJsonMatchModal .modal-footer .btn-glass:hover,
+    #detailedJsonMatchModal .modal-footer .btn:hover {
+      background: #2563eb !important;
+      border-color: #2563eb !important;
+    }
+
+    /* Ensure close icon contrasts on dark modal */
+    #jsonMatchModal .btn-close,
+    #detailedJsonMatchModal .btn-close,
     #detailedJsonMatchModal .btn-close-white {
-      filter: none !important;
+      filter: invert(1) !important;
+      opacity: 0.98 !important;
+    }
+
+    /* Add a subtle circular background to the close button for clarity */
+    #detailedJsonMatchModal .btn-close {
+      background: rgba(255,255,255,0.06) !important;
+      border-radius: 999px !important;
+      width: 40px !important;
+      height: 40px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 0 !important;
     }
 
     /* Match results list scrollable */
@@ -5870,21 +5958,46 @@
       overflow-y: visible !important;
     }
 
-    /* Card styling within the modal */
+    /* Card styling within the modal - dark cards for dark modal */
     #detailedJsonMatchModal .card {
-      background: white !important;
-      color: #1a1a2e !important;
-      border: 1px solid #dee2e6 !important;
+      background: rgba(40, 40, 60, 0.95) !important;
+      color: #ffffff !important;
+      border: 1px solid rgba(255, 255, 255, 0.2) !important;
     }
 
     #detailedJsonMatchModal .card-header {
-      background: #e9ecef !important;
-      color: #1a1a2e !important;
-      border-bottom: 1px solid #dee2e6 !important;
+      background: rgba(60, 60, 80, 0.95) !important;
+      color: #ffffff !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
     }
 
     #detailedJsonMatchModal .card-body {
-      color: #1a1a2e !important;
+      color: #ffffff !important;
+    }
+
+    /* Override bg-info and bg-success panels inside detailed modal */
+    #detailedJsonMatchModal .bg-info,
+    #detailedJsonMatchModal .bg-success,
+    #detailedJsonMatchModal .bg-secondary,
+    #detailedJsonMatchModal [class*="bg-opacity"] {
+      background: rgba(60, 60, 80, 0.8) !important;
+      color: #ffffff !important;
+    }
+
+    /* Make all text-muted visible in detailed modal */
+    #detailedJsonMatchModal .text-muted {
+      color: rgba(200, 200, 220, 0.9) !important;
+    }
+
+    /* Ensure strong and small text are visible */
+    #detailedJsonMatchModal .card-body strong,
+    #detailedJsonMatchModal .card-body small,
+    #detailedJsonMatchModal .card-body em {
+      color: #ffffff !important;
+    }
+
+    #detailedJsonMatchModal .card-body small.text-muted {
+      color: rgba(200, 200, 220, 0.9) !important;
     }
 
     /* Form controls in JSON match modals - dark text */
@@ -5916,16 +6029,28 @@
       border-color: #c3e6cb !important;
     }
 
-    #jsonMatchModal .alert-info,
-    #detailedJsonMatchModal .alert-info {
+    #jsonMatchModal .alert-info {
       background-color: #d1ecf1 !important;
       color: #0c5460 !important;
       border-color: #bee5eb !important;
     }
 
+    #detailedJsonMatchModal .alert-info {
+      background-color: rgba(60, 60, 80, 0.8) !important;
+      color: rgba(200, 200, 220, 0.95) !important;
+      border-color: rgba(255, 255, 255, 0.15) !important;
+    }
+
+    #jsonMatchModal .alert-danger,
+    #detailedJsonMatchModal .alert-danger {
+      background-color: #f8d7da !important;
+      color: #721c24 !important;
+      border-color: #f5c6cb !important;
+    }
+
     /* Spinner text */
     #detailedMatchLoading p {
-      color: #1a1a2e !important;
+      color: rgba(255, 255, 255, 0.9) !important;
     }
     
     /* Store modal backdrop */
@@ -6360,7 +6485,7 @@
                 </div>
               </div>
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
-                <div id="availableTags" class="tag-list-container">>
+                <div id="availableTags" class="tag-list-container">
                   <div class="tag-list">
                     <div class="d-flex align-items-center gap-3 mb-2">
                       <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
@@ -6712,25 +6837,39 @@
 
           window.STORE_MODAL_BLOCKING = true;
 
-          // CRITICAL FIX (PC stuck on loading): Store modal must show BEFORE TagManager.init()
-          // TagManager.init() only runs after store is selected - so loading splash would never
-          // hide on its own. Hide splash immediately and show modal - no waiting.
-          const loadingSplash = document.getElementById('appLoadingSplash') || 
-                               document.getElementById('loadingOverlay') ||
-                               document.querySelector('#loadingOverlay');
-          if (loadingSplash) {
-            loadingSplash.style.display = 'none';
-            loadingSplash.classList.add('fade-out');
-            console.log('✅ Hid loading splash for store selection modal');
-          }
+          let attemptCount = 0;
+          const MAX_ATTEMPTS = 50; // 10 seconds max (50 * 200ms)
           
-          const doShowModal = () => {
-            // Skip if already shown (e.g. by checkStoreRequired)
-            const existingModal = document.getElementById('storeSelectionModal');
-            if (existingModal && (existingModal.classList.contains('show') || existingModal.style.display === 'block')) {
-              console.log('⚠️ Early check: Store modal already visible - skipping');
+          const attemptShow = () => {
+            attemptCount++;
+            
+            // CRITICAL FIX: Prevent infinite loop - timeout after max attempts
+            if (attemptCount > MAX_ATTEMPTS) {
+              console.warn('⚠️ Loading splash check timeout - showing modal anyway');
+              // Force hide loading splash if it exists
+              const loadingSplash = document.getElementById('appLoadingSplash');
+              if (loadingSplash) {
+                loadingSplash.style.display = 'none';
+                loadingSplash.classList.add('fade-out');
+              }
+              // Continue to show modal
+            }
+            
+            // Check for loading splash (try multiple possible IDs)
+            const loadingSplash = document.getElementById('appLoadingSplash') || 
+                                 document.getElementById('loadingOverlay') ||
+                                 document.querySelector('#loadingOverlay');
+            
+            if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
+              // Loading splash is still visible, wait a bit longer
+              if (attemptCount % 5 === 0 || attemptCount <= 2) {
+                console.log(`⏳ Waiting for loading splash to hide... (attempt ${attemptCount}/${MAX_ATTEMPTS})`);
+              }
+              setTimeout(attemptShow, 200);
               return;
             }
+            
+            // Loading splash is hidden or doesn't exist - proceed to show modal
             if (typeof window.showStoreSelectionModal === 'function') {
               window.showStoreSelectionModal();
             } else {
@@ -6758,11 +6897,11 @@
                   }
                 } catch (err) {
                   console.warn('⚠️ Failed to show modal via bootstrap, falling back:', err);
-                  setTimeout(doShowModal, 100);
+                  setTimeout(attemptShow, 100);
                   return;
                 }
               } else {
-                setTimeout(doShowModal, 100);
+                setTimeout(attemptShow, 100);
                 return;
               }
             }
@@ -6778,9 +6917,9 @@
           };
 
           if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', doShowModal);
+            document.addEventListener('DOMContentLoaded', attemptShow);
           } else {
-            doShowModal();
+            attemptShow();
           }
         };
         
@@ -6808,8 +6947,56 @@
           });
         }
         
+        // When backend says no store but we have a recent valid session store, sync to backend and proceed
+        const hasSessionStoreToRestore = sessionStore && sessionStore.trim() !== '' && sessionStoreValid;
+        if (requiresStore && !hasValidStore && hasSessionStoreToRestore) {
+          console.log('🔄 Backend has no store but session has', sessionStore, '- syncing to backend...');
+          fetch('/api/set-store', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ store: sessionStore })
+          })
+          .then(r => r.json())
+          .then(setData => {
+            if (setData && setData.success) {
+              console.log('✅ Store restored from session:', sessionStore);
+              sessionStorage.setItem('selected_store', sessionStore);
+              sessionStorage.setItem('store_just_selected', 'true');
+              sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
+              window.STORE_MODAL_BLOCKING = false;
+              const modalEl = document.getElementById('storeSelectionModal');
+              if (modalEl) {
+                modalEl.style.display = 'none';
+                modalEl.classList.remove('show');
+                modalEl.setAttribute('aria-hidden', 'true');
+              }
+              document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
+              document.body.classList.remove('modal-open');
+              document.body.style.overflow = '';
+              if (mainContent) {
+                mainContent.style.display = 'block';
+                mainContent.style.visibility = 'visible';
+                mainContent.style.pointerEvents = 'auto';
+                mainContent.classList.remove('store-selection-disabled');
+                mainContent.classList.add('store-selected', 'loaded');
+              }
+              if (typeof updateCurrentStoreDisplay === 'function') updateCurrentStoreDisplay(sessionStore);
+              if (typeof updateStoreStatus === 'function') updateStoreStatus('Store: ' + sessionStore.replace(/_/g, ' '), 'active');
+              return;
+            }
+            console.log('❗ set-store failed, showing modal');
+            forceShowModal();
+          })
+          .catch(err => {
+            console.warn('set-store failed:', err);
+            forceShowModal();
+          });
+          return;
+        }
+
         // CRITICAL FIX: Trust backend - if backend says store is valid, show content
-        // Only show modal if backend explicitly requires it
+        // Only show modal if backend explicitly requires it and we have no session to restore
         if (requiresStore || (!hasValidStore && !sessionStore)) {
           console.log('❗ No valid store match - showing modal');
           console.log('❗ Details:', {
@@ -8232,53 +8419,6 @@
   
   <!-- Load main.js with defer for faster page load -->
   <script src="{{ url_for('static', filename='js/main.js') }}?v={{ cache_bust }}" defer></script>
-  <script>
-    // Lightweight fallback splash helpers in case main.js failed to attach agtShowSplash
-    if (!window.agtShowSplash) {
-      window.agtShowSplash = function(message) {
-        try {
-          let el = document.getElementById('agt-action-splash');
-          const text = message || 'Working...';
-          if (!el) {
-            el = document.createElement('div');
-            el.id = 'agt-action-splash';
-            el.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:200000;background:rgba(0,0,0,0.55);backdrop-filter:blur(2px);';
-            el.innerHTML = `
-              <div style="display:flex;flex-direction:row;align-items:center;gap:12px;background:rgba(18,18,20,0.96);color:#fff;padding:14px 18px;border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,0.6);max-width:90%;">
-                <div class="spinner-border text-light" role="status" style="width:1.6rem;height:1.6rem;margin-top:2px"><span class="visually-hidden">Loading...</span></div>
-                <div style="font-size:1rem;line-height:1.1;">${text}</div>
-              </div>`;
-            document.body.appendChild(el);
-          } else {
-            const content = el.querySelector('div > div:last-child');
-            if (content) content.textContent = text;
-            el.style.display = 'flex';
-          }
-          // Ensure overlay is removed after a short default timeout in case caller forgets
-          if (el._autoHideTimer) clearTimeout(el._autoHideTimer);
-          el._autoHideTimer = setTimeout(() => { try { window.agtHideSplash(); } catch (e) {} }, 6000);
-          return el;
-        } catch (e) {
-          console.warn('Fallback agtShowSplash failed', e);
-          return null;
-        }
-      };
-    }
-    if (!window.agtHideSplash) {
-      window.agtHideSplash = function() {
-        try {
-          const el = document.getElementById('agt-action-splash');
-          if (el) {
-            if (el._autoHideTimer) { clearTimeout(el._autoHideTimer); el._autoHideTimer = null; }
-            el.style.transition = 'opacity .18s, transform .18s';
-            el.style.opacity = '0';
-            el.style.transform = 'scale(0.995)';
-            setTimeout(() => { try { el.remove(); } catch (e) {} }, 200);
-          }
-        } catch (e) { console.warn('Fallback agtHideSplash failed', e); }
-      };
-    }
-  </script>
   
   <script>
     // CRITICAL: main.js is loaded with defer, so it won't execute until DOMContentLoaded
@@ -8326,22 +8466,6 @@
       } else {
         console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
       }
-
-      // CRITICAL FIX (PC stuck on loading): Global safety timeout to force-hide splash
-      // If init hangs (store check, TagManager, API), splash would never hide. Force it after 6s.
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      const safetyMs = isLocalhost ? 6000 : 5000; // 6s for PC/desktop, 5s for web
-      setTimeout(function forceHideLoadingSplash() {
-        const splash = document.getElementById('appLoadingSplash');
-        if (splash && !splash.classList.contains('fade-out')) {
-          console.warn('⚡ Safety timeout: Forcing loading splash to hide after', safetyMs, 'ms (PC/desktop stuck fix)');
-          splash.classList.add('fade-out');
-          setTimeout(function() { splash.style.display = 'none'; }, 300);
-          if (typeof AppLoadingSplash !== 'undefined') {
-            AppLoadingSplash.isVisible = false;
-          }
-        }
-      }, safetyMs);
 
       // Check TagManager after deferred scripts have executed
       (function checkTagManager() {
@@ -8413,6 +8537,8 @@
 
     // Load saved lists from the server
     async function loadSavedLists() {
+      // Show network loading modal while fetching saved lists
+      if (typeof showLoadingModal === 'function') showLoadingModal('Loading saved lists...');
       const loadingEl = document.getElementById('savedListsLoading');
       const emptyEl = document.getElementById('savedListsEmpty');
       const contentEl = document.getElementById('savedListsContent');
@@ -8433,6 +8559,7 @@
         const data = await response.json();
 
         if (loadingEl) loadingEl.classList.add('d-none');
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
 
         if (data.success && data.lists && data.lists.length > 0) {
           renderSavedLists(data.lists);
@@ -8451,6 +8578,7 @@
             <small class="text-muted">Server may need to be reloaded</small>`;
           emptyEl.classList.remove('d-none');
         }
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
       }
     }
 
@@ -8460,27 +8588,27 @@
       if (!contentEl) return;
 
       contentEl.innerHTML = lists.map(list => `
-        <div class="saved-list-item card bg-dark mb-2" data-list-id="${list.id}">
-          <div class="card-body p-3">
-            <div class="d-flex justify-content-between align-items-start">
+        <div class="saved-list-item card" data-list-id="${list.id}" style="background: rgba(40, 40, 60, 0.9);">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
               <div class="flex-grow-1">
-                <h6 class="mb-1 text-light">${escapeHtml(list.name)}</h6>
-                <small class="text-muted">
-                  <i class="bi bi-tags me-1"></i>${list.tag_count} tags
+                <h6>${escapeHtml(list.name)}</h6>
+                <small>
+                  <i class="bi bi-tags me-1"></i><strong>${list.tag_count}</strong> tags
                   <span class="mx-2">|</span>
                   <i class="bi bi-shop me-1"></i>${escapeHtml(list.store)}
                   <span class="mx-2">|</span>
                   <i class="bi bi-clock me-1"></i>${formatDate(list.updated_at)}
                 </small>
               </div>
-              <div class="btn-group btn-group-sm">
-                <button type="button" class="btn btn-outline-success" onclick="loadTagList(${list.id}, false)" title="Load (replace current selection)">
-                  <i class="bi bi-download"></i>
+              <div class="btn-group">
+                <button type="button" class="btn btn-success" onclick="loadTagList(${list.id}, false)" title="Load & Replace">
+                  <i class="bi bi-download me-1"></i>Load
                 </button>
-                <button type="button" class="btn btn-outline-info" onclick="loadTagList(${list.id}, true)" title="Append to current selection">
-                  <i class="bi bi-plus-lg"></i>
+                <button type="button" class="btn btn-info" onclick="loadTagList(${list.id}, true)" title="Add to current selection">
+                  <i class="bi bi-plus-lg me-1"></i>Add
                 </button>
-                <button type="button" class="btn btn-outline-danger" onclick="deleteTagList(${list.id}, '${escapeHtml(list.name)}')" title="Delete">
+                <button type="button" class="btn btn-outline-danger" onclick="deleteTagList(${list.id}, '${escapeHtml(list.name)}')" title="Delete this list">
                   <i class="bi bi-trash"></i>
                 </button>
               </div>
@@ -8494,9 +8622,12 @@
     window.saveCurrentTagList = async function() {
       console.log('📋 saveCurrentTagList called');
       const nameInput = document.getElementById('saveListName');
+      console.log('📋 nameInput element:', nameInput);
       const name = nameInput?.value?.trim();
+      console.log('📋 name value:', name);
 
       if (!name) {
+        console.log('📋 No name provided, showing warning');
         showToastMessage('Please enter a name for the list', 'warning');
         nameInput?.focus();
         return;
@@ -8504,17 +8635,19 @@
 
       // Get current selected tags from TagManager
       let tags = [];
+      console.log('📋 TagManager exists:', !!window.TagManager);
+      console.log('📋 TagManager.state:', window.TagManager?.state);
+      console.log('📋 persistentSelectedTags:', window.TagManager?.state?.persistentSelectedTags);
       if (window.TagManager && window.TagManager.state.persistentSelectedTags) {
         tags = [...window.TagManager.state.persistentSelectedTags];
       }
+      console.log('📋 tags to save:', tags);
 
       if (tags.length === 0) {
+        console.log('📋 No tags to save, showing warning');
         showToastMessage('No tags selected to save', 'warning');
         return;
       }
-
-      // Show brief splash while saving
-      try { if (window.agtShowSplash) window.agtShowSplash('Saving selection...'); } catch (e) {}
 
       try {
         const store = sessionStorage.getItem('selected_store') || '';
@@ -8536,17 +8669,13 @@
       } catch (error) {
         console.error('Error saving tag list:', error);
         showToastMessage('Error saving tag list', 'danger');
-      } finally {
-        try { if (window.agtHideSplash) window.agtHideSplash(); } catch (e) {}
       }
     };
 
     // Load a saved tag list
     window.loadTagList = async function(listId, append = false) {
-      // _skipAutoHideSplash will be set when we schedule a delayed hide
-      let _skipAutoHideSplash = false;
+      if (typeof showLoadingModal === 'function') showLoadingModal('Loading list...');
       try {
-        try { if (window.agtShowSplash) window.agtShowSplash('Loading saved list...'); } catch (e) {}
         const response = await fetch(`/api/saved-tag-lists/${listId}/load`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -8555,79 +8684,112 @@
 
         const data = await response.json();
 
-        if (data.success) {
+          if (data.success) {
           const tagNames = data.tags || [];
+          // Backend provides partial data - we'll prefer full data from loaded inventory
           const backendTagsWithLineage = data.tags_with_lineage || [];
 
-          // Update TagManager state
-          if (window.TagManager) {
-            window.TagManager.state.persistentSelectedTags = [...tagNames];
-            window.TagManager.state.selectedTags = new Set(tagNames);
-            window.TagManager.state._selectedTagsSet = new Set(tagNames);
+          console.log('📋 Loading saved list - tagNames:', tagNames.length, 'backendTags:', backendTagsWithLineage.length);
 
+            // Update TagManager state
+            if (window.TagManager) {
+            // If append flag was set, merge tags into existing selection; otherwise replace
+            const existing = window.TagManager.state.persistentSelectedTags || [];
+            let mergedNames;
+            if (append) {
+              mergedNames = existing.concat(tagNames.filter(n => !existing.includes(n)));
+            } else {
+              mergedNames = [...tagNames];
+            }
+            window.TagManager.state.persistentSelectedTags = mergedNames;
+            window.TagManager.state.selectedTags = new Set(mergedNames);
+            window.TagManager.state._selectedTagsSet = new Set(mergedNames);
+
+            // Build tag objects by looking up FULL data from loaded inventory first
+            // Only fall back to backend data if tag not found in current inventory
             const tagObjects = [];
             const notFoundInInventory = [];
 
-            tagNames.forEach(name => {
+            mergedNames.forEach(name => {
+              // First, try to find full tag in _tagLookupMap (best source)
               let fullTag = window.TagManager._tagLookupMap?.get(name);
+
+              // Second, try originalTags array
               if (!fullTag && window.TagManager.state.originalTags) {
                 fullTag = window.TagManager.state.originalTags.find(t => t['Product Name*'] === name);
               }
+
+              // Third, try current tags array
               if (!fullTag && window.TagManager.state.tags) {
                 fullTag = window.TagManager.state.tags.find(t => t['Product Name*'] === name);
               }
 
               if (fullTag) {
+                // Found in inventory - use full data
                 tagObjects.push({ ...fullTag });
               } else {
+                // Not in current inventory - use backend data or minimal fallback
                 notFoundInInventory.push(name);
                 const backendTag = backendTagsWithLineage.find(t => t['Product Name*'] === name);
                 if (backendTag) {
                   tagObjects.push({ ...backendTag });
                 } else {
-                  tagObjects.push({ 'Product Name*': name, displayName: name, lineage: 'MIXED', currentLineage: 'MIXED' });
+                  tagObjects.push({
+                    'Product Name*': name,
+                    displayName: name,
+                    lineage: 'MIXED',
+                    currentLineage: 'MIXED'
+                  });
                 }
               }
             });
 
-            if (!window.TagManager._tagLookupMap) window.TagManager._tagLookupMap = new Map();
+            if (notFoundInInventory.length > 0) {
+              console.warn('📋 Tags not found in current inventory:', notFoundInInventory.length, notFoundInInventory.slice(0, 5));
+            }
+            console.log('📋 Built', tagObjects.length, 'tag objects from inventory lookup');
+
+            // Initialize lookup map if needed
+            if (!window.TagManager._tagLookupMap) {
+              window.TagManager._tagLookupMap = new Map();
+            }
+
+            // Force update flag and clear cached render state
             window.TagManager._forceSelectedTagsUpdate = true;
             window.TagManager._lastRenderedSelectedTags = null;
 
+            // Refresh the UI using updateSelectedTags with proper tag objects
             if (typeof window.TagManager.updateSelectedTags === 'function') {
+              console.log('📋 Calling updateSelectedTags with', tagObjects.length, 'tags');
               window.TagManager.updateSelectedTags(tagObjects);
             }
 
+            // Update tag count display
             if (typeof window.TagManager.updateTagCount === 'function') {
-              window.TagManager.updateTagCount('selected', tagNames.length);
+              window.TagManager.updateTagCount('selected', mergedNames.length);
             }
 
+            // Also update the selected tags count badge
             const countBadge = document.getElementById('selectedTagsCount');
-            if (countBadge) countBadge.textContent = `(${tagNames.length})`;
+            if (countBadge) {
+              countBadge.textContent = `(${mergedNames.length})`;
+            }
           }
 
           showToastMessage(data.message, 'success');
 
-          // Delay closing the modal slightly so the splash is visible briefly
+          // Close modal
           if (savedListsModal) {
-            _skipAutoHideSplash = true;
-            setTimeout(() => {
-              try { savedListsModal.hide(); } catch (e) {}
-              try { if (window.agtHideSplash) window.agtHideSplash(); } catch (e) {}
-            }, 420);
+            savedListsModal.hide();
           }
         } else {
           showToastMessage(data.error || 'Failed to load list', 'danger');
         }
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
       } catch (error) {
         console.error('Error loading tag list:', error);
         showToastMessage('Error loading tag list', 'danger');
-      }
-      finally {
-        // Only auto-hide the splash if we did not schedule the delayed hide above
-        if (!_skipAutoHideSplash) {
-          try { if (window.agtHideSplash) window.agtHideSplash(); } catch (e) {}
-        }
+        if (typeof hideLoadingModal === 'function') hideLoadingModal();
       }
     };
 
@@ -8678,6 +8840,63 @@
       } catch {
         return dateStr;
       }
+
+    // -----------------------------
+    // Loading Modal Helpers
+    // -----------------------------
+    // Create and manage a small non-dismissible loading modal with spinner.
+    (function() {
+      let _loadingModal = null;
+
+      window.showLoadingModal = function(message) {
+        try {
+          let modalEl = document.getElementById('loadingModal');
+          if (!modalEl) {
+            // Inject modal markup at end of body
+            modalEl = document.createElement('div');
+            modalEl.id = 'loadingModal';
+            modalEl.className = 'modal fade';
+            modalEl.tabIndex = -1;
+            modalEl.setAttribute('aria-hidden', 'true');
+            modalEl.innerHTML = `
+              <div class="modal-dialog modal-sm modal-dialog-centered">
+                <div class="modal-content" style="background: transparent; border: none; box-shadow: none;">
+                  <div class="modal-body text-center text-white">
+                    <div class="spinner-border text-light" role="status" style="width:3rem;height:3rem;"></div>
+                    <div id="loadingModalMessage" style="margin-top:0.5rem; font-weight:600;">${message || 'Loading...'}</div>
+                  </div>
+                </div>
+              </div>
+            `;
+            document.body.appendChild(modalEl);
+          } else {
+            const msgEl = modalEl.querySelector('#loadingModalMessage');
+            if (msgEl) msgEl.textContent = message || 'Loading...';
+          }
+
+          if (!_loadingModal) _loadingModal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+          _loadingModal.show();
+        } catch (e) {
+          console.warn('Could not show loading modal', e);
+        }
+      };
+
+      window.hideLoadingModal = function() {
+        try {
+          if (_loadingModal) {
+            _loadingModal.hide();
+          } else {
+            const el = document.getElementById('loadingModal');
+            if (el) {
+              const m = bootstrap.Modal.getInstance(el);
+              if (m) m.hide();
+            }
+          }
+        } catch (e) {
+          console.warn('Could not hide loading modal', e);
+        }
+      };
+    })();
     }
 
     // Helper function to show toast messages
@@ -11497,44 +11716,14 @@
   
   <!-- JSON Match Modal -->
   <style>
-    /* Reuse Lineage Editor theme for JSON modal */
-    #jsonMatchModal .modal-content {
-      background: rgba(15, 23, 42, 0.95);
-      color: #fff;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.06);
-      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
-    }
-    #jsonMatchModal .modal-header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #fff;
-      border-radius: 12px 12px 0 0;
-      border-bottom: none;
-    }
-    #jsonMatchModal .modal-title { color: #fff; }
-    #jsonMatchModal .modal-title svg { vertical-align: -3px; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.3)); }
-    #jsonMatchModal .modal-body { color: rgba(255,255,255,0.95); }
-    #jsonMatchModal .input-group .form-control {
-      border-radius: 8px;
-      border: 1px solid rgba(225,229,233,0.08);
-      background: rgba(15, 23, 42, 0.9);
-      color: rgba(255,255,255,0.95);
-    }
-    #jsonMatchModal .input-group .form-control::placeholder { color: rgba(255,255,255,0.5); }
-    #jsonMatchModal .btn-outline-secondary,
-    #jsonMatchModal .btn-glass {
-      border-radius: 8px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #fff;
-      border: none;
-    }
-    #jsonMatchModal .btn-outline-secondary:hover,
-    #jsonMatchModal .btn-glass:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(102,126,234,0.25); }
-    #jsonMatchModal .btn-outline-info { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; border: none; }
+    /* JSON modal: ensure large, centered, scrollable, glass-card appearance */
+    #jsonMatchModal .modal-dialog { max-width: 96vw !important; width: 96vw !important; max-height: 96vh !important; height: 96vh !important; margin: 2vh auto !important; }
+    #jsonMatchModal .modal-content { height: 100% !important; max-height: 96vh !important; display:flex !important; flex-direction:column !important; overflow: hidden !important; background: var(--glass-bg, rgba(255,255,255,0.75)) !important; backdrop-filter: blur(8px) saturate(120%) !important; border: var(--glass-border, 1px solid rgba(255,255,255,0.08)) !important; }
+    #jsonMatchModal .modal-body { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); overflow-y:auto !important; flex:1 1 auto !important; padding:1.25rem !important; }
+    #jsonMatchModal .input-group .form-control { border-right: 0; }
     #jsonMatchModal .json-actions { gap: .5rem; }
-    #matchedProductsList { background: rgba(255,255,255,0.03); border-radius: .5rem; border: 1px solid rgba(255,255,255,0.03); }
-    #jsonMatchModal .text-muted { color: rgba(255,255,255,0.7) !important; }
-    #jsonMatchModal .btn-close { filter: invert(1) brightness(2); }
+    #matchedProductsList { background: rgba(255,255,255,0.03); border-radius: .5rem; }
+    #jsonMatchModal .modal-title svg { vertical-align: -3px; }
   </style>
 
   <div class="modal fade" id="jsonMatchModal" tabindex="-1" aria-labelledby="jsonMatchModalLabel" inert>
@@ -11559,7 +11748,7 @@
 
               <div class="input-group mb-2">
                 <input type="url" class="form-control form-control-lg" id="jsonUrlInput" placeholder="https://example.com/inventory-transfer.json" autocomplete="off" required>
-                <button class="btn btn-outline-secondary btn-lg" type="button" onclick="performDetailedJsonMatch()">Begin Match</button>
+                <button class="btn btn-primary btn-lg" type="button" onclick="performDetailedJsonMatch()">Match JSON</button>
               </div>
               <div class="text-muted small">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
             </div>
@@ -11582,7 +11771,7 @@
                   <strong id="matchCount">0</strong> products matched and selected
                 </div>
                 <label class="form-label">Matched Products:</label>
-                <div id="matchedProductsList" class="border rounded p-3" style="max-height: 65vh; overflow-y: auto;">
+                <div id="matchedProductsList" class="border rounded p-3" style="max-height: 420px; overflow-y: auto;">
                   <!-- Matched products will be listed here -->
                 </div>
               </div>
@@ -11594,6 +11783,14 @@
   </div>
 
   <!-- Detailed JSON Match Comparison Modal -->
+  <style>
+    /* Ensure Detailed JSON Match modal is large, scrollable, and uses glass-card styling */
+    #detailedJsonMatchModal .modal-dialog { max-width: 96vw !important; width: 96vw !important; max-height: 96vh !important; height: 96vh !important; margin: 2vh auto !important; }
+    #detailedJsonMatchModal .modal-content { height: 100% !important; max-height: 96vh !important; display:flex !important; flex-direction:column !important; overflow: hidden !important; background: var(--glass-bg, rgba(255,255,255,0.75)) !important; backdrop-filter: blur(8px) saturate(120%) !important; border: var(--glass-border, 1px solid rgba(255,255,255,0.08)) !important; }
+    #detailedJsonMatchModal .modal-body { overflow-y:auto !important; flex:1 1 auto !important; padding:1.25rem !important; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.02)); }
+    #detailedJsonMatchModal .modal-header { background: transparent !important; border-bottom: none !important; }
+    #detailedJsonMatchModal .modal-footer { background: transparent !important; border-top: none !important; }
+  </style>
   <div class="modal fade" id="detailedJsonMatchModal" tabindex="-1" aria-labelledby="detailedJsonMatchModalLabel" inert>
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
       <div class="modal-content">
@@ -11622,11 +11819,8 @@
                 </div>
                 <div class="col-md-6">
                   <div class="d-flex justify-content-end">
-                    <button type="button" class="btn btn-success me-2" onclick="acceptAllMatches()" id="acceptAllBtn" disabled>
+                    <button type="button" class="btn btn-success" onclick="acceptAllMatches()" id="acceptAllBtn" disabled>
                       <i class="bi bi-check-circle me-1"></i>Accept All Matches
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary" onclick="selectCustomMatches()">
-                      <i class="bi bi-pencil me-1"></i>Select Custom
                     </button>
                   </div>
                 </div>
@@ -11646,6 +11840,9 @@
           </div>
         </div>
         <div class="modal-footer border-0">
+          <button type="button" class="btn btn-success me-2" onclick="acceptAllMatches()" id="footerSaveBtn">
+            <i class="bi bi-check-circle me-1"></i>Save
+          </button>
           <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
@@ -13278,13 +13475,9 @@
 
     function selectSimilarProduct(productName) {
       // Add to selected tags
-      try {
-        if (window.agtShowSplash) window.agtShowSplash('Adding product...');
-      } catch (e) {}
       if (typeof TagManager !== 'undefined' && TagManager.addToSelected) {
-        try { TagManager.addToSelected(productName); } catch (e) { console.warn(e); }
+        TagManager.addToSelected(productName);
       }
-      try { if (window.agtHideSplash) setTimeout(window.agtHideSplash, 450); } catch (e) {}
       // Close modal
       const modal = bootstrap.Modal.getInstance(document.getElementById('databaseModal'));
       if (modal) {
@@ -13383,13 +13576,10 @@
     }
 
     function selectSearchResult(productName) {
-      try {
-        if (window.agtShowSplash) window.agtShowSplash('Adding product...');
-      } catch (e) {}
+      // Add to selected tags
       if (typeof TagManager !== 'undefined' && TagManager.addToSelected) {
-        try { TagManager.addToSelected(productName); } catch (e) { console.warn(e); }
+        TagManager.addToSelected(productName);
       }
-      try { if (window.agtHideSplash) setTimeout(window.agtHideSplash, 450); } catch (e) {}
       // Close modal
       const modal = bootstrap.Modal.getInstance(document.getElementById('databaseModal'));
       if (modal) {

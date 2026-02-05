@@ -1914,15 +1914,6 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
-        # CRITICAL: Ensure Price is set for docx (UI may have Price* only); template expects 'Price'
-        price_val = label_context.get('Price') or record.get('Price') or record.get('Price*') or record.get('Price* (Tier Name for Bulk)') or record.get('Med Price')
-        if price_val is not None and not (hasattr(pd, 'isna') and pd.isna(price_val)):
-            price_str = str(price_val).strip()
-            if price_str and price_str.lower() not in ('nan', 'none', 'null', ''):
-                label_context['Price'] = price_str
-        # Ensure Price is never NaN in context (web/request rows can have NaN from DataFrame)
-        if not label_context.get('Price') or (hasattr(pd, 'isna') and pd.isna(label_context.get('Price'))):
-            label_context['Price'] = ''
 
         # DEBUG: Log Product Brand from record vs label_context
         self.logger.info(f"🔍 RECORD BRAND DEBUG for '{product_name}': record['Product Brand']='{record.get('Product Brand')}', record['ProductBrand']='{record.get('ProductBrand')}', record['Vendor']='{record.get('Vendor')}'")

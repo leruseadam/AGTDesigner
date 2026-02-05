@@ -11756,9 +11756,9 @@ const TagManager = {
             console.log('📊 No cache or tags already exist - fetching from server');
         }
         
-        // PERFORMANCE: Prioritize cache for all clients (web endpoint used everywhere)
-        if (hasCache && !hasExistingTags && !forceReload) {
-            console.log(`⚡ Using cache immediately for faster load`);
+        // PERFORMANCE: For web clients, prioritize cache even more aggressively
+        if (isWebClient && hasCache && !hasExistingTags && !forceReload) {
+            console.log(`⚡ WEB CLIENT: Using cache immediately for faster load`);
         }
         
         // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
@@ -11769,13 +11769,13 @@ const TagManager = {
         this._fetchingAvailableTagsStartTime = Date.now();
         
         // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
-        // This prevents infinite loading state on reload
+        const safetyTimeoutMs = isWebClient ? 30000 : 60000; // 30s web (match 25s fetch), 60s desktop
         if (this._fetchingTimeout) {
             clearTimeout(this._fetchingTimeout);
         }
         this._fetchingTimeout = setTimeout(() => {
             if (this._fetchingAvailableTags) {
-                console.warn('⚠️ Tag fetch timeout - resetting flag after 60 seconds');
+                console.warn(`⚠️ Tag fetch timeout - resetting flag after ${safetyTimeoutMs / 1000}s`);
                 this._fetchingAvailableTags = false;
                 // CRITICAL: Clear loading UI when timeout occurs
                 if (this.hideActionSplash) {
@@ -11807,8 +11807,8 @@ const TagManager = {
                     }
                 }
             }
-        }, 60000); // 60 second safety timeout
-        
+        }, safetyTimeoutMs);
+
         // CRITICAL FIX: Immediately show loading state if container is empty
         // This prevents upload prompt from flashing while tags are being fetched
         if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0)) {
@@ -11884,9 +11884,8 @@ const TagManager = {
         }, 30000); // 30 second warning, but don't hide splash
         
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
-        // Declare at function scope so accessible in try, catch, finally
+        // Declare cacheUsedForDisplay at function scope so it's accessible throughout
         let cacheUsedForDisplay = false;
-        let safetyTimeout = null;
 
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
@@ -11895,20 +11894,26 @@ const TagManager = {
                 this._liteTagsRendered = false;
             }
 
-            // CRITICAL: Add safety timeout to hide spinner - ALWAYS, for both initial load AND refresh
-            // Without this, "Refreshing tags..." can stick forever if fetch hangs
-            const safetyTimeoutMs = hasExistingTags ? 8000 : 5000; // 8s for refresh, 5s for initial
-            safetyTimeout = setTimeout(() => {
-                console.warn(`⚠️ Safety timeout: Hiding loading spinner after ${safetyTimeoutMs}ms (stuck fix)`);
-                if (this.hideActionSplash) this.hideActionSplash();
-                // Restore container opacity if we dimmed it during refresh
-                const container = document.getElementById('availableTags');
-                if (container) {
-                    container.style.opacity = '1';
-                    container.style.pointerEvents = '';
-                }
-                this._fetchingAvailableTags = false;
-            }, safetyTimeoutMs);
+            // CRITICAL: Declare safetyTimeout at the very start of function so it's always available in catch block
+            // This prevents "safetyTimeout is not defined" errors if an exception occurs early
+            let safetyTimeout = null;
+
+            // CRITICAL: Add safety timeout to hide spinner after longer delay
+            // This prevents indefinite hanging even if error handling fails
+            if (!hasExistingTags) {
+                // Don't hide splash while tag fetch is in progress - avoids "sketchy" empty UI
+                const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
+                safetyTimeout = setTimeout(() => {
+                    if (this._fetchingAvailableTags) {
+                        verboseLog(`⚠️ Safety timeout (${safetyTimeoutMs}ms): Tag fetch still in progress - keeping splash visible`);
+                        return;
+                    }
+                    console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
+                    if (this.hideActionSplash) {
+                        this.hideActionSplash();
+                    }
+                }, safetyTimeoutMs);
+            }
 
             // PERFORMANCE FIX: Use cache first for instant load, then refresh in background
             // This provides fast reloads while still keeping data fresh
@@ -12016,26 +12021,21 @@ const TagManager = {
             const timestamp = Date.now();
             
             // PERFORMANCE vs CORRECTNESS:
-            // - On true "first load" (no existing tags and no cache), we MUST load with full database lineage
-            //   to avoid showing Excel/stale lineage that then "flips" a moment later.
-            // - On subsequent loads (or when cache exists), we can safely use fast_load=1 for speed.
-            //
-            // So:
-            // - First load (no tags, no cache) → fast_load=0  (no flash, correct lineage from the start)
-            // - All other cases               → fast_load=1  (fast, backend does lightweight alignment)
+            // - Web: always use fast_load=1 so tags appear quickly; backend aligns lineage; we can refresh lineage in background.
+            // - Desktop first load (no cache): fast_load=0 for correct lineage from the start.
+            // - Desktop subsequent: fast_load=1 for speed.
             const isFirstTrueLoad = !hasExistingTags && !hasCache && !this._hasLoadedOnce;
-            const fastLoadParam = isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1';
+            const fastLoadParam = isWebClient ? '&fast_load=1' : (isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1');
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
             
-            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (60s for large datasets on web)
-            // Desktop/localhost should respond quickly with fast_load=1
-            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for web (was 1, but timeouts need retries)
-            const maxProcessingRetries = isWebClient ? 2 : 2; // Allow 2 processing retries for web
-            const fetchTimeout = 60000; // 60s - web endpoint used for all; backend handles heavy datasets
+            // ⚡ WEB CLIENT: Shorter timeout so we don't wait too long; fall back to cache/lite/retry
+            const maxRetries = isWebClient ? 2 : 2;
+            const maxProcessingRetries = isWebClient ? 2 : 2;
+            const fetchTimeout = isWebClient ? 25000 : 45000; // 25s for web (was 60s), 45s for desktop
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -12075,17 +12075,18 @@ const TagManager = {
                     const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
                     const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
                     
-                    // Web endpoint handles lineage updates via session - no need to force nocache from frontend
-                    const forceDbLineage = false;
+                    // CRITICAL FIX: For web clients, if lineage was recently updated, force nocache to bypass stale cache
+                    // Web endpoint will still get database lineage when needed (it checks lineage_update_timestamp)
+                    // PERFORMANCE: Web clients skip prefer_db for speed, but still get fresh data when lineage updates
+                    const forceDbLineage = isWebClient ? false : (this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate);
                     // CRITICAL: Force nocache if lineage was recently updated (even for web clients) to get fresh lineage
                     const useCache = retryCount === 0 && !forceDbLineage && !forceReload && !hasRecentLineageUpdate;
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Web endpoint always uses fast_load, skips prefer_db for speed
-                    const preferDbParam = '';
+                    // Skip prefer_db for web clients (fast_load includes lineage), use for desktop if needed
+                    const preferDbParam = isWebClient ? '' : (forceDbLineage ? '&prefer_db=1' : '');
                     
-                    // PERFORMANCE: Use web-optimized endpoint for BOTH web and desktop - it's faster
-                    // Web endpoint has aggressive caching, fast_load, and background cache; works on localhost too
-                    const baseEndpoint = '/api/web/available-tags';
+                    // Use web endpoint for web clients, regular endpoint for localhost/desktop
+                    const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
                     
                     // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
                     const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
@@ -12095,8 +12096,8 @@ const TagManager = {
                     console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
                     
-            // ⚡ AGGRESSIVE CACHING: 30 min for both - web endpoint used everywhere for speed
-            const cacheMaxAge = 1800; // 30 min
+                    // ⚡ AGGRESSIVE CACHING: Web clients use longer cache (30 min), desktop uses shorter (5 min)
+                    const cacheMaxAge = isWebClient ? 1800 : 300; // Web: 30min, Desktop: 5min
                     response = await fetch(optimizedFetchUrl, {
                         signal: controller.signal,
                         // Default cache strategy - let browser handle it intelligently
@@ -13127,11 +13128,7 @@ const TagManager = {
 
             return false;
         } finally {
-            // Clear timeouts since operation completed
-            if (safetyTimeout) {
-                clearTimeout(safetyTimeout);
-                safetyTimeout = null;
-            }
+            // Clear safety timeout since operation completed
             if (this._fetchingTimeout) {
                 clearTimeout(this._fetchingTimeout);
                 this._fetchingTimeout = null;
@@ -15315,11 +15312,6 @@ const TagManager = {
             });
             if (!response.ok) {
                 const error = await response.json();
-                // Handle stale upload error - prompt user to upload fresh Excel
-                if (error.error === 'stale_upload' || error.message?.includes('stale')) {
-                    this.showStaleUploadModal(error.message || error.stale_reason || 'Your Excel data is stale. Please upload a fresh Excel file.');
-                    throw new Error('STALE_UPLOAD'); // Special error to prevent further processing
-                }
                 throw new Error(error.error || 'Failed to generate labels');
             }
             const blob = await response.blob();
@@ -15383,18 +15375,6 @@ const TagManager = {
             }
         } catch (error) {
             console.error('Error generating labels:', error);
-            // Handle stale upload - don't show generic error, modal already shown
-            if (error.message === 'STALE_UPLOAD') {
-                // Modal already shown, just return
-                return;
-            }
-            // Show error toast for other errors
-            const errorMsg = error.message || 'Failed to generate labels. Please try again.';
-            if (typeof showToast === 'function') {
-                showToast('error', errorMsg);
-            } else {
-                alert(errorMsg);
-            }
             // CRITICAL FIX: Even on error, mark generation time to preserve selections
             // This prevents tags from disappearing if generation partially succeeded
             this._lastTagSelectionTime = Date.now();
@@ -16545,103 +16525,6 @@ const TagManager = {
             verboseLog('✅ Splash hidden');
         } else {
             console.error('❌ Could not find splash element to hide');
-        }
-    },
-
-    showStaleUploadModal(message) {
-        verboseLog('⚠️ Showing stale upload modal:', message);
-        
-        // Create or get modal element
-        let modal = document.getElementById('staleUploadModal');
-        if (!modal) {
-            modal = document.createElement('div');
-            modal.id = 'staleUploadModal';
-            modal.className = 'modal fade';
-            modal.setAttribute('tabindex', '-1');
-            modal.setAttribute('role', 'dialog');
-            modal.setAttribute('aria-labelledby', 'staleUploadModalLabel');
-            modal.setAttribute('aria-hidden', 'true');
-            modal.innerHTML = `
-                <div class="modal-dialog modal-dialog-centered" role="document">
-                    <div class="modal-content">
-                        <div class="modal-header bg-warning text-dark">
-                            <h5 class="modal-title" id="staleUploadModalLabel">
-                                <i class="fas fa-exclamation-triangle me-2"></i>Stale Data Detected
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <p class="mb-3">${message || 'Your Excel data is stale. Please upload a fresh Excel file before generating tags.'}</p>
-                            <p class="text-muted small">This prevents generating tags with outdated product information.</p>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="button" class="btn btn-primary" id="staleUploadModalUploadBtn">
-                                <i class="fas fa-upload me-2"></i>Upload Fresh Excel File
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-            
-            // Handle upload button click
-            const uploadBtn = modal.querySelector('#staleUploadModalUploadBtn');
-            if (uploadBtn) {
-                uploadBtn.addEventListener('click', () => {
-                    const fileInput = document.getElementById('fileInput');
-                    if (fileInput) {
-                        // Close modal first
-                        const bsModal = bootstrap.Modal.getInstance(modal);
-                        if (bsModal) {
-                            bsModal.hide();
-                        }
-                        // Trigger file input click
-                        setTimeout(() => {
-                            fileInput.click();
-                        }, 300);
-                    } else {
-                        console.error('File input not found');
-                        alert('Please use the upload button in the header to upload a new Excel file.');
-                    }
-                });
-            }
-        }
-        
-        // Update message if modal already exists
-        const bodyText = modal.querySelector('.modal-body p');
-        if (bodyText && message) {
-            bodyText.textContent = message;
-        }
-        
-        // Show modal using Bootstrap
-        try {
-            const bsModal = new bootstrap.Modal(modal);
-            bsModal.show();
-        } catch (e) {
-            // Fallback if Bootstrap not available
-            console.warn('Bootstrap Modal not available, using fallback:', e);
-            modal.style.display = 'block';
-            modal.classList.add('show');
-            modal.setAttribute('aria-hidden', 'false');
-        }
-    },
-    
-    hideStaleUploadModal() {
-        const modal = document.getElementById('staleUploadModal');
-        if (modal) {
-            try {
-                const bsModal = bootstrap.Modal.getInstance(modal);
-                if (bsModal) {
-                    bsModal.hide();
-                } else {
-                    modal.style.display = 'none';
-                    modal.classList.remove('show');
-                    modal.setAttribute('aria-hidden', 'true');
-                }
-            } catch (e) {
-                modal.style.display = 'none';
-            }
         }
     },
 
@@ -19273,7 +19156,7 @@ const TagManager = {
             (async () => {
                 try {
                     // PERFORMANCE: Use cache first for instant dropdown population, refresh in background
-                    const filterResp = await fetch('/api/web/filter-options?t=' + Date.now());
+                    const filterResp = await fetch('/api/filter-options?t=' + Date.now());
                     const filterData = await filterResp.json();
                     const lineages = filterData.lineage || [];
 
@@ -20368,8 +20251,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.TagManager._checkingExistingData = false;
             }
             
-            if (fetchingStuck && fetchingDuration > 30000) {
-                console.warn('⚠️ Resetting stuck _fetchingAvailableTags flag on visibility change');
+            // Only reset fetch flag after 60s+ so we don't kill an in-progress 60s web request
+            if (fetchingStuck && fetchingDuration > 60000) {
+                console.warn('⚠️ Resetting stuck _fetchingAvailableTags flag on visibility change (after 60s)');
                 window.TagManager._fetchingAvailableTags = false;
             }
             
