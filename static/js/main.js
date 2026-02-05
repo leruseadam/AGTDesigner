@@ -12031,16 +12031,12 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE vs CORRECTNESS:
-            // - On true "first load" (no existing tags and no cache), we MUST load with full database lineage
-            //   to avoid showing Excel/stale lineage that then "flips" a moment later.
-            // - On subsequent loads (or when cache exists), we can safely use fast_load=1 for speed.
-            //
-            // So:
-            // - First load (no tags, no cache) → fast_load=0  (no flash, correct lineage from the start)
-            // - All other cases               → fast_load=1  (fast, backend does lightweight alignment)
-            const isFirstTrueLoad = !hasExistingTags && !hasCache && !this._hasLoadedOnce;
-            const fastLoadParam = isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1';
+            // PERFORMANCE OPTIMIZATION: Always use fast_load=1 for instant loading
+            // Lineage will be enriched in background if needed, but initial load is instant
+            // This provides much faster page loads while still getting correct lineage eventually
+            // - Fast load shows tags immediately (fast_load=1)
+            // - Background enrichment updates lineage if needed (non-blocking)
+            const fastLoadParam = '&fast_load=1';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
@@ -14807,11 +14803,11 @@ const TagManager = {
         }, 60000); // 60 second safety net - increased for large files
 
         try {
-            // CRITICAL FIX: Load WITH lineage enrichment to ensure dropdowns show correct values
-            // Previously used fast_load=1 which skipped lineage, causing empty dropdowns when filtering by product type
-            // Explicitly pass fast_load=0 to ensure all tags have database lineage from the start
+            // PERFORMANCE: Use fast_load=1 for instant loading - lineage will be enriched in background
+            // Fast loading shows tags immediately, then enriches with database lineage asynchronously
+            // This provides much faster initial load while still getting correct lineage
             const response = await Promise.race([
-                fetch('/api/initial-data?fast_load=0'),
+                fetch('/api/initial-data?fast_load=1'),
                 timeoutPromise
             ]).catch(err => {
                 // If fetch fails or times out, complete initialization anyway

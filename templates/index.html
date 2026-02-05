@@ -1180,8 +1180,9 @@
               return Promise.resolve([]);
             }
             
-            // CRITICAL FIX: Use main endpoint with full lineage alignment (no web fast_load path)
-            return fetchWithTimeout('/api/available-tags?fast_load=0&nocache=1', 60000).catch(e => { 
+            // PERFORMANCE: Use fast_load=1 for instant loading, lineage will be enriched in background
+            // Only use fast_load=0 when explicitly needed (e.g., after lineage updates)
+            return fetchWithTimeout('/api/available-tags?fast_load=1', 60000).catch(e => { 
               console.error('Available tags failed:', e); 
               return []; 
             });

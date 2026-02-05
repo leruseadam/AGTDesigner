@@ -2927,12 +2927,20 @@ class JSONMatcher:
                 json_column_match = self._find_json_column_match(product_name)
                 if not json_column_match and raw_product_name != product_name:
                     json_column_match = self._find_json_column_match(raw_product_name)
+                
+                # If exact match fails, try fuzzy match on JSON column
+                if not json_column_match:
+                    json_column_match = self._find_json_column_fuzzy_match(product_name)
+                    if not json_column_match and raw_product_name != product_name:
+                        json_column_match = self._find_json_column_fuzzy_match(raw_product_name)
+                
                 if json_column_match:
-                    # JSON COLUMN MATCH = EXACT MATCH - accept it immediately, no vendor/brand/strain checks
-                    logging.info(f"✅ JSON COLUMN EXACT MATCH: '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
+                    # JSON COLUMN MATCH = EXACT OR FUZZY MATCH - accept it immediately, no vendor/brand/strain checks
+                    match_type = json_column_match.get('_match_type', 'json_column')
+                    logging.info(f"✅ JSON COLUMN MATCH ({match_type}): '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
                     matched_product = json_column_match.copy()
                     matched_product['_source'] = 'JSON Column Match'
-                    matched_product['_match_score'] = 100.0
+                    matched_product['_match_score'] = 100.0 if 'exact' in match_type else 95.0
                     # Database prices are the correct retail prices - keep them
                     # STRAIN DATABASE ENRICHMENT: Enrich lineage from strain database
                     matched_product = self._enrich_product_with_strain_info(matched_product)
@@ -8685,8 +8693,16 @@ class JSONMatcher:
                         return product
             
             # Debug: log what keys we tried and what's available
-            logging.debug(f"🔍 JSON COLUMN LOOKUP: Tried keys: {[exact_key[:50], key_lower[:50], key_ws[:50], key_no_apos[:50]]}")
-            logging.debug(f"🔍 JSON COLUMN LOOKUP: Cache has {len(json_lookup)} keys, sample: {list(json_lookup.keys())[:5]}")
+            logging.warning(f"🔍 JSON COLUMN LOOKUP FAILED: Tried keys: exact='{exact_key[:80]}', lower='{key_lower[:80]}', ws='{key_ws[:80]}', no_apos='{key_no_apos[:80]}'")
+            if json_lookup:
+                sample_keys = list(json_lookup.keys())[:10]
+                logging.warning(f"🔍 JSON COLUMN LOOKUP: Cache has {len(json_lookup)} keys, sample: {sample_keys}")
+                # Check if any key contains parts of the search term
+                search_words = set(key_lower.split())
+                for key in sample_keys:
+                    key_words = set(str(key).lower().split())
+                    if search_words & key_words:  # Any overlap
+                        logging.warning(f"🔍 JSON COLUMN PARTIAL MATCH: '{key[:80]}' shares words with '{key_lower[:80]}'")
 
         # Excel fallback
         if hasattr(self, 'excel_processor') and self.excel_processor and getattr(self.excel_processor, 'df', None) is not None:
@@ -8737,6 +8753,70 @@ class JSONMatcher:
             logging.debug(f"Direct DB JSON lookup error: {e}")
 
         return None
+
+    def _find_json_column_fuzzy_match(self, json_description: str) -> Optional[dict]:
+        """
+        Fuzzy match incoming JSON description to database JSON column when exact match fails.
+        Uses fuzzy string matching to find similar JSON column values.
+        """
+        if not json_description:
+            return None
+
+        json_desc_lower = json_description.lower().strip()
+        
+        # Ensure JSON column lookup is populated
+        if not self._indexed_cache or 'json_column_lookup' not in self._indexed_cache:
+            self._populate_json_column_lookup_from_db()
+
+        best_match = None
+        best_score = 0
+        threshold = 85  # Require at least 85% similarity
+
+        # Try direct database query for fuzzy matching
+        try:
+            product_db = self._get_product_database()
+            if product_db:
+                all_products = product_db.get_all_products()
+                for product in all_products:
+                    db_json = str(product.get('JSON') or product.get('json') or '').strip()
+                    if not db_json:
+                        continue
+                    
+                    db_json_lower = db_json.lower().strip()
+                    
+                    # Use fuzzy matching
+                    try:
+                        from fuzzywuzzy import fuzz
+                        score = fuzz.token_sort_ratio(json_desc_lower, db_json_lower)
+                        
+                        if score >= threshold and score > best_score:
+                            best_score = score
+                            result = dict(product)
+                            result['_source'] = 'database'
+                            result['_match_type'] = 'json_column_fuzzy'
+                            result['_fuzzy_score'] = score
+                            best_match = result
+                    except ImportError:
+                        # Fallback to simple substring matching if fuzzywuzzy not available
+                        if json_desc_lower in db_json_lower or db_json_lower in json_desc_lower:
+                            # Check word overlap
+                            json_words = set(json_desc_lower.split())
+                            db_words = set(db_json_lower.split())
+                            overlap = len(json_words & db_words) / max(len(json_words), len(db_words))
+                            if overlap >= 0.7:  # 70% word overlap
+                                result = dict(product)
+                                result['_source'] = 'database'
+                                result['_match_type'] = 'json_column_fuzzy'
+                                result['_fuzzy_score'] = overlap * 100
+                                best_match = result
+                                break
+        except Exception as e:
+            logging.debug(f"Fuzzy JSON column lookup error: {e}")
+
+        if best_match:
+            logging.info(f"✅ JSON COLUMN FUZZY MATCH ({best_score}%): '{json_description[:60]}' → '{best_match.get('Product Name*', 'Unknown')[:60]}'")
+        
+        return best_match
 
     def _find_vendor_keyword_match(self, json_name: str, json_vendor: str, json_type: str) -> Optional[dict]:
         """
