@@ -481,6 +481,12 @@
 
     function showStoreSelectionModal(forceClear = false) {
       try {
+        const modalElement = document.getElementById('storeSelectionModal');
+        // CRITICAL FIX: Prevent modal from loading/showing twice - skip if already visible
+        if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block')) {
+          console.log('⚠️ Store modal already visible - skipping duplicate show');
+          return;
+        }
         console.log('=== SHOWING STORE SELECTION MODAL ===');
         console.log('forceClear:', forceClear);
         console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
@@ -493,13 +499,12 @@
           sessionStorage.removeItem('selected_store');
         }
 
-        const modalElement = document.getElementById('storeSelectionModal');
-        console.log('Modal element found:', modalElement !== null);
         if (!modalElement) {
           console.error('❌ Store selection modal element not found - retrying in 500ms');
-          setTimeout(showStoreSelectionModal, 500);
+          setTimeout(() => showStoreSelectionModal(forceClear), 500);
           return;
         }
+        console.log('Modal element found');
         
         // CRITICAL: Ensure modal is visible (remove any hidden states)
         modalElement.style.visibility = 'visible';
@@ -929,9 +934,9 @@
             }, 300);
           } else {
             // NO STORE - Show modal
-            // CRITICAL FIX: Check if modal is already visible to prevent duplicate modals
-            if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block')) {
-              console.log('⚠️ Modal already visible - skipping duplicate show');
+            // CRITICAL FIX: Skip if modal already visible (early IIFE or previous call showed it)
+            if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block' || modalElement.getAttribute('aria-hidden') === 'false')) {
+              console.log('⚠️ checkStoreRequired: Modal already visible - skipping duplicate show');
               window.checkingStoreRequired = false;
               return;
             }
@@ -6720,6 +6725,12 @@
           }
           
           const doShowModal = () => {
+            // Skip if already shown (e.g. by checkStoreRequired)
+            const existingModal = document.getElementById('storeSelectionModal');
+            if (existingModal && (existingModal.classList.contains('show') || existingModal.style.display === 'block')) {
+              console.log('⚠️ Early check: Store modal already visible - skipping');
+              return;
+            }
             if (typeof window.showStoreSelectionModal === 'function') {
               window.showStoreSelectionModal();
             } else {

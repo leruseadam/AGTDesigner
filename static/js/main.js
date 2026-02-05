@@ -11756,9 +11756,9 @@ const TagManager = {
             console.log('📊 No cache or tags already exist - fetching from server');
         }
         
-        // PERFORMANCE: For web clients, prioritize cache even more aggressively
-        if (isWebClient && hasCache && !hasExistingTags && !forceReload) {
-            console.log(`⚡ WEB CLIENT: Using cache immediately for faster load`);
+        // PERFORMANCE: Prioritize cache for all clients (web endpoint used everywhere)
+        if (hasCache && !hasExistingTags && !forceReload) {
+            console.log(`⚡ Using cache immediately for faster load`);
         }
         
         // CRITICAL FIX: Set flag EARLY to prevent upload prompt from showing while fetching
@@ -11902,7 +11902,7 @@ const TagManager = {
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
                 // PERFORMANCE: Much shorter timeout for faster failure recovery
-                const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
+                const safetyTimeoutMs = 5000; // 5s - web endpoint is fast for all clients
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
                     // Just hide the splash, don't show error message
@@ -12038,7 +12038,7 @@ const TagManager = {
             // Desktop/localhost should respond quickly with fast_load=1
             const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for web (was 1, but timeouts need retries)
             const maxProcessingRetries = isWebClient ? 2 : 2; // Allow 2 processing retries for web
-            const fetchTimeout = isWebClient ? 60000 : 45000; // 60s timeout for web clients (large datasets), 45s for desktop
+            const fetchTimeout = 60000; // 60s - web endpoint used for all; backend handles heavy datasets
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -12078,18 +12078,17 @@ const TagManager = {
                     const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
                     const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
                     
-                    // CRITICAL FIX: For web clients, if lineage was recently updated, force nocache to bypass stale cache
-                    // Web endpoint will still get database lineage when needed (it checks lineage_update_timestamp)
-                    // PERFORMANCE: Web clients skip prefer_db for speed, but still get fresh data when lineage updates
-                    const forceDbLineage = isWebClient ? false : (this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate);
+                    // Web endpoint handles lineage updates via session - no need to force nocache from frontend
+                    const forceDbLineage = false;
                     // CRITICAL: Force nocache if lineage was recently updated (even for web clients) to get fresh lineage
                     const useCache = retryCount === 0 && !forceDbLineage && !forceReload && !hasRecentLineageUpdate;
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Skip prefer_db for web clients (fast_load includes lineage), use for desktop if needed
-                    const preferDbParam = isWebClient ? '' : (forceDbLineage ? '&prefer_db=1' : '');
+                    // Web endpoint always uses fast_load, skips prefer_db for speed
+                    const preferDbParam = '';
                     
-                    // Use web endpoint for web clients, regular endpoint for localhost/desktop
-                    const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+                    // PERFORMANCE: Use web-optimized endpoint for BOTH web and desktop - it's faster
+                    // Web endpoint has aggressive caching, fast_load, and background cache; works on localhost too
+                    const baseEndpoint = '/api/web/available-tags';
                     
                     // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
                     const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
@@ -12099,8 +12098,8 @@ const TagManager = {
                     console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
                     
-                    // ⚡ AGGRESSIVE CACHING: Web clients use longer cache (30 min), desktop uses shorter (5 min)
-                    const cacheMaxAge = isWebClient ? 1800 : 300; // Web: 30min, Desktop: 5min
+            // ⚡ AGGRESSIVE CACHING: 30 min for both - web endpoint used everywhere for speed
+            const cacheMaxAge = 1800; // 30 min
                     response = await fetch(optimizedFetchUrl, {
                         signal: controller.signal,
                         // Default cache strategy - let browser handle it intelligently
@@ -19273,7 +19272,7 @@ const TagManager = {
             (async () => {
                 try {
                     // PERFORMANCE: Use cache first for instant dropdown population, refresh in background
-                    const filterResp = await fetch('/api/filter-options?t=' + Date.now());
+                    const filterResp = await fetch('/api/web/filter-options?t=' + Date.now());
                     const filterData = await filterResp.json();
                     const lineages = filterData.lineage || [];
 
