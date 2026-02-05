@@ -112,8 +112,7 @@ else:
     PERMANENT_SESSION_LIFETIME = 1800
     
     # More generous memory settings for local (still overridable)
-    # Increased default to reduce spurious memory warnings during heavy local use
-    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '800'))
+    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '500'))
     CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '100'))
     BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '500'))
 
@@ -134,7 +133,7 @@ def get_memory_usage():
         try:
             import resource
             return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-        except Exception:
+        except:
             return 0
 
 def cleanup_memory():
@@ -1783,24 +1782,6 @@ def create_app():
                 # Ultimate fallback - this should never happen
                 return Response('{"success": false, "error": "Unknown error"}', status=500, mimetype='application/json')
     
-    # Return JSON for API when product database is missing (avoids generic 500)
-    @app.errorhandler(FileNotFoundError)
-    def handle_file_not_found(e):
-        from flask import request, has_request_context
-        msg = str(e) if e else "Resource not found"
-        try:
-            if has_request_context() and hasattr(request, 'path') and request.path and request.path.startswith('/api/'):
-                # Friendly message for "no database" case
-                if "product database" in msg.lower() or "database file" in msg.lower():
-                    return jsonify({
-                        'success': False,
-                        'error': 'Product database not available. Upload the database via admin tools or select a store that has one.',
-                        'error_type': 'FileNotFoundError'
-                    }), 503
-                return jsonify({'success': False, 'error': msg, 'error_type': 'FileNotFoundError'}), 404
-        except Exception:
-            pass
-        raise e
     
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
@@ -2320,18 +2301,16 @@ class LabelMakerApp:
             return False
             
     def run(self):
-        # Default 0.0.0.0 so other computers on the network can connect (e.g. coworkers).
-        # Set HOST=127.0.0.1 in the environment to restrict to same machine only.
-        host = os.environ.get('HOST', '0.0.0.0')
+        host = os.environ.get('HOST', '127.0.0.1')
         port = int(os.environ.get('FLASK_PORT', 8001))
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
-        # PREVENT MULTIPLE RESTARTS: Check if app is already running (use 127.0.0.1 for check so we don't depend on network)
+        # PREVENT MULTIPLE RESTARTS: Check if app is already running
         import socket
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
-            result = sock.connect_ex(('127.0.0.1', port))
+            result = sock.connect_ex((host, port))
             sock.close()
             
             if result == 0:
@@ -2353,19 +2332,7 @@ class LabelMakerApp:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
-        print(f"🌐 App will be available at: http://127.0.0.1:{port}")
-        if host == '0.0.0.0':
-            # Show how to connect from other computers on the network
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.settimeout(0.5)
-                s.connect(('8.8.8.8', 80))
-                lan_ip = s.getsockname()[0]
-                s.close()
-                print(f"   From other computers (same network): http://{lan_ip}:{port}")
-            except Exception:
-                print(f"   From other computers: use this machine's IP address with port {port}")
-            print(f"   (If others can't connect, allow port {port} in this computer's firewall)")
+        print(f"🌐 App will be available at: http://{host}:{port}")
         logging.info(f"Development mode: {development_mode}")
         
         # DEVELOPMENT MODE: Keep debug but disable reloader to prevent multiple restarts
@@ -2391,7 +2358,7 @@ def get_session_excel_processor():
             fallback.df = pd.DataFrame()
             fallback.selected_tags = []
             return fallback
-        except Exception:
+        except:
             return None
     
     try:
@@ -7858,12 +7825,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         skip_if_aligned: If True, skip alignment if tags already have canonical_lineage/currentLineage AND sovereign_lineage
     """
     try:
-        try:
-            product_db = get_product_database(store_name)
-        except FileNotFoundError:
-            # No database for this store - return tags unchanged (alignment is optional)
-            logging.debug("No product database available for lineage alignment; returning tags unchanged")
-            return tags
+        product_db = get_product_database(store_name)
         if not product_db:
             return tags
         
@@ -7931,11 +7893,13 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         cursor = conn.cursor()
         
         # CRITICAL FIX: Use EXACT same query as docx generation for consistency
-        # PERFORMANCE: One row per product name (latest by id) to avoid redundant DB rows slowing tag load
+        # Match by "Product Name*" exactly like docx generation (tag_generator.py line 909)
         chunk_size = 400
         for start in range(0, len(product_names), chunk_size):
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
+        # EXACT same query as docx generation - but also return individual fields to preserve priority
+        # CRITICAL FIX: Also select Product Brand and DOH to enrich tags with brand and DOH data
             cursor.execute(f'''
                 SELECT p."Product Name*", 
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
@@ -7948,9 +7912,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
-                  AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) GROUP BY "Product Name*")
                 ORDER BY p.id DESC
-            ''', chunk + chunk)
+            ''', chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
                 db_lineage_raw = row[1]
@@ -8632,20 +8595,6 @@ def generate_labels():
             logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly - SKIPPING ALL FILE I/O")
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
-            # CRITICAL: Ensure Price is populated for DOCX (web sends full tag objects; UI may have Price* only)
-            _df = excel_processor.df
-            if _df is not None and not _df.empty:
-                if 'Price*' in _df.columns and ('Price' not in _df.columns or _df['Price'].isna().all()):
-                    if 'Price' not in _df.columns:
-                        _df['Price'] = _df['Price*']
-                    else:
-                        _df['Price'] = _df['Price'].fillna(_df['Price*'])
-                if 'Price' in _df.columns:
-                    # Fill NaN in Price from Price* where available
-                    if 'Price*' in _df.columns:
-                        _df['Price'] = _df['Price'].fillna(_df['Price*'])
-                    if 'Price* (Tier Name for Bulk)' in _df.columns:
-                        _df['Price'] = _df['Price'].fillna(_df['Price* (Tier Name for Bulk)'])
             excel_processor._last_loaded_file = file_path or 'direct_from_request'
             excel_processor._skip_enrichment = True  # Skip database enrichment for speed
             logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time)")
@@ -8712,48 +8661,6 @@ def generate_labels():
         # CRITICAL FIX: JSON tags work exactly like Excel tags - no special restoration needed
         # They're processed through the same pipeline as Excel tags
 
-        # CRITICAL: Check for stale data - prevent generation with old Excel uploads
-        upload_timestamp = session.get('upload_timestamp', 0)
-        session_file_path = session.get('file_path')
-        current_time = time.time()
-        stale_threshold = 21600  # 6 hours in seconds
-        
-        # Check if upload is stale (missing timestamp or older than 1 hour)
-        is_stale = False
-        stale_reason = None
-        
-        if not upload_timestamp or upload_timestamp == 0:
-            is_stale = True
-            stale_reason = "No upload timestamp found"
-        elif current_time - upload_timestamp > stale_threshold:
-            is_stale = True
-            age_hours = (current_time - upload_timestamp) / 3600
-            stale_reason = f"Upload is {age_hours:.1f} hours old (max 6 hours allowed)"
-        
-        # Also check if file exists and matches session
-        if session_file_path and os.path.exists(session_file_path):
-            file_mtime = os.path.getmtime(session_file_path)
-            file_age = current_time - file_mtime
-            if file_age > stale_threshold:
-                is_stale = True
-                stale_reason = f"Excel file is {file_age / 3600:.1f} hours old (max 6 hours allowed)"
-        elif session_file_path and not os.path.exists(session_file_path):
-            is_stale = True
-            stale_reason = "Excel file no longer exists"
-        
-        # Block generation if data is stale - always check, even if tags come from request
-        # UI may show stale data if cache is stale, so we must verify upload freshness
-        if is_stale:
-            logging.warning(f"⚠️ STALE DATA BLOCK: {stale_reason} - blocking tag generation")
-            generate_labels._processing_requests.discard(request_fingerprint)
-            return jsonify({
-                'error': 'stale_upload',
-                'message': 'Session Expired. Please upload a fresh Excel file to prevent stale or outdated product information.',
-                'stale_reason': stale_reason,
-                'upload_timestamp': upload_timestamp,
-                'current_time': current_time
-            }), 400
-        
         # Check if we have data in Excel processor OR database
         has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
         has_database = False
@@ -9182,7 +9089,6 @@ def generate_labels():
                                 # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
                                 # This ensures DOCX uses the same lineage shown in the UI
                                 ui_lineage_map = {}
-                                ui_price_map = {}  # Price from UI (selected tags) - DOCX must match what user sees
                                 for tag in selected_tags_from_request:
                                     if isinstance(tag, dict):
                                         product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
@@ -9190,15 +9096,6 @@ def generate_labels():
                                         ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
                                         if product_name and ui_lineage:
                                             ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
-                                        # Price from UI - same source as "Selected Tags" display (incl. best_match)
-                                        ui_price = (
-                                            tag.get('Price') or tag.get('Price*') or tag.get('Price* (Tier Name for Bulk)') or tag.get('Med Price') or
-                                            (tag.get('best_match') or {}).get('Price') or (tag.get('best_match') or {}).get('Price*')
-                                        )
-                                        if product_name and ui_price and str(ui_price).strip() and str(ui_price).strip().lower() not in ('nan', 'none', 'null', ''):
-                                            key = str(product_name).strip()
-                                            ui_price_map[key] = str(ui_price).strip()
-                                            ui_price_map[key.lower()] = str(ui_price).strip()
                                 
                                 # PERFORMANCE FIX: Batch query all lineages at once instead of N+1 queries
                                 # This replaces individual get_product_lineage() calls which were causing 5-minute delays
@@ -9333,36 +9230,28 @@ def generate_labels():
                                         is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
                                         docx_lineage = 'HYBRID' if is_classic else 'MIXED'
                                     
-                                    # Extract price: UI first (what user sees), then Excel cache, then database
-                                    extracted_price = None
-                                    if ui_price_map:
-                                        key = product_name_for_record.strip()
-                                        extracted_price = ui_price_map.get(key) or ui_price_map.get(key.lower())
-                                    if extracted_price is not None:
-                                        logging.info(f"💰 Using price from UI (selected tags): '{product_name_for_record[:50]}' -> '{extracted_price}'")
-                                    elif price_cache_from_excel and (product_name_for_record in price_cache_from_excel or product_name_for_record.strip().lower() in price_cache_from_excel):
-                                        extracted_price = price_cache_from_excel.get(product_name_for_record) or price_cache_from_excel.get(product_name_for_record.strip().lower())
-                                        logging.info(f"💰 Using price from Excel cache: '{product_name_for_record[:50]}' -> '{extracted_price}'")
+                                    # Extract price from Excel cache first, then database
+                                    if product_name_for_record in price_cache_from_excel:
+                                        extracted_price = price_cache_from_excel[product_name_for_record]
+                                        logging.info(f"💰 Using price from Excel cache: '{product_name_debug}' -> '{extracted_price}'")
                                     else:
                                         extracted_price = _extract_price_from_database_product(processed_record)
-                                    if not extracted_price:
-                                        raw_price = db_record.get('Price') or db_record.get('Price*') or db_record.get('Med Price')
-                                        if raw_price and str(raw_price).strip() and str(raw_price).strip().lower() not in ('none', 'nan', ''):
-                                            extracted_price = str(raw_price).strip()
-                                            logging.info(f"💰 Using price from raw db_record: '{product_name_for_record[:50]}' -> '{extracted_price}'")
                                     
                                     formatted_price = _format_price_value(extracted_price)
+                                    
+                                    # CRITICAL FIX: Ensure Price is always set - use fallback if empty
                                     if not formatted_price or str(formatted_price).strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']:
+                                        # Try to get price from other fields
                                         price_fallback = (
                                             processed_record.get('Price', '') or
                                             processed_record.get('Price*', '') or
                                             processed_record.get('Med Price', '') or
                                             ''
                                         )
-                                        if price_fallback and str(price_fallback).strip():
+                                        if price_fallback:
                                             formatted_price = _format_price_value(price_fallback)
-                                        if not formatted_price:
-                                            formatted_price = ''
+                                        else:
+                                            formatted_price = ''  # Leave empty instead of $0.00
                                     
                                     # CRITICAL FIX: Ensure DescAndWeight is always set - use fallback if empty
                                     desc_and_weight = processed_record.get('DescAndWeight', '')
@@ -9629,22 +9518,15 @@ def generate_labels():
             # PERFORMANCE: Fast validation loop - only process records that need fixing
             for record in records:
                 # CRITICAL FIX: NEVER set default prices - preserve existing price or leave empty
-                # Treat NaN as missing so we fall back to Price* (web/UI may have Price* only)
-                def _safe_price_val(r, key, default=''):
-                    v = r.get(key, default)
-                    if v is None: return default
-                    if hasattr(pd, 'isna') and pd.isna(v): return default
-                    s = str(v).strip()
-                    if not s or s.lower() in ('nan', 'none', 'null', 'n/a', ''): return default
-                    return s
-                price = _safe_price_val(record, 'Price') or _safe_price_val(record, 'Price*') or _safe_price_val(record, 'Med Price')
-                if price:
+                # Only use existing price fields, never fallback to $0.00 or any default
+                price = record.get('Price', '') or record.get('Price*', '') or record.get('Med Price', '')
+                if price and price.strip() and price.strip().lower() not in ['none', 'nan', 'n/a', '']:
                     # Only set price if we have a valid value from Excel
-                    if not _safe_price_val(record, 'Price'):
+                    if not record.get('Price'):
                         record['Price'] = price
-                    if not _safe_price_val(record, 'Price*'):
+                    if not record.get('Price*'):
                         record['Price*'] = price
-                    if not record.get('Price* (Tier Name for Bulk)') or (hasattr(pd, 'isna') and pd.isna(record.get('Price* (Tier Name for Bulk)'))):
+                    if not record.get('Price* (Tier Name for Bulk)'):
                         record['Price* (Tier Name for Bulk)'] = price
                 
                 # Ensure DescAndWeight is always set (fast check)
@@ -10704,7 +10586,7 @@ def get_session_cache_key(base_key):
             sid = session.get('_id', None) or session.sid if hasattr(session, 'sid') else None
         else:
             sid = 'background'  # Use 'background' for background processing
-    except Exception:
+    except:
         sid = 'background'  # Fallback for any session access issues
 
     # OPTIMIZATION: Get file path from global _excel_processor if it exists, without loading
@@ -11126,14 +11008,8 @@ def get_available_tags():
                     'force_frontend_cache_clear': force_frontend_cache_clear
                 })
             # Only return 503 if we have no cached data
-            memory_mb = get_memory_usage()
-            logging.error(f"Memory usage too high ({memory_mb:.1f}MB > {MAX_MEMORY_MB}MB) and no cached data available")
-            return jsonify({
-                'error': 'Server memory usage is too high',
-                'message': f'Server memory usage ({memory_mb:.0f}MB) exceeds the limit ({MAX_MEMORY_MB}MB). Please wait a moment and try again, or click "Reset Cache" in Database Tools to free up memory.',
-                'memory_mb': round(memory_mb),
-                'limit_mb': MAX_MEMORY_MB
-            }), 503
+            logging.error("Memory usage too high and no cached data available")
+            return jsonify({'error': 'Memory usage too high, please try again later'}), 503
         
         # Rate limiting: prevent rapid successive requests
         client_ip = request.remote_addr
@@ -12904,7 +12780,6 @@ def get_available_tags():
                                             placeholders = ','.join(['?'] * len(chunk))
                                             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                                             # Also handle case where normalized_product_strain is NULL - fall back to name-based join
-                                            # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                             chunk_query = f'''
                                                 SELECT DISTINCT
                                                     COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
@@ -12915,11 +12790,10 @@ def get_available_tags():
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
-                              AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
+                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                                 ORDER BY p.id DESC
                                             '''
-                                            cur.execute(chunk_query, chunk + chunk + chunk + chunk)
+                                            cur.execute(chunk_query, chunk + chunk)
                                             all_batch_results.extend(cur.fetchall())
                                         except Exception as chunk_err:
                                             logging.warning(f"Batch chunk query failed: {chunk_err}")
@@ -12929,7 +12803,6 @@ def get_available_tags():
                                     placeholders = ','.join(['?'] * len(all_search_names))
                                     # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                                     # Also handle case where normalized_product_strain is NULL - fall back to name-based join
-                                    # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                     batch_query = f'''
                                         SELECT DISTINCT
                                             COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
@@ -12940,8 +12813,7 @@ def get_available_tags():
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
-                              AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
+                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
                                         ORDER BY p.id DESC
                                     '''
                                     # Add query timing to detect slow queries
@@ -12950,7 +12822,7 @@ def get_available_tags():
                                     # Target: <100ms for fast loading, <500ms for normal loading
                                     MAX_QUERY_TIME = 0.1 if fast_load else 0.5  # Stricter timeout in fast mode
                                     try:
-                                        cur.execute(batch_query, all_search_names + all_search_names + all_search_names + all_search_names)
+                                        cur.execute(batch_query, all_search_names + all_search_names)
                                         batch_results = cur.fetchall()
                                         
                                         query_duration = (time.time() - query_start) * 1000
@@ -14435,12 +14307,12 @@ def download_processed_excel():
             product_db = get_product_database(store_name)
             if product_db:
                 try:
-                    # Fast path: get products as DataFrame in one query (avoids slow get_all_products row-by-row)
-                    products_df = product_db.get_products_dataframe(limit=10000)
-                    if products_df is not None and not products_df.empty:
+                    # Get all products from database
+                    db_products = product_db.get_all_products(limit=10000)
+                    if db_products:
+                        # Convert database products to DataFrame
                         import pandas as pd
-                        records = products_df.to_dict('records')
-                        processed_products = [process_database_product_for_api(p) for p in records]
+                        processed_products = [process_database_product_for_api(p) for p in db_products]
                         df = pd.DataFrame(processed_products)
                         logging.info(f"Using {len(df)} database products for Excel download")
                     else:
@@ -14534,24 +14406,24 @@ def download_processed_excel():
         if df is None or df.empty:
             return jsonify({'error': 'No data available after filtering'}), 400
 
-        # Create output buffer (xlsxwriter is faster than openpyxl for writing)
+        # Create output buffer
         output_buffer = BytesIO()
         logging.debug(f"Creating Excel file with {df.shape[0]} rows and {df.shape[1]} columns")
-        try:
-            df.to_excel(output_buffer, index=False, engine='xlsxwriter')
-        except Exception:
-            df.to_excel(output_buffer, index=False, engine='openpyxl')
+        df.to_excel(output_buffer, index=False, engine='openpyxl')
         output_buffer.seek(0)
 
-        # Generate descriptive filename with vendor and record count (value_counts is much faster than iterrows)
+        # Generate descriptive filename with vendor and record count
         today_str = datetime.now().strftime('%Y%m%d')
         time_str = datetime.now().strftime('%H%M%S')
-        vendor_col = next((c for c in ['Vendor', 'Vendor/Supplier*', 'vendor'] if c in df.columns), None)
-        if vendor_col is not None:
-            counts = df[vendor_col].astype(str).str.strip().replace('', None).replace('nan', None).dropna().value_counts()
-            primary_vendor = str(counts.index[0]).strip() if len(counts) else 'Unknown'
-        else:
-            primary_vendor = 'Unknown'
+        
+        # Get vendor information for filename
+        vendor_counts = {}
+        for _, row in df.iterrows():
+            vendor = str(row.get('Vendor', 'Unknown')).strip()
+            if vendor and vendor != 'Unknown':
+                vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
+        
+        primary_vendor = max(vendor_counts.items(), key=lambda x: x[1])[0] if vendor_counts else 'Unknown'
         vendor_clean = primary_vendor.replace(' ', '_').replace('&', 'AND').replace(',', '').replace('.', '')[:15]
         
         filename = f"AGT_{vendor_clean}_Processed_Data_{len(df)}RECORDS_{today_str}_{time_str}.xlsx"
@@ -14759,28 +14631,6 @@ def update_lineage():
                 if similar_products_updated > 0:
                     logging.info(f"✅ Updated {similar_products_updated} Classic Type products with strain '{strain_name}' (linked: {strain_linked_count}, name-matched: {name_match_count})")
         
-        # CRITICAL FIX: Also copy canonical/sovereign lineage to products for ALL product types
-        # This ensures the main products table has the canonical lineage set so downstream
-        # queries and UI lookups that rely on p."Lineage" reflect the strain canonical value.
-        try:
-            total_copied = 0
-            for strain_id, strain_name in strain_rows:
-                try:
-                    cursor.execute("""
-                        UPDATE products
-                        SET "Lineage" = ?, sovereign_lineage = ?
-                        WHERE strain_id = ? OR LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
-                    """, (new_lineage, new_lineage, strain_id, strain_name))
-                    copied = cursor.rowcount
-                    total_copied += copied
-                    if copied > 0:
-                        logging.info(f"✅ Copied canonical lineage to {copied} product(s) for strain '{strain_name}' (id: {strain_id})")
-                except Exception as copy_err:
-                    logging.warning(f"⚠️ Could not copy canonical lineage to products for strain '{strain_name}' (id: {strain_id}): {copy_err}")
-            if total_copied > 0:
-                logging.info(f"✅ Total products updated with canonical/sovereign lineage copy: {total_copied}")
-        except Exception as overall_copy_err:
-            logging.warning(f"⚠️ Failed to copy canonical lineage to products (overall): {overall_copy_err}")
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
 
@@ -15611,25 +15461,12 @@ def get_web_available_tags():
     """Web-optimized version - uses same fast path as regular endpoint but always with fast_load=1"""
     try:
         start_time = time.time()
-
+        
         # WEB OPTIMIZATION: Always use fast_load=1 and skip prefer_db for maximum speed
         # This skips slow database queries that cause timeouts on web servers
         fast_load = True  # Always fast for web
         prefer_db = False  # Skip database queries for speed
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
-        # Optional: limit number of tags for initial web load to avoid timeouts
-        max_tags_param = request.args.get('max_tags')
-        max_tags: Optional[int] = None
-        try:
-            if max_tags_param is not None:
-                parsed = int(str(max_tags_param).strip())
-                if parsed > 0:
-                    max_tags = parsed
-        except (TypeError, ValueError):
-            max_tags = None
-        # Sensible default for web: cap initial payload unless caller explicitly requests unlimited
-        DEFAULT_WEB_MAX_TAGS = 400
-        effective_max_tags = max_tags or DEFAULT_WEB_MAX_TAGS
         
         # CRITICAL FIX: Check for recent lineage updates - ALWAYS skip cache if lineage was recently updated
         # This ensures UI shows fresh database lineage, not stale cached Excel lineage
@@ -15741,17 +15578,11 @@ def get_web_available_tags():
         logging.info("🔄 WEB: Building tags with Excel data, aligning with database lineage...")
         
         # Excel processor already loaded and validated above - just use it
-        # Get tags from Excel (respect web max_tags limit to prevent huge payloads/timeouts)
+        # Get tags from Excel
         try:
             logging.info("WEB: Calling excel_processor.get_available_tags() - starting")
-            excel_tags = excel_processor.get_available_tags(max_tags=effective_max_tags)
-            total_rows = len(excel_processor.df) if getattr(excel_processor, "df", None) is not None else None
-            logging.info(
-                "WEB: excel_processor.get_available_tags() returned - count=%s (effective_max_tags=%s, total_rows=%s)",
-                (len(excel_tags) if excel_tags else 0),
-                effective_max_tags,
-                total_rows,
-            )
+            excel_tags = excel_processor.get_available_tags()
+            logging.info("WEB: excel_processor.get_available_tags() returned - count=%s", (len(excel_tags) if excel_tags else 0))
             
             # Enforce database-as-source-of-truth: always align Excel tags with DB lineage
             # before returning to the web UI. This ensures Excel data cannot override
@@ -16665,7 +16496,6 @@ def database_stats():
             product_db.init_database()
         
         # Test database connection
-        test_conn = None
         try:
             import sqlite3
             test_conn = create_db_connection(product_db.db_path)
@@ -16673,58 +16503,27 @@ def database_stats():
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
+                # If store-specific database doesn't have products table, fall back to main database
                 logging.info(f"Not falling back to main database; honoring store selection '{getattr(_product_database, '_store_name', 'unknown')}'.")
-                test_conn.close()
-                test_conn = None
+                # Re-test using store-specific DB only
                 test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
                     logging.error("Products table not found in main database either")
                     return jsonify({'error': 'Products table not found in any database'}), 500
+                test_conn.close()
                 logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+            # Products table exists, proceed
+            test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
-        finally:
-            if test_conn is not None:
-                try:
-                    test_conn.close()
-                except Exception:
-                    pass
         
         # Get vendor stats for the frontend
         vendor_stats = {}
         try:
             import sqlite3
-            if not product_db or not hasattr(product_db, 'db_path') or not product_db.db_path:
-                logging.error("Product database or db_path is not available")
-                return jsonify({
-                    'stats': {
-                        'total_products': 0,
-                        'unique_vendors': 0,
-                        'unique_brands': 0,
-                        'unique_product_types': 0,
-                        'product_type_distribution': {}
-                    },
-                    'vendor_stats': {'vendors': [], 'brands': []},
-                    'error': 'Database path not available'
-                }), 500
-            
-            if not os.path.exists(product_db.db_path):
-                logging.error(f"Database file does not exist: {product_db.db_path}")
-                return jsonify({
-                    'stats': {
-                        'total_products': 0,
-                        'unique_vendors': 0,
-                        'unique_brands': 0,
-                        'unique_product_types': 0,
-                        'product_type_distribution': {}
-                    },
-                    'vendor_stats': {'vendors': [], 'brands': []},
-                    'error': f'Database file not found: {product_db.db_path}'
-                }), 500
-            
             with db_connection(product_db.db_path) as conn:
                 # Get basic counts
                 cursor = conn.cursor()
@@ -16806,13 +16605,9 @@ def database_stats():
                     logging.warning(f"Auto-cleanup failed: {cleanup_error}")
                 
         except Exception as db_error:
-            import traceback
-            error_trace = traceback.format_exc()
             logging.error(f"Error querying database: {db_error}")
-            logging.error(f"Traceback: {error_trace}")
-            if product_db and hasattr(product_db, 'db_path'):
-                logging.error(f"Database path: {product_db.db_path}")
-                logging.error(f"Database exists: {os.path.exists(product_db.db_path) if product_db.db_path else 'N/A'}")
+            logging.error(f"Database path: {product_db.db_path}")
+            logging.error(f"Database exists: {os.path.exists(product_db.db_path)}")
             stats = {
                 'total_products': 0,
                 'unique_vendors': 0,
@@ -16828,21 +16623,8 @@ def database_stats():
         })
         
     except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
         logging.error(f"Error getting database stats: {str(e)}")
-        logging.error(f"Traceback: {error_trace}")
-        return jsonify({
-            'error': str(e),
-            'stats': {
-                'total_products': 0,
-                'unique_vendors': 0,
-                'unique_brands': 0,
-                'unique_product_types': 0,
-                'product_type_distribution': {}
-            },
-            'vendor_stats': {'vendors': [], 'brands': []}
-        }), 500
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/database-schema', methods=['GET'])
 def database_schema():
@@ -16919,32 +16701,27 @@ def database_vendor_stats():
             product_db.init_database()
         
         # Test database connection and fallback if needed
-        test_conn = None
         try:
             test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
+                # If store-specific database doesn't have products table, fall back to main database
                 logging.info("Not falling back to main database; honoring current store selection")
-                test_conn.close()
-                test_conn = None
+                # Re-test using the current store-specific database only
                 test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
                     logging.error("Products table not found in main database either")
                     return jsonify({'error': 'Products table not found in any database'}), 500
+                test_conn.close()
                 logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+            test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
-        finally:
-            if test_conn is not None:
-                try:
-                    test_conn.close()
-                except Exception:
-                    pass
         
         with db_connection(product_db.db_path) as conn:
             # Get all vendors with their product counts
@@ -17285,291 +17062,58 @@ def search_products():
 def database_export():
     """Export the database to Excel."""
     try:
-        logging.info("=== DATABASE EXPORT REQUEST START ===")
-        
         # Check disk space before creating temporary files
-        try:
+        disk_ok, disk_message = check_disk_space()
+        if not disk_ok:
+            emergency_cleanup()
             disk_ok, disk_message = check_disk_space()
             if not disk_ok:
-                emergency_cleanup()
-                disk_ok, disk_message = check_disk_space()
-                if not disk_ok:
-                    logging.error(f"Insufficient disk space: {disk_message}")
-                    return jsonify({'error': f'Insufficient disk space for export: {disk_message}'}), 507
-        except Exception as disk_check_err:
-            import traceback
-            error_trace = traceback.format_exc()
-            logging.warning(f"Disk space check failed (continuing anyway): {disk_check_err}\n{error_trace}")
-            # Continue with export even if disk check fails - let the export itself fail if needed
+                return jsonify({'error': f'Insufficient disk space for export: {disk_message}'}), 507
         
         import tempfile
         import os
         
-        # Get store name with error handling
-        try:
-            store_name = get_current_store_name()
-            if not store_name:
-                return jsonify({'error': 'No store selected. Please select a store first.'}), 400
-        except Exception as store_err:
-            import traceback
-            logging.error(f"Error getting store name: {store_err}\n{traceback.format_exc()}")
-            return jsonify({'error': f'Failed to get store name: {str(store_err)}'}), 500
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
         
-        # Get product database with error handling
-        try:
-            product_db = get_product_database(store_name)
-            if not product_db:
-                return jsonify({'error': f'Failed to get database for store: {store_name}'}), 500
-        except Exception as db_err:
-            import traceback
-            logging.error(f"Error getting product database: {db_err}\n{traceback.format_exc()}")
-            return jsonify({'error': f'Failed to get database: {str(db_err)}'}), 500
-        
-        # Verify database exists
-        if not hasattr(product_db, 'db_path') or not product_db.db_path:
-            return jsonify({'error': 'Database path not configured'}), 500
-        
-        if not os.path.exists(product_db.db_path):
-            return jsonify({'error': f'Database file not found: {product_db.db_path}'}), 404
-        
-        # Create temporary file in a writable directory (important for web servers like PythonAnywhere)
-        try:
-            logging.info("Starting temp file creation...")
-            # Try to use a writable directory - check if we're on PythonAnywhere or similar
-            is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
-            logging.info(f"PythonAnywhere detected: {is_pythonanywhere}")
-            
-            # Try multiple directories in order of preference
-            temp_dir = None
-            temp_dir_candidates = []
-            
-            if is_pythonanywhere:
-                # On PythonAnywhere, prefer UPLOADS_DIR (known to be writable)
-                temp_dir_candidates = [
-                    UPLOADS_DIR,  # Known writable directory
-                    os.path.join(os.path.expanduser('~'), 'tmp'),
-                    os.getcwd()
-                ]
-            else:
-                # Local development - try system temp first
-                temp_dir_candidates = [
-                    tempfile.gettempdir(),
-                    UPLOADS_DIR,
-                    os.getcwd()
-                ]
-            
-            logging.info(f"Trying temp directories: {temp_dir_candidates}")
-            
-            # Find first writable directory
-            for candidate_dir in temp_dir_candidates:
-                try:
-                    os.makedirs(candidate_dir, exist_ok=True)
-                    if os.access(candidate_dir, os.W_OK):
-                        temp_dir = candidate_dir
-                        logging.info(f"Using writable temp directory: {temp_dir}")
-                        break
-                except Exception as dir_err:
-                    logging.debug(f"Directory {candidate_dir} not writable: {dir_err}")
-                    continue
-            
-            if not temp_dir:
-                # Last resort: use current directory
-                temp_dir = os.getcwd()
-                os.makedirs(temp_dir, exist_ok=True)
-                logging.warning(f"Using current directory as temp: {temp_dir}")
-            
-            # Create temp file in the writable directory
-            temp_file_path = os.path.join(temp_dir, f"export_{int(time.time())}_{uuid.uuid4().hex[:8]}.xlsx")
-            with open(temp_file_path, 'wb') as temp_file:
-                pass  # create empty file; export_database will write to path
-            temp_file_name = temp_file_path
-            logging.info(f"Created temp export file at: {temp_file_name}")
-        except Exception as temp_err:
-            import traceback
-            error_trace = traceback.format_exc()
-            logging.error(f"Error creating temp file: {temp_err}\n{error_trace}")
-            return jsonify({
-                'error': f'Failed to create temporary file: {str(temp_err)}',
-                'details': error_trace[:1000] if len(error_trace) > 1000 else error_trace
-            }), 500
+        # Create temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+        temp_file.close()
         
         # Export database
-        try:
-            logging.info(f"Calling export_database with path: {temp_file_name}")
-            logging.info(f"Database path: {product_db.db_path}")
-            product_db.export_database(temp_file_name)
-            logging.info("export_database completed successfully")
-        except Exception as export_err:
-            import traceback
-            error_trace = traceback.format_exc()
-            logging.error(f"Error calling export_database: {export_err}\n{error_trace}")
-            # Clean up temp file
-            try:
-                if os.path.exists(temp_file_name):
-                    os.unlink(temp_file_name)
-            except Exception:
-                pass
-            # Return detailed error message
-            error_msg = str(export_err)
-            return jsonify({
-                'error': f'Export failed: {error_msg}',
-                'details': error_trace[:1000] if len(error_trace) > 1000 else error_trace
-            }), 500
-        
-        # Verify file was created and has content
-        if not os.path.exists(temp_file_name):
-            return jsonify({'error': 'Export file was not created'}), 500
-        
-        file_size = os.path.getsize(temp_file_name)
-        logging.info(f"Export file created: {temp_file_name} ({file_size} bytes)")
-        
-        if file_size == 0:
-            # Clean up empty file
-            try:
-                os.unlink(temp_file_name)
-            except Exception:
-                pass
-            return jsonify({'error': 'Export file was created but is empty'}), 500
+        product_db.export_database(temp_file.name)
         
         # Send file with proper cleanup
         # Generate descriptive filename with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
         filename = f"AGT_Product_Database_{timestamp}.xlsx"
-        response = None
-
-        # On web (e.g. PythonAnywhere), send from memory and delete temp immediately to avoid
-        # cleanup race where the file is removed while still being streamed.
-        use_memory_send = is_pythonanywhere
-
-        if use_memory_send:
+        response = send_file(
+            temp_file.name,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+        # Set proper download filename with headers
+        response = set_download_filename(response, filename)
+        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        
+        # Clean up the temporary file after sending
+        @response.call_on_close
+        def cleanup():
             try:
-                with open(temp_file_name, 'rb') as f:
-                    data = f.read()
-                mem = BytesIO(data)
-                mem.seek(0)
-                response = send_file(
-                    mem,
-                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    as_attachment=True,
-                    download_name=filename
-                )
-                response = set_download_filename(response, filename)
-                response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                try:
-                    if os.path.exists(temp_file_name):
-                        os.unlink(temp_file_name)
-                except Exception:
-                    pass
-            except Exception as mem_err:
-                logging.error(f"Export send (memory) failed: {mem_err}")
-                try:
-                    if os.path.exists(temp_file_name):
-                        os.unlink(temp_file_name)
-                except Exception:
-                    pass
-                return jsonify({'error': f'Export failed during send: {mem_err}'}), 500
-        else:
-            # Try to send file by path first; if that fails, fall back to in-memory send
-            try:
-                response = send_file(
-                    temp_file_name,
-                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    as_attachment=True,
-                    download_name=filename
-                )
-                response = set_download_filename(response, filename)
-                response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            except Exception as send_err:
-                logging.error(f"send_file failed, attempting in-memory fallback: {send_err}")
-                try:
-                    with open(temp_file_name, 'rb') as f:
-                        data = f.read()
-                    mem = BytesIO(data)
-                    mem.seek(0)
-                    response = send_file(
-                        mem,
-                        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        as_attachment=True,
-                        download_name=filename
-                    )
-                    response = set_download_filename(response, filename)
-                    response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-                except Exception as mem_err:
-                    logging.error(f"In-memory send_file fallback also failed: {mem_err}")
-                    try:
-                        if os.path.exists(temp_file_name):
-                            os.unlink(temp_file_name)
-                    except Exception:
-                        pass
-                    return jsonify({'error': f'Export failed during send: {mem_err}'}), 500
-
-            if response is None:
-                try:
-                    if os.path.exists(temp_file_name):
-                        os.unlink(temp_file_name)
-                except Exception:
-                    pass
-                return jsonify({'error': 'Failed to create response'}), 500
-
-            # Schedule background cleanup of the temporary file
-            try:
-                import threading
-                def _del_later(path, delay=8):
-                    try:
-                        time.sleep(delay)
-                        if os.path.exists(path):
-                            os.unlink(path)
-                    except Exception as cleanup_error:
-                        logging.warning(f"Failed to cleanup temp file {path}: {cleanup_error}")
-                threading.Thread(target=_del_later, args=(temp_file_name,), daemon=True).start()
-            except Exception:
-                try:
-                    if os.path.exists(temp_file_name):
-                        os.unlink(temp_file_name)
-                except Exception:
-                    pass
-
+                if os.path.exists(temp_file.name):
+                    os.unlink(temp_file.name)
+            except Exception as cleanup_error:
+                logging.warning(f"Failed to cleanup temp file {temp_file.name}: {cleanup_error}")
+        
         return response
         
     except Exception as e:
         import traceback
-        error_trace = traceback.format_exc()
-        error_msg = str(e)
-        error_type = type(e).__name__
-        logging.error(f"=== DATABASE EXPORT ERROR ===")
-        logging.error(f"Error type: {error_type}")
-        logging.error(f"Error message: {error_msg}")
-        logging.error(f"Full traceback:\n{error_trace}")
-        
-        # Clean up any temp file that might have been created
-        try:
-            if 'temp_file_name' in locals() and temp_file_name and os.path.exists(temp_file_name):
-                os.unlink(temp_file_name)
-                logging.info(f"Cleaned up temp file: {temp_file_name}")
-        except Exception as cleanup_err:
-            logging.warning(f"Failed to cleanup temp file: {cleanup_err}")
-        
-        # Return detailed error for debugging - ensure it's JSON
-        try:
-            error_response = {
-                'error': f'Export failed: {error_msg}',
-                'type': error_type,
-                'details': error_trace[:2000] if len(error_trace) > 2000 else error_trace
-            }
-            logging.info(f"Returning error response: {error_response}")
-            return jsonify(error_response), 500
-        except Exception as json_err:
-            # Fallback if jsonify fails
-            logging.error(f"Failed to create JSON error response: {json_err}")
-            try:
-                from flask import Response
-                error_json = f'{{"error": "Export failed: {error_msg}", "type": "{error_type}"}}'
-                return Response(error_json, status=500, mimetype='application/json')
-            except Exception as response_err:
-                logging.error(f"Failed to create fallback response: {response_err}")
-                # Last resort - return minimal JSON
-                return Response('{"error": "Export failed: Internal server error"}', status=500, mimetype='application/json')
+        logging.error(f"Error exporting database: {str(e)}\n" + traceback.format_exc())
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
 
 @app.route('/api/database-view', methods=['GET'])
 def database_view():
@@ -17733,39 +17277,36 @@ def database_analytics():
             }), 500
         
         # Test database connection and fallback if needed
-        test_conn = None
         try:
             test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
+                # Fall back to main database
                 logging.info("Falling back to main database for analytics")
-                test_conn.close()
-                test_conn = None
+                # Create main database instance directly (don't clear the global variable!)
                 from src.core.data.product_database import ProductDatabase
                 main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
                 product_db = ProductDatabase(main_db_path)
                 if not product_db._initialized:
                     product_db.init_database()
+                # Update the global reference to use the main database
                 global _product_database
                 _product_database = product_db
+                # Test main database
                 test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
                     logging.error("Products table not found in main database either")
                     return jsonify({'error': 'Products table not found in any database'}), 500
+                test_conn.close()
                 logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+            test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
-        finally:
-            if test_conn is not None:
-                try:
-                    test_conn.close()
-                except Exception:
-                    pass
         
         with db_connection(product_db.db_path) as conn:
             # Get product type distribution
@@ -17998,21 +17539,15 @@ def database_test():
         dir_writable = os.access(db_dir, os.W_OK) if dir_exists else False
         
         # Test 3: Try to create a simple connection
-        conn = None
         try:
             conn = create_db_connection(db_path)
             cursor = conn.cursor()
             cursor.execute("SELECT 1")
             result = cursor.fetchone()
+            conn.close()
             connection_test = "SUCCESS"
         except Exception as e:
             connection_test = f"FAILED: {e}"
-        finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
         
         # Test 4: Try to initialize the database
         try:
@@ -20465,29 +20000,9 @@ def json_match_detailed():
             return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
             
         # Fetch JSON items first
-        # Use a generous timeout here because large Cultivera transfer JSONs can legitimately
-        # take longer than 30s to stream, especially over PythonAnywhere / slow networks.
         import requests
-        try:
-            # Increase timeout to handle large remote JSON files (e.g. Cultivera transfers)
-            response = requests.get(url, timeout=90)  # was 30s
-            response.raise_for_status()
-            payload = response.json()
-        except requests.exceptions.Timeout:
-            logging.error(f"Error in detailed JSON matching: timeout fetching URL {url}")
-            return jsonify({
-                "error": "json_fetch_timeout",
-                "message": (
-                    "Fetching the JSON from the remote server took too long (timeout after 90s). "
-                    "Please try again in a moment, or download the JSON file and re-run using a local data: URL."
-                )
-            }), 504
-        except Exception as fetch_err:
-            logging.error(f"Error in detailed JSON matching while fetching URL {url}: {fetch_err}")
-            return jsonify({
-                "error": "json_fetch_error",
-                "message": f"Failed to fetch JSON from the provided URL: {fetch_err}"
-            }), 502
+        response = requests.get(url, timeout=30)
+        payload = response.json()
         
         if isinstance(payload, list):
             json_items = payload
@@ -20503,37 +20018,12 @@ def json_match_detailed():
             
         available_tags = excel_processor.df.to_dict('records')
         
-        # OPTIMIZATION: Convert fetched payload to data URL to avoid re-fetching in fetch_and_match
-        # This prevents double-fetching the same JSON and reduces timeout risk
-        import json
-        import base64
-        payload_json_str = json.dumps(payload)
-        payload_base64 = base64.b64encode(payload_json_str.encode('utf-8')).decode('utf-8')
-        data_url = f"data:application/json;base64,{payload_base64}"
-        
-        # Limit items to prevent timeout (process max 500 items for detailed match)
-        MAX_ITEMS_FOR_DETAILED = 500
-        if len(json_items) > MAX_ITEMS_FOR_DETAILED:
-            logging.warning(f"Limiting detailed match to first {MAX_ITEMS_FOR_DETAILED} items (total: {len(json_items)}) to prevent timeout")
-            json_items = json_items[:MAX_ITEMS_FOR_DETAILED]
-            # Update payload to only include limited items
-            if isinstance(payload, dict):
-                payload = {**payload, "inventory_transfer_items": json_items}
-            elif isinstance(payload, list):
-                payload = json_items
-            payload_json_str = json.dumps(payload)
-            payload_base64 = base64.b64encode(payload_json_str.encode('utf-8')).decode('utf-8')
-            data_url = f"data:application/json;base64,{payload_base64}"
-        
-        logging.info(f"Using data URL to avoid re-fetch (payload size: {len(payload_json_str)} bytes, {len(json_items)} items)")
+        # FIXED: Use regular JSON Matcher with Excel-priority system
+        logging.info("Using regular JSON Matcher with Excel-priority approach")
         
         # Use the Enhanced JSON Matcher to get database-enhanced results
-        # Pass data URL instead of original URL to skip re-fetch
-        import time
-        match_start = time.time()
-        enhanced_matches = json_matcher.fetch_and_match(data_url)
-        match_duration = time.time() - match_start
-        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products in {match_duration:.2f}s")
+        enhanced_matches = json_matcher.fetch_and_match(url)
+        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
         
         # NOTE: Do NOT reorder `enhanced_matches` here — they are expected to align
         # with the incoming `json_items` order so each JSON item maps to its
@@ -20553,58 +20043,18 @@ def json_match_detailed():
             if i < len(enhanced_matches):
                 enhanced_match = enhanced_matches[i]
             
-            # CRITICAL: Filter out Flower matches for concentrate/vape JSON items (mL units)
-            if enhanced_match:
-                import re
-                json_name_lower = json_name.lower()
-                json_type = str(json_item.get('inventory_type', '') or json_item.get('product_type', '')).lower()
-                json_weight = str(json_item.get('unit_weight', '') or json_item.get('weight', '') or '').lower()
-                
-                # Check if JSON is concentrate/vape (has mL units or concentrate/vape indicators)
-                # Check for mL weight patterns (e.g., "1ml", "0.5ml", "1 ml", "0.5 ml")
-                has_ml_weight = bool(re.search(r'\d+(?:\.\d+)?\s*ml', json_name_lower))
-                has_ml_in_weight = 'ml' in json_weight
-                
-                is_json_concentrate_vape = (
-                    has_ml_weight or has_ml_in_weight or
-                    'concentrate for inhalation' in json_type or
-                    any(x in json_name_lower for x in ['live resin', 'aio', 'prana aio', 'vape', 'cartridge', 'disposable', 'liquid diamonds'])
-                )
-                
-                if is_json_concentrate_vape:
-                    db_type = str(enhanced_match.get('Product Type*', '') or '').lower()
-                    db_units = str(enhanced_match.get('Units', '') or '').lower()
-                    db_weight = str(enhanced_match.get('Weight*', '') or '').lower()
-                    db_name = str(enhanced_match.get('Product Name*', '') or '').lower()
-                    
-                    # Check if DB product is Flower
-                    is_db_flower = (
-                        'flower' in db_type or
-                        ('flower' in db_name and ('g' in db_units or 'g' in db_weight or not db_units))
-                    )
-                    
-                    if is_db_flower:
-                        logging.warning(f"🚫 REJECTED FLOWER MATCH: JSON '{json_name[:50]}' (concentrate/vape) matched Flower '{enhanced_match.get('Product Name*', '')[:50]}' - setting to None")
-                        enhanced_match = None
-            
             # Create detailed match info using database-priority data
-            # CRITICAL FIX: Check if enhanced_match is a real DB match (not a fallback with 'JSON - No DB Match' source)
-            has_db_match = (
-                enhanced_match is not None and
-                not str(enhanced_match.get('Source', '')).startswith('JSON - No DB Match') and
-                not str(enhanced_match.get('Source', '')).startswith('Emergency Fallback')
-            )
             match_info = {
                 'json_name': json_name,
                 'json_data': json_item,
-                'best_score': 0.95 if has_db_match else 0.0,
-                'best_match': enhanced_match if has_db_match else None,
-                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if has_db_match else [],
-                'is_match': has_db_match,
-                'match_reason': 'Database Priority (100% DB data)' if has_db_match else 'No database match found',
-                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if has_db_match else 'No match',
-                'data_source': enhanced_match.get('Data_Source', 'Database') if has_db_match else 'None',
-                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if has_db_match else '0.0'
+                'best_score': 0.95 if enhanced_match else 0.0,  # High confidence for database matches
+                'best_match': enhanced_match,
+                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if enhanced_match else [],
+                'is_match': enhanced_match is not None,
+                'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
+                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
+                'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
+                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if enhanced_match else '0.0'
             }
             
             detailed_matches.append(match_info)
@@ -20627,22 +20077,9 @@ def json_match_detailed():
             }
         })
         
-    except requests.exceptions.Timeout:
-        logging.error(f"Timeout in detailed JSON matching (likely gateway timeout)")
-        return jsonify({
-            'error': 'gateway_timeout',
-            'message': 'The matching process took too long and timed out. Try with a smaller JSON file or fewer items.'
-        }), 504
     except Exception as e:
-        error_msg = str(e)
-        logging.error(f"Error in detailed JSON matching: {error_msg}")
-        # Check if it's a timeout-related error
-        if 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower():
-            return jsonify({
-                'error': 'timeout',
-                'message': f'Matching timed out: {error_msg}'
-            }), 504
-        return jsonify({'error': f'Detailed matching failed: {error_msg}'}), 500
+        logging.error(f"Error in detailed JSON matching: {str(e)}")
+        return jsonify({'error': f'Detailed matching failed: {str(e)}'}), 500
 
 @app.route('/api/match-json-tags', methods=['POST'])
 def match_json_tags():
@@ -21447,21 +20884,6 @@ def get_available_tags_lite():
     try:
         start_time = time.time()
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
-
-        # Optional: allow callers (like the ultra-fast TagManager prefetch) to
-        # request only a small subset of tags for instant display. Full tag
-        # loads should continue to use the regular /api/available-tags or
-        # /api/web/available-tags endpoints without this parameter.
-        max_tags_param = request.args.get('max_tags')
-        max_tags: Optional[int] = None
-        if max_tags_param:
-            try:
-                parsed = int(max_tags_param)
-                # Clamp to a reasonable range to avoid abuse
-                if parsed > 0:
-                    max_tags = min(parsed, 2000)
-            except (TypeError, ValueError):
-                max_tags = None
         
         # Only try Excel processor - no database queries
         excel_processor = get_excel_processor()
@@ -21471,10 +20893,8 @@ def get_available_tags_lite():
                 if hasattr(excel_processor, '_skip_enrichment'):
                     excel_processor._skip_enrichment = True
                 
-                # Get tags without database enrichment for speed. When max_tags
-                # is provided, only build a small subset for ultra-fast UI
-                # prefetch while the full endpoints continue to load all tags.
-                excel_tags = excel_processor.get_available_tags(max_tags=max_tags)
+                # Get tags without database enrichment for speed
+                excel_tags = excel_processor.get_available_tags()
                 
                 # CRITICAL: Optionally align lineage with database (sovereign_lineage) when requested
                 if prefer_db:

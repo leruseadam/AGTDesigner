@@ -1,0 +1,78 @@
+================================================================================
+RUN DATABASE WEIGHT FIX ON PYTHONANYWHERE - COPY & PASTE THESE COMMANDS
+================================================================================
+
+STEP 1: Open PythonAnywhere Bash Console
+  1. Go to www.pythonanywhere.com
+  2. Click "Consoles" tab
+  3. Click "Bash" to open a new console
+
+STEP 2: Navigate to Project and Pull Latest Code
+--------------------------------------------------------------------------------
+cd ~/AGTDesigner
+git pull origin main
+
+STEP 3: Run the Comprehensive Weight Fix
+--------------------------------------------------------------------------------
+python3 fix_all_weights.py
+
+This will fix:
+  ✓ Constellation Moonshots → 1.7 oz
+  ✓ Major Beverages → 6.7 oz
+  ✓ All 190g → 6.7 oz
+  ✓ Topicals (bath salts) → oz
+  ✓ Edible solids (chips) → oz
+  ✓ Flower weight mismatches
+
+STEP 4: Verify the Fixes
+--------------------------------------------------------------------------------
+python3 fix_all_weights.py verify
+
+STEP 5: Reload Your Web App
+  1. Go to "Web" tab on PythonAnywhere
+  2. Click the big green "Reload" button
+  3. Wait for reload to complete
+
+DONE! ✅
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+If git pull fails:
+  git fetch origin
+  git reset --hard origin/main
+  # Then try step 3 again
+
+If database is locked:
+  # Stop web app first from Web tab, then run fix, then reload
+
+To preview changes without applying:
+  python3 fix_all_weights.py --dry-run
+
+To see what the script will fix:
+  python3 fix_all_weights.py --help
+
+================================================================================
+EXPECTED OUTPUT
+================================================================================
+
+You should see:
+  ================================================================================
+  COMPREHENSIVE WEIGHT NORMALIZATION
+  ================================================================================
+  
+  1. Normalizing Constellation Moonshots to 1.7 oz...
+  2. Normalizing Major beverages to 6.7 oz...
+  3. Converting any 190g → 6.7 oz...
+  4. Converting non-classic products (topicals, edible solids) to oz...
+  5. Fixing flower weight mismatches...
+  
+  ================================================================================
+  ✅ COMPLETE: Updated X products
+  ================================================================================
+
+Then verification showing all products fixed correctly.
+
+================================================================================
+

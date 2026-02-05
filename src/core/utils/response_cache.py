@@ -40,7 +40,7 @@ class ResponseCache:
         if data:
             try:
                 key_parts.append(json.dumps(data, sort_keys=True, default=str))
-            except Exception:
+            except:
                 key_parts.append(str(data))
         
         key_string = "|".join(key_parts)
@@ -149,7 +149,7 @@ def cached_route(ttl: int = 300, cache_type: str = 'normal', vary_by: list = Non
             if request.method == 'POST':
                 try:
                     request_data = request.get_json()
-                except Exception:
+                except:
                     pass
             
             cache_key = cache._generate_cache_key(route, query_args, request_data)

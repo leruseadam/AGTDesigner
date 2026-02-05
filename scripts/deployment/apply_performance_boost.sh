@@ -4,7 +4,7 @@
 # Applies all performance optimizations to the application
 
 echo "=========================================="
-echo "  AGT Designer Performance Boost"
+echo "  Label Maker Performance Boost"
 echo "=========================================="
 echo ""
 

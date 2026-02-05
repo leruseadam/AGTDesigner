@@ -1,6 +1,6 @@
-# AGT Designer - Consolidated Web Application
-# ===========================================
-# This is the sole, consolidated web version of the AGT Designer application.
+# AGT Label Maker - Consolidated Web Application
+# ============================================
+# This is the sole, consolidated web version of the AGT Label Maker application.
 # All web deployment functionality has been consolidated into this single file.
 #
 # Features:
@@ -2208,7 +2208,7 @@ class LabelMakerApp:
                 self.logger.addHandler(file_handler)
                 self.logger.setLevel(logging.INFO)
                 
-                self.logger.debug("Basic logging configured for AGT Designer application")
+                self.logger.debug("Basic logging configured for Label Maker application")
             self.logger.debug(f"Log file location: {log_file}")
     
     def _is_port_available(self, port):
@@ -2254,7 +2254,7 @@ class LabelMakerApp:
         if DISABLE_STARTUP_FILE_LOADING:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
-        logging.info(f"Starting AGT Designer application on {host}:{port}")
+        logging.info(f"Starting Label Maker application on {host}:{port}")
         print(f"🌐 App will be available at: http://{host}:{port}")
         logging.info(f"Development mode: {development_mode}")
         
@@ -22030,7 +22030,7 @@ if __name__ == '__main__':
         pass  # Continue even if we can't create lock file
     
     # Use the LabelMakerApp class for proper startup
-    print("Starting AGT Designer application...")
+    print("Starting Label Maker application...")
     print(f"🆔 Process ID: {os.getpid()}")
     print(f"🆔 Parent Process ID: {os.getppid()}")
     print("🛑 Press Ctrl+C to stop the app")

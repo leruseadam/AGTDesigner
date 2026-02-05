@@ -1,0 +1,36 @@
+================================================================================
+PYTHONANYWHERE DATABASE QUICK FIX - COPY & PASTE
+================================================================================
+
+STEP 1: Open PythonAnywhere Bash Console
+  → Go to www.pythonanywhere.com
+  → Click "Consoles" tab  
+  → Click "Bash"
+
+STEP 2: Copy & Paste This Entire Block:
+--------------------------------------------------------------------------------
+cd ~/AGTDesigner && git pull origin main && python3 fix_database_weights.py moonshots && echo "✅ Database fixed! Now reload your web app from the Web tab."
+--------------------------------------------------------------------------------
+
+STEP 3: Reload Web App
+  → Go to "Web" tab
+  → Click big green "Reload" button
+
+DONE! ✅ All Constellation Moonshots now 1.7oz
+
+================================================================================
+VERIFY THE FIX:
+================================================================================
+python3 -c "import sqlite3; conn = sqlite3.connect('uploads/product_database_AGT_Bothell.db'); cursor = conn.cursor(); cursor.execute('SELECT \"Product Name*\", \"Weight*\", \"Units\" FROM products WHERE \"Product Name*\" LIKE \"%Moonshot%\" AND \"Product Brand\" = \"Constellation Cannabis\" ORDER BY \"Product Name*\"'); [print(f'  {row[0]}: {row[1]} {row[2]}') for row in cursor.fetchall()]; conn.close()"
+
+Expected: All should show "1.7 oz"
+
+================================================================================
+TROUBLESHOOTING:
+================================================================================
+❌ "Database not found" → Check path: ls -la ~/AGTDesigner/uploads/
+❌ "Permission denied" → Run: chmod 644 uploads/product_database_AGT_Bothell.db  
+❌ "Database locked" → Stop web app first, then run fix
+❌ "Changes not showing" → Hard refresh browser (Ctrl+Shift+R)
+
+================================================================================

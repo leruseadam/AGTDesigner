@@ -1,6 +1,6 @@
-# Comprehensive Test Suite for AGT Designer
+# Comprehensive Test Suite for AGT Label Maker
 
-This directory contains comprehensive tests for the AGT Designer application.
+This directory contains comprehensive tests for the AGT Label Maker application.
 
 ## Test Structure
 

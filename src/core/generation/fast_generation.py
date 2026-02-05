@@ -308,7 +308,7 @@ def optimize_records_for_generation(records: List[Dict]) -> List[Dict]:
             'Vendor': _get(record, 'Vendor', 'Vendor/Supplier*'),
             'Product Strain': _get(record, 'Product Strain'),
             'ProductStrain': _get(record, 'ProductStrain', 'Product Strain'),
-            'Price': _get(record, 'Price', 'Price*', 'Price* (Tier Name for Bulk)', 'Med Price'),
+            'Price': _get(record, 'Price'),
             'DOH': _get(record, 'DOH'),
             'DOH Compliant (Yes/No)': _get(record, 'DOH Compliant (Yes/No)'),
             'Weight*': _get(record, 'Weight*', default='1'),

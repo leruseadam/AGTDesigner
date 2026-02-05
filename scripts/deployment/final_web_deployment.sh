@@ -2,7 +2,7 @@
 # FINAL WEB DEPLOYMENT SCRIPT
 # Deploy all fixes to web application
 
-echo "🚀 AGT Designer - Final Web Deployment"
+echo "🚀 AGT Label Maker - Final Web Deployment"
 echo "========================================="
 
 # Step 1: Pull latest changes

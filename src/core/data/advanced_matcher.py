@@ -98,6 +98,27 @@ class AdvancedMatcher:
             'tincture': ['tincture', 'drops', 'liquid', 'oil'],
             'cartridge': ['cartridge', 'cart', 'vape', 'pen']
         }
+        # Common abbreviation/alias map for strain shortcodes -> expanded names
+        # Keep keys lowercase and normalized (normalized form produced by normalize_text)
+        self.abbreviation_map = {
+            'gg4': 'gorilla glue 4',
+            'gg#4': 'gorilla glue 4',
+            'gg#4': 'gorilla glue 4',
+            'gg#1': 'gorilla glue 1',
+            'gg': 'gorilla glue',
+            'gsc': 'girl scout cookies',
+            'bubba': 'bubba kush',
+            'skunk1': 'skunk 1',
+            'skunk#1': 'skunk 1',
+            'alien runtz': 'alien runtz',
+            'pure': 'pure',
+            'prana': 'prana'
+        }
+        # Common product-descriptor tokens that are not helpful for strain/brand matching
+        self.product_descriptors = {
+            'pure', 'live', 'resin', 'disposable', 'vape', 'cartridge', 'cart', 'aio', 'pulse',
+            'hybrid', 'indica', 'sativa', '1ml', 'ml', 'g', 'gram', 'grams'
+        }
     
     def normalize_text(self, text: str) -> str:
         """Normalize text for consistent matching."""
@@ -106,14 +127,73 @@ class AdvancedMatcher:
         
         # Convert to lowercase and strip
         text = text.lower().strip()
-        
+
+        # Merge letter+separator+digits patterns like 'gg#4' or 'gg 4' into 'gg4'
+        text = re.sub(r'([a-zA-Z]+)[^0-9a-zA-Z]+(\d+)', r"\1\2", text)
+
+        # Replace common separators that often appear inside model/strain codes
+        text = re.sub(r'[\/#@\u2013\u2014]', ' ', text)
+
         # Remove special characters but keep spaces and hyphens
         text = re.sub(r'[^\w\s-]', ' ', text)
-        
+
         # Normalize whitespace
         text = re.sub(r'\s+', ' ', text)
-        
-        return text.strip()
+
+        result = text.strip()
+
+        # Expand common abbreviations (e.g., 'gg4' -> 'gorilla glue 4')
+        try:
+            tokens = result.split()
+            expanded = [self.abbreviation_map.get(tok, tok) for tok in tokens]
+            # Remove generic product descriptor tokens early to strengthen core name signals
+            filtered = [tok for tok in expanded if tok not in self.product_descriptors and tok not in self.common_words]
+            result = ' '.join(filtered)
+        except Exception:
+            pass
+
+        return result
+
+    def extract_strain_tokens(self, text: str):
+        """Extract strain-like tokens such as 'skunk #1', 'skunk 1', or 'skunk1'.
+        Returns a list of (base, number) tuples. Base and number are lowercased strings.
+        """
+        if not text or not isinstance(text, str):
+            return []
+
+        t = text.lower()
+        tokens = []
+
+        try:
+            # Patterns to capture base + numeric strain identifiers in several common formats
+            patterns = [
+                r"\b([a-z]{2,})\s*#\s*(\d{1,3})\b",    # skunk #1
+                r"\b([a-z]{2,})[\s-]+(\d{1,3})\b",      # skunk 1 or skunk-1
+                r"\b([a-z]{2,})(\d{1,3})\b"              # skunk1
+            ]
+
+            for pat in patterns:
+                for m in re.finditer(pat, t):
+                    base = (m.group(1) or '').strip()
+                    num = (m.group(2) or '').strip()
+                    if not base or not num:
+                        continue
+                    # Ignore matches that are clearly units or descriptors
+                    if base in self.product_descriptors or base in {'ml', 'g', 'oz', 'gram', 'grams'}:
+                        continue
+                    tokens.append((base, num))
+        except Exception:
+            return []
+
+        # Deduplicate while preserving order
+        seen = set()
+        out = []
+        for b, n in tokens:
+            key = f"{b}{n}"
+            if key not in seen:
+                seen.add(key)
+                out.append((b, n))
+        return out
     
     def _is_vendor_match(self, vendor1: str, vendor2: str) -> bool:
         """Check if two vendor names represent the same vendor using various patterns."""
@@ -181,7 +261,7 @@ class AdvancedMatcher:
                 import jellyfish
                 if jellyfish.soundex(v1_clean) == jellyfish.soundex(v2_clean):
                     return True
-            except Exception:
+            except:
                 pass
         
         return False
@@ -214,6 +294,21 @@ class AdvancedMatcher:
             
             # 8. Keyword extraction and matching
             scores['keywords'] = self._calculate_keyword_similarity(json_name, candidate_name)
+
+            # Build "core" versions of both names with product descriptor tokens removed
+            try:
+                core_json = ' '.join([t for t in self.normalize_text(json_name).split() if t not in self.product_descriptors])
+                core_cand = ' '.join([t for t in self.normalize_text(candidate_name).split() if t not in self.product_descriptors])
+            except Exception:
+                core_json = self.normalize_text(json_name)
+                core_cand = self.normalize_text(candidate_name)
+
+            # Compute core ngram/levenshtein on descriptor-stripped strings to avoid descriptor-driven similarity
+            scores['core_ngram'] = self._calculate_ngram_similarity(core_json, core_cand)
+            scores['core_levenshtein'] = self._calculate_levenshtein_ratio(core_json, core_cand)
+            
+            # 8b. Exact token overlap (helps short codes like GG4, Bx3, etc.)
+            scores['token_overlap'] = self._calculate_token_overlap_score(json_name, candidate_name)
             
             # 9. Weight/size pattern matching
             scores['weight_pattern'] = self._calculate_weight_pattern_score(json_name, candidate_name)
@@ -238,21 +333,107 @@ class AdvancedMatcher:
         if ai_scores:
             # Weight different AI algorithms - increased weights for better matching
             weights = {
-                'ngram': 0.20,  # Increased from 0.15
-                'levenshtein': 0.20,  # Increased from 0.15
-                'jaccard': 0.15,  # Increased from 0.10
-                'subsequence': 0.15,  # Increased from 0.10
-                'soundex': 0.10,  # Keep same
-                'metaphone': 0.10,  # Keep same
-                'partial': 0.15,  # Increased from 0.10
-                'keywords': 0.15,  # Increased from 0.10
-                'weight_pattern': 0.10,  # Increased from 0.05
-                'type_pattern': 0.10  # Increased from 0.05
+                'ngram': 0.20,  # Character n-gram similarity
+                'levenshtein': 0.20,  # Edit distance
+                'jaccard': 0.15,  # Word set similarity
+                'subsequence': 0.15,  # Subsequence match
+                'soundex': 0.08,  # Phonetic
+                'metaphone': 0.07,  # Phonetic
+                'partial': 0.12,  # Partial substring matching
+                'keywords': 0.12,  # Keyword overlap
+                'token_overlap': 0.18,  # Exact token overlap (short codes)
+                'weight_pattern': 0.10,  # Numeric weight similarity
+                'type_pattern': 0.10  # Product type patterns
             }
             
             weighted_ai_score = sum(ai_scores.get(key, 0) * weight for key, weight in weights.items())
             ai_boost = weighted_ai_score * 0.5  # Increased from 30% to 50% weight for AI scores
+
+            # Compute a focused name-strength metric to avoid high scores when names aren't actually similar
+            # Prefer core (descriptor-stripped) name signals when available
+            name_components = {
+                'ngram': ai_scores.get('core_ngram', ai_scores.get('ngram', 0.0)),
+                'levenshtein': ai_scores.get('core_levenshtein', ai_scores.get('levenshtein', 0.0)),
+                'token_overlap': ai_scores.get('token_overlap', 0.0),
+                'keywords': ai_scores.get('keywords', 0.0),
+                'partial': ai_scores.get('partial', 0.0)
+            }
+            # weighted name strength (sum of component * factor) / total
+            name_weights = {'ngram': 0.30, 'levenshtein': 0.20, 'token_overlap': 0.25, 'keywords': 0.15, 'partial': 0.10}
+            name_strength = 0.0
+            for k, v in name_components.items():
+                name_strength += v * name_weights.get(k, 0)
+
+            # If name strength is low, significantly reduce AI boost to avoid false positives
+            if name_strength < 30.0:
+                ai_boost *= 0.25
+                low_name_penalty = True
+            else:
+                low_name_penalty = False
+
+            # More conservative: if name strength is clearly under a stricter threshold,
+            # heavily suppress AI boost so matches with weak name similarity don't score high.
+            if name_strength < 40.0:
+                ai_boost *= 0.1
+                low_name_penalty = True
+
+            # Extra conservative rule: if token overlap and keyword overlap are both weak
+            # and core ngram is also modest, strongly suppress AI boost to avoid false positives.
+            core_ngram = name_components.get('ngram', 0.0)
+            token_ov = name_components.get('token_overlap', 0.0)
+            keyword_score = name_components.get('keywords', 0.0)
+            if core_ngram < 40.0 and token_ov < 30.0 and keyword_score < 30.0:
+                ai_boost *= 0.15
+                low_name_penalty = True
         
+        # Strict gating: require at least one exact non-descriptor token overlap
+        try:
+            # Targeted strain extraction: require candidate to include strain base+number
+            raw_query = getattr(match_result, 'query_name', '') or ''
+            # Candidate name may come under several keys depending on callsite
+            cand_raw = ''
+            try:
+                cand_raw = (match_result.item.get('original_name') or match_result.item.get('Product Name*') or match_result.item.get('product_name') or '')
+            except Exception:
+                try:
+                    cand_raw = str(match_result.item)
+                except Exception:
+                    cand_raw = ''
+            cand_name = self.normalize_text(str(cand_raw))
+            strains = self.extract_strain_tokens(raw_query)
+            if strains:
+                cand_tokens = set(cand_name.split())
+                ok = True
+                for base, num in strains:
+                    combined = f"{base}{num}"
+                    # Accept if combined token exists or both base and number appear as tokens
+                    if combined in cand_name or (base in cand_tokens and num in cand_tokens):
+                        continue
+                    ok = False
+                    break
+                if not ok:
+                    # Allow targeted exception when strong other signals indicate match
+                    try:
+                        # Conditions for exception: weight matches strongly, product type indicates vape/cartridge,
+                        # and either token/keyword overlap or strong core name signal exists.
+                        wt = ai_scores.get('weight_pattern', 0.0)
+                        core_ng = ai_scores.get('core_ngram', ai_scores.get('ngram', 0.0))
+                        tok_ov = ai_scores.get('token_overlap', 0.0)
+                        kw = ai_scores.get('keywords', 0.0)
+                        cand_lower = cand_name.lower()
+                        type_like = any(x in cand_lower for x in ('vape', 'cartridge', 'cart', 'disposable', 'pen'))
+
+                        if wt >= 90.0 and core_ng >= 30.0 and type_like and (tok_ov >= 15.0 or kw >= 30.0 or match_result.vendor_match):
+                            # Construct a high confidence score when these conditions hold
+                            fallback_score = min(100.0, max(95.0, base_score + ai_boost + 10.0))
+                            match_result.match_reason = 'Strain missing but weight+type+keywords indicate strong match'
+                            return fallback_score
+                    except Exception:
+                        pass
+                    return 0.0
+        except Exception:
+            pass
+
         # Combine base score with AI boost
         final_score = base_score + ai_boost
         
@@ -263,7 +444,19 @@ class AdvancedMatcher:
         # Ensure minimum score for any meaningful match
         if (match_result.vendor_match or match_result.brand_match or match_result.type_match) and final_score < 20:
             final_score = max(20, final_score)
-        
+        # If name-based AI signals are very strong, favor them even if other context differs
+        if ai_scores:
+            name_strength = max(
+                ai_scores.get('token_overlap', 0.0),
+                ai_scores.get('ngram', 0.0),
+                ai_scores.get('levenshtein', 0.0),
+                ai_scores.get('keywords', 0.0),
+                ai_scores.get('partial', 0.0)
+            )
+            if name_strength >= 80.0:
+                # Blend final score with name strength to favor clear name matches
+                final_score = max(final_score, min(100.0, final_score * 0.4 + name_strength * 0.6))
+
         return min(100.0, final_score)  # Cap at 100
     
     def _calculate_ngram_similarity(self, str1: str, str2: str, n: int = 3) -> float:
@@ -271,7 +464,7 @@ class AdvancedMatcher:
         try:
             from rapidfuzz import fuzz
             return fuzz.ratio(str1, str2)
-        except Exception:
+        except:
             return 0.0
     
     def _calculate_levenshtein_ratio(self, str1: str, str2: str) -> float:
@@ -279,7 +472,7 @@ class AdvancedMatcher:
         try:
             from rapidfuzz import fuzz
             return fuzz.ratio(str1, str2)
-        except Exception:
+        except:
             return 0.0
     
     def _calculate_jaccard_similarity(self, str1: str, str2: str) -> float:
@@ -324,7 +517,7 @@ class AdvancedMatcher:
             soundex1 = jellyfish.soundex(str1)
             soundex2 = jellyfish.soundex(str2)
             return 100.0 if soundex1 == soundex2 else 0.0
-        except Exception:
+        except:
             return 0.0
     
     def _calculate_metaphone_similarity(self, str1: str, str2: str) -> float:
@@ -334,7 +527,7 @@ class AdvancedMatcher:
             meta1 = jellyfish.metaphone(str1)
             meta2 = jellyfish.metaphone(str2)
             return 100.0 if meta1 == meta2 else 0.0
-        except Exception:
+        except:
             return 0.0
     
     def _calculate_partial_match_score(self, str1: str, str2: str) -> float:
@@ -378,29 +571,105 @@ class AdvancedMatcher:
         
         matches = len(set(words1).intersection(set(words2)))
         return (matches / max(len(words1), len(words2))) * 100.0
+
+    def _calculate_token_overlap_score(self, str1: str, str2: str) -> float:
+        """Calculate exact token overlap score; helps with short codes like 'GG4'."""
+        if not str1 or not str2:
+            return 0.0
+
+        t1 = self.normalize_text(str1).split()
+        t2 = self.normalize_text(str2).split()
+
+        if not t1 and not t2:
+            return 100.0
+        if not t1 or not t2:
+            return 0.0
+
+        set1 = set(t1)
+        set2 = set(t2)
+        # Remove generic product descriptor tokens from scoring
+        filtered1 = {tok for tok in set1 if tok not in self.product_descriptors}
+        filtered2 = {tok for tok in set2 if tok not in self.product_descriptors}
+        intersection = filtered1.intersection(filtered2)
+        if not intersection:
+            # If there are only descriptor overlaps (e.g., 'pure live resin'), de-prioritize
+            raw_intersection = set1.intersection(set2)
+            if raw_intersection:
+                return 20.0  # small score when only generic descriptors overlap
+            return 0.0
+
+        # Base score is proportion of overlapping tokens (using filtered sets)
+        base = (len(intersection) / max(1, min(len(filtered1), len(filtered2)))) * 100.0
+
+        # Boost short alphanumeric tokens (codes) and tokens containing digits
+        boost = 0.0
+        for token in intersection:
+            if any(ch.isdigit() for ch in token) and len(token) <= 6:
+                boost += 10.0
+            elif len(token) <= 3:
+                boost += 5.0
+
+        score = min(100.0, base + boost)
+        return score
     
     def _calculate_weight_pattern_score(self, str1: str, str2: str) -> float:
         """Calculate weight/size pattern matching score."""
         import re
-        
-        # Extract weight patterns (e.g., "3.5g", "28g", "1oz", "2oz")
-        weight_pattern = r'(\d+(?:\.\d+)?)\s*(g|oz|gram|ounce|lb|pound)'
-        
+
+        # Helper to parse weight tuples and convert to grams
+        def parse_to_grams(match_tuple):
+            # match_tuple may be like ('3.5', 'g')
+            try:
+                val = float(match_tuple[0])
+                unit = match_tuple[1].lower()
+                if unit.startswith('g'):
+                    return val
+                # Treat milliliters as approximate grams (1 mL ~= 1 g)
+                if unit.startswith('ml') or unit in ('milliliter', 'millilitre', 'milliliters', 'millilitres'):
+                    return val
+                if unit.startswith('oz') or unit in ('ounce', 'ounces'):
+                    return val * 28.3495
+                if unit in ('lb', 'pound', 'pounds'):
+                    return val * 453.592
+            except Exception:
+                return None
+            return None
+
+        # Extract weight patterns (e.g., "3.5g", "28g", "1oz", "2oz", "1ml")
+        weight_pattern = r'(\d+(?:\.\d+)?)\s*(g|grams|gram|gm|ml|milliliter|millilitre|milliliters|millilitres|oz|ounce|ounces|lb|pound|pounds)'
+
         weights1 = re.findall(weight_pattern, str1.lower())
         weights2 = re.findall(weight_pattern, str2.lower())
-        
+
         if not weights1 and not weights2:
             return 50.0  # Neutral score if no weights found
         if not weights1 or not weights2:
             return 0.0
-        
-        # Check if any weights match
+
+        # Compute numeric similarity for any pair and return the best score
+        best_score = 0.0
         for w1 in weights1:
+            g1 = parse_to_grams(w1)
+            if g1 is None:
+                continue
             for w2 in weights2:
-                if w1 == w2:
-                    return 100.0
-        
-        return 0.0
+                g2 = parse_to_grams(w2)
+                if g2 is None:
+                    continue
+                # If nearly identical (within 5%), full score
+                try:
+                    rel_diff = abs(g1 - g2) / max(g1, g2)
+                except Exception:
+                    rel_diff = 1.0
+
+                score = max(0.0, 100.0 * (1.0 - rel_diff))
+                # Small tolerance boost if units are the same textually
+                if w1[1] == w2[1]:
+                    score = min(100.0, score + 5.0)
+                if score > best_score:
+                    best_score = score
+
+        return best_score if best_score > 0 else 0.0
     
     def _calculate_type_pattern_score(self, str1: str, str2: str, json_item: Dict, candidate: Dict) -> float:
         """Calculate product type pattern matching score."""
@@ -467,13 +736,19 @@ class AdvancedMatcher:
         
         # Convert to lowercase and strip
         normalized = text.lower().strip()
-        
+
+        # Merge letter+separator+digits patterns like 'gg#4' or 'gg 4' into 'gg4'
+        normalized = re.sub(r'([a-zA-Z]+)[^0-9a-zA-Z]+(\d+)', r"\1\2", normalized)
+
+        # Replace common separators that often appear inside model/strain codes
+        normalized = re.sub(r'[\/#@\u2013\u2014]', ' ', normalized)
+
         # Remove special characters but keep spaces and hyphens
         normalized = re.sub(r'[^\w\s-]', ' ', normalized)
-        
+
         # Normalize whitespace
         normalized = re.sub(r'\s+', ' ', normalized)
-        
+
         result = normalized.strip()
         
         # Cache the result
@@ -499,7 +774,7 @@ class AdvancedMatcher:
         # Filter out common words and short words
         key_terms = {
             word for word in words 
-            if len(word) > 2 and word not in self.common_words
+            if len(word) > 2 and word not in self.common_words and word not in self.product_descriptors
         }
         
         # Cache the result
@@ -819,7 +1094,7 @@ class AdvancedMatcher:
                             best_ratio = max(vendor_ratio, partial_ratio)
                             if best_ratio >= 60:  # Reduced from 70 to 60 for more lenient matching
                                 vendor_match = True
-                        except Exception:
+                        except:
                             pass
                     # 5. Check for common vendor name patterns
                     elif self._is_vendor_match_flexible(json_vendor_clean, candidate_vendor_clean):
@@ -887,7 +1162,7 @@ class AdvancedMatcher:
                             if ratio >= 70:  # 70% similarity threshold
                                 is_match = True
                                 match_reason = f"fuzzy ({ratio}%)"
-                        except Exception:
+                        except:
                             pass
                     
                     # 5. Check for common business name patterns
@@ -918,6 +1193,31 @@ class AdvancedMatcher:
             candidate_name = str(candidate.get("original_name", "")).strip()
             if not candidate_name:
                 continue
+
+            # Strict pre-filter: if JSON name contains a strain-like token (e.g., 'skunk #1'),
+            # skip candidates that do not contain that token to enforce exact-description requirement.
+            try:
+                # Use the extract_strain_tokens helper to find strain-like tokens
+                strains = self.extract_strain_tokens(json_name)
+                if strains:
+                    # Determine whether candidate contains required strain tokens but do not skip here.
+                    # Final gating/exception logic will be applied later in calculate_overall_score_with_ai.
+                    cand_norm = self.normalize_text(candidate_name)
+                    cand_tokens = set(cand_norm.split())
+                    ok = True
+                    for base, num in strains:
+                        combined = f"{base}{num}"
+                        if combined in cand_norm or (base in cand_tokens and num in cand_tokens):
+                            continue
+                        ok = False
+                        break
+                    # store a flag on candidate dict to indicate strain requirement (optional)
+                    try:
+                        candidate['_strain_requirement'] = {'present': ok, 'tokens': strains}
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             
             # Check for exact match first
             if self.normalize_text(json_name) == self.normalize_text(candidate_name):
@@ -964,6 +1264,11 @@ class AdvancedMatcher:
                 match_reason=f"AI-powered match using {algorithm}",
                 algorithm_used=algorithm
             )
+            # Attach the original JSON query name to the result for gating rules
+            try:
+                match_result.query_name = json_name
+            except Exception:
+                match_result.query_name = ''
             
             # Add AI scores to match result
             match_result.ai_scores = ai_scores

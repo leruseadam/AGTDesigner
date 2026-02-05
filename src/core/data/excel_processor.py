@@ -2116,18 +2116,7 @@ class ExcelProcessor:
             # Reset index immediately after assignment to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
-
-            # CRITICAL: Capture original Description values into JSON column BEFORE any transformations
-            # This preserves the original Excel Description (pre-transformed values) for JSON URL matching
-            # Description column contains pre-transformed values like "Pure Prana Pulse AIO Disposable - Rainbow Belts Live Resin - Hybrid - 1mL"
-            # These will be replaced with transformed Product Name values later, so we save them to JSON now
-            if "Description" in self.df.columns:
-                self.df["JSON"] = self.df["Description"].astype(str).str.strip()
-                self.logger.info(f"✅ Captured {len(self.df)} original Description values into JSON column (before transformation)")
-            else:
-                self.df["JSON"] = ""
-                self.logger.debug("No Description column found - JSON column initialized empty")
-
+            
             # 2) Trim product names
             if "Product Name*" in self.df.columns:
                 self.df["Product Name*"] = self.df["Product Name*"].str.lstrip()
@@ -2388,17 +2377,6 @@ class ExcelProcessor:
                         product_names = product_names.astype(str)
                         # Debug: Check if product_names is a Series or DataFrame
                         self.logger.debug(f"product_names type: {type(product_names)}, shape: {getattr(product_names, 'shape', 'N/A')}")
-                        
-                        # CRITICAL: Copy Description to JSON BEFORE replacing Description
-                        if "Description" in self.df.columns and "JSON" not in self.df.columns:
-                            self.df["JSON"] = self.df["Description"].astype(str).str.strip()
-                            self.logger.info(f"✅ Copied {len(self.df)} Description values to JSON column (before Description replacement)")
-                        elif "Description" in self.df.columns:
-                            # JSON column exists - only update if JSON is empty/null
-                            mask_empty_json = (self.df["JSON"].isna() | (self.df["JSON"].astype(str).str.strip() == ""))
-                            if mask_empty_json.any():
-                                self.df.loc[mask_empty_json, "JSON"] = self.df.loc[mask_empty_json, "Description"].astype(str).str.strip()
-                                self.logger.info(f"✅ Copied {mask_empty_json.sum()} Description values to JSON column (filling empty JSON)")
                         
                         # Ensure product_names is a Series before calling .str
                         if isinstance(product_names, pd.Series):
@@ -2985,7 +2963,7 @@ class ExcelProcessor:
                         else:
                             # Round to 2 decimal places and remove trailing zeros
                             return f"${v:.2f}".rstrip('0').rstrip('.')
-                    except Exception:
+                    except:
                         return f"${s}"
                 self.df["Price"] = self.df["Price"].apply(lambda x: format_p(x) if pd.notnull(x) else "")
                 self.df["Price"] = self.df["Price"].astype("string")
@@ -3467,20 +3445,8 @@ class ExcelProcessor:
             else:
                 self.dropdown_cache[filter_id] = []
 
-    def get_available_tags(
-        self,
-        filters: Optional[Dict[str, str]] = None,
-        max_tags: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """Return a list of tag objects with all necessary data.
-
-        Args:
-            filters: Optional filter dictionary.
-            max_tags: Optional soft limit on number of tags to return. When provided,
-                this is primarily used by ultra-fast/lite endpoints to get a small,
-                representative sample of tags for instant UI rendering. Full tag
-                loading continues to use the default (no limit).
-        """
+    def get_available_tags(self, filters: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+        """Return a list of tag objects with all necessary data."""
         if self.df is None:
             logger.warning("DataFrame is None in get_available_tags")
             return []
@@ -3492,22 +3458,10 @@ class ExcelProcessor:
         seen_product_keys = set()  # Track seen product keys to prevent duplicates
 
         # PERFORMANCE OPTIMIZATION: Convert DataFrame to dict records - much faster than iterrows()
-        # This is 5-10x faster than iterrows() for large DataFrames.
-        # If max_tags is provided, we only materialize a subset of rows here to keep
-        # lite/preview calls extremely fast.
-        if max_tags is not None and max_tags > 0:
-            # Use a safety factor to account for deduplication - we may need to
-            # inspect more than max_tags rows to end up with max_tags unique tags.
-            materialize_rows = min(len(filtered_df), max_tags * 3)
-            df_for_materialization = filtered_df.head(materialize_rows)
-        else:
-            df_for_materialization = filtered_df
-
-        rows_dict = df_for_materialization.to_dict('records')
+        # This is 5-10x faster than iterrows() for large DataFrames
+        rows_dict = filtered_df.to_dict('records')
         
         for row in rows_dict:
-            if max_tags is not None and len(tags) >= max_tags:
-                break
             # Get quantity from various possible column names
             quantity = row.get('Quantity*', '') or row.get('Quantity Received*', '') or row.get('Quantity', '') or row.get('qty', '') or ''
             
@@ -4298,19 +4252,6 @@ class ExcelProcessor:
             # Convert to list of dictionaries
             records = filtered_df.to_dict('records')
             logger.debug(f"Converted to {len(records)} records")
-            
-            # CRITICAL: Ensure Price is set for DOCX (web/UI may have Price* only; template expects 'Price')
-            for rec in records:
-                if not isinstance(rec, dict):
-                    continue
-                price = rec.get('Price')
-                price_star = rec.get('Price*') or rec.get('Price* (Tier Name for Bulk)') or rec.get('Med Price')
-                if price_star is not None and str(price_star).strip() and str(price_star).lower() not in ('nan', 'none', 'null', ''):
-                    if price is None or (hasattr(pd, 'isna') and pd.isna(price)) or not str(price).strip() or str(price).lower() in ('nan', 'none', 'null', ''):
-                        rec['Price'] = price_star
-                if price is not None and str(price).strip() and str(price).lower() not in ('nan', 'none', 'null', ''):
-                    if not rec.get('Price*') or (hasattr(pd, 'isna') and pd.isna(rec.get('Price*'))):
-                        rec['Price*'] = price
             
             # Sort records by lineage order, then by the order they appear in selected_tags
             lineage_order = [
@@ -5460,7 +5401,7 @@ class ExcelProcessor:
                                 try:
                                     if '$' in str(v):
                                         formatted_prices.add(str(v).strip())
-                                except Exception:
+                                except:
                                     pass  # Skip invalid values
                         # Add "No Price" if we found products without prices
                         if has_no_price:
@@ -6610,7 +6551,7 @@ class ExcelProcessor:
                 return f"0:{cbd:.0f}"
             else:
                 return "0:0"
-        except Exception:
+        except:
             return "20:1"  # Default ratio
     
     def _generate_description(self, product_name, product_type, product_brand):
@@ -7940,26 +7881,9 @@ class ExcelProcessor:
             logger.error(f"Error in get_available_tag_names: {e}")
             return []
 
-    def get_available_tags(
-        self,
-        filters: Optional[Dict[str, Any]] = None,
-        max_tags: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """Return a list of tag objects with all necessary data.
-
-        Args:
-            filters: Optional filter dictionary.
-            max_tags: Optional soft limit on number of tags to return. When provided,
-                this is primarily used by ultra-fast/lite endpoints to get a small,
-                representative sample of tags for instant UI rendering. Full tag
-                loading continues to use the default (no limit).
-        """
-        # Include max_tags in the cache key so limited results never pollute
-        # the full-results cache (and vice versa).
-        cache_params: Dict[str, Any] = dict(filters or {})
-        cache_params['_max_tags'] = int(max_tags) if max_tags is not None else 'all'
-
-        cache_key = self._build_cache_key('available_tags', cache_params)
+    def get_available_tags(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Return a list of tag objects with all necessary data."""
+        cache_key = self._build_cache_key('available_tags', filters or {})
         cached_tags = self._get_cached_value(self._available_tags_cache, cache_key)
         if cached_tags is not None:
             # CRITICAL FIX: Always enrich cached tags with fresh database values
@@ -8085,13 +8009,7 @@ class ExcelProcessor:
         cols = {col: filtered_df[col].values for col in filtered_df.columns}
         col_names = list(filtered_df.columns)
 
-        row_count = len(filtered_df)
-        for idx in range(row_count):
-            # If a max_tags limit is provided, stop once we've built enough tags.
-            # This is primarily used by ultra-fast/lite endpoints to get an initial
-            # subset of tags for instant rendering.
-            if max_tags is not None and len(tags) >= max_tags:
-                break
+        for idx in range(len(filtered_df)):
             # Fast index-based access instead of slow row iteration
             def get_val(col_name, default=''):
                 if col_name in cols:
@@ -8516,17 +8434,6 @@ class ExcelProcessor:
             # Ensure we have a Description column
             if "Description" not in self.df.columns:
                 self.df["Description"] = ""
-            
-            # CRITICAL: Copy Description to JSON BEFORE replacing Description
-            if "Description" in self.df.columns and "JSON" not in self.df.columns:
-                self.df["JSON"] = self.df["Description"].astype(str).str.strip()
-                self.logger.info(f"✅ Copied {len(self.df)} Description values to JSON column (before Description replacement)")
-            elif "Description" in self.df.columns:
-                # JSON column exists - only update if JSON is empty/null
-                mask_empty_json = (self.df["JSON"].isna() | (self.df["JSON"].astype(str).str.strip() == ""))
-                if mask_empty_json.any():
-                    self.df.loc[mask_empty_json, "JSON"] = self.df.loc[mask_empty_json, "Description"].astype(str).str.strip()
-                    self.logger.info(f"✅ Copied {mask_empty_json.sum()} Description values to JSON column (filling empty JSON)")
             
             # Replace ALL Description values with processed Product Name
             self.df["Description"] = self.df[product_name_col].astype(str).str.strip()

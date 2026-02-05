@@ -378,7 +378,7 @@ class ProductDatabase:
                         logging.error(f"Database corruption detected during connection validation: {e}")
                         try:
                             conn.close()
-                        except Exception:
+                        except:
                             pass
                         del self._connection_pool[thread_id]
                         # Attempt recovery
@@ -392,7 +392,7 @@ class ProductDatabase:
                         logging.warning(f"Connection validation failed for thread {thread_id}: {e}, creating new connection")
                         try:
                             conn.close()
-                        except Exception:
+                        except:
                             pass
                         del self._connection_pool[thread_id]
 
@@ -473,7 +473,7 @@ class ProductDatabase:
             if thread_id in self._connection_pool:
                 try:
                     self._connection_pool[thread_id].close()
-                except Exception:
+                except:
                     pass
                 del self._connection_pool[thread_id]
     
@@ -483,7 +483,7 @@ class ProductDatabase:
             for conn in self._connection_pool.values():
                 try:
                     conn.close()
-                except Exception:
+                except:
                     pass
             self._connection_pool.clear()
     
@@ -564,7 +564,6 @@ class ProductDatabase:
                         "Vendor/Supplier*" TEXT,
                         "Product Brand" TEXT,
                         "Description" TEXT,
-                        "JSON" TEXT,  -- Original Description value from Excel BEFORE any transformations
                         "Weight*" TEXT,
                         "Units" TEXT,
                         "Price" TEXT,
@@ -759,8 +758,7 @@ class ProductDatabase:
                 'qty',
                 '"Weight Unit* (grams/gm or ounces/oz)"',
                 'Vendor',
-                'Source',  # Add Source column for compatibility
-                '"JSON"'  # Original Description value from Excel BEFORE transformations
+                'Source'  # Add Source column for compatibility
             ]
             
             advanced_columns = [
@@ -1325,8 +1323,8 @@ class ProductDatabase:
     
     @timed_operation("add_or_update_product")
     @retry_on_lock(max_retries=3, delay=0.5)
-    def add_or_update_product(self, product_data: Dict[str, Any], insert_only: bool = False) -> int:
-        """Add a new product or update existing product information. If insert_only=True, skip updating existing rows."""
+    def add_or_update_product(self, product_data: Dict[str, Any]) -> int:
+        """Add a new product or update existing product information."""
         try:
             self.init_database()  # Ensure DB is initialized
             
@@ -1423,11 +1421,10 @@ class ProductDatabase:
                 
                 if existing:
                     product_id, occurrences, existing_name = existing
-                    if insert_only:
-                        logger.debug(f"Found existing product: '{existing_name}' (ID: {product_id}) - skipping (insert_only)")
-                        return product_id
+                    
                     # Log duplicate detection and update
                     logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
+                    
                     # Update existing product with new data (new data always replaces old values)
                     try:
                         self._update_existing_product(cursor, product_id, product_data)
@@ -1441,7 +1438,7 @@ class ProductDatabase:
                             conn.rollback()
                             # Close connection and retry from the beginning
                             self.close_all_connections()
-                            return self.add_or_update_product(product_data, insert_only=insert_only)
+                            return self.add_or_update_product(product_data)
                         raise
                 
                 # If no exact match, check by name and vendor only (ignore brand differences)
@@ -1456,9 +1453,6 @@ class ProductDatabase:
                 vendor_match = cursor.fetchone()
                 if vendor_match:
                     product_id, occurrences, existing_name, existing_brand = vendor_match
-                    if insert_only:
-                        logger.debug(f"Found similar product: '{existing_name}' (ID: {product_id}) - skipping (insert_only)")
-                        return product_id
                     logger.info(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
                     try:
                         self._update_existing_product(cursor, product_id, product_data)
@@ -1472,7 +1466,7 @@ class ProductDatabase:
                             conn.rollback()
                             # Close connection and retry from the beginning
                             self.close_all_connections()
-                            return self.add_or_update_product(product_data, insert_only=insert_only)
+                            return self.add_or_update_product(product_data)
                         raise
                 
                 # Check for similar products (same name + vendor, different brand)
@@ -1578,9 +1572,8 @@ class ProductDatabase:
                         'Weight Unit* (grams/gm or ounces/oz)': product_data.get('Weight Unit* (grams/gm or ounces/oz)', product_data.get('Units', '')),
                         'THC test result': product_data.get('THC test result', ''),
                         'CBD test result': product_data.get('CBD test result', ''),
-                        'JSON': product_data.get('JSON', ''),  # Original Description for JSON URL matching
                     }
-
+                    
                     # CRITICAL FIX: Include ALL remaining fields from product_data that aren't already in column_data_map
                     # This ensures all Excel columns are included, not just the hardcoded ones
                     for col_name, col_value in product_data.items():
@@ -1703,8 +1696,8 @@ class ProductDatabase:
             logger.info(f"   Missing product type: {self._rejected_missing_type}")
             logger.info(f"   Total rejected: {total_rejected}")
     
-    def store_excel_data(self, df: pd.DataFrame, source_file: str = None, _retry_on_schema_error: bool = True, insert_only: bool = False) -> Dict[str, Any]:
-        """Store Excel data in the database. If insert_only=True, only add new products (do not update existing)."""
+    def store_excel_data(self, df: pd.DataFrame, source_file: str = None, _retry_on_schema_error: bool = True) -> Dict[str, Any]:
+        """Store Excel data in the database. New data replaces existing data when duplicates are found."""
         try:
             self.init_database()  # Ensure DB is initialized
             logger.info(f"Starting to store Excel data with {len(df)} rows from {source_file}")
@@ -1837,17 +1830,6 @@ class ProductDatabase:
                         else:
                             row_dict[col] = str(value).strip() if isinstance(value, str) else value
                     
-                    # CRITICAL: Ensure JSON column has raw Description value (captured by Excel processor)
-                    # The Excel processor puts raw Description into JSON column BEFORE any transformations
-                    # If JSON is empty but Description exists, copy raw Description to JSON
-                    if 'JSON' in row_dict and row_dict['JSON']:
-                        # JSON already has raw Description from Excel processor - keep it
-                        pass
-                    elif 'Description' in row_dict and row_dict['Description']:
-                        # JSON is empty but Description exists - use raw Description for JSON
-                        # This handles cases where JSON column wasn't populated
-                        row_dict['JSON'] = str(row_dict['Description']).strip()
-                    
                     # Map to database columns correctly
                     # CRITICAL FIX: Preserve actual Excel weight values, don't use fallbacks
                     excel_weight = row_dict.get('Weight*', row_dict.get('Weight', ''))
@@ -1899,10 +1881,6 @@ class ProductDatabase:
                             row_dict.get('Product Name*', ''), 
                             row_dict.get('Description', '')
                         ),
-                        # CRITICAL: Store raw Description value in JSON column BEFORE transformation
-                        # The Excel processor captures raw Description into JSON column (line 2123 in excel_processor.py)
-                        # Use JSON column value (raw Description) if available, otherwise use raw Description
-                        'JSON': str(row_dict.get('JSON', '') or row_dict.get('Description', '')).strip(),
                         'Weight*': weight_value,
                         'Units': units_value,
                         'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
@@ -2272,7 +2250,7 @@ class ProductDatabase:
                         logger.warning(f"   Available vendor columns in row_dict: {[k for k in row_dict.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]}")
                     
                     try:
-                        product_id = self.add_or_update_product(product_data, insert_only=insert_only)
+                        product_id = self.add_or_update_product(product_data)
                     
                         if product_id:
                             cursor_temp = conn.cursor()
@@ -2323,7 +2301,7 @@ class ProductDatabase:
                             'Units': product_data.get('Units', 'g'),
                             'Price': product_data.get('Price', '0.00')
                         }
-                        fallback_id = self.add_or_update_product(minimal_product_data, insert_only=insert_only)
+                        fallback_id = self.add_or_update_product(minimal_product_data)
                         if fallback_id:
                             stored_count += 1
                             logger.info(f"✅ FALLBACK: Added product '{product_name}' with minimal data after error")
@@ -3132,134 +3110,69 @@ class ProductDatabase:
             return {}
     
     def export_database(self, output_path: str):
-        """Export database to Excel file - optimized for large datasets."""
+        """Export database to Excel file."""
         try:
             self.init_database()  # Ensure DB is initialized
-
+            
             conn = self._get_connection()
             cursor = conn.cursor()
-
-            # Export strains directly using pandas read_sql_query (fast)
-            # Check if strains table exists first
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
-            strains_table_exists = cursor.fetchone() is not None
             
-            strains_df = pd.DataFrame()
-            if strains_table_exists:
-                try:
-                    strains_df = pd.read_sql_query('''
-                        SELECT strain_name, canonical_lineage, total_occurrences, first_seen_date, last_seen_date
-                        FROM strains
-                        ORDER BY total_occurrences DESC
-                    ''', conn)
-                except Exception as strains_err:
-                    logger.warning(f"Could not export strains table: {strains_err}")
-                    strains_df = pd.DataFrame()
-
-            # Check if products table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-            products_table_exists = cursor.fetchone() is not None
+            # Database should already be initialized with all required columns
+            # No need to add missing columns during export
             
-            if not products_table_exists:
-                raise ValueError("Products table does not exist in database")
+            # Export strains
+            strains_df = pd.read_sql_query('''
+                SELECT strain_name, canonical_lineage, total_occurrences, first_seen_date, last_seen_date
+                FROM strains
+                ORDER BY total_occurrences DESC
+            ''', conn)
             
-            # Get available columns dynamically
+            # Get available columns dynamically to avoid SQL errors
             cursor.execute("PRAGMA table_info(products)")
             available_columns = [row[1] for row in cursor.fetchall()]
             
-            if not available_columns:
-                raise ValueError("Products table has no columns")
-
-            # Filter columns to export
-            exclude_cols = {'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id'}
-            columns_to_export = [col for col in available_columns if col not in exclude_cols]
+            # Filter to only columns that exist in the database (exclude id for now)
+            columns_to_export = [col for col in available_columns if col not in ['id', 'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id']]
             
-            if not columns_to_export:
-                raise ValueError("No columns available to export after filtering")
-
-            # Build SELECT query with proper quoting
-            select_columns = ', '.join([f'"{col}"' for col in columns_to_export])
-
-            # Use pandas read_sql_query directly - much faster than row-by-row
-            products_df = pd.read_sql_query(f'''
-                SELECT {select_columns}
-                FROM products
-                ORDER BY id
-            ''', conn)
+            # Build dynamic SELECT query with proper quoting for column names with special characters
+            select_columns = ', '.join([f'p."{col}"' for col in columns_to_export])
             
-            # Ensure we have at least an empty DataFrame with correct columns
-            if products_df.empty:
-                logger.warning("Products table is empty - exporting empty table with column structure")
-                # Create empty DataFrame with correct columns
-                products_df = pd.DataFrame(columns=columns_to_export)
-
-            logger.info(f"Exporting {len(products_df)} products and {len(strains_df)} strains")
-
-            # Check which Excel engines are available
-            xlsxwriter_available = False
-            openpyxl_available = False
+            # Query all products with only the columns that exist
+            cursor.execute(f'''
+                SELECT p.id, {select_columns}
+                FROM products p
+                ORDER BY p.id
+            ''')
             
-            try:
-                import xlsxwriter
-                xlsxwriter_available = True
-            except ImportError:
-                logger.debug("xlsxwriter not available, will use openpyxl")
+            results = cursor.fetchall()
+            products_data = []
             
-            try:
-                import openpyxl
-                openpyxl_available = True
-            except ImportError:
-                logger.debug("openpyxl not available")
+            # Debug logging
+            logger.info(f"Number of results: {len(results)}")
+            if results:
+                logger.info(f"Number of columns in first result: {len(results[0])}")
             
-            if not xlsxwriter_available and not openpyxl_available:
-                raise ImportError("Neither xlsxwriter nor openpyxl is installed. Please install at least one: pip install openpyxl")
-
-            # Export to Excel - try xlsxwriter first (faster), then openpyxl
-            export_success = False
-            last_error = None
+            # Build product dictionaries dynamically based on available columns
+            for result in results:
+                product = {'id': result[0]}
+                for i, col in enumerate(columns_to_export, start=1):
+                    product[col] = result[i]
+                products_data.append(product)
             
-            if xlsxwriter_available:
-                try:
-                    logger.info("Attempting export with xlsxwriter engine...")
-                    with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                        if not strains_df.empty:
-                            strains_df.to_excel(writer, sheet_name='Strains', index=False)
-                        products_df.to_excel(writer, sheet_name='Products', index=False)
-                    export_success = True
-                    logger.info("Successfully exported using xlsxwriter")
-                except Exception as xlsx_err:
-                    last_error = xlsx_err
-                    logger.warning(f"xlsxwriter export failed: {xlsx_err}, trying openpyxl...")
+            # Convert to DataFrame
+            products_df = pd.DataFrame(products_data)
             
-            if not export_success and openpyxl_available:
-                try:
-                    logger.info("Attempting export with openpyxl engine...")
-                    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                        if not strains_df.empty:
-                            strains_df.to_excel(writer, sheet_name='Strains', index=False)
-                        products_df.to_excel(writer, sheet_name='Products', index=False)
-                    export_success = True
-                    logger.info("Successfully exported using openpyxl")
-                except Exception as openpyxl_err:
-                    last_error = openpyxl_err
-                    logger.error(f"openpyxl export also failed: {openpyxl_err}")
+            # Export to Excel
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                strains_df.to_excel(writer, sheet_name='Strains', index=False)
+                products_df.to_excel(writer, sheet_name='Products', index=False)
             
-            if not export_success:
-                error_msg = "Failed to export to Excel"
-                if last_error:
-                    error_msg += f": {str(last_error)}"
-                raise RuntimeError(error_msg)
-
-            logger.info(f"Database exported to {output_path}")
+            logger.info(f"Database exported to {output_path} with {len(strains_df)} strains and {len(products_df)} products")
             
-            # Don't close connection here - it's from a pool and should be returned to pool
-            # The connection pool will handle cleanup
-
         except Exception as e:
             logger.error(f"Error exporting database: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            # Don't close connection on error - let pool handle it
             raise
     
     def update_all_descriptions(self) -> Dict[str, Any]:
@@ -5854,7 +5767,8 @@ class ProductDatabase:
             # Use placeholders for the IN clause
             placeholders = ','.join(['?' for _ in normalized_names])
             
-            # One row per normalized_name (latest by id) to avoid redundant DB rows slowing tag load
+            # Fixed query - use products table directly with correct column names
+            # CRITICAL: Include sovereign_lineage to capture manual tag manager edits
             cursor.execute(f'''
                 SELECT id, "Product Name*", normalized_name, "Product Type*", "Vendor/Supplier*", "Product Brand", "Lineage",
                        "Product Strain" as strain_name, "Lineage" as canonical_lineage, sovereign_lineage, total_occurrences, first_seen_date, last_seen_date,
@@ -5867,8 +5781,7 @@ class ProductDatabase:
                        "CombinedWeight", "Ratio_or_THC_CBD", "Description_Complexity", "Total THC", "THCA", "CBDA", "CBN"
                 FROM products
                 WHERE normalized_name IN ({placeholders})
-                  AND id IN (SELECT MAX(id) FROM products WHERE normalized_name IN ({placeholders}) GROUP BY normalized_name)
-            ''', normalized_names + normalized_names)
+            ''', normalized_names)
             
             results = cursor.fetchall()
             
@@ -6272,7 +6185,6 @@ class ProductDatabase:
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
                 FROM products p
                 WHERE 1=1
-                  AND (p."Is Sample? (yes/no)" IS NULL OR LOWER(p."Is Sample? (yes/no)") != 'yes')
             '''
             
             params = []
@@ -7487,41 +7399,6 @@ class ProductDatabase:
         except Exception as e:
             logger.error(f"Error getting all products: {e}")
             return []
-
-    def update_product_json_column(self, product_id: int, json_value: str) -> bool:
-        """Set the JSON column for a product to the given value (e.g. latest feed description)."""
-        try:
-            self.init_database()
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(products)")
-            columns = [row[1] for row in cursor.fetchall()]
-            if 'JSON' not in columns:
-                return False
-            cursor.execute('UPDATE products SET "JSON" = ? WHERE id = ?', (str(json_value).strip() if json_value else '', product_id))
-            conn.commit()
-            return cursor.rowcount > 0
-        except Exception as e:
-            logger.warning(f"Failed to update JSON column for product {product_id}: {e}")
-            return False
-
-    def get_products_dataframe(self, limit: Optional[int] = 10000) -> Optional[pd.DataFrame]:
-        """Get products as DataFrame (fast path for export/download). Uses single read_sql_query."""
-        try:
-            self.init_database()
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(products)")
-            available_columns = [row[1] for row in cursor.fetchall()]
-            exclude_cols = {'normalized_name', 'Ratio_or_THC_CBD', 'Description_Complexity', 'strain_id'}
-            columns_to_export = [col for col in available_columns if col not in exclude_cols]
-            select_columns = ', '.join([f'"{col}"' for col in columns_to_export])
-            limit_clause = f' LIMIT {int(limit)}' if limit else ''
-            query = f'SELECT {select_columns} FROM products ORDER BY id{limit_clause}'
-            return pd.read_sql_query(query, conn)
-        except Exception as e:
-            logger.error(f"Error getting products DataFrame: {e}")
-            return None
     
     def update_all_product_strains(self) -> Dict[str, Any]:
         """Update all existing Product Strain column values using the _calculate_product_strain logic."""

@@ -1,4 +1,4 @@
-# AGT Designer - Python Dependencies for PythonAnywhere Deployment
+# AGT Label Maker - Python Dependencies for PythonAnywhere Deployment
 #
 # Install with: pip install --user -r requirements.txt
 # Then patch docxcompose: python patch_docxcompose.py (if available)

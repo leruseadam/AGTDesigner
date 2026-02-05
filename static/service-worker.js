@@ -6,12 +6,11 @@
  * CACHE BUST: Increment version numbers to force cache refresh
  */
 
-// 🔧 DEVELOPMENT MODE: Automatically disable caching on localhost/127.0.0.1
-// In production (agtpricetags.com, etc.), caching is enabled by default.
-const DEV_MODE = ['localhost', '127.0.0.1'].includes(self.location.hostname);
+// 🔧 DEVELOPMENT MODE: Set to true to disable all caching
+const DEV_MODE = true;
 
 // Version numbers - increment to force cache refresh
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `labelmaker-${CACHE_VERSION}`;
 const STATIC_CACHE_NAME = `labelmaker-static-${CACHE_VERSION}`;
 const API_CACHE_NAME = `labelmaker-api-${CACHE_VERSION}`;

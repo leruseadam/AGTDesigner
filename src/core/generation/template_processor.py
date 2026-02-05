@@ -1833,7 +1833,7 @@ class TemplateProcessor:
                 from datetime import datetime
                 date_obj = datetime.strptime(context['AcceptedDate'], '%Y-%m-%d')
                 context['AcceptedDate'] = date_obj.strftime('%m/%d/%Y')
-            except Exception:
+            except:
                 pass  # Keep original format if parsing fails
         
         # Ensure all values are strings
@@ -1914,15 +1914,6 @@ class TemplateProcessor:
         
         # Fast dictionary copy
         label_context = dict(record)
-        # CRITICAL: Ensure Price is set for docx (UI may have Price* only); template expects 'Price'
-        price_val = label_context.get('Price') or record.get('Price') or record.get('Price*') or record.get('Price* (Tier Name for Bulk)') or record.get('Med Price')
-        if price_val is not None and not (hasattr(pd, 'isna') and pd.isna(price_val)):
-            price_str = str(price_val).strip()
-            if price_str and price_str.lower() not in ('nan', 'none', 'null', ''):
-                label_context['Price'] = price_str
-        # Ensure Price is never NaN in context (web/request rows can have NaN from DataFrame)
-        if not label_context.get('Price') or (hasattr(pd, 'isna') and pd.isna(label_context.get('Price'))):
-            label_context['Price'] = ''
 
         # DEBUG: Log Product Brand from record vs label_context
         self.logger.info(f"🔍 RECORD BRAND DEBUG for '{product_name}': record['Product Brand']='{record.get('Product Brand')}', record['ProductBrand']='{record.get('ProductBrand')}', record['Vendor']='{record.get('Vendor')}'")
@@ -3068,7 +3059,7 @@ class TemplateProcessor:
                     unwrapped = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
                     if unwrapped and str(unwrapped).strip():
                         existing_vendor_has_content = True
-                except Exception:
+                except:
                     # If unwrapping fails, check if it's just the plain value (no markers)
                     if 'PRODUCTVENDOR_START' not in str(existing_vendor):
                         existing_vendor_has_content = True
@@ -3758,7 +3749,7 @@ class TemplateProcessor:
                     unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
                     if not unwrapped or not unwrapped.strip():
                         vendor_is_empty = True
-                except Exception:
+                except:
                     # If unwrapping fails, check if it's just empty markers
                     if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
                         match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
@@ -5536,7 +5527,7 @@ class TemplateProcessor:
             
             # Ensure consistent spacing above all marker sections for equal margins
             paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(2)
+            paragraph.paragraph_format.space_after = Pt(1)
             
             # Sort markers by position in text
             sorted_markers = sorted(processed_content.items(), key=lambda x: x[1]['start_pos'])
@@ -5702,7 +5693,7 @@ class TemplateProcessor:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         paragraph.paragraph_format.left_indent = Inches(0)
                         paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
                         self.logger.debug(f"LINEAGE ALIGNMENT: Forced LEFT alignment for classic lineage value: '{clean_content}'")
                     elif is_classic_product:
                         # Classic product types should have LEFT alignment for lineage
@@ -5711,13 +5702,13 @@ class TemplateProcessor:
                         paragraph.paragraph_format.left_indent = Inches(0)
                         # Ensure consistent spacing above lineage section for equal margins
                         paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
                     else:
                         # Non-classic product types should have CENTER alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         # Ensure consistent spacing above lineage section for equal margins
                         paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
                     
                     # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage
                     if product_type and 'vape' in product_type.lower():
@@ -5731,7 +5722,7 @@ class TemplateProcessor:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     # Ensure consistent spacing above product brand section for equal margins
                     paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
                     for run in paragraph.runs:
                         # Get product type for font sizing
                         product_type = None
@@ -5746,7 +5737,7 @@ class TemplateProcessor:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                     # Ensure consistent spacing above vendor section for equal margins
                     paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
                     # Use unified font sizing for vendor text
                     for run in paragraph.runs:
                         # Apply unified font sizing using 'vendor' field type
@@ -5778,7 +5769,7 @@ class TemplateProcessor:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     # Ensure consistent spacing above strain section for equal margins
                     paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
                     strain_content = str(marker_data.get('content') or '').strip()
                     for run in paragraph.runs:
                         run_text = run.text or ''
@@ -6057,15 +6048,13 @@ class TemplateProcessor:
                                 if is_classic or is_classic_lineage_value:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                     paragraph.paragraph_format.left_indent = Inches(0)
-                                    # Equal, minimal spacing above and below lineage text
-                                    paragraph.paragraph_format.space_before = Pt(1)
+                                    paragraph.paragraph_format.space_before = Pt(2)
                                     paragraph.paragraph_format.space_after = Pt(1)
                                     if is_classic_lineage_value:
                                         self.logger.debug(f"Left-aligned lineage for classic lineage value: '{clean_lineage}'")
                                 else:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    # Equal, minimal spacing above and below brand-in-lineage text
-                                    paragraph.paragraph_format.space_before = Pt(1)
+                                    paragraph.paragraph_format.space_before = Pt(2)
                                     paragraph.paragraph_format.space_after = Pt(1)
                                 
                                 # Update the content to only show the actual lineage (remove any markers)
@@ -6116,23 +6105,20 @@ class TemplateProcessor:
                             # For Classic Lineage Values, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            # Equal, minimal spacing above and below lineage text
-                            paragraph.paragraph_format.space_before = Pt(1)
+                            paragraph.paragraph_format.space_before = Pt(2)
                             paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Left-justified lineage for classic lineage value: '{clean_content}' (content: '{content}')")
                         elif is_classic_product:
                             # For Classic Types, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            # Equal, minimal spacing above and below lineage text
-                            paragraph.paragraph_format.space_before = Pt(1)
+                            paragraph.paragraph_format.space_before = Pt(2)
                             paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
                         else:
                             # For non-classic types, center the ProductBrand content in Lineage field
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            # Equal, minimal spacing above and below brand-in-lineage text
-                            paragraph.paragraph_format.space_before = Pt(1)
+                            paragraph.paragraph_format.space_before = Pt(2)
                             paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
                         
@@ -6140,13 +6126,7 @@ class TemplateProcessor:
                         if product_type and 'vape' in product_type.lower():
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            # Preserve equal, minimal spacing for vape cartridges as well
-                            paragraph.paragraph_format.space_before = Pt(1)
-                            paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"VAPE CARTRIDGE FALLBACK OVERRIDE: Forced LEFT alignment for lineage")
-
-                    # Finally, ensure the lineage/brand cell is vertically centered within its band
-                    self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
                 
                 self.logger.debug(f"Applied template-specific font sizing: {font_size.pt}pt for {marker_name} marker")
 
@@ -6292,7 +6272,7 @@ class TemplateProcessor:
                 if any(keyword in text for keyword in ['indica', 'sativa', 'hybrid', 'cbd', 'alpha crux', 'constellation']):
                     # Set consistent spacing for lineage/brand sections
                     paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
                     
                     # Also set at XML level for maximum compatibility
                     pPr = paragraph._element.get_or_add_pPr()
@@ -6301,7 +6281,7 @@ class TemplateProcessor:
                         spacing = OxmlElement('w:spacing')
                         pPr.append(spacing)
                     spacing.set(qn('w:before'), '40')  # 2pt = 40 twips
-                    spacing.set(qn('w:after'), '40')   # 2pt = 40 twips
+                    spacing.set(qn('w:after'), '20')   # 1pt = 20 twips
                     spacing.set(qn('w:lineRule'), 'auto')
             
             # Process all tables
@@ -7935,7 +7915,7 @@ class TemplateProcessor:
             
             # Ensure consistent spacing above lineage/vendor section for equal margins
             paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(2)
+            paragraph.paragraph_format.space_after = Pt(1)
             
             # SPECIAL RULE: For Vertical template, automatically force vendor to next line for specific lineages
             if (self.template_type == 'vertical' and 
@@ -8088,7 +8068,7 @@ class TemplateProcessor:
             
             # Ensure consistent spacing above lineage/vendor section for equal margins
             paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(2)
+            paragraph.paragraph_format.space_after = Pt(1)
             
             # Set paragraph to right alignment for proper vendor right-alignment
             paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT

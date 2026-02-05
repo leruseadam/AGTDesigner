@@ -130,89 +130,6 @@ const safeReload = (delay = 0) => {
 window.safeReload = safeReload;
 window._reloadInProgress = false; // Make flag accessible
 
-// Global inactivity notification (1 hour)
-// After 60 minutes with no user interaction, show a full-screen modal.
-(function setupInactivityAutoReload() {
-    const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 hour
-    let inactivityTimer = null;
-
-    const resetInactivityTimer = () => {
-        // Do not auto-reload if the emergency kill switch is active
-        if (window.EMERGENCY_KILL_SWITCH) {
-            return;
-        }
-
-        if (inactivityTimer) {
-            clearTimeout(inactivityTimer);
-            inactivityTimer = null;
-        }
-
-        inactivityTimer = setTimeout(() => {
-            console.log('⏰ No user activity for 1 hour - showing idle session modal');
-
-            const messageHtml = [
-                '<p style="margin-bottom: 8px;">You have been inactive for an hour.</p>',
-                '<p style="margin-bottom: 0;">Click <strong>OK</strong> to reload the page and ensure your data is fresh.</p>'
-            ].join('');
-
-            // Prefer our custom full-screen modal helper if available
-            if (window.agtShowModal) {
-                window.agtShowModal({
-                    title: 'Session Idle',
-                    message: messageHtml,
-                    buttons: [
-                        { text: 'OK', value: 'ok', primary: true }
-                    ]
-                }).then((result) => {
-                    if (result === 'ok') {
-                        if (typeof window.safeReload === 'function') {
-                            window.safeReload();
-                        } else {
-                            window.location.reload();
-                        }
-                    }
-                });
-            } else if (typeof showToast === 'function') {
-                // Fallback to a toast plus manual reload
-                showToast(
-                    'info',
-                    'You have been inactive for an hour. Please reload the page to ensure your data is fresh.'
-                );
-            } else if (window.Toast && typeof window.Toast.show === 'function') {
-                // Fallback to Toast helper if present
-                window.Toast.show(
-                    'info',
-                    'You have been inactive for an hour. Please reload the page to ensure your data is fresh.'
-                );
-            } else {
-                // Final fallback: simple browser dialog
-                if (window.confirm('You have been inactive for an hour. Reload now to ensure your data is fresh?')) {
-                    if (typeof window.safeReload === 'function') {
-                        window.safeReload();
-                    } else {
-                        window.location.reload();
-                    }
-                }
-            }
-        }, INACTIVITY_LIMIT_MS);
-    };
-
-    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click', 'focus'];
-    activityEvents.forEach(eventName => {
-        window.addEventListener(eventName, resetInactivityTimer, { passive: true });
-    });
-
-    // When the tab becomes visible again, restart the inactivity timer
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-            resetInactivityTimer();
-        }
-    });
-
-    // Initialize on load
-    resetInactivityTimer();
-})();
-
 // Memory-optimized performance utilities
 // Performance detection for slow computers
 const devicePerformance = (function() {
@@ -2269,6 +2186,13 @@ const TagManager = {
             verboseLog(`💾 Saved selection state for undo - Action: ${actionType}, Stack size: ${this.state.localUndoStack.length}, Selected tags: ${currentState.selected_tag_names.length}`);
             
             // Background: Also save to backend (non-blocking)
+            // Only perform backend autosave if explicitly enabled (prevents saving on every add)
+            // Set `window.AUTO_SAVE_SELECTION = true` in console to re-enable autosave behavior.
+            if (typeof window.AUTO_SAVE_SELECTION === 'undefined') window.AUTO_SAVE_SELECTION = false;
+            if (!window.AUTO_SAVE_SELECTION) {
+                verboseLog('Autosave disabled (window.AUTO_SAVE_SELECTION=false); skipping backend save');
+                return;
+            }
             // Use fetch instead of sendBeacon for better reliability and error handling
             const payload = JSON.stringify({
                 action_type: actionType,
@@ -3130,8 +3054,8 @@ const TagManager = {
 
             verboseLog(`💾 Saving ${selectedTagNames.length} selected tags to backend...`);
 
-            // REMOVED: Don't show splash for individual selections - too annoying
-            // The save happens silently in the background
+            // Show a saving splash while the backend request is in flight
+            try { this.showSplash && this.showSplash('Saving selection...'); } catch (e) {}
 
             const response = await fetch('/api/selected-tags', {
                 method: 'POST',
@@ -3154,7 +3078,14 @@ const TagManager = {
 
             const result = await response.json();
             verboseLog('✅ Selected tags saved to backend:', result);
-            // REMOVED: Don't show success modal for individual selections - saves silently
+            try {
+                this.hideSplash && this.hideSplash();
+                this.showModal && this.showModal({
+                    title: 'Saved',
+                    message: `Saved ${selectedTagNames.length} selected tags.`,
+                    buttons: [{ text: 'OK', value: 'ok', primary: true }]
+                });
+            } catch (e) {}
         } catch (error) {
             console.warn('⚠️ Error saving selected tags to backend:', error);
         }
@@ -11698,11 +11629,7 @@ const TagManager = {
             // Keep this timeout short – we only want it if it is truly fast
             const timeoutId = setTimeout(() => controller.abort(), 3000);
 
-            // Request a limited subset of tags for ultra-fast prefetch.
-            // The full /api/web/available-tags endpoint will still load all
-            // tags in the background; this is just to get something on screen
-            // immediately.
-            const response = await fetch(`/api/available-tags-lite?t=${Date.now()}&max_tags=400`, {
+            const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`, {
                 signal: controller.signal
             });
             clearTimeout(timeoutId);
@@ -11792,40 +11719,30 @@ const TagManager = {
                           (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
         
         // CRITICAL FIX: Reset stuck flag if it's been set for too long, or if force reload
-        // Reduced timeout from 30s to 10s to prevent blocking legitimate retries
         if (this._fetchingAvailableTags && !forceReload) {
             const fetchStartTime = this._fetchingAvailableTagsStartTime || Date.now();
             const stuckDuration = Date.now() - fetchStartTime;
-            if (stuckDuration > 10000) { // Reduced from 30s to 10s
-                console.warn(`⚠️ _fetchingAvailableTags stuck for ${stuckDuration}ms (>10s), resetting flag to allow retry`);
+            if (stuckDuration > 30000) {
+                console.warn('⚠️ _fetchingAvailableTags stuck for 30+ seconds, resetting flag');
                 this._fetchingAvailableTags = false;
-                if (this._fetchingTimeout) {
-                    clearTimeout(this._fetchingTimeout);
-                    this._fetchingTimeout = null;
-                }
             } else {
                 console.log('⏸️ Tag fetch already in progress, waiting for completion...');
-                // Wait up to 1 second (reduced from 2s) for in-progress fetch to complete
+                // Wait up to 2 seconds for in-progress fetch to complete
                 let waitCount = 0;
-                while (this._fetchingAvailableTags && waitCount < 10) { // Reduced from 20 to 10
+                while (this._fetchingAvailableTags && waitCount < 20) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     waitCount++;
                 }
-                // If still in progress after waiting, reset flag and proceed (don't skip)
+                // If still in progress after waiting, skip to prevent hang
                 if (this._fetchingAvailableTags) {
-                    console.warn('⚠️ Tag fetch still in progress after wait - resetting flag and proceeding');
-                    this._fetchingAvailableTags = false;
-                    if (this._fetchingTimeout) {
-                        clearTimeout(this._fetchingTimeout);
-                        this._fetchingTimeout = null;
-                    }
+                    console.log('⏸️ Tag fetch still in progress after wait, skipping duplicate call');
                     // CRITICAL FIX: Force hide splash if we're stuck waiting
                     if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                         console.log('⚡ Force hiding splash - tag fetch stuck');
                         AppLoadingSplash.stopAutoAdvance();
                         AppLoadingSplash.complete();
                     }
-                    // Don't return false - proceed with fetch instead
+                    return false;
                 }
             }
         } else if (forceReload && this._fetchingAvailableTags) {
@@ -12002,10 +11919,11 @@ const TagManager = {
                 const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
+                    // Just hide the splash, don't show error message
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
-                    // Just hide splash, don't show notification - let the actual error handler show messages if needed
+                    // Don't show error message - let the app continue working
                 }, safetyTimeoutMs);
             }
 
@@ -12114,12 +12032,16 @@ const TagManager = {
             verboseLog('Fetching available tags...');
             const timestamp = Date.now();
             
-            // PERFORMANCE OPTIMIZATION: Always use fast_load=1 for instant loading
-            // Lineage will be enriched in background if needed, but initial load is instant
-            // This provides much faster page loads while still getting correct lineage eventually
-            // - Fast load shows tags immediately (fast_load=1)
-            // - Background enrichment updates lineage if needed (non-blocking)
-            const fastLoadParam = '&fast_load=1';
+            // PERFORMANCE vs CORRECTNESS:
+            // - On true "first load" (no existing tags and no cache), we MUST load with full database lineage
+            //   to avoid showing Excel/stale lineage that then "flips" a moment later.
+            // - On subsequent loads (or when cache exists), we can safely use fast_load=1 for speed.
+            //
+            // So:
+            // - First load (no tags, no cache) → fast_load=0  (no flash, correct lineage from the start)
+            // - All other cases               → fast_load=1  (fast, backend does lightweight alignment)
+            const isFirstTrueLoad = !hasExistingTags && !hasCache && !this._hasLoadedOnce;
+            const fastLoadParam = isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
@@ -12242,8 +12164,6 @@ const TagManager = {
                     if (!response.ok) {
                         // CRITICAL FIX: Handle 503 errors gracefully - try to use cache
                         if (response.status === 503) {
-                            // Store error status for retry logic
-                            this._lastErrorStatus = 503;
                             verboseLog('⚠️ Server returned 503 (Service Unavailable), attempting to use cached data...');
                             // Try to use cached tags if available
                             const cachedTags = this.hydrateAvailableTagsFromCache();
@@ -12251,22 +12171,8 @@ const TagManager = {
                                 verboseLog('✅ Using cached tags as fallback for 503 error');
                                 return true;
                             }
-                            // Try to parse error response for better error message
-                            let errorMsg = 'Server is temporarily overloaded. Please try again in a moment.';
-                            try {
-                                const errorData = await response.clone().json();
-                                if (errorData && errorData.message) {
-                                    errorMsg = errorData.message;
-                                } else if (errorData && errorData.error) {
-                                    errorMsg = errorData.error;
-                                }
-                            } catch (parseErr) {
-                                // Use default message if parsing fails
-                            }
                             // If no cache, throw error but don't retry 503 (server is overloaded)
-                            const error = new Error(`HTTP 503: ${errorMsg}`);
-                            error.status = 503; // Store status on error object for error handler
-                            throw error;
+                            throw new Error(`HTTP 503: Service Unavailable - Server is temporarily overloaded. Please try again in a moment.`);
                         }
                         if (response.status >= 500 && retryCount < maxRetries - 1) {
                             // Server error - retry immediately
@@ -12498,11 +12404,6 @@ const TagManager = {
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
-                }
-                // Clear safety timeout so it doesn't overwrite this message
-                if (safetyTimeout) {
-                    clearTimeout(safetyTimeout);
-                    safetyTimeout = null;
                 }
                 // Return true to indicate initialization completed (even with no tags)
                 return true;
@@ -13223,28 +13124,16 @@ const TagManager = {
             if (availableTagsContainer) {
                 const errorMessage = error.message || 'Unknown error';
                 const isProcessingError = errorMessage.includes('still processing') || errorMessage.includes('processing');
-                const isMemoryError = errorMessage.includes('memory') || errorMessage.includes('Memory') || error.status === 503;
-                
-                // Extract backend message if available (remove "HTTP 503: " prefix)
-                let displayMessage = errorMessage.replace(/^HTTP \d+: /, '');
-                
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-4">
-                        <div class="alert ${isMemoryError ? 'alert-danger' : 'alert-warning'} mx-3">
-                            <h5 class="alert-heading">${isMemoryError ? '⚠️ Server Memory Issue' : 'Unable to Load Tags'}</h5>
+                        <div class="alert alert-warning mx-3">
+                            <h5 class="alert-heading">Unable to Load Tags</h5>
                             <p class="mb-3">${isProcessingError 
                                 ? 'The file is still being processed. Please wait a moment and try again, or refresh the page.' 
-                                : isMemoryError
-                                ? displayMessage + '<br><br><strong>Solution:</strong> Click "Reset Cache" in Database Tools to free up memory, then retry.'
                                 : 'There was a problem loading the product tags. This can happen if the database is temporarily unavailable or the connection timed out.'}</p>
                             <button class="btn btn-primary me-2" onclick="TagManager.retryLoadTags()">
                                 <i class="fas fa-redo"></i> Retry Loading Tags
                             </button>
-                            ${isMemoryError ? `
-                            <button class="btn btn-warning me-2" onclick="if(window.resetCache) window.resetCache(); else alert('Please use the Reset Cache button in Database Tools');">
-                                <i class="fas fa-trash-alt"></i> Reset Cache
-                            </button>
-                            ` : ''}
                             <button class="btn btn-secondary" onclick="TagManager.forceReloadTags()">
                                 <i class="fas fa-sync-alt"></i> Force Reload (Clear Cache)
                             </button>
@@ -13300,15 +13189,6 @@ const TagManager = {
             clearTimeout(this._fetchingTimeout);
             this._fetchingTimeout = null;
         }
-        
-        // Check if last error was a 503 (memory issue) - add delay to give server time to recover
-        const lastErrorWas503 = this._lastErrorStatus === 503;
-        if (lastErrorWas503) {
-            console.log('⏳ Last error was 503 (memory issue) - waiting 3 seconds before retry to give server time to recover...');
-            this.showActionSplash('Waiting a moment for server to recover, then retrying...');
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
-        }
-        
         // Show loading indicator
         this.showActionSplash('Retrying tag loading...');
         // Attempt to load tags again with force flag
@@ -14886,11 +14766,11 @@ const TagManager = {
         }, 60000); // 60 second safety net - increased for large files
 
         try {
-            // PERFORMANCE: Use fast_load=1 for instant loading - lineage will be enriched in background
-            // Fast loading shows tags immediately, then enriches with database lineage asynchronously
-            // This provides much faster initial load while still getting correct lineage
+            // CRITICAL FIX: Load WITH lineage enrichment to ensure dropdowns show correct values
+            // Previously used fast_load=1 which skipped lineage, causing empty dropdowns when filtering by product type
+            // Explicitly pass fast_load=0 to ensure all tags have database lineage from the start
             const response = await Promise.race([
-                fetch('/api/initial-data?fast_load=1'),
+                fetch('/api/initial-data?fast_load=0'),
                 timeoutPromise
             ]).catch(err => {
                 // If fetch fails or times out, complete initialization anyway
@@ -15449,11 +15329,6 @@ const TagManager = {
             });
             if (!response.ok) {
                 const error = await response.json();
-                // Handle stale upload error - prompt user to upload fresh Excel
-                if (error.error === 'stale_upload' || error.message?.includes('stale')) {
-                    this.showStaleUploadModal(error.message || error.stale_reason || 'Session Expired. Please upload a fresh Excel file to prevent stale or outdated product information.');
-                    throw new Error('STALE_UPLOAD'); // Special error to prevent further processing
-                }
                 throw new Error(error.error || 'Failed to generate labels');
             }
             const blob = await response.blob();
@@ -15517,18 +15392,6 @@ const TagManager = {
             }
         } catch (error) {
             console.error('Error generating labels:', error);
-            // Handle stale upload - don't show generic error, modal already shown
-            if (error.message === 'STALE_UPLOAD') {
-                // Modal already shown, just return
-                return;
-            }
-            // Show error toast for other errors
-            const errorMsg = error.message || 'Failed to generate labels. Please try again.';
-            if (typeof showToast === 'function') {
-                showToast('error', errorMsg);
-            } else {
-                alert(errorMsg);
-            }
             // CRITICAL FIX: Even on error, mark generation time to preserve selections
             // This prevents tags from disappearing if generation partially succeeded
             this._lastTagSelectionTime = Date.now();
@@ -16679,103 +16542,6 @@ const TagManager = {
             verboseLog('✅ Splash hidden');
         } else {
             console.error('❌ Could not find splash element to hide');
-        }
-    },
-
-    showStaleUploadModal(message) {
-        verboseLog('⚠️ Showing stale upload modal:', message);
-        
-        // Create or get modal element
-        let modal = document.getElementById('staleUploadModal');
-        if (!modal) {
-            modal = document.createElement('div');
-            modal.id = 'staleUploadModal';
-            modal.className = 'modal fade';
-            modal.setAttribute('tabindex', '-1');
-            modal.setAttribute('role', 'dialog');
-            modal.setAttribute('aria-labelledby', 'staleUploadModalLabel');
-            modal.setAttribute('aria-hidden', 'true');
-            modal.innerHTML = `
-                <div class="modal-dialog modal-dialog-centered" role="document">
-                    <div class="modal-content">
-                        <div class="modal-header bg-warning text-dark">
-                            <h5 class="modal-title" id="staleUploadModalLabel">
-                                <i class="fas fa-exclamation-triangle me-2"></i>Stale Data Detected
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <p class="mb-3">${message || 'Session Expired. Please upload a fresh Excel file to prevent stale or outdated product information.'}</p>
-                            <p class="text-muted small">Upload a new file to continue generating tags.</p>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="button" class="btn btn-primary" id="staleUploadModalUploadBtn">
-                                <i class="fas fa-upload me-2"></i>Upload Fresh Excel File
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-            
-            // Handle upload button click
-            const uploadBtn = modal.querySelector('#staleUploadModalUploadBtn');
-            if (uploadBtn) {
-                uploadBtn.addEventListener('click', () => {
-                    const fileInput = document.getElementById('fileInput');
-                    if (fileInput) {
-                        // Close modal first
-                        const bsModal = bootstrap.Modal.getInstance(modal);
-                        if (bsModal) {
-                            bsModal.hide();
-                        }
-                        // Trigger file input click
-                        setTimeout(() => {
-                            fileInput.click();
-                        }, 300);
-                    } else {
-                        console.error('File input not found');
-                        alert('Please use the upload button in the header to upload a new Excel file.');
-                    }
-                });
-            }
-        }
-        
-        // Update message if modal already exists
-        const bodyText = modal.querySelector('.modal-body p');
-        if (bodyText && message) {
-            bodyText.textContent = message;
-        }
-        
-        // Show modal using Bootstrap
-        try {
-            const bsModal = new bootstrap.Modal(modal);
-            bsModal.show();
-        } catch (e) {
-            // Fallback if Bootstrap not available
-            console.warn('Bootstrap Modal not available, using fallback:', e);
-            modal.style.display = 'block';
-            modal.classList.add('show');
-            modal.setAttribute('aria-hidden', 'false');
-        }
-    },
-    
-    hideStaleUploadModal() {
-        const modal = document.getElementById('staleUploadModal');
-        if (modal) {
-            try {
-                const bsModal = bootstrap.Modal.getInstance(modal);
-                if (bsModal) {
-                    bsModal.hide();
-                } else {
-                    modal.style.display = 'none';
-                    modal.classList.remove('show');
-                    modal.setAttribute('aria-hidden', 'true');
-                }
-            } catch (e) {
-                modal.style.display = 'none';
-            }
         }
     },
 
@@ -20443,28 +20209,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (hasTags || hasRenderedTags) {
                     console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
                 } else if (isChecking || isFetching) {
-                    // CRITICAL FIX: Check how long flags have been stuck - reset if stuck too long
-                    const checkStartTime = window.TagManager._checkingExistingDataStartTime || Date.now();
-                    const fetchStartTime = window.TagManager._fetchingAvailableTagsStartTime || Date.now();
-                    const checkDuration = Date.now() - checkStartTime;
-                    const fetchDuration = Date.now() - fetchStartTime;
-                    const maxStuckTime = 15000; // 15 seconds
-                    
-                    if ((isChecking && checkDuration > maxStuckTime) || (isFetching && fetchDuration > maxStuckTime)) {
-                        console.warn(`⚠️ SAFEGUARD: Flags stuck for ${Math.max(checkDuration, fetchDuration)}ms - resetting and forcing retry`);
-                        window.TagManager._checkingExistingData = false;
-                        window.TagManager._fetchingAvailableTags = false;
-                        window.TagManager._checkingExistingDataStartTime = null;
-                        window.TagManager._fetchingAvailableTagsStartTime = null;
-                        // Force retry after resetting flags
-                        if (typeof window.TagManager.checkForExistingData === 'function') {
-                            window.TagManager.checkForExistingData().catch(err => {
-                                console.error('Safeguard retry after reset failed:', err);
-                            });
-                        }
-                    } else {
-                        console.log('✅ SAFEGUARD: Tags are currently being loaded, skipping retry');
-                    }
+                    console.log('✅ SAFEGUARD: Tags are currently being loaded, skipping retry');
                 }
             }
         }, 5000);
@@ -20499,25 +20244,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (hasTags || hasRenderedTags) {
                     console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
                 } else if (isChecking || isFetching) {
-                    // CRITICAL FIX: After 10 seconds, force reset flags even if they're set
-                    // This prevents infinite waiting if flags get stuck
-                    const checkStartTime = window.TagManager._checkingExistingDataStartTime || Date.now();
-                    const fetchStartTime = window.TagManager._fetchingAvailableTagsStartTime || Date.now();
-                    const checkDuration = Date.now() - checkStartTime;
-                    const fetchDuration = Date.now() - fetchStartTime;
-                    
-                    console.warn(`⚠️ 10s SAFEGUARD: Flags still set after 10s (check: ${checkDuration}ms, fetch: ${fetchDuration}ms) - forcing reset and reload`);
-                    window.TagManager._checkingExistingData = false;
-                    window.TagManager._fetchingAvailableTags = false;
-                    window.TagManager._checkingExistingDataStartTime = null;
-                    window.TagManager._fetchingAvailableTagsStartTime = null;
-                    // Force reload after resetting flags
-                    if (typeof window.TagManager.forceReloadTags === 'function') {
-                        console.log('🔄 10s SAFEGUARD: Using forceReloadTags after flag reset');
-                        window.TagManager.forceReloadTags().catch(e => {
-                            console.error('10s safeguard force reload failed:', e);
-                        });
-                    }
+                    console.log('✅ 10s SAFEGUARD: Tags are currently being loaded - skipping force fetch');
                 }
             }
         }, 10000);
@@ -20582,112 +20309,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     });
-
-    // Global Enter/Escape behavior for professional-feeling keyboard UX
-    document.addEventListener('keydown', function (event) {
-        const key = event.key || event.code;
-
-        // Don't interfere with typing in standard text inputs/textareas
-        const activeEl = document.activeElement;
-        const activeTag = activeEl && activeEl.tagName;
-        const isTypingContext =
-            activeEl &&
-            (activeTag === 'INPUT' || activeTag === 'TEXTAREA') &&
-            activeEl.type !== 'button' &&
-            activeEl.type !== 'submit';
-
-        // Helper: get the top‑most visible modal, if any
-        const openModals = Array.from(
-            document.querySelectorAll('.modal.show, .modal[aria-modal="true"][style*="display: block"]')
-        );
-        const topModal = openModals.length ? openModals[openModals.length - 1] : null;
-
-        if (key === 'Enter') {
-            // If user is actively typing into a field, let the browser handle Enter
-            if (isTypingContext) {
-                return;
-            }
-
-            // If a modal is open, treat Enter as "primary action" for that modal
-            if (topModal) {
-                // Store selection modal: pressing Enter should activate the focused store button (if any)
-                if (topModal.id === 'storeSelectionModal') {
-                    const focusedStoreBtn =
-                        document.activeElement &&
-                        document.activeElement.classList &&
-                        document.activeElement.classList.contains('btn-store-option')
-                            ? document.activeElement
-                            : topModal.querySelector('.btn-store-option:focus');
-
-                    if (focusedStoreBtn && typeof focusedStoreBtn.click === 'function') {
-                        event.preventDefault();
-                        focusedStoreBtn.click();
-                    }
-                    return;
-                }
-
-                // Generic modals: click the primary/submit button if present
-                const primaryButton =
-                    topModal.querySelector('button.btn-primary, button.btn-success, button[type="submit"], .modal-footer .btn-primary') ||
-                    topModal.querySelector('button[type="button"].btn-primary');
-
-                if (primaryButton && typeof primaryButton.click === 'function') {
-                    event.preventDefault();
-                    primaryButton.click();
-                    return;
-                }
-            }
-
-            // No modal open: Enter should trigger Generate Tags (if available)
-            const generateBtn = document.getElementById('generateBtn');
-            if (
-                generateBtn &&
-                typeof generateBtn.click === 'function' &&
-                !generateBtn.disabled &&
-                window.getComputedStyle(generateBtn).display !== 'none' &&
-                window.getComputedStyle(generateBtn).visibility !== 'hidden'
-            ) {
-                event.preventDefault();
-                generateBtn.click();
-            }
-        } else if (key === 'Escape' || key === 'Esc') {
-            // First, close the top‑most modal if one is open (except the required store selector)
-            if (topModal && topModal.id !== 'storeSelectionModal') {
-                event.preventDefault();
-
-                try {
-                    if (window.bootstrap && typeof window.bootstrap.Modal !== 'undefined') {
-                        // Prefer Bootstrap's API when available
-                        let modalInstance = window.bootstrap.Modal.getInstance(topModal);
-                        if (!modalInstance) {
-                            modalInstance = window.bootstrap.Modal.getOrCreateInstance(topModal);
-                        }
-                        if (modalInstance && typeof modalInstance.hide === 'function') {
-                            modalInstance.hide();
-                        }
-                    } else {
-                        // Fallback: hide manually
-                        topModal.classList.remove('show');
-                        topModal.style.display = 'none';
-                        topModal.setAttribute('aria-hidden', 'true');
-
-                        const backdrop =
-                            document.getElementById('storeModalBackdrop') ||
-                            document.querySelector('.modal-backdrop.show');
-                        if (backdrop && backdrop.parentNode) {
-                            backdrop.parentNode.removeChild(backdrop);
-                        }
-                    }
-                } catch (err) {
-                    console.error('Error hiding modal via Escape key:', err);
-                }
-
-                return;
-            }
-            // If no modal is open, let the existing Esc‑to‑clear‑filters handler run
-        }
-    });
-
+    
     // Ensure proper scrolling behavior (safe to call even if TagManager not fully initialized)
     if (window.TagManager && typeof TagManager.ensureProperScrolling === 'function') {
         TagManager.ensureProperScrolling();
@@ -22078,3 +21700,59 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+    // Dedupe lineage options to avoid duplicate entries like 'CBD' appearing twice
+    function dedupeLineageOptions() {
+        const selectors = [
+            '.lineage-dropdown',
+            '#lineageFilter',
+            '#bulkLineageSelect',
+            'select[id^="lineage-"]',
+            '#lineageSelect',
+            '#singleProductLineage',
+            '#bulkStrainLineage',
+            '#multiStrainLineage',
+            '#editLineage'
+        ];
+
+        selectors.forEach(sel => {
+            document.querySelectorAll(sel).forEach(select => {
+                const seen = new Set();
+                for (let i = select.options.length - 1; i >= 0; i--) {
+                    const opt = select.options[i];
+                    let rawVal = (opt.value || '').toString().trim();
+                    if (rawVal === '') continue;
+                    // Normalize common variants (PARAPHERNALIA -> PARA, CBD_BLEND -> CBD, THC -> MIXED)
+                    let normVal = rawVal;
+                    try {
+                        if (typeof window.normalizeLineageValue === 'function') {
+                            normVal = window.normalizeLineageValue(rawVal || '') || rawVal;
+                        } else {
+                            normVal = rawVal.toUpperCase();
+                            if (normVal === 'PARAPHERNALIA') normVal = 'PARA';
+                            if (normVal === 'CBD_BLEND') normVal = 'CBD';
+                            if (normVal === 'THC') normVal = 'MIXED';
+                        }
+                    } catch (e) {
+                        normVal = rawVal.toUpperCase();
+                    }
+
+                    if (seen.has(normVal)) {
+                        select.remove(i);
+                    } else {
+                        seen.add(normVal);
+                    }
+                }
+            });
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        try {
+            dedupeLineageOptions();
+            window.dedupeLineageOptions = dedupeLineageOptions;
+            verboseLog('lineage option dedupe complete');
+        } catch (err) {
+            console.warn('dedupeLineageOptions failed', err);
+        }
+    });

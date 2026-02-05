@@ -1,0 +1,48 @@
+#!/bin/bash
+# Quick fix script for PythonAnywhere production issues
+
+echo "=== PythonAnywhere Production Fix ==="
+echo ""
+
+echo "1. Upload the database zip file to PythonAnywhere:"
+echo "   File: database_for_pythonanywhere_20251012_141821.zip"
+echo "   Location: /home/adamcordova/AGTDesigner/"
+echo ""
+
+echo "2. Run these commands in PythonAnywhere Bash console:"
+echo ""
+echo "   cd ~/AGTDesigner"
+echo "   unzip -o database_for_pythonanywhere_20251012_141821.zip"
+echo "   mv product_database_AGT_Bothell.db uploads/"
+echo "   chmod 644 uploads/product_database_AGT_Bothell.db"
+echo "   rm database_for_pythonanywhere_20251012_141821.zip"
+echo ""
+
+echo "3. Check database status:"
+echo "   python3 debug_production_db.py"
+echo ""
+
+echo "4. If database is working, reload the web app:"
+echo "   - Go to Web tab in PythonAnywhere"
+echo "   - Click 'Reload' for your web app"
+echo ""
+
+echo "5. If still getting 500 error, check error logs:"
+echo "   - Go to Web tab"
+echo "   - Click on your web app"
+echo "   - Check the Error log for details"
+echo ""
+
+echo "=== Common Issues ==="
+echo "- Database file permissions (should be 644)"
+echo "- Database path in production code"
+echo "- Missing uploads/ directory"
+echo "- Corrupted database file"
+echo ""
+
+echo "=== Expected Result ==="
+echo "After successful upload, the website should show:"
+echo "- 10,543 TOTAL PRODUCTS"
+echo "- 101 UNIQUE VENDORS" 
+echo "- 166 UNIQUE BRANDS"
+echo "- 25 PRODUCT TYPES"

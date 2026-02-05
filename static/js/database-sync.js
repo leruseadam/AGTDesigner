@@ -348,43 +348,9 @@ async function exportDatabase() {
   showExportSplash();
   
   try {
-    const response = await fetch('/api/database-export', { credentials: 'include' });
-    
+    const response = await fetch('/api/database-export');
     if (!response.ok) {
-      // Try to read detailed error message from JSON response
-      let errorMessage = `Export failed: ${response.status} ${response.statusText}`;
-      let errorDetails = null;
-      try {
-        const responseText = await response.text();
-        try {
-          const data = JSON.parse(responseText);
-          if (data && data.error) {
-            errorMessage = data.error;
-            if (data.details) {
-              errorDetails = data.details;
-            }
-            if (data.type) {
-              errorMessage += ` (${data.type})`;
-            }
-          } else if (data && data.message) {
-            errorMessage = data.message;
-          }
-        } catch (parseError) {
-          // If response isn't JSON, try to extract error from text
-          if (responseText && responseText.length < 500) {
-            errorMessage = responseText;
-          }
-        }
-      } catch (readError) {
-        console.error('Error reading error response:', readError);
-      }
-      
-      console.error('Database export error:', errorMessage);
-      if (errorDetails) {
-        console.error('Error details:', errorDetails);
-      }
-      
-      throw new Error(errorMessage);
+      throw new Error(`Export failed: ${response.statusText}`);
     }
     
     // Get the filename from the Content-Disposition header
