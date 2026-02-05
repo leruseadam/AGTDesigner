@@ -2100,19 +2100,111 @@ def simple_initialize_excel_processor():
 
 
 def initialize_excel_processor():
-    """Initialize Excel processor and load default data (deprecated no-op).
-
-    Excel processors are now created lazily per request. This function is kept
-    only so the startup hook below doesn't do any heavy work that slows or
-    hangs app startup.
-    """
+    """Initialize Excel processor and load default data."""
     try:
+        # Skip initialization if startup file loading is disabled for performance
         if DISABLE_STARTUP_FILE_LOADING:
-            logging.info("Startup Excel initialization skipped (startup file loading disabled)")
+            logging.info("Startup file loading disabled for faster application startup")
+            return
+
+        # CRITICAL FIX: get_excel_processor() is deprecated and returns None
+        # Skip initialization - processors are now created per-request
+        excel_processor = get_excel_processor()
+        if excel_processor is None:
+            logging.info("Excel processor initialization skipped - using per-request processors")
+            return
+
+        # Safety check: ensure excel_processor has a logger attribute
+        if not hasattr(excel_processor, 'logger') or excel_processor.logger is None:
+            logging.warning("Excel processor does not have a logger - skipping logger configuration")
         else:
-            logging.info("Startup Excel initialization skipped (using per-request processors)")
+            excel_processor.logger.setLevel(logging.WARNING)
+        
+        # Enable product database integration by default
+        if hasattr(excel_processor, 'enable_product_db_integration'):
+            excel_processor.enable_product_db_integration(True)
+            logging.info("Product database integration enabled by default")
+        
+        # CRITICAL FIX: Check for session file FIRST before loading default file
+        # This ensures uploaded files persist across page reloads
+        session_file_path = None
+        try:
+            from flask import session, has_request_context
+            if has_request_context():
+                session_file_path = session.get('file_path')
+                if session_file_path and os.path.exists(session_file_path):
+                    # CRITICAL FIX: Validate that session file is not an exported file
+                    # Exported files have patterns like "AGT_*_Transformed_Data_*.xlsx" or are in downloads
+                    filename = os.path.basename(session_file_path)
+                    is_exported_file = (
+                        'Transformed_Data' in filename or
+                        'processed_excel' in filename.lower() or
+                        filename.startswith('AGT_') and '_Transformed_' in filename
+                    )
+                    
+                    if is_exported_file:
+                        logging.warning(f"⚠️ Session file_path points to exported file, clearing: {session_file_path}")
+                        session['file_path'] = None
+                        session['uploaded_filename'] = None
+                        session.modified = True
+                        session_file_path = None
+                    else:
+                        logging.info(f"✅ Found session file in initialize_excel_processor: {session_file_path}")
+                        # Check if already loaded
+                        if excel_processor._last_loaded_file != session_file_path or not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
+                            logging.info(f"📂 Loading session file in initialize_excel_processor: {session_file_path}")
+                            success = excel_processor.load_file(session_file_path)
+                            if success:
+                                excel_processor._last_loaded_file = session_file_path
+                                row_count = len(excel_processor.df) if hasattr(excel_processor, 'df') and excel_processor.df is not None else 0
+                                logging.info(f"✅ Session file loaded successfully with {row_count} records")
+                                return  # Don't load default file if session file was loaded
+                            else:
+                                logging.warning(f"⚠️ Failed to load session file: {session_file_path}")
+                        else:
+                            logging.info(f"✅ Session file already loaded: {session_file_path}")
+                            return  # Don't load default file if session file is already loaded
+        except Exception as session_check_error:
+            logging.debug(f"Could not check session in initialize_excel_processor: {session_check_error}")
+        
+        # Only load default file if no session file was found/loaded
+        from src.core.data.excel_processor import get_default_upload_file
+        # CRITICAL FIX: Use allow_fallback=True for default file loading on startup
+        # This ensures default file loads even if store hasn't been selected yet
+        selected_store = get_current_store_name(allow_fallback=True)
+        default_file = get_default_upload_file(selected_store)
+        
+        if default_file and os.path.exists(default_file):
+            logging.info(f"Loading default file on startup: {default_file}")
+            try:
+                # CRITICAL FIX: Use safe_load_file_with_timeout for Windows compatibility
+                success = safe_load_file_with_timeout(excel_processor, default_file, timeout_seconds=30)
+                
+                if success:
+                    excel_processor._last_loaded_file = default_file
+                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
+                else:
+                    logging.warning("Failed to load default file")
+                    # Try to move corrupted file if timeout occurred
+                    try:
+                        corrupted_path = default_file + '.corrupted'
+                        if os.path.exists(default_file):
+                            os.rename(default_file, corrupted_path)
+                            logging.info(f"Moved potentially corrupted file to: {corrupted_path}")
+                    except Exception as move_err:
+                        logging.error(f"Could not move corrupted file: {move_err}")
+                        
+            except Exception as load_error:
+                logging.error(f"Error loading default file: {load_error}")
+                logging.error(f"Traceback: {traceback.format_exc()}")
+        else:
+            logging.info("No default file found, waiting for user upload")
+            if default_file:
+                logging.info(f"Default file path was found but file doesn't exist: {default_file}")
+            
     except Exception as e:
-        logging.warning(f"initialize_excel_processor no-op encountered an error: {e}")
+        logging.error(f"Error initializing Excel processor: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
 
 # Initialize on startup
 # Load Excel file on startup for immediate availability
@@ -20368,12 +20460,9 @@ def json_match_detailed():
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
             
-        # Use EnhancedJSONMatcher for detailed matching (not the legacy JSONMatcher)
-        excel_processor = get_session_excel_processor()
-        if excel_processor is None:
-            return jsonify({'error': 'Failed to initialize Excel processor'}), 500
-        from src.core.data.enhanced_json_matcher import EnhancedJSONMatcher
-        json_matcher = EnhancedJSONMatcher(excel_processor)
+        json_matcher = get_session_json_matcher()
+        if json_matcher is None:
+            return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
             
         # Fetch JSON items first
         # Use a generous timeout here because large Cultivera transfer JSONs can legitimately
@@ -20446,29 +20535,23 @@ def json_match_detailed():
         match_duration = time.time() - match_start
         logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products in {match_duration:.2f}s")
         
-        # Build a lookup from JSON item name -> enhanced match (name-based, not index-based).
-        # Each enhanced match carries a JSON_Item_Name field identifying the source JSON item.
-        _match_by_json_name = {}
-        for em in (enhanced_matches or []):
-            key = str(em.get('JSON_Item_Name', '') or '').strip().lower()
-            if key and key not in _match_by_json_name:
-                _match_by_json_name[key] = em
-
+        # NOTE: Do NOT reorder `enhanced_matches` here — they are expected to align
+        # with the incoming `json_items` order so each JSON item maps to its
+        # corresponding enhanced match by index. Sorting here caused misaligned
+        # detailed match displays (matches appearing next to different JSON rows).
+        
         detailed_matches = []
         high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
-
+        
         for i, json_item in enumerate(json_items):
-            json_name = str(json_item.get('product_name', '') or json_item.get('inventory_name', '') or '')
+            json_name = str(json_item.get('product_name', ''))
             if not json_name.strip():
                 continue
-
-            # Find corresponding enhanced match by JSON item name
-            enhanced_match = _match_by_json_name.get(json_name.strip().lower())
-            if not enhanced_match:
-                # Also try inventory_name in case the field mapping differs
-                inv_name = str(json_item.get('inventory_name', '') or '').strip().lower()
-                if inv_name:
-                    enhanced_match = _match_by_json_name.get(inv_name)
+                
+            # Find corresponding enhanced match
+            enhanced_match = None
+            if i < len(enhanced_matches):
+                enhanced_match = enhanced_matches[i]
             
             # CRITICAL: Filter out Flower matches for concentrate/vape JSON items (mL units)
             if enhanced_match:
@@ -20505,66 +20588,23 @@ def json_match_detailed():
                         enhanced_match = None
             
             # Create detailed match info using database-priority data
-            # CRITICAL FIX: Distinguish between:
-            # - True database matches (Database Priority / 100% DB data)
-            # - JSON fallback / non-DB matches (still valid labels we want to display)
-            has_any_match = enhanced_match is not None
+            # CRITICAL FIX: Check if enhanced_match is a real DB match (not a fallback with 'JSON - No DB Match' source)
             has_db_match = (
                 enhanced_match is not None and
                 not str(enhanced_match.get('Source', '')).startswith('JSON - No DB Match') and
-                not str(enhanced_match.get('Source', '')).startswith('Emergency Fallback') and
-                not str(enhanced_match.get('Source', '')).startswith('JSON Fallback')
+                not str(enhanced_match.get('Source', '')).startswith('Emergency Fallback')
             )
-
-            # Best score / confidence: use real confidence when we have any match
-            if has_any_match:
-                try:
-                    best_score = float(enhanced_match.get('Match_Score', enhanced_match.get('score', 0.95)) or 0.95)
-                except Exception:
-                    best_score = 0.95
-                match_confidence = enhanced_match.get('Match_Confidence', f"{best_score:.3f}")
-            else:
-                best_score = 0.0
-                match_confidence = '0.0'
-
-            # Top candidates: always include the primary enhanced match when we have one,
-            # even if it's a JSON fallback, so the UI can show the label details.
-            top_candidates = []
-            if has_any_match:
-                top_candidates.append({
-                    'excel_name': enhanced_match.get('Product Name*', enhanced_match.get('ProductName', 'Enhanced Match')),
-                    'score': best_score,
-                    'excel_data': enhanced_match,
-                })
-
-            # Human-readable reason and source for the UI
-            if has_db_match:
-                match_reason = 'Database Priority (100% DB data)'
-            elif has_any_match:
-                # Still a valid label, but coming from JSON-enriched fallback rather than a DB row
-                match_reason = 'JSON Fallback (no direct DB product)'
-            else:
-                match_reason = 'No database match found'
-
-            if has_any_match:
-                source = enhanced_match.get('Source', 'Database Priority (100% DB)')
-                data_source = enhanced_match.get('Data_Source', 'Database')
-            else:
-                source = 'No match'
-                data_source = 'None'
-
             match_info = {
                 'json_name': json_name,
                 'json_data': json_item,
-                'best_score': best_score,
-                # IMPORTANT: expose enhanced_match even for JSON fallbacks so UI can render the label
-                'best_match': enhanced_match if has_any_match else None,
-                'top_candidates': top_candidates,
+                'best_score': 0.95 if has_db_match else 0.0,
+                'best_match': enhanced_match if has_db_match else None,
+                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if has_db_match else [],
                 'is_match': has_db_match,
-                'match_reason': match_reason,
-                'source': source,
-                'data_source': data_source,
-                'match_confidence': match_confidence,
+                'match_reason': 'Database Priority (100% DB data)' if has_db_match else 'No database match found',
+                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if has_db_match else 'No match',
+                'data_source': enhanced_match.get('Data_Source', 'Database') if has_db_match else 'None',
+                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if has_db_match else '0.0'
             }
             
             detailed_matches.append(match_info)

@@ -390,8 +390,8 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
 
             # Special rule: Descriptions with any word longer than 8 characters
             # should render 1pt smaller than the base size that would normally be chosen.
-            # Applied to vertical, double, and mini templates for consistency.
-            if field_type.lower() == 'description' and orientation.lower() in ('vertical', 'double', 'mini'):
+            # Originally applied only to vertical; now also applied to double for consistency.
+            if field_type.lower() == 'description' and orientation.lower() in ('vertical', 'double'):
                 try:
                     words = [w for w in str(text).split() if w]
                     if any(len(w) > 8 for w in words):
@@ -402,7 +402,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                             f"base_size={size}pt, adjusted_size={adjusted_size}pt"
                         )
                 except Exception:
-                    logger.exception("Error applying description long-word rule")
+                    logger.exception("Error applying vertical description long-word rule")
 
             final_size = adjusted_size * scale_factor
             logger.debug(f"Selected size {adjusted_size}pt (final: {final_size}pt)")
