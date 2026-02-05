@@ -20368,9 +20368,12 @@ def json_match_detailed():
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
             
-        json_matcher = get_session_json_matcher()
-        if json_matcher is None:
-            return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
+        # Use EnhancedJSONMatcher for detailed matching (not the legacy JSONMatcher)
+        excel_processor = get_session_excel_processor()
+        if excel_processor is None:
+            return jsonify({'error': 'Failed to initialize Excel processor'}), 500
+        from src.core.data.enhanced_json_matcher import EnhancedJSONMatcher
+        json_matcher = EnhancedJSONMatcher(excel_processor)
             
         # Fetch JSON items first
         # Use a generous timeout here because large Cultivera transfer JSONs can legitimately
@@ -20455,7 +20458,7 @@ def json_match_detailed():
         high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
 
         for i, json_item in enumerate(json_items):
-            json_name = str(json_item.get('product_name', ''))
+            json_name = str(json_item.get('product_name', '') or json_item.get('inventory_name', '') or '')
             if not json_name.strip():
                 continue
 
@@ -20502,24 +20505,66 @@ def json_match_detailed():
                         enhanced_match = None
             
             # Create detailed match info using database-priority data
-            # CRITICAL FIX: Check if enhanced_match is a real DB match (not a fallback with 'JSON - No DB Match' source)
+            # CRITICAL FIX: Distinguish between:
+            # - True database matches (Database Priority / 100% DB data)
+            # - JSON fallback / non-DB matches (still valid labels we want to display)
+            has_any_match = enhanced_match is not None
             has_db_match = (
                 enhanced_match is not None and
                 not str(enhanced_match.get('Source', '')).startswith('JSON - No DB Match') and
                 not str(enhanced_match.get('Source', '')).startswith('Emergency Fallback') and
                 not str(enhanced_match.get('Source', '')).startswith('JSON Fallback')
             )
+
+            # Best score / confidence: use real confidence when we have any match
+            if has_any_match:
+                try:
+                    best_score = float(enhanced_match.get('Match_Score', enhanced_match.get('score', 0.95)) or 0.95)
+                except Exception:
+                    best_score = 0.95
+                match_confidence = enhanced_match.get('Match_Confidence', f"{best_score:.3f}")
+            else:
+                best_score = 0.0
+                match_confidence = '0.0'
+
+            # Top candidates: always include the primary enhanced match when we have one,
+            # even if it's a JSON fallback, so the UI can show the label details.
+            top_candidates = []
+            if has_any_match:
+                top_candidates.append({
+                    'excel_name': enhanced_match.get('Product Name*', enhanced_match.get('ProductName', 'Enhanced Match')),
+                    'score': best_score,
+                    'excel_data': enhanced_match,
+                })
+
+            # Human-readable reason and source for the UI
+            if has_db_match:
+                match_reason = 'Database Priority (100% DB data)'
+            elif has_any_match:
+                # Still a valid label, but coming from JSON-enriched fallback rather than a DB row
+                match_reason = 'JSON Fallback (no direct DB product)'
+            else:
+                match_reason = 'No database match found'
+
+            if has_any_match:
+                source = enhanced_match.get('Source', 'Database Priority (100% DB)')
+                data_source = enhanced_match.get('Data_Source', 'Database')
+            else:
+                source = 'No match'
+                data_source = 'None'
+
             match_info = {
                 'json_name': json_name,
                 'json_data': json_item,
-                'best_score': 0.95 if has_db_match else 0.0,
-                'best_match': enhanced_match if has_db_match else None,
-                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if has_db_match else [],
+                'best_score': best_score,
+                # IMPORTANT: expose enhanced_match even for JSON fallbacks so UI can render the label
+                'best_match': enhanced_match if has_any_match else None,
+                'top_candidates': top_candidates,
                 'is_match': has_db_match,
-                'match_reason': 'Database Priority (100% DB data)' if has_db_match else 'No database match found',
-                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if has_db_match else 'No match',
-                'data_source': enhanced_match.get('Data_Source', 'Database') if has_db_match else 'None',
-                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if has_db_match else '0.0'
+                'match_reason': match_reason,
+                'source': source,
+                'data_source': data_source,
+                'match_confidence': match_confidence,
             }
             
             detailed_matches.append(match_info)

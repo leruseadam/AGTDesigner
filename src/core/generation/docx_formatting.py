@@ -1313,13 +1313,11 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                             # OPTIMIZATION: Skip expensive paragraph/run processing if requested
                             if not skip_paragraph_processing:
                                 for paragraph in cell.paragraphs:
-                                    # For most templates, force tight spacing inside cells so text doesn't
-                                    # push the cell taller. For mini/preroll, leave paragraph spacing on the
-                                    # template's default ("auto") so Word controls the paragraph spacing.
-                                    if template_type not in ('mini', 'preroll'):
-                                        paragraph.paragraph_format.space_before = Pt(0)
-                                        paragraph.paragraph_format.space_after = Pt(0)
-                                        paragraph.paragraph_format.line_spacing = 1.0
+                                    # Force tight spacing inside cells for all templates (including mini/preroll)
+                                    # so text doesn't push the cell taller.
+                                    paragraph.paragraph_format.space_before = Pt(0)
+                                    paragraph.paragraph_format.space_after = Pt(0)
+                                    paragraph.paragraph_format.line_spacing = 1.0
                                     
                                     # CRITICAL: Set paragraph alignment to prevent expansion
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT

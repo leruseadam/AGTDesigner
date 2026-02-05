@@ -13,9 +13,32 @@ from docx import Document
 from docx.shared import Pt, Inches
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 
 logger = logging.getLogger(__name__)
+
+
+def _set_table_cell_margins(table, top=36, left=36, bottom=36, right=36):
+    """Set minimal cell margins on table for tighter spacing. Values in twips (dxa)."""
+    try:
+        tbl = table._element
+        tblPr = tbl.find(qn('w:tblPr'))
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
+            tbl.insert(0, tblPr)
+        for old in tblPr.findall(qn('w:tblCellMar')):
+            tblPr.remove(old)
+        tcMar = OxmlElement('w:tblCellMar')
+        for side, val in [('top', top), ('left', left), ('bottom', bottom), ('right', right)]:
+            el = OxmlElement(f'w:{side}')
+            el.set(qn('w:w'), str(val))
+            el.set(qn('w:type'), 'dxa')
+            tcMar.append(el)
+        tblPr.append(tcMar)
+    except Exception as e:
+        logger.warning(f"INVENTORY LIST: Could not set table cell margins: {e}")
 
 
 def _get_product_name(record: Dict[str, Any]) -> str:
@@ -256,23 +279,23 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
         # Set document to portrait orientation and optimize margins
         try:
             section = doc.sections[0]
-            # Ensure portrait orientation (default, but explicitly set)
-            section.page_width = Inches(8.5)  # Standard letter width
-            section.page_height = Inches(11)   # Standard letter height
-            # Tighten margins to maximize space for table
-            section.left_margin = Inches(0.3)
-            section.right_margin = Inches(0.3)
-            section.top_margin = Inches(0.4)
-            section.bottom_margin = Inches(0.4)
+            section.page_width = Inches(8.5)
+            section.page_height = Inches(11)
+            # Tight margins to maximize usable space
+            section.left_margin = Inches(0.25)
+            section.right_margin = Inches(0.25)
+            section.top_margin = Inches(0.3)
+            section.bottom_margin = Inches(0.3)
         except Exception as e:
             logger.warning(f"INVENTORY LIST: Failed to set portrait orientation: {e}")
 
-        # Title
+        # Title - compact spacing
         title = doc.add_heading("Current Inventory", level=0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        # Smaller title to save vertical space
         for run in title.runs:
             run.font.size = Pt(14)
+        title.paragraph_format.space_before = Pt(0)
+        title.paragraph_format.space_after = Pt(6)
 
         # Sort categories alphabetically
         for category in sorted(grouped.keys(), key=lambda c: c.lower()):
@@ -280,22 +303,22 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             if not items:
                 continue
 
-            # Category heading
+            # Category heading - tight spacing
             heading = doc.add_heading(category, level=1)
             heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
             for run in heading.runs:
                 run.font.size = Pt(9)
-            # Remove extra spacing before/after heading
-            for paragraph in heading._element.xpath(".//w:p"):
-                p = paragraph
-                # We can't easily wrap as Paragraph, but heading spacing is already small; skip heavy XML tweaks
+            heading.paragraph_format.space_before = Pt(6)
+            heading.paragraph_format.space_after = Pt(2)
+            heading.paragraph_format.line_spacing = 1.0
 
-            # Table with 9 columns - use a plain grid style to minimize ink (no colored fills)
+            # Table with 9 columns - plain grid style, minimal cell padding
             table = doc.add_table(rows=1, cols=9)
             table.style = "Table Grid"
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            _set_table_cell_margins(table, top=28, left=28, bottom=28, right=28)
 
-            # PERFORMANCE: Set optimized column widths based on content
+            # Set optimized column widths based on content
             # Total available width: 8.5" - 0.3" left - 0.3" right = 7.9"
             # Optimized widths to minimize wasted space while fitting in portrait:
             column_widths = [
@@ -312,8 +335,6 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
             # Total: 7.05" - leaves room for table borders and padding
             
             # Set column widths
-            from docx.oxml import OxmlElement
-            from docx.oxml.ns import qn
             tbl = table._element
             tblGrid = tbl.find(qn('w:tblGrid'))
             if tblGrid is None:
@@ -362,11 +383,11 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                     # Compact header spacing
                     paragraph.paragraph_format.space_before = Pt(0)
                     paragraph.paragraph_format.space_after = Pt(0)
-                    paragraph.paragraph_format.line_spacing = 1.0
+                    paragraph.paragraph_format.line_spacing = 0.95
 
-            # Make header row more compact
+            # Compact header row
             header_row = table.rows[0]
-            header_row.height = Pt(12)  # Slightly increased for larger font
+            header_row.height = Pt(11)
             header_row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
             # Sort items within category alphabetically by product name
@@ -401,14 +422,14 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                 for cell in row_cells:
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
-                            run.font.size = Pt(9)  # Increased from 6 to 9 (50% larger)
+                            run.font.size = Pt(9)
                         paragraph.paragraph_format.space_before = Pt(0)
                         paragraph.paragraph_format.space_after = Pt(0)
-                        paragraph.paragraph_format.line_spacing = 1.0
+                        paragraph.paragraph_format.line_spacing = 0.95
 
-                # Row height adjusted for larger font
+                # Compact row height (AT_LEAST allows wrap for long product names)
                 row = table.rows[-1]
-                row.height = Pt(12)  # Increased from 9 to 12 for larger font
+                row.height = Pt(11)
                 row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
 
         logger.info(

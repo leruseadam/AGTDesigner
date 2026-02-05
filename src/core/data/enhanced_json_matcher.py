@@ -58,23 +58,23 @@ except Exception as _e:
         cosine = None  # type: ignore
     _SKLEARN_AVAILABLE = False
 
-    # Module-level synonyms map to canonicalize common product type tokens
-    SYNONYM_MAP = {
-        'vaporizer': 'disposable vape',
-        'vape pen': 'vape',
-        'disposable vape': 'disposable vape',
-        'disposable': 'disposable',
-    }
+# Module-level synonyms map to canonicalize common product type tokens
+SYNONYM_MAP = {
+    'vaporizer': 'disposable vape',
+    'vape pen': 'vape',
+    'disposable vape': 'disposable vape',
+    'disposable': 'disposable',
+}
 
-    def apply_synonyms(text: str) -> str:
-        if not text:
-            return text
-        t = ' ' + text.lower() + ' '
-        for k in sorted(SYNONYM_MAP.keys(), key=lambda x: -len(x)):
-            v = SYNONYM_MAP[k]
-            pattern = r'\b' + re.escape(k) + r'\b'
-            t = re.sub(pattern, ' ' + v + ' ', t)
-        return re.sub(r'\s+', ' ', t).strip()
+def apply_synonyms(text: str) -> str:
+    if not text:
+        return text
+    t = ' ' + text.lower() + ' '
+    for k in sorted(SYNONYM_MAP.keys(), key=lambda x: -len(x)):
+        v = SYNONYM_MAP[k]
+        pattern = r'\b' + re.escape(k) + r'\b'
+        t = re.sub(pattern, ' ' + v + ' ', t)
+    return re.sub(r'\s+', ' ', t).strip()
 
 # Product-specific imports
 from .field_mapping import get_canonical_field, get_all_aliases, FIELD_ALIASES
@@ -1505,7 +1505,7 @@ class EnhancedJSONMatcher:
                     db_priority_product['Lineage'] = inferred_lineage
                     logging.info(f"🧬 LINEAGE INFERRED: '{inferred_lineage}' for '{product_name}'")
             
-        logging.info(f"💽 DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {best_match_score:.3f})")
+        logging.info(f"DATABASE PRIORITY COMPLETE: '{product_name}' using 100% database data, matched with JSON '{json_item_name}' (match score: {getattr(match_result, 'score', 0.0):.3f})")
         return db_priority_product
 
     def _select_db_price(self, product: dict) -> str:
@@ -2893,15 +2893,11 @@ class EnhancedJSONMatcher:
             return matched_products
             
         except Exception as e:
+            import traceback
             logging.error(f"EnhancedJSONMatcher fetch_and_match error: {str(e)}")
-            # Fallback to basic JSONMatcher if available
-            try:
-                from .json_matcher import JSONMatcher
-                basic_matcher = JSONMatcher(self.excel_processor)
-                return basic_matcher.fetch_and_match(url)
-            except Exception as fallback_error:
-                logging.error(f"Fallback to basic matcher also failed: {fallback_error}")
-                return []
+            logging.error(f"EnhancedJSONMatcher TRACEBACK:\n{traceback.format_exc()}")
+            # Do NOT silently fall back to legacy matcher — raise so caller sees the real error
+            raise
 
 # Backward compatibility functions
 def map_inventory_type_to_product_type(inventory_type, inventory_category=None, product_name=None):
