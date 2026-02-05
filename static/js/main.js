@@ -11884,8 +11884,9 @@ const TagManager = {
         }, 30000); // 30 second warning, but don't hide splash
         
         // CRITICAL FIX: Use try-finally to ensure flag is always reset
-        // Declare cacheUsedForDisplay at function scope so it's accessible throughout
+        // Declare at function scope so accessible in try, catch, finally
         let cacheUsedForDisplay = false;
+        let safetyTimeout = null;
 
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
@@ -11894,24 +11895,20 @@ const TagManager = {
                 this._liteTagsRendered = false;
             }
 
-            // CRITICAL: Declare safetyTimeout at the very start of function so it's always available in catch block
-            // This prevents "safetyTimeout is not defined" errors if an exception occurs early
-            let safetyTimeout = null;
-
-            // CRITICAL: Add safety timeout to hide spinner after longer delay
-            // This prevents indefinite hanging even if error handling fails
-            if (!hasExistingTags) {
-                // PERFORMANCE: Much shorter timeout for faster failure recovery
-                const safetyTimeoutMs = 5000; // 5s - web endpoint is fast for all clients
-                safetyTimeout = setTimeout(() => {
-                    console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
-                    // Just hide the splash, don't show error message
-                    if (this.hideActionSplash) {
-                        this.hideActionSplash();
-                    }
-                    // Don't show error message - let the app continue working
-                }, safetyTimeoutMs);
-            }
+            // CRITICAL: Add safety timeout to hide spinner - ALWAYS, for both initial load AND refresh
+            // Without this, "Refreshing tags..." can stick forever if fetch hangs
+            const safetyTimeoutMs = hasExistingTags ? 8000 : 5000; // 8s for refresh, 5s for initial
+            safetyTimeout = setTimeout(() => {
+                console.warn(`⚠️ Safety timeout: Hiding loading spinner after ${safetyTimeoutMs}ms (stuck fix)`);
+                if (this.hideActionSplash) this.hideActionSplash();
+                // Restore container opacity if we dimmed it during refresh
+                const container = document.getElementById('availableTags');
+                if (container) {
+                    container.style.opacity = '1';
+                    container.style.pointerEvents = '';
+                }
+                this._fetchingAvailableTags = false;
+            }, safetyTimeoutMs);
 
             // PERFORMANCE FIX: Use cache first for instant load, then refresh in background
             // This provides fast reloads while still keeping data fresh
@@ -13130,7 +13127,11 @@ const TagManager = {
 
             return false;
         } finally {
-            // Clear safety timeout since operation completed
+            // Clear timeouts since operation completed
+            if (safetyTimeout) {
+                clearTimeout(safetyTimeout);
+                safetyTimeout = null;
+            }
             if (this._fetchingTimeout) {
                 clearTimeout(this._fetchingTimeout);
                 this._fetchingTimeout = null;
