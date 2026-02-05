@@ -2986,6 +2986,9 @@ class JSONMatcher:
                     or "concentrate for inhalation" in inventory_type.lower()
                     or any(x in product_name_lower for x in ["live resin", "aio", "prana aio", "vape", "cartridge", "disposable", "liquid diamonds"])
                 )
+                
+                # Store has_ml_weight for use in DB fallback type matching
+                _has_ml_weight = has_ml_weight
 
                 # PERFORMANCE: Only log every 50th item to reduce I/O overhead
                 if i % 50 == 0:
@@ -3252,6 +3255,9 @@ class JSONMatcher:
                     json_is_preroll = 'pre-roll' in json_name_lower or 'preroll' in json_name_lower or 'shorty' in json_name_lower
                     json_is_concentrate = 'batter' in json_name_lower or 'wax' in json_name_lower or 'terp' in json_name_lower
                     
+                    # Check if JSON has mL weight (indicates vape/concentrate)
+                    json_has_ml = bool(re.search(r'\d+(?:\.\d+)?\s*ml', json_name_lower)) or 'ml' in str(weight or '').lower()
+                    
                     def _type_match(p):
                         """Check if DB product matches JSON product type."""
                         dn = str(p.get("Product Name*", "") or p.get("JSON", "") or "").lower()
@@ -3263,12 +3269,20 @@ class JSONMatcher:
                         db_flower = 'flower' in dn or 'flower' in db_type
                         db_preroll = 'pre-roll' in dn or 'preroll' in dn or 'shorty' in dn or 'pre-roll' in db_type or 'preroll' in db_type
                         db_conc = 'batter' in dn or 'wax' in dn or 'terp' in dn or 'batter' in db_type or 'wax' in db_type or 'crystal' in dn or 'crystal' in db_type
+                        db_is_vape = db_510 or db_aio or 'vape' in db_type or 'cartridge' in db_type
+                        
+                        # CRITICAL: If JSON is vape/concentrate (has mL, live resin, aio, etc.), REJECT Flower matches
+                        json_is_vape_concentrate = json_is_510 or json_is_aio or json_is_concentrate or json_has_ml
+                        if json_is_vape_concentrate and db_flower:
+                            return False  # Never match Flower to vape/concentrate JSON
+                        
+                        # CRITICAL: If JSON is Flower, REJECT vape/concentrate matches
+                        if json_is_flower and (db_is_vape or db_conc):
+                            return False  # Never match vape/concentrate to Flower JSON
                         
                         # CRITICAL FIX: Prana AIO and 510 Vape are both vape products - allow cross-matching within vape category
                         # This handles cases where JSON says "Prana AIO" but DB has "Vape Cartridge" or vice versa
                         json_is_vape = json_is_510 or json_is_aio
-                        db_is_vape = db_510 or db_aio or 'vape' in db_type or 'cartridge' in db_type
-                        
                         if json_is_vape and db_is_vape:
                             return True  # Both are vape products - allow match
                         
