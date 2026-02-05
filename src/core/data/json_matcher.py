@@ -2531,6 +2531,10 @@ class JSONMatcher:
         self._sheet_cache = None
         self._indexed_cache = None
         self._build_sheet_cache()
+        # CRITICAL: Ensure JSON column lookup is populated even if cache build failed
+        if not self._indexed_cache or 'json_column_lookup' not in self._indexed_cache:
+            logging.warning("JSON column lookup not populated after cache build, populating now...")
+            self._populate_json_column_lookup_from_db()
             
         # DEBUG: Log the current state of Excel data
         print(f"🔍 DEBUG: Excel processor exists: {self.excel_processor is not None}")
@@ -2924,9 +2928,14 @@ class JSONMatcher:
                 product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
                 
                 # CRITICAL: Try JSON column matching FIRST - EXACT MATCH ONLY, no filtering
-                json_column_match = self._find_json_column_match(product_name)
-                if not json_column_match and raw_product_name != product_name:
-                    json_column_match = self._find_json_column_match(raw_product_name)
+                json_column_match = None
+                try:
+                    json_column_match = self._find_json_column_match(product_name)
+                    if not json_column_match and raw_product_name != product_name:
+                        json_column_match = self._find_json_column_match(raw_product_name)
+                except Exception as e:
+                    logging.error(f"Error in JSON column matching for '{product_name[:50]}': {e}")
+                
                 if json_column_match:
                     # JSON COLUMN MATCH = EXACT MATCH - accept it immediately, no vendor/brand/strain checks
                     logging.info(f"✅ JSON COLUMN EXACT MATCH: '{product_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
@@ -2943,6 +2952,11 @@ class JSONMatcher:
                     if pid is not None and product_name:
                         self._update_matched_product_json(pid, product_name)
                     continue  # Skip to next item since we found a match
+                else:
+                    # Log why no match was found
+                    cache_status = "exists" if (self._indexed_cache and 'json_column_lookup' in self._indexed_cache) else "MISSING"
+                    cache_size = len(self._indexed_cache.get('json_column_lookup', {})) if self._indexed_cache else 0
+                    logging.debug(f"🔍 No JSON column match for '{product_name[:50]}' (cache: {cache_status}, size: {cache_size})")
 
                 # Concentrate/vape detection (for type/weight checks). Vendor isolation is always enforced
                 # when from_license_name is present (json_vendor_filter) - no relaxation for concentrate/vape.
@@ -8666,8 +8680,11 @@ class JSONMatcher:
         key_ws = re.sub(r'\s+', ' ', key_lower).strip()
         key_no_apos = re.sub(r"[''`]", '', key_ws).strip()
 
-        # Ensure JSON column lookup is populated
-        if not self._indexed_cache or 'json_column_lookup' not in self._indexed_cache:
+        # CRITICAL: Ensure JSON column lookup is populated - create cache if needed
+        if self._indexed_cache is None:
+            self._indexed_cache = {}
+        if 'json_column_lookup' not in self._indexed_cache:
+            logging.info("JSON column lookup cache missing, populating from database...")
             self._populate_json_column_lookup_from_db()
 
         if self._indexed_cache and 'json_column_lookup' in self._indexed_cache:
