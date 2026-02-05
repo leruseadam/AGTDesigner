@@ -2987,8 +2987,6 @@ class JSONMatcher:
                     or any(x in product_name_lower for x in ["live resin", "aio", "prana aio", "vape", "cartridge", "disposable", "liquid diamonds"])
                 )
                 
-                # Store has_ml_weight for use in DB fallback type matching
-                _has_ml_weight = has_ml_weight
 
                 # PERFORMANCE: Only log every 50th item to reduce I/O overhead
                 if i % 50 == 0:
