@@ -20443,23 +20443,29 @@ def json_match_detailed():
         match_duration = time.time() - match_start
         logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products in {match_duration:.2f}s")
         
-        # NOTE: Do NOT reorder `enhanced_matches` here — they are expected to align
-        # with the incoming `json_items` order so each JSON item maps to its
-        # corresponding enhanced match by index. Sorting here caused misaligned
-        # detailed match displays (matches appearing next to different JSON rows).
-        
+        # Build a lookup from JSON item name -> enhanced match (name-based, not index-based).
+        # Each enhanced match carries a JSON_Item_Name field identifying the source JSON item.
+        _match_by_json_name = {}
+        for em in (enhanced_matches or []):
+            key = str(em.get('JSON_Item_Name', '') or '').strip().lower()
+            if key and key not in _match_by_json_name:
+                _match_by_json_name[key] = em
+
         detailed_matches = []
         high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
-        
+
         for i, json_item in enumerate(json_items):
             json_name = str(json_item.get('product_name', ''))
             if not json_name.strip():
                 continue
-                
-            # Find corresponding enhanced match
-            enhanced_match = None
-            if i < len(enhanced_matches):
-                enhanced_match = enhanced_matches[i]
+
+            # Find corresponding enhanced match by JSON item name
+            enhanced_match = _match_by_json_name.get(json_name.strip().lower())
+            if not enhanced_match:
+                # Also try inventory_name in case the field mapping differs
+                inv_name = str(json_item.get('inventory_name', '') or '').strip().lower()
+                if inv_name:
+                    enhanced_match = _match_by_json_name.get(inv_name)
             
             # CRITICAL: Filter out Flower matches for concentrate/vape JSON items (mL units)
             if enhanced_match:
@@ -20500,7 +20506,8 @@ def json_match_detailed():
             has_db_match = (
                 enhanced_match is not None and
                 not str(enhanced_match.get('Source', '')).startswith('JSON - No DB Match') and
-                not str(enhanced_match.get('Source', '')).startswith('Emergency Fallback')
+                not str(enhanced_match.get('Source', '')).startswith('Emergency Fallback') and
+                not str(enhanced_match.get('Source', '')).startswith('JSON Fallback')
             )
             match_info = {
                 'json_name': json_name,

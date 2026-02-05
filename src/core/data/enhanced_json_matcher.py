@@ -1449,6 +1449,7 @@ class EnhancedJSONMatcher:
             merged_product['Source'] = 'JSON Fallback'
             merged_product['Match_Confidence'] = '0.050'
             merged_product['Match_Algorithm'] = 'Fallback'
+            merged_product['JSON_Item_Name'] = raw_name
             logging.info(f"FALLBACK TAG: Mapped JSON columns for non-database-matched tag '{json_item.get('product_name', '')}' - Price: '{price_value}', Weight: '{weight_value}'")
             return merged_product
         
@@ -1606,11 +1607,25 @@ class EnhancedJSONMatcher:
         except Exception:
             return str(product.get('Units', ''))
 
+    # Brand names that map to the same parent vendor for vendor filtering.
+    _VENDOR_ALIASES: Dict[str, str] = {
+        'pure': 'conscious cannabis',
+        'original': 'conscious cannabis',
+        'honey tree': 'conscious cannabis',
+        'ultra pure': 'conscious cannabis',
+        'honey stixx': 'conscious cannabis',
+        'bodhi high': 'conscious cannabis',
+        'conscious cannabis proc': 'conscious cannabis',
+        'conscious cannabis': 'conscious cannabis',
+    }
+
     def _normalize_vendor(self, vendor: str) -> str:
         """Normalize vendor strings to improve matching across formats.
+        Resolves brand aliases (Pure, Original, etc.) to canonical parent vendor.
         Examples:
           'CERES - 435011' -> 'ceres'
-          'Ceres, Inc.' -> 'ceres inc'
+          'Pure' -> 'conscious cannabis'
+          'Bodhi High' -> 'conscious cannabis'
         """
         try:
             if not vendor:
@@ -1626,6 +1641,9 @@ class EnhancedJSONMatcher:
             v = re.sub(r"[^a-z0-9]+", ' ', v)
             # Collapse repeated spaces
             v = re.sub(r"\s+", ' ', v).strip()
+            # Resolve brand aliases to canonical parent vendor
+            if v in self._VENDOR_ALIASES:
+                return self._VENDOR_ALIASES[v]
             return v
         except Exception:
             return str(vendor).lower().strip()
@@ -2455,12 +2473,13 @@ class EnhancedJSONMatcher:
         for m in matches:
             if m.source_json_item is None:
                 continue
-            key = (m.source_json_item.get('inventory_name')
-                   or m.source_json_item.get('product_name')
-                   or m.source_json_item.get('name')
-                   or id(m.source_json_item))
-            groups[str(key)] = groups.get(str(key)) or []
-            groups[str(key)].append(m)
+            key = str(
+                m.source_json_item.get('inventory_name')
+                or m.source_json_item.get('product_name')
+                or m.source_json_item.get('name')
+                or id(m.source_json_item)
+            )
+            groups[key].append(m)
 
         # Sort each group internally by score desc
         for key in groups:
