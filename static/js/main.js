@@ -11709,30 +11709,40 @@ const TagManager = {
                           (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
         
         // CRITICAL FIX: Reset stuck flag if it's been set for too long, or if force reload
+        // Reduced timeout from 30s to 10s to prevent blocking legitimate retries
         if (this._fetchingAvailableTags && !forceReload) {
             const fetchStartTime = this._fetchingAvailableTagsStartTime || Date.now();
             const stuckDuration = Date.now() - fetchStartTime;
-            if (stuckDuration > 30000) {
-                console.warn('⚠️ _fetchingAvailableTags stuck for 30+ seconds, resetting flag');
+            if (stuckDuration > 10000) { // Reduced from 30s to 10s
+                console.warn(`⚠️ _fetchingAvailableTags stuck for ${stuckDuration}ms (>10s), resetting flag to allow retry`);
                 this._fetchingAvailableTags = false;
+                if (this._fetchingTimeout) {
+                    clearTimeout(this._fetchingTimeout);
+                    this._fetchingTimeout = null;
+                }
             } else {
                 console.log('⏸️ Tag fetch already in progress, waiting for completion...');
-                // Wait up to 2 seconds for in-progress fetch to complete
+                // Wait up to 1 second (reduced from 2s) for in-progress fetch to complete
                 let waitCount = 0;
-                while (this._fetchingAvailableTags && waitCount < 20) {
+                while (this._fetchingAvailableTags && waitCount < 10) { // Reduced from 20 to 10
                     await new Promise(resolve => setTimeout(resolve, 100));
                     waitCount++;
                 }
-                // If still in progress after waiting, skip to prevent hang
+                // If still in progress after waiting, reset flag and proceed (don't skip)
                 if (this._fetchingAvailableTags) {
-                    console.log('⏸️ Tag fetch still in progress after wait, skipping duplicate call');
+                    console.warn('⚠️ Tag fetch still in progress after wait - resetting flag and proceeding');
+                    this._fetchingAvailableTags = false;
+                    if (this._fetchingTimeout) {
+                        clearTimeout(this._fetchingTimeout);
+                        this._fetchingTimeout = null;
+                    }
                     // CRITICAL FIX: Force hide splash if we're stuck waiting
                     if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                         console.log('⚡ Force hiding splash - tag fetch stuck');
                         AppLoadingSplash.stopAutoAdvance();
                         AppLoadingSplash.complete();
                     }
-                    return false;
+                    // Don't return false - proceed with fetch instead
                 }
             }
         } else if (forceReload && this._fetchingAvailableTags) {
@@ -20354,7 +20364,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (hasTags || hasRenderedTags) {
                     console.log('✅ SAFEGUARD: Tags already loaded or rendered, skipping retry');
                 } else if (isChecking || isFetching) {
-                    console.log('✅ SAFEGUARD: Tags are currently being loaded, skipping retry');
+                    // CRITICAL FIX: Check how long flags have been stuck - reset if stuck too long
+                    const checkStartTime = window.TagManager._checkingExistingDataStartTime || Date.now();
+                    const fetchStartTime = window.TagManager._fetchingAvailableTagsStartTime || Date.now();
+                    const checkDuration = Date.now() - checkStartTime;
+                    const fetchDuration = Date.now() - fetchStartTime;
+                    const maxStuckTime = 15000; // 15 seconds
+                    
+                    if ((isChecking && checkDuration > maxStuckTime) || (isFetching && fetchDuration > maxStuckTime)) {
+                        console.warn(`⚠️ SAFEGUARD: Flags stuck for ${Math.max(checkDuration, fetchDuration)}ms - resetting and forcing retry`);
+                        window.TagManager._checkingExistingData = false;
+                        window.TagManager._fetchingAvailableTags = false;
+                        window.TagManager._checkingExistingDataStartTime = null;
+                        window.TagManager._fetchingAvailableTagsStartTime = null;
+                        // Force retry after resetting flags
+                        if (typeof window.TagManager.checkForExistingData === 'function') {
+                            window.TagManager.checkForExistingData().catch(err => {
+                                console.error('Safeguard retry after reset failed:', err);
+                            });
+                        }
+                    } else {
+                        console.log('✅ SAFEGUARD: Tags are currently being loaded, skipping retry');
+                    }
                 }
             }
         }, 5000);
@@ -20389,7 +20420,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else if (hasTags || hasRenderedTags) {
                     console.log('✅ 10s SAFEGUARD: Tags already loaded or rendered - skipping force fetch');
                 } else if (isChecking || isFetching) {
-                    console.log('✅ 10s SAFEGUARD: Tags are currently being loaded - skipping force fetch');
+                    // CRITICAL FIX: After 10 seconds, force reset flags even if they're set
+                    // This prevents infinite waiting if flags get stuck
+                    const checkStartTime = window.TagManager._checkingExistingDataStartTime || Date.now();
+                    const fetchStartTime = window.TagManager._fetchingAvailableTagsStartTime || Date.now();
+                    const checkDuration = Date.now() - checkStartTime;
+                    const fetchDuration = Date.now() - fetchStartTime;
+                    
+                    console.warn(`⚠️ 10s SAFEGUARD: Flags still set after 10s (check: ${checkDuration}ms, fetch: ${fetchDuration}ms) - forcing reset and reload`);
+                    window.TagManager._checkingExistingData = false;
+                    window.TagManager._fetchingAvailableTags = false;
+                    window.TagManager._checkingExistingDataStartTime = null;
+                    window.TagManager._fetchingAvailableTagsStartTime = null;
+                    // Force reload after resetting flags
+                    if (typeof window.TagManager.forceReloadTags === 'function') {
+                        console.log('🔄 10s SAFEGUARD: Using forceReloadTags after flag reset');
+                        window.TagManager.forceReloadTags().catch(e => {
+                            console.error('10s safeguard force reload failed:', e);
+                        });
+                    }
                 }
             }
         }, 10000);

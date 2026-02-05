@@ -8666,6 +8666,10 @@ class JSONMatcher:
         key_ws = re.sub(r'\s+', ' ', key_lower).strip()
         key_no_apos = re.sub(r"[''`]", '', key_ws).strip()
 
+        # Ensure JSON column lookup is populated
+        if not self._indexed_cache or 'json_column_lookup' not in self._indexed_cache:
+            self._populate_json_column_lookup_from_db()
+
         if self._indexed_cache and 'json_column_lookup' in self._indexed_cache:
             json_lookup = self._indexed_cache['json_column_lookup']
 
@@ -8677,7 +8681,12 @@ class JSONMatcher:
                         product = dict(matched[0])
                         product['_source'] = 'database'
                         product['_match_type'] = 'json_column_exact'
+                        logging.info(f"✅ JSON COLUMN MATCH: '{json_description[:60]}' → '{product.get('Product Name*', 'Unknown')[:60]}'")
                         return product
+            
+            # Debug: log what keys we tried and what's available
+            logging.debug(f"🔍 JSON COLUMN LOOKUP: Tried keys: {[exact_key[:50], key_lower[:50], key_ws[:50], key_no_apos[:50]]}")
+            logging.debug(f"🔍 JSON COLUMN LOOKUP: Cache has {len(json_lookup)} keys, sample: {list(json_lookup.keys())[:5]}")
 
         # Excel fallback
         if hasattr(self, 'excel_processor') and self.excel_processor and getattr(self.excel_processor, 'df', None) is not None:
@@ -8695,9 +8704,37 @@ class JSONMatcher:
                         if key and key in self._excel_json_lookup:
                             match = dict(self._excel_json_lookup[key])
                             match['_source'] = 'excel'
+                            logging.info(f"✅ JSON COLUMN MATCH (Excel): '{json_description[:60]}' → '{match.get('Product Name*', 'Unknown')[:60]}'")
                             return match
             except Exception as e:
                 logging.debug(f"Excel JSON lookup error: {e}")
+
+        # Direct database query fallback - check if JSON column matches exactly
+        try:
+            product_db = self._get_product_database()
+            if product_db:
+                all_products = product_db.get_all_products()
+                for product in all_products:
+                    db_json = str(product.get('JSON') or product.get('json') or '').strip()
+                    if not db_json:
+                        continue
+                    # Try all normalized versions
+                    db_json_lower = db_json.lower().strip()
+                    db_json_ws = re.sub(r'\s+', ' ', db_json_lower).strip()
+                    db_json_no_apos = re.sub(r"[''`]", '', db_json_ws).strip()
+                    
+                    # Check if any normalized version matches
+                    if (exact_key == db_json or 
+                        key_lower == db_json_lower or 
+                        key_ws == db_json_ws or 
+                        key_no_apos == db_json_no_apos):
+                        result = dict(product)
+                        result['_source'] = 'database'
+                        result['_match_type'] = 'json_column_exact'
+                        logging.info(f"✅ JSON COLUMN MATCH (Direct DB): '{json_description[:60]}' → '{result.get('Product Name*', 'Unknown')[:60]}'")
+                        return result
+        except Exception as e:
+            logging.debug(f"Direct DB JSON lookup error: {e}")
 
         return None
 
