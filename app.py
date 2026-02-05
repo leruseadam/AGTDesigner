@@ -20587,17 +20587,23 @@ def json_match_detailed():
                         enhanced_match = None
             
             # Create detailed match info using database-priority data
+            # CRITICAL FIX: Check if enhanced_match is a real DB match (not a fallback with 'JSON - No DB Match' source)
+            has_db_match = (
+                enhanced_match is not None and
+                not str(enhanced_match.get('Source', '')).startswith('JSON - No DB Match') and
+                not str(enhanced_match.get('Source', '')).startswith('Emergency Fallback')
+            )
             match_info = {
                 'json_name': json_name,
                 'json_data': json_item,
-                'best_score': 0.95 if enhanced_match else 0.0,  # High confidence for database matches
-                'best_match': enhanced_match,
-                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if enhanced_match else [],
-                'is_match': enhanced_match is not None,
-                'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
-                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
-                'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
-                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if enhanced_match else '0.0'
+                'best_score': 0.95 if has_db_match else 0.0,
+                'best_match': enhanced_match if has_db_match else None,
+                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if has_db_match else [],
+                'is_match': has_db_match,
+                'match_reason': 'Database Priority (100% DB data)' if has_db_match else 'No database match found',
+                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if has_db_match else 'No match',
+                'data_source': enhanced_match.get('Data_Source', 'Database') if has_db_match else 'None',
+                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if has_db_match else '0.0'
             }
             
             detailed_matches.append(match_info)

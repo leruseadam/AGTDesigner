@@ -375,7 +375,9 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
         # RSO/CO2 tankers - check FIRST before other concentrate types
         if any(keyword in product_name_lower for keyword in ["rso", "applicator", "tanker", "syringe", "co2 oil", "co2 extract", "ethanol extract", "alcohol extract"]):
             return _log_and_return("RSO/CO2 Tankers", 'name_rso_co2_keywords')
-        if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
+        if any(keyword in product_name_lower for keyword in ["infused preroll", "infused pre-roll", "infused pre roll"]):
+            return _log_and_return("Infused Pre-Roll", 'name_infused_preroll_keywords')
+        if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "preroll", "joint", "blunt", "cone"]):
             return _log_and_return("Pre-Roll", 'name_preroll_keywords')
         # Distinguish between all‑in‑one/disposable devices and 510 carts.
         # AIO (all‑in‑one) hardware is a disposable vape, not a 510 cartridge.
@@ -2835,9 +2837,21 @@ class JSONMatcher:
                         db_json = str(product.get("JSON", "") or "")
                         db_vendor = str(product.get("Vendor/Supplier*", "") or product.get("Vendor", "") or "").strip().lower()
                         db_brand = str(product.get("Product Brand", "") or product.get("ProductBrand", "") or "").strip().lower()
-                        db_strain = self._extract_strain_from_product_name(db_name) or self._extract_strain_from_product_name(db_json)
+                        # Use Product Strain column first (most reliable), then extract from name/JSON
+                        db_product_strain = str(product.get("Product Strain", "") or product.get("product_strain", "") or "").strip()
+                        db_extracted_strain = self._extract_strain_from_product_name(db_name) or self._extract_strain_from_product_name(db_json)
+                        db_strain = db_product_strain or db_extracted_strain
+
+                        # Collect all unique strain keys to index under (Product Strain + extracted may differ)
+                        strain_keys = set()
                         if db_strain and len(db_strain) >= 3:
-                            sk = db_strain.lower().strip()
+                            strain_keys.add(db_strain.lower().strip())
+                        if db_product_strain and len(db_product_strain) >= 3 and db_product_strain.lower().strip() not in strain_keys:
+                            strain_keys.add(db_product_strain.lower().strip())
+                        if db_extracted_strain and len(db_extracted_strain) >= 3 and db_extracted_strain.lower().strip() not in strain_keys:
+                            strain_keys.add(db_extracted_strain.lower().strip())
+
+                        for sk in strain_keys:
                             
                             # Add to indexes with original vendor/brand
                             if db_vendor:
@@ -3246,15 +3260,32 @@ class JSONMatcher:
                         if extracted_brand:
                             json_brand = extracted_brand.lower()
                     
-                    # Determine product type from JSON name
+                    # Determine product type from JSON name and inventory_type field
+                    inventory_type_lower = str(item.get("inventory_type", "") or "").lower()
                     json_is_510 = '510' in json_name_lower or ('cartridge' in json_name_lower and 'disposable' not in json_name_lower)
                     json_is_aio = 'aio' in json_name_lower or 'prana' in json_name_lower or 'disposable' in json_name_lower
-                    json_is_flower = 'flower' in json_name_lower
+                    json_is_flower = 'flower' in json_name_lower or 'flower' in inventory_type_lower
                     json_is_preroll = 'pre-roll' in json_name_lower or 'preroll' in json_name_lower or 'shorty' in json_name_lower
-                    json_is_concentrate = 'batter' in json_name_lower or 'wax' in json_name_lower or 'terp' in json_name_lower
+                    # CRITICAL FIX: Expand concentrate detection to include extract, crystal, live resin, etc.
+                    # Also check inventory_type field which often says "Concentrate for Inhalation"
+                    json_is_concentrate = (
+                        'batter' in json_name_lower or 'wax' in json_name_lower or 'terp' in json_name_lower or
+                        'extract' in json_name_lower or 'crystal' in json_name_lower or 
+                        'live resin' in json_name_lower or 'liquid diamonds' in json_name_lower or
+                        'concentrate' in inventory_type_lower
+                    )
                     
                     # Check if JSON has mL weight (indicates vape/concentrate)
                     json_has_ml = bool(re.search(r'\d+(?:\.\d+)?\s*ml', json_name_lower)) or 'ml' in str(weight or '').lower()
+                    
+                    # Debug logging for concentrate detection
+                    if json_is_concentrate or json_is_510 or json_is_aio or json_has_ml:
+                        json_type_detected = []
+                        if json_is_510: json_type_detected.append("510")
+                        if json_is_aio: json_type_detected.append("AIO")
+                        if json_is_concentrate: json_type_detected.append("concentrate")
+                        if json_has_ml: json_type_detected.append("has_ml")
+                        logging.debug(f"🔍 JSON TYPE DETECTED: '{product_name[:50]}' → {', '.join(json_type_detected)}")
                     
                     def _type_match(p):
                         """Check if DB product matches JSON product type."""
@@ -3266,16 +3297,21 @@ class JSONMatcher:
                         db_aio = 'aio' in dn or 'aio' in db_type or 'prana' in dn or 'prana' in db_type or 'disposable' in dn or 'disposable' in db_type
                         db_flower = 'flower' in dn or 'flower' in db_type
                         db_preroll = 'pre-roll' in dn or 'preroll' in dn or 'shorty' in dn or 'pre-roll' in db_type or 'preroll' in db_type
-                        db_conc = 'batter' in dn or 'wax' in dn or 'terp' in dn or 'batter' in db_type or 'wax' in db_type or 'crystal' in dn or 'crystal' in db_type
+                        db_conc = ('batter' in dn or 'wax' in dn or 'terp' in dn or 'crystal' in dn or
+                                   'extract' in dn or 'live resin' in dn or 'rosin' in dn or
+                                   'batter' in db_type or 'wax' in db_type or 'crystal' in db_type or
+                                   'concentrate' in db_type or 'live resin' in db_type or 'rosin' in db_type)
                         db_is_vape = db_510 or db_aio or 'vape' in db_type or 'cartridge' in db_type
                         
                         # CRITICAL: If JSON is vape/concentrate (has mL, live resin, aio, etc.), REJECT Flower matches
                         json_is_vape_concentrate = json_is_510 or json_is_aio or json_is_concentrate or json_has_ml
                         if json_is_vape_concentrate and db_flower:
+                            logging.debug(f"🚫 TYPE MISMATCH: JSON concentrate/vape '{product_name[:50]}' vs DB Flower '{dn[:50]}' - rejecting")
                             return False  # Never match Flower to vape/concentrate JSON
                         
                         # CRITICAL: If JSON is Flower, REJECT vape/concentrate matches
                         if json_is_flower and (db_is_vape or db_conc):
+                            logging.debug(f"🚫 TYPE MISMATCH: JSON Flower '{product_name[:50]}' vs DB vape/concentrate '{dn[:50]}' - rejecting")
                             return False  # Never match vape/concentrate to Flower JSON
                         
                         # CRITICAL FIX: Prana AIO and 510 Vape are both vape products - allow cross-matching within vape category
@@ -3797,7 +3833,10 @@ class JSONMatcher:
             product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
             excel_variations, type_override = self._generate_excel_style_variations(item, vendor, product_type)
             use_excel_style_name = False
-            if type_override:
+            # Only accept type_override if product_type is a generic fallback (Unknown, Mixed, Flower)
+            # Don't override specific types like 'Live Resin', 'Infused Pre-Roll', 'Concentrate', etc.
+            generic_types = {'unknown', 'mixed', 'flower', ''}
+            if type_override and (not product_type or product_type.lower() in generic_types):
                 product_type = type_override
             if excel_variations:
                 try:
@@ -10189,7 +10228,9 @@ class JSONMatcher:
                 vendor_for_variations,
                 product_type
             )
-            if type_override:
+            # Only accept type_override for generic types - don't override specific types
+            generic_types = {'unknown', 'mixed', 'flower', ''}
+            if type_override and (not product_type or product_type.lower() in generic_types):
                 product_type = type_override
             if vendor_for_variations:
                 vendor = self._normalize_vendor_display_name(vendor_for_variations)
@@ -12229,9 +12270,17 @@ class JSONMatcher:
         units_lower = units.lower()
         name_lower = product_name.lower()
         is_joint_product = any(keyword in name_lower for keyword in ['joint', 'pre-roll', 'preroll'])
-        
-        # Flower / standard usable marijuana formatting
-        if vendor_display and strain and total_weight is not None and units_lower in ['g', 'gram', 'grams'] and not is_joint_product:
+        # Detect concentrate/extract/vape products that should NOT be overridden to Flower
+        inventory_type_lower = str(item.get('inventory_type', '') or '').lower()
+        is_concentrate_product = (
+            any(kw in name_lower for kw in ['extract', 'live resin', 'batter', 'crystal', 'wax', 'shatter',
+                                            'rosin', 'concentrate', 'liquid diamond', 'distillate', 'hash',
+                                            'solventless', 'vape', 'cartridge', 'disposable', 'aio']) or
+            'concentrate' in inventory_type_lower
+        )
+
+        # Flower / standard usable marijuana formatting (only for non-concentrate products)
+        if vendor_display and strain and total_weight is not None and units_lower in ['g', 'gram', 'grams'] and not is_joint_product and not is_concentrate_product:
             weight_label = self._format_weight_label(total_weight, 'g')
             if weight_label:
                 base_name = f"{strain} by {vendor_display} - {weight_label}"
@@ -12282,6 +12331,105 @@ class JSONMatcher:
                 
                 product_type_override = "Pre-Roll"
         
+        # Concentrate / vape / cartridge / AIO formatting
+        # These products use mL or g units and need DB-style name variations
+        if vendor_display and strain and is_concentrate_product:
+            # Determine weight - user says mL products are actually 1g, so treat mL as g
+            conc_weight = total_weight
+            conc_unit = 'g'
+            if units_lower in ['ml', 'milliliter', 'milliliters']:
+                # mL products are stored as grams in the DB
+                conc_weight = total_weight
+                conc_unit = 'g'
+            elif units_lower in ['g', 'gram', 'grams']:
+                conc_weight = total_weight
+                conc_unit = 'g'
+            elif units_lower in ['oz', 'ounce', 'ounces']:
+                conc_weight = total_weight
+                conc_unit = 'oz'
+
+            if conc_weight is not None:
+                weight_label = self._format_weight_label(conc_weight, conc_unit)
+            else:
+                weight_label = '1g'  # Safe default for concentrates
+
+            # Determine product sub-type keywords from JSON name
+            conc_type_parts = []
+            if 'live resin' in name_lower:
+                conc_type_parts.append('Live Resin')
+            if 'liquid diamond' in name_lower:
+                conc_type_parts.append('Liquid Diamonds')
+
+            # Determine device type
+            device_type = ''
+            if 'prana' in name_lower or ('aio' in name_lower and '510' not in name_lower):
+                device_type = 'Prana AIO'
+            elif '510' in name_lower:
+                device_type = '510 Vape'
+            elif 'disposable' in name_lower:
+                device_type = 'Disposable Vape'
+            elif 'cartridge' in name_lower or 'cart' in name_lower:
+                device_type = 'Vape Cartridge'
+
+            # Determine dab/extract type
+            extract_type = ''
+            if 'crystal' in name_lower:
+                extract_type = 'Terp Crystal'
+            elif 'batter' in name_lower:
+                extract_type = 'Terp Batter'
+            elif 'wax' in name_lower:
+                extract_type = 'Wax'
+            elif 'shatter' in name_lower:
+                extract_type = 'Shatter'
+            elif 'rosin' in name_lower:
+                extract_type = 'Rosin'
+            elif 'extract' in name_lower and not device_type:
+                extract_type = 'Extract'
+
+            # Build type descriptor (e.g., "Live Resin Prana AIO", "Live Resin Terp Crystal")
+            type_desc_parts = []
+            if conc_type_parts:
+                type_desc_parts.extend(conc_type_parts)
+            if device_type:
+                type_desc_parts.append(device_type)
+            elif extract_type:
+                type_desc_parts.append(extract_type)
+            type_desc = ' '.join(type_desc_parts)
+
+            # Also try vendor aliases for Conscious Cannabis brands
+            vendor_variants = [vendor_display]
+            conscious_brand_to_vendor = {
+                'pure': ['Bodhi High', 'Conscious Cannabis Proc'],
+                'original': ['Bodhi High', 'Conscious Cannabis Proc'],
+                'honey tree': ['Honey Tree', 'Conscious Cannabis Proc'],
+                'ultra pure': ['Bodhi High', 'Conscious Cannabis Proc'],
+                'honey stixx': ['Honey Tree', 'Conscious Cannabis Proc'],
+            }
+            brand_lower = str(item.get('brand', '') or '').strip().lower()
+            if not brand_lower and ' - ' in product_name:
+                brand_lower = product_name.split(' - ')[0].strip().lower()
+            if brand_lower in conscious_brand_to_vendor:
+                for alias in conscious_brand_to_vendor[brand_lower]:
+                    if alias not in vendor_variants:
+                        vendor_variants.append(alias)
+
+            for v in vendor_variants:
+                if type_desc:
+                    # "{Strain} {Type Desc} by {Vendor} - {Weight}"
+                    variations.append(f"{strain} {type_desc} by {v} - {weight_label}")
+                # Also try just "{Strain} by {Vendor} - {Weight}" (simpler DB names)
+                variations.append(f"{strain} by {v} - {weight_label}")
+
+            # Also add the raw JSON product name with weight replaced (some DB entries keep the full JSON name)
+            if product_name:
+                # Replace mL weight with g weight in the original name
+                import re as _re
+                name_with_g = _re.sub(r'\d+(?:\.\d+)?\s*m[lL]', weight_label, product_name)
+                if name_with_g != product_name:
+                    variations.append(name_with_g)
+                # Also add original name as-is (DB might store the exact JSON name)
+                variations.append(product_name)
+
         # Deduplicate while preserving order
         seen = set()
         unique_variations = []
@@ -12290,7 +12438,7 @@ class JSONMatcher:
             if normalized and normalized not in seen:
                 seen.add(normalized)
                 unique_variations.append(normalized)
-        
+
         return unique_variations, product_type_override
 
     def _upgrade_fallback_products(self, products: List[Dict], global_vendor: str) -> List[Dict]:
@@ -12319,7 +12467,9 @@ class JSONMatcher:
             upgraded = False
             if (product.get('Source') or '').startswith('JSON - No DB Match') and product_db and isinstance(original_item, dict):
                 variations, type_override = self._generate_excel_style_variations(original_item, vendor_norm, product_type)
-                if type_override:
+                # Only accept type_override for generic types - don't override specific types
+                generic_types = {'unknown', 'mixed', 'flower', ''}
+                if type_override and (not product_type or product_type.lower() in generic_types):
                     product_type = type_override
                 if variations:
                     try:
@@ -12582,17 +12732,101 @@ class JSONMatcher:
     def _extract_strain_from_product_name(self, product_name: str) -> Optional[str]:
         """
         Extract strain name from product name for database lookup.
-        
+
+        Handles TWO formats:
+        1. JSON-style (dash-separated): "Brand - Type - Details - STRAIN - Lineage - Weight"
+        2. DB-style: "Strain Name Product Type by Vendor - Weight"
+
         Args:
             product_name: The full product name
-            
+
         Returns:
             Extracted strain name or None if no strain found
         """
         try:
             if not product_name:
                 return None
-                
+
+            import re
+            name = product_name.strip()
+
+            # PRIORITY: JSON-style dash-separated format
+            # Pattern: "Brand - Product Type - Details - STRAIN - Lineage - Weight"
+            parts = [p.strip() for p in name.split(' - ')]
+            if len(parts) >= 4:
+                lineage_indicators = {'hybrid', 'indica', 'sativa', 'indica dominant', 'sativa dominant',
+                                      'hybrid dominant', 'indica/hybrid', 'sativa/hybrid', 'hybrid/indica',
+                                      'hybrid/sativa', 'mixed', 'cbd'}
+                weight_pattern_re = re.compile(r'^\d+(\.\d+)?\s*(g|mg|ml|oz|pack|pk)$', re.IGNORECASE)
+                product_type_words = {'live resin', 'liquid diamonds', 'hte', '510 vape', 'aio',
+                                     'disposable', 'cartridge', 'cart', 'vape', 'prana', 'flower',
+                                     'pre-roll', 'preroll', 'concentrate', 'edible', 'tincture',
+                                     'high potency', 'crystal', 'batter', 'extract', 'flavored', 'hash',
+                                     'live resin prana aio', 'live resin 510 vape', 'live resin extract',
+                                     'flavored prana aio', 'flavored 510 vape',
+                                     'solventless infused preroll', 'live resin infused preroll'}
+                brand_words = {'ultra pure', 'pure', 'bodhi high', 'honey tree', 'phat panda',
+                              'sticky frog', 'dabstract', 'crystal clear', 'geez', 'fkit labs',
+                              'thunderchief', 'baker boys', 'ceres', 'snickle fritz', 'leafwerx',
+                              'noble farms', 'homegrown', 'kushco', 'original', 'honey stixx'}
+
+                strain_idx = None
+                for i in range(len(parts) - 1, -1, -1):
+                    part_lower = parts[i].lower().strip()
+                    if weight_pattern_re.match(parts[i].strip()):
+                        continue
+                    if part_lower in lineage_indicators:
+                        continue
+                    if part_lower in product_type_words:
+                        continue
+                    # Skip pack size indicators like "5pk", "2Pk"
+                    if re.match(r'^\d+pk$', part_lower, re.IGNORECASE):
+                        continue
+                    if i == 0 or part_lower in brand_words:
+                        continue
+                    strain_idx = i
+                    break
+
+                if strain_idx is not None and strain_idx > 0:
+                    extracted = parts[strain_idx].strip()
+                    if len(extracted) >= 3 and not weight_pattern_re.match(extracted):
+                        return extracted
+
+            # DB-style extraction: remove weight, vendor, and product type suffixes
+            name_db = name
+            # Remove weight suffix
+            name_db = re.sub(r'\s*-\s*[\d.]+\s*(g|mg|ml|oz)\s*$', '', name_db, flags=re.IGNORECASE)
+            name_db = re.sub(r'\s*-\s*[\d.]+\s*(g|mg|ml|oz)\s*x\s*\d+\s*(pack)?\s*$', '', name_db, flags=re.IGNORECASE)
+            # Remove vendor suffix
+            name_db = re.sub(r'\s+by\s+[\w\s]+$', '', name_db, flags=re.IGNORECASE)
+            # Remove compound product type phrases
+            compound_types = [
+                'live resin disposable vape', 'live resin prana aio',
+                'live resin prana pulse aio disposable', 'live resin 510 vape',
+                'live resin cartridge', 'live resin cart', 'live resin disposable',
+                'live resin vape', 'liquid diamonds disposable', 'liquid diamonds cartridge',
+                'liquid diamonds vape', 'disposable vape', 'live resin', 'liquid diamonds',
+                'original live resin terp crystal', 'terp crystal', 'terp batter',
+                'live resin terp crystal', 'live resin terp batter',
+            ]
+            for ctype in compound_types:
+                name_db = re.sub(rf'\s+{re.escape(ctype)}s?\s*$', '', name_db, flags=re.IGNORECASE)
+            # Remove simple product type suffixes
+            product_types_db = [
+                'flower', 'pre-roll', 'preroll', 'pre roll', 'joint', 'blunt',
+                'cartridge', 'cart', 'vape', 'disposable', 'aio',
+                'concentrate', 'wax', 'shatter', 'budder', 'batter', 'sugar', 'sauce', 'diamonds',
+                'rosin', 'badder', 'crumble', 'crystal', 'extract', 'terp',
+                'edible', 'gummy', 'gummies', 'chocolate', 'cookie', 'brownie',
+                'tincture', 'capsule', 'capsules', 'topical', 'balm', 'lotion'
+            ]
+            for ptype in product_types_db:
+                name_db = re.sub(rf'\s+{re.escape(ptype)}s?\s*$', '', name_db, flags=re.IGNORECASE)
+            name_db = re.sub(r'\s*-\s*$', '', name_db)
+            name_db = re.sub(r'\s+', ' ', name_db).strip()
+            if name_db and len(name_db) >= 3 and name_db != name:
+                return name_db
+
             # Common strain keywords to look for
             strain_keywords = [
                 # Popular strains
