@@ -1,6 +1,9 @@
-# AGT Label Maker — User Manual
+# AGT Label Maker  
+## User Manual
 
-This manual explains how to install, run, and use the AGT Label Maker web application for generating professional cannabis product labels from Excel inventory and optional JSON URLs.
+**Document version:** 1.0  
+**Application:** AGT Label Maker — Professional Cannabis Label Generation  
+**Last updated:** 2025
 
 ---
 
@@ -17,365 +20,365 @@ This manual explains how to install, run, and use the AGT Label Maker web applic
 9. [Generating and Downloading Labels](#9-generating-and-downloading-labels)
 10. [Database and Data Tools](#10-database-and-data-tools)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Quick Reference](#12-quick-reference)
 
 ---
 
 ## 1. Overview
 
-**AGT Label Maker** is a web application that:
+AGT Label Maker is a web application for generating professional cannabis product labels. It uses store-specific Excel files and/or a product database, and can match products from external JSON URLs (e.g., Cultivera inventory transfers).
 
-- **Loads product data** from store-specific Excel files or from the product database.
-- **Matches products** from external JSON URLs (e.g., Cultivera inventory transfer URLs) to your Excel/database products.
-- **Lets you select** which products (tags) to include using filters and checkboxes.
-- **Generates label documents** (DOCX) in several templates: Horizontal, Vertical, Mini, Double, Preroll, and Inventory.
+### What the application does
 
-**Typical use:** Upload an Excel file (or use database-only), optionally match a JSON URL to pre-select products, filter/select tags, choose a template, then click **Generate Tags** to download a DOCX file of labels.
+| Function | Description |
+|----------|-------------|
+| **Load product data** | From store-specific Excel files or the product database. |
+| **Match products** | From external JSON URLs (e.g., Cultivera) to your Excel/database products. |
+| **Select products** | Use filters and checkboxes to choose which products (tags) to include. |
+| **Generate labels** | Produce DOCX label documents in multiple templates. |
+
+### Available label templates
+
+Horizontal • Vertical • Mini • Double • Preroll • Inventory
+
+### Typical workflow
+
+1. Select a store.  
+2. Load data (upload Excel, use database only, or match a JSON URL).  
+3. Filter and select the tags you want.  
+4. Choose a template and click **Generate Tags**.  
+5. Download the generated DOCX file.
 
 ---
 
 ## 2. Installation
 
-### Requirements
+### 2.1 Requirements
 
-- Python 3.x
-- Dependencies listed in `requirements.txt`
+- **Python:** 3.x  
+- **Dependencies:** As listed in `requirements.txt`
 
-### Install Dependencies
+### 2.2 Install dependencies
 
-**Option 1 — Automated (recommended):**
+Choose one method.
 
-```bash
-./install_requirements.sh
+| Method | Command |
+|--------|--------|
+| **Automated (recommended)** | `./install_requirements.sh` |
+| **Cross-platform** | `python3 install_requirements.py` |
+| **Manual** | `pip3 install --user -r requirements.txt` then `python3 patch_docxcompose.py` if needed |
+
+### 2.3 Verify installation
+
+Run:
+
 ```
-
-**Option 2 — Cross-platform:**
-
-```bash
-python3 install_requirements.py
-```
-
-**Option 3 — Manual:**
-
-```bash
-pip3 install --user -r requirements.txt
-python3 patch_docxcompose.py   # if needed for docxcompose)
-```
-
-### Verify Installation
-
-```bash
 python3 -c 'import app; print("Ready to run")'
 ```
+
+If you see **Ready to run**, the installation is successful.
 
 ---
 
 ## 3. Starting the Application
 
-### Run the app
+### 3.1 Run the application
 
 From the project root directory:
 
-```bash
+```
 python3 app.py
 ```
 
-Or:
+or
 
-```bash
+```
 python app.py
 ```
 
-### What you’ll see
+### 3.2 URLs and access
 
-- **Local access:**  
-  `http://127.0.0.1:8001`  
-  (Port may be 8001–8010 if 8001 is in use.)
+After startup, the console will display:
 
-- **Network access:**  
-  The console will show a second URL, e.g.  
-  `http://<your-machine-IP>:8001`  
-  so other computers on the same network can open the app.
+| Access type | URL example | Notes |
+|-------------|-------------|--------|
+| **Local (this computer)** | `http://127.0.0.1:8001` | Port may be 8001–8010 if 8001 is in use. |
+| **Network (other devices)** | `http://<your-IP>:8001` | Shown in console; allow the port in your firewall if needed. |
 
-- **Restrict to this computer only:**  
-  Before starting, set:  
-  `export HOST=127.0.0.1`  
-  Then run the app. It will only listen on localhost.
+### 3.3 Optional settings
 
-- **Custom port:**  
-  `export FLASK_PORT=5001`  
-  Then run the app.
+| Goal | Action |
+|------|--------|
+| Restrict to this computer only | Before starting: `export HOST=127.0.0.1` then run the app. |
+| Use a different port | Before starting: `export FLASK_PORT=5001` (or another free port) then run the app. |
 
-### Open the app
+### 3.4 Open the application
 
-In a browser, go to the URL printed in the console (e.g. `http://127.0.0.1:8001`). If others can’t connect, allow the app’s port in your firewall.
+In a web browser, go to the URL shown in the console (e.g. `http://127.0.0.1:8001`). If other computers cannot connect, allow the application’s port in your firewall.
 
 ---
 
 ## 4. First-Time Setup: Store Selection
 
-Before uploading files or generating labels, you must choose a **store**. Each store has its own Excel data and product database.
+A **store** must be selected before uploading files or generating labels. Each store has its own Excel data and product database.
 
-1. When you first open the app, a **store selection** modal appears.
-2. Choose your store from the list, for example:
-   - AGT Bothell  
-   - AGT Burien  
-   - AGT Goldbar  
-   - AGT Lynnwood  
-   - AGT Seattle  
-   - AGT Shoreline  
-   - AGT Walla Walla  
-   - Test  
-3. Click the store name. The page will reload with that store’s context.
-4. Store choice is remembered for your session and can persist across reloads.
+### Procedure: Select a store
 
-**Important:** You cannot upload an Excel file until a store is selected. The filename should match the selected store (e.g. a file for Bothell should indicate “Bothell” in the name).
+1. Open the application.  
+2. When the **store selection** modal appears, choose your store from the list.  
+3. Click the store name. The page will reload with that store’s context.  
+4. The choice is remembered for your session and can persist across reloads.
+
+### Available stores
+
+AGT Bothell • AGT Burien • AGT Goldbar • AGT Lynnwood • AGT Seattle • AGT Shoreline • AGT Walla Walla • Test
+
+> **Important:** You cannot upload an Excel file until a store is selected. The file name should match the selected store (e.g., a file for Bothell should indicate “Bothell” in the name).
 
 ---
 
 ## 5. Main Workflow: Creating Labels
 
-High-level steps:
+### Step-by-step workflow
 
-1. **Select store** (if not already selected).
-2. **Load product data**  
-   - Upload an Excel file **or**  
-   - Rely on the product database (no file), **or**  
-   - Use **Match JSON** to load and select products from a JSON URL.
-3. **Refine the list** with filters (Vendor, Brand, Product Type, Lineage, Weight, Price, DOH, High CBD).
-4. **Select tags** in the “Current Inventory” list (left). Selected items appear in “Selected” (right). Use “Select All” for a vendor/category if available.
-5. **Choose a template** (Horizontal, Vertical, Mini, Double, Preroll, Inventory).
-6. Click **Generate Tags**.
-7. **Download** the generated DOCX when the process completes.
+| Step | Action |
+|------|--------|
+| 1 | Select store (if not already selected). |
+| 2 | Load product data: upload Excel, use database only, or use **Match JSON** with a URL. |
+| 3 | Refine the list using the filter dropdowns (Vendor, Brand, Product Type, Lineage, etc.). |
+| 4 | Select tags in **Current Inventory** (left). Selected items appear in **Selected** (right). |
+| 5 | Choose a **template** from the TEMPLATE dropdown. |
+| 6 | Click **Generate Tags**. |
+| 7 | Download the generated DOCX when the process completes. |
 
 ---
 
 ## 6. Uploading an Excel File
 
-### When to upload
+### 6.1 When to upload
 
-- You have a store-specific Excel inventory file (e.g. from your POS or export).
+- You have a store-specific Excel inventory file (e.g., from your POS or export).  
 - You want labels to reflect that file’s products and data.
 
-### Steps
+### 6.2 Procedure: Upload an Excel file
 
-1. Ensure the correct **store** is selected.
-2. In the **filter bar** at the top, click **Upload Excel**.
-3. In the file picker, select an **.xlsx** (or .xls) file whose name matches the selected store.
-4. Wait for processing. The **file path / name** appears near the upload button (e.g. “No file uploaded” → your filename).
-5. When loading finishes, **Current Inventory** (left column) fills with product tags. You can search, filter, and select from them.
+1. Ensure the correct **store** is selected.  
+2. In the **filter bar** at the top, click **Upload Excel**.  
+3. In the file picker, select an **.xlsx** or **.xls** file whose name matches the selected store.  
+4. Wait for processing. The file name will appear near the upload button.  
+5. When loading finishes, **Current Inventory** (left column) will list product tags. Use search and filters as needed.
 
-### Rules
+### 6.3 Rules
 
-- Only **Excel** files (`.xlsx`, `.xls`) are accepted.
-- The **filename** must be valid for the **selected store** (validation runs on upload).
-- One file per store/session; a new upload replaces the previous one for that session.
+- **Accepted formats:** Excel only (`.xlsx`, `.xls`).  
+- **File name:** Must be valid for the selected store (validation runs on upload).  
+- **Session:** One file per store per session; a new upload replaces the previous one.
 
-### If you don’t upload
+### 6.4 Without an Excel file
 
-- You can still use **Match JSON** to pull products from a JSON URL; matching uses the product database when no Excel file is present (or in addition to it).
-- You can also use **database-only** mode: no file, but product list comes from the store’s product database.
+- You can still use **Match JSON**; matching will use the product database when no Excel file is present.  
+- You can also use **database-only** mode: no file upload, with the product list coming from the store’s product database.
 
 ---
 
 ## 7. Matching Products from a JSON URL
 
-This feature matches products from an external **JSON URL** (e.g. Cultivera inventory transfer) to your Excel/database products and can pre-select them for labels.
+This feature matches products from an external **JSON URL** (e.g., Cultivera inventory transfer) to your Excel/database products and can add them to **Selected** in one step.
 
-### When to use it
+### 7.1 When to use it
 
-- You have a **JSON URL** that lists products (e.g. `https://files.cultivera.com/.../Cultivera_ORD-30063_422044.json`).
-- You want to **match** those JSON products to your Excel/database and add them to **Selected** in one step.
+- You have a JSON URL that lists products (e.g., a Cultivera inventory transfer URL).  
+- You want to match those products to your Excel/database and add them to **Selected**.
 
-### Steps
+### 7.2 Procedure: Match products from a JSON URL
 
-1. (Recommended) Have a **store** selected and, if you use Excel, an **Excel file already uploaded**.
-2. In the filter bar, click **Match JSON**.
-3. In the **JSON Product Matching** modal:
-   - Paste the full JSON URL into the input (e.g. `https://...`).
-   - Click **Match JSON**.
-4. Wait for matching (can take up to about two minutes for large data). Progress may be reported in the modal or browser console.
-5. When finished:
-   - The modal shows how many products were matched and selected.
-   - Matched products are added to **Selected** (right column).
-   - **Current Inventory** may update to include any new tags from the match.
-6. Close the modal and continue with filters/template and **Generate Tags** as needed.
+1. (Recommended) Select a **store** and, if you use Excel, upload an Excel file first.  
+2. In the filter bar, click **Match JSON**.  
+3. In the **JSON Product Matching** modal:  
+   - Paste the full JSON URL into the input (e.g. `https://...`).  
+   - Click **Match JSON**.  
+4. Wait for matching to complete (up to about two minutes for large data). Progress may appear in the modal or browser console.  
+5. When finished:  
+   - The modal shows how many products were matched and selected.  
+   - Matched products are added to **Selected** (right column).  
+   - **Current Inventory** may update with new tags from the match.  
+6. Close the modal and continue with filters, template selection, and **Generate Tags** as needed.
 
-### URL rules
+### 7.3 URL requirements
 
-- Must be **HTTP or HTTPS** (or `data:`). If you omit `https://`, the app may try to add it.
-- The URL must return **inventory transfer / product list JSON** that the app can parse.
+- **Protocol:** HTTP or HTTPS (or `data:`). The app may add `https://` if omitted.  
+- **Content:** The URL must return inventory transfer / product list JSON that the application can parse.
 
-### Detailed match view
+### 7.4 Detailed match view
 
-- Some flows offer a **detailed match** or “Before & After” view where you can review and **Accept** matches.
-- Use **Accept All Matches** or per-item accept, then **Save** so the selection is applied.
+Some flows offer a **detailed match** or “Before & After” view. You can review matches, use **Accept All Matches** or accept per item, then **Save** to apply the selection.
 
-### JSON inventory slips (separate feature)
+### 7.5 JSON Inventory Slips (separate feature)
 
-- From **Data Tools** or the same area, you may see **JSON Inventory Slips**.
-- There you paste a **JSON URL** and generate **inventory slip documents** (not the same as “Match JSON” for tag selection). Use that when you want slips from JSON rather than matching to Excel/database tags.
+**JSON Inventory Slips** (e.g., under Data Tools) is separate from **Match JSON**. There you paste a JSON URL to generate **inventory slip documents**, not to match and select tags for label generation.
 
 ---
 
 ## 8. Filtering and Selecting Tags
 
-### Layout
+### 8.1 Screen layout
 
-- **Left:** **Current Inventory** — list of product tags (from Excel and/or database, and after JSON match).
-- **Center:** Template, **Generate Tags**, and controls (Undo, Redo, Clear, Export, Data & Analytics, Reset Cache, Lineage Editor).
-- **Right:** **Selected** — tags chosen for label generation. You can reorder by dragging.
+| Area | Content |
+|------|---------|
+| **Left** | **Current Inventory** — product tags from Excel and/or database (and from JSON match). |
+| **Center** | Template selector, **Generate Tags** button, and controls (Undo, Redo, Clear, Export, Data & Analytics, Reset Cache, Lineage Editor). |
+| **Right** | **Selected** — tags chosen for label generation. Items can be reordered by dragging. |
 
-### Filters (top bar)
+### 8.2 Filter dropdowns (top bar)
 
-Use the dropdowns to narrow **Current Inventory**:
+Use these to narrow **Current Inventory**:
 
-- **Vendor**  
-- **Brand**  
-- **Product Type**  
-- **Lineage** (e.g. Sativa, Indica, Hybrid)  
-- **Weight**  
-- **Price**  
-- **DOH Compliance**  
-- **High CBD**
+- Vendor  
+- Brand  
+- Product Type  
+- Lineage (e.g., Sativa, Indica, Hybrid)  
+- Weight  
+- Price  
+- DOH Compliance  
+- High CBD  
 
-Changing a filter updates the list; you can combine several filters.
+You can combine multiple filters.
 
-### Selecting tags
+### 8.3 Selecting tags
 
-- **By hand:** In Current Inventory, **check** the products you want. They appear in **Selected**.
-- **Select All:** If available for a vendor/category, use it to select a whole group.
-- **Search:** Use the **Search** box above Current Inventory to find products by name or other text.
-- **Selected list:** You can **drag** items in the Selected column to change order; order can affect layout in the generated document.
+- **Manual:** In Current Inventory, check the products you want; they appear in **Selected**.  
+- **Select All:** Use when available for a vendor/category to select a whole group.  
+- **Search:** Use the search box above Current Inventory to find products by name or other text.  
+- **Order:** Drag items in the **Selected** column to change order; order can affect layout in the generated document.
 
-### Clearing and resetting
+### 8.4 Clearing and resetting
 
-- **Clear & Reset** (or “Clear Filters”): Clears selected tags and resets filters so you can start a new selection.
-- **Undo / Redo**: Reverses or re-applies the last selection change (e.g. move to selected).
+- **Clear & Reset** (or “Clear Filters”): Clears selected tags and resets filters.  
+- **Undo / Redo:** Reverses or re-applies the last selection change.
 
 ---
 
 ## 9. Generating and Downloading Labels
 
-### Before you generate
+### 9.1 Before you generate
 
-- At least one tag should be in **Selected** (right column).
-- Choose the **template** you want.
+- At least one tag must be in **Selected** (right column).  
+- Choose the **template** you want from the TEMPLATE dropdown.
 
-### Template options
+### 9.2 Template options
 
-In the center column, use the **TEMPLATE** dropdown:
+| Template | Use |
+|----------|-----|
+| **Horizontal** | Horizontal label layout. |
+| **Vertical** | Vertical label layout. |
+| **Mini** | Smaller labels. |
+| **Double** | Two-up or double layout. |
+| **Preroll** | For pre-roll products. |
+| **Inventory** | Inventory-style layout. |
 
-- **Horizontal** — horizontal layout.
-- **Vertical** — vertical layout.
-- **Mini** — smaller labels.
-- **Double** — two-up or double layout.
-- **Preroll** — for pre-roll products.
-- **Inventory** — inventory-style layout.
+### 9.3 Procedure: Generate labels
 
-### Generate
+1. Set **TEMPLATE** to the desired layout.  
+2. Click **Generate Tags**.  
+3. Wait for generation (seconds to minutes depending on set size). A progress or status message may appear.  
+4. When complete, the application will prompt or auto-download a **DOCX** file (e.g., “Labels.docx”). Save it to your computer.
 
-1. Set **TEMPLATE** to the desired layout.
-2. Click **Generate Tags**.
-3. Wait for generation (may take several seconds to minutes for large sets). A progress or status message may appear.
-4. When done, the app will prompt or auto-download a **DOCX** file (e.g. “Labels.docx” or similar). Save it to your computer.
+### 9.4 After generation
 
-### After generation
-
-- Use **Export Data** to download the **selected tags as Excel** (separate from the label DOCX).
-- To change layout, change **TEMPLATE** and run **Generate Tags** again.
+- Use **Export Data** to download the **selected tags as Excel** (separate from the label DOCX).  
+- To change layout, select a different **TEMPLATE** and click **Generate Tags** again.
 
 ---
 
 ## 10. Database and Data Tools
 
-Available from the center column or the **Data & Analytics**-style entry:
+Tools are available from the center column or via **Data & Analytics**.
 
-- **Export Data** — Download selected tags as an Excel file.
-- **Data & Analytics** — Open the product database manager: browse products, run analytics, **Edit DB** (add/edit/delete products).
-- **Reset Cache** — Clear cached data so the next load uses fresh data from Excel/database. Use if the list seems stale.
-- **Lineage Editor** — Open the lineage/strain editor to manage strain names and lineage (e.g. Sativa/Indica/Hybrid) and related display.
+| Tool | Purpose |
+|------|---------|
+| **Export Data** | Download selected tags as an Excel file. |
+| **Data & Analytics** | Open the product database manager: browse products, run analytics, **Edit DB** (add/edit/delete products). |
+| **Reset Cache** | Clear cached data so the next load uses fresh data from Excel/database. Use when the list seems stale. |
+| **Lineage Editor** | Manage strain names and lineage (e.g., Sativa/Indica/Hybrid) and related display. |
 
-### Database manager (Edit DB)
+### 10.1 Database manager (Edit DB)
 
-- View product table, search, and run analytics.
-- **Edit** existing products (name, vendor, type, lineage, weight, price, DOH, etc.).
-- **Add** new products and **Delete** ones you don’t need.
-- Changes here affect what appears in Current Inventory and in matching (including JSON match).
+- View the product table, search, and run analytics.  
+- **Edit** existing products (name, vendor, type, lineage, weight, price, DOH, etc.).  
+- **Add** new products and **Delete** products you no longer need.  
+- Changes affect Current Inventory and matching (including JSON match).
 
-### Backups and health
+### 10.2 Backups and health
 
-- From the database/analytics UI you may have options to **backup** the database, **restore** from backup, and check **database health**. Use these for safety and troubleshooting.
+From the database/analytics UI you may **backup** the database, **restore** from backup, and check **database health**. Use these for safety and troubleshooting.
 
 ---
 
 ## 11. Troubleshooting
 
-### Store / upload
+### 11.1 Store and upload
 
-- **“Please select a store before uploading”**  
-  Choose a store from the modal first, then upload.
+| Issue | Solution |
+|-------|----------|
+| “Please select a store before uploading” | Choose a store from the modal first, then upload. |
+| Upload rejected (filename/store) | Ensure the Excel file name matches the selected store and the file is `.xlsx` or `.xls`. |
 
-- **Upload rejected (filename/store)**  
-  Ensure the Excel filename matches the selected store (e.g. contains “Bothell” for AGT Bothell). Use a valid `.xlsx`/`.xls` file.
+### 11.2 JSON match
 
-### JSON match
+| Issue | Solution |
+|-------|----------|
+| “Please enter a JSON URL first” | Paste a full URL in the JSON Match modal and click **Match JSON**. |
+| Match fails or times out | Confirm the URL is reachable in a browser; allow 1–2 minutes for large payloads; ensure store is set and, if using Excel, that a file is uploaded. |
 
-- **“Please enter a JSON URL first”**  
-  Paste a full URL (e.g. `https://files.cultivera.com/.../file.json`) in the JSON Match modal and click **Match JSON**.
+### 11.3 Tags and generation
 
-- **Match fails or times out**  
-  - Check that the URL is publicly reachable (open it in a browser).  
-  - Large payloads can take 1–2 minutes; wait or try a smaller JSON.  
-  - Ensure store is set and, if you use Excel, that the file is uploaded so matching has data to match against.
+| Issue | Solution |
+|-------|----------|
+| No tags in Current Inventory | Confirm store is selected; upload Excel or ensure the product database has products for that store; try **Reset Cache** and reload. |
+| Generate does nothing or no download | Ensure at least one tag is in **Selected**; check browser download settings and pop-up blocker; check app logs or browser console (F12). |
 
-### Tags / generation
+### 11.4 Performance and cache
 
-- **No tags in Current Inventory**  
-  - Confirm store is selected.  
-  - Upload an Excel file **or** ensure the product database has products for that store.  
-  - Try **Reset Cache** and reload the page.
+| Issue | Solution |
+|------|----------|
+| Slow or stale data | Use **Reset Cache** and reload; for heavy use, restart the application. |
+| Port already in use | Use the URL shown in the console (app may use 8001–8010). Or set `FLASK_PORT` to a free port and restart. |
 
-- **Generate does nothing or no download**  
-  - Ensure at least one tag is in **Selected**.  
-  - Check the browser’s download settings (allow downloads, no aggressive pop-up blocker).  
-  - Check the app logs or browser console for errors.
+### 11.5 Network (other computers cannot connect)
 
-### Performance and cache
+- Use the **network URL** printed at startup (e.g. `http://<IP>:8001`).  
+- Allow the application’s port in your firewall (Windows/macOS/Linux).  
+- For local-only use, set `HOST=127.0.0.1` before starting; use port forwarding or a reverse proxy for remote access.
 
-- **Slow or stale data**  
-  Use **Reset Cache**, then reload. For heavy use, restart the app.
+### 11.6 Logs
 
-- **Port already in use**  
-  The app will try 8001–8010. Use the URL printed in the console (it will show the port actually used). Or set `FLASK_PORT` to a free port and restart.
-
-### Network (other computers can’t connect)
-
-- App binds to `0.0.0.0` by default. Use the **network URL** printed at startup (e.g. `http://<IP>:8001`).
-- Allow the app’s port in your **firewall** (Windows/macOS/Linux).
-- If still failing, try `HOST=127.0.0.1` only for local use and use port forwarding or a reverse proxy for remote access.
-
-### Logs
-
-- **Log viewer** (e.g. under **/logs** or linked from the UI) shows server-side logs.
-- Browser **Developer Tools (F12)** → **Console** and **Network** help debug front-end and API errors.
+- **Server logs:** Log viewer (e.g. under **/logs** or linked from the UI).  
+- **Browser:** Developer Tools (F12) → **Console** and **Network** for front-end and API errors.
 
 ---
 
-## Quick Reference
+## 12. Quick Reference
 
-| Task              | Action |
-|-------------------|--------|
-| Start app         | `python3 app.py` |
-| Open app          | Browser → `http://127.0.0.1:8001` (or URL shown in console) |
-| Select store      | Use modal on first load; required before upload |
-| Load products     | **Upload Excel** or use **Match JSON** with a URL |
-| Filter list       | Use Vendor, Brand, Product Type, Lineage, etc. |
-| Select for labels | Check items in Current Inventory; see Selected on the right |
-| Generate labels  | Pick **TEMPLATE** → **Generate Tags** → download DOCX |
-| Export selection  | **Export Data** (Excel of selected tags) |
-| Manage products   | **Data & Analytics** → Edit DB, backups, analytics |
-| Fix stale data    | **Reset Cache** and/or reload page |
+| Task | Action |
+|------|--------|
+| Start application | `python3 app.py` |
+| Open application | Browser → `http://127.0.0.1:8001` (or URL shown in console) |
+| Select store | Use modal on first load; required before upload |
+| Load products | **Upload Excel** or **Match JSON** with a URL |
+| Filter list | Use Vendor, Brand, Product Type, Lineage, etc. |
+| Select for labels | Check items in Current Inventory; review Selected on the right |
+| Generate labels | Choose **TEMPLATE** → **Generate Tags** → download DOCX |
+| Export selection | **Export Data** (Excel of selected tags) |
+| Manage products | **Data & Analytics** → Edit DB, backups, analytics |
+| Fix stale data | **Reset Cache** and/or reload page |
 
 ---
 
-*For installation details see `INSTALLATION.md`. For performance and API behavior see `QUICK_START_GUIDE.md` and `api_endpoints_summary.md`.*
+## Related documentation
+
+- **Installation details:** `INSTALLATION.md`  
+- **Performance and API:** `QUICK_START_GUIDE.md`, `api_endpoints_summary.md`
+
+---
+
+*AGT Label Maker — User Manual v1.0*

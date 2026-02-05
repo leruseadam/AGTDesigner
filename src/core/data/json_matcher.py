@@ -2903,8 +2903,8 @@ class JSONMatcher:
                         # Use pre-filtered cache or fallback to full cache
                         candidates_to_check = cache_to_search
                         
-                        # PERFORMANCE: Limit candidates to check (max 100 for speed - reduced from 300)
-                        candidates_to_check = candidates_to_check[:100]
+                        # PERFORMANCE: Limit candidates to check (max 50 for speed)
+                        candidates_to_check = candidates_to_check[:50]
                         
                         # PERFORMANCE: Pre-compute product name lower once
                         product_name_lower = product_name.lower()
@@ -3107,24 +3107,6 @@ class JSONMatcher:
                                         best_match = cache_item
                             except Exception as e:
                                 continue
-                
-                # DB FALLBACK: When cache (Excel) has no match, try vendor+strain and strain+type from full DB.
-                # This finds Honey Tree / Prana AIO etc. when they exist in the DB but aren't in the current Excel.
-                if best_match is None and (effective_vendor or product_name):
-                    db_fallback = self._find_vendor_keyword_match(
-                        product_name, (effective_vendor or "").strip(), (product_type or "").strip()
-                    )
-                    if not db_fallback:
-                        db_fallback = self._find_strain_type_match(
-                            product_name,
-                            (effective_vendor or "").strip(),
-                            (product_type or "").strip(),
-                            (strain or "").strip(),
-                        )
-                    if db_fallback:
-                        best_match = db_fallback
-                        best_score = 85.0
-                        logging.info(f"✅ DB FALLBACK MATCH: '{product_name[:50]}' → '{best_match.get('Product Name*', '')[:50]}' (vendor/strain+type)")
                 
                 # If we found a good match, create a product
                 # PROFESSIONAL-GRADE ACCURACY: Strict threshold (90.0) for high confidence
