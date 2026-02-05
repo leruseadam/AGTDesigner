@@ -2927,6 +2927,7 @@ class JSONMatcher:
                 weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
                 price = str(item.get("line_price", item.get("price", ""))).strip()
                 strain = str(item.get("strain_name", item.get("strain", ""))).strip()
+                json_strain_lower = (strain or "").lower().strip() if strain else ""
                 
                 # CRITICAL FIX: Transform SKU to readable name BEFORE matching
                 product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
