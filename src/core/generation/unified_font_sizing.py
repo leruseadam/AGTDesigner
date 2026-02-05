@@ -29,8 +29,8 @@ def _load_font_sizing_config():
         return {
             'standard': {
                 'mini': {
-                    'description': [(5, 18), (20, 17), (30, 16), (35, 15), (40, 14), (45, 13), (50, 12), (60, 11), (70, 10), (100, 9), (float('inf'), 8)],
-                    'brand': [(5, 10.5), (10, 9.5), (20, 8), (30, 7.5), (float('inf'), 6.5)],
+                    'description': [(5, 20), (20, 19), (25, 18), (30, 17), (35, 16), (40, 15), (45, 14), (50, 13), (55, 12), (60, 11), (70, 10), (100, 9), (float('inf'), 8)],
+                    'brand': [(5, 10.5), (20, 9), (30, 7.5), (float('inf'), 6.5)],
                     'price': [(1, 18), (2, 16), (float('inf'), 14)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
                     'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
@@ -43,7 +43,7 @@ def _load_font_sizing_config():
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
-                    'description': [(10, 28), (20, 26), (30, 23), (35, 21), (40, 19), (45, 18), (50, 17), (60, 16), (80, 15), (90, 13), (100, 12), (120, 10), (float('inf'), 9)],
+                    'description': [(10, 28), (20, 26), (30, 23), (35, 21), (40, 19), (45, 18), (50, 17), (70, 16), (90, 15), (100, 14), (120, 12), (float('inf'), 9)],
                     'brand': [(5, 12), (15, 10), (20, 8), (30, 7.5), (40, 7), (float('inf'), 6.5)],
                     'price': [(10, 26), (15, 21), (float('inf'), 14)],
                     'lineage': [(15, 16), (25, 15), (35, 14), (45, 9), (float('inf'), 9)],
@@ -52,7 +52,9 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 16), (25, 14), (35, 12), (float('inf'), 9)],
                     'doh': [(15, 20), (25, 16), (float('inf'), 13)],
-                    'vendor': [(10, 6), (float('inf'), 5)],
+                    # Vendor label: keep consistent small label size across templates
+                    # Use 6pt even for longer vendor names (matches horizontal template)
+                    'vendor': [(10, 6), (float('inf'), 6)],
                     'qr': [(float('inf'), 36)],  # QR codes: Medium size for double template
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },
@@ -66,7 +68,8 @@ def _load_font_sizing_config():
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
                     'weight': [(15, 20), (25, 18), (35, 16), (float('inf'), 14)],
                     'doh': [(15, 24), (25, 20), (float('inf'), 18)],
-                    'vendor': [(10, 6), (float('inf'), 5)],
+                    # Vendor label: match horizontal/double for visual consistency
+                    'vendor': [(10, 6), (float('inf'), 6)],
                     'qr': [(float('inf'), 45)],  # QR codes: Large size for vertical template
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
@@ -293,32 +296,6 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             return Pt(first_size * scale_factor)
         return Pt(12 * scale_factor)
     
-    # Special rule: If Description has any word longer than 8 characters in Vertical Template,
-    # reduce font size so that it's 28pt or smaller (user requirement: >8-letter words must be 28pt or smaller)
-    if field_type.lower() == 'description' and orientation.lower() == 'vertical':
-        words = str(text).split()
-        if words:
-            max_word_length = max(len(word) for word in words)
-            if max_word_length > 8:
-                # Calculate appropriate font size based on the longest word, but cap at 28pt
-                if max_word_length <= 10:
-                    font_size = 28
-                elif max_word_length <= 12:
-                    font_size = 24
-                elif max_word_length <= 15:
-                    font_size = 20
-                elif max_word_length <= 18:
-                    font_size = 16
-                else:
-                    font_size = 11
-
-                # Enforce upper cap of 28pt to satisfy requirement
-                font_size = min(font_size, 28)
-                final_size = font_size * scale_factor
-                logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font (capped at 28pt)")
-                return Pt(final_size)
-    
-    
     # Special guard: extremely long double-template brands still maintain 8pt minimum (removed 6.5pt cap)
     # Long brands (12+) are already forced to 8pt above, so this guard is no longer needed
     
@@ -409,8 +386,26 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         if field_type.lower() == 'price':
             logger.info(f"PRICE DEBUG: threshold {threshold} -> size {size}, comp {comp} <= threshold? {comp <= threshold}")
         if comp <= threshold:  # Fixed: Use <= instead of < for proper threshold matching
-            final_size = size * scale_factor
-            logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
+            adjusted_size = size
+
+            # Special rule: Descriptions with any word longer than 8 characters
+            # should render 1pt smaller than the base size that would normally be chosen.
+            # Originally applied only to vertical; now also applied to double for consistency.
+            if field_type.lower() == 'description' and orientation.lower() in ('vertical', 'double'):
+                try:
+                    words = [w for w in str(text).split() if w]
+                    if any(len(w) > 8 for w in words):
+                        # Decrease by 1pt but never below 8pt for readability
+                        adjusted_size = max(size - 1, 8)
+                        logger.debug(
+                            f"{orientation} description long-word rule: text='{text}', "
+                            f"base_size={size}pt, adjusted_size={adjusted_size}pt"
+                        )
+                except Exception:
+                    logger.exception("Error applying vertical description long-word rule")
+
+            final_size = adjusted_size * scale_factor
+            logger.debug(f"Selected size {adjusted_size}pt (final: {final_size}pt)")
             if field_type.lower() == 'price':
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
             if field_type.lower() == 'brand' and 'CONSTELLATION' in text.upper():

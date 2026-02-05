@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Bulletproof Label Maker Control Script
+# Bulletproof AGT Designer Control Script
 # This script WILL work - guaranteed!
 
 APP_DIR="/Users/adamcordova/Desktop/labelMaker_ QR copy final"
@@ -8,7 +8,7 @@ PORT=8001
 
 # Function to kill everything
 kill_all() {
-    echo "🔫 Killing all Label Maker processes..."
+    echo "🔫 Killing all AGT Designer processes..."
     
     # Kill by port
     PORT_PIDS=$(lsof -ti:$PORT 2>/dev/null)
@@ -40,7 +40,7 @@ kill_all() {
 
 # Function to start the app
 start_app() {
-    echo "🚀 Starting Label Maker..."
+    echo "🚀 Starting AGT Designer..."
     
     # First, kill everything
     kill_all
@@ -74,7 +74,7 @@ start_app() {
 
 # Function to show status
 show_status() {
-    echo "📊 Label Maker Status:"
+    echo "📊 AGT Designer Status:"
     echo "======================"
     
     # Check if port is in use
@@ -95,7 +95,7 @@ show_status() {
         # Check for any Python processes
         PYTHON_COUNT=$(ps aux | grep python | grep -v grep | wc -l)
         if [ $PYTHON_COUNT -gt 0 ]; then
-            echo "⚠️  Found $PYTHON_COUNT Python processes running (not Label Maker)"
+            echo "⚠️  Found $PYTHON_COUNT Python processes running (not AGT Designer)"
         fi
     fi
 }
@@ -106,12 +106,12 @@ case "${1:-help}" in
         start_app
         ;;
     stop)
-        echo "🛑 Stopping Label Maker..."
+        echo "🛑 Stopping AGT Designer..."
         kill_all
         echo "✅ App stopped!"
         ;;
     restart)
-        echo "🔄 Restarting Label Maker..."
+        echo "🔄 Restarting AGT Designer..."
         kill_all
         sleep 2
         start_app
@@ -123,15 +123,15 @@ case "${1:-help}" in
         kill_all
         ;;
     *)
-        echo "🎯 Label Maker Control Script"
+        echo "🎯 AGT Designer Control Script"
         echo "============================"
         echo ""
         echo "Usage: $0 [command]"
         echo ""
         echo "Commands:"
-        echo "  start    - Start the Label Maker app"
-        echo "  stop     - Stop the Label Maker app"
-        echo "  restart  - Restart the Label Maker app"
+        echo "  start    - Start the AGT Designer app"
+        echo "  stop     - Stop the AGT Designer app"
+        echo "  restart  - Restart the AGT Designer app"
         echo "  status   - Show app status"
         echo "  kill     - Force kill all processes"
         echo ""

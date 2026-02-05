@@ -1,4 +1,4 @@
-# AGT Label Maker - Python Dependencies
+# AGT Designer - Python Dependencies
 # 
 # RECOMMENDED: Use automated installation (applies docxcompose patch automatically)
 #   Local:         python3 install_requirements.py

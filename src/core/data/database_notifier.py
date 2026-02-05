@@ -1,5 +1,5 @@
 """
-Database Notifier for Label Maker Application
+Database Notifier for AGT Designer Application
 Integrates with session manager to ensure immediate propagation of database changes.
 """
 

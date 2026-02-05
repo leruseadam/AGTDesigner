@@ -2,7 +2,7 @@
 
 ## Overview
 
-A comprehensive test suite has been created for the AGT Label Maker application, covering all major components and functionality.
+A comprehensive test suite has been created for the AGT Designer application, covering all major components and functionality.
 
 ## Test Files Created
 

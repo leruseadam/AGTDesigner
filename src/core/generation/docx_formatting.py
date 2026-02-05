@@ -1308,15 +1308,18 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                     tcPr.append(tcH)
                                 tcH.set(qn('w:w'), '1440')  # Fixed height in twips (1.0 inch)
                                 tcH.set(qn('w:hRule'), 'exact')  # Exact height rule
-                            
+
                             # Process paragraphs in the cell to prevent text overflow
                             # OPTIMIZATION: Skip expensive paragraph/run processing if requested
                             if not skip_paragraph_processing:
                                 for paragraph in cell.paragraphs:
-                                    # Set paragraph spacing to minimum
-                                    paragraph.paragraph_format.space_before = Pt(0)
-                                    paragraph.paragraph_format.space_after = Pt(0)
-                                    paragraph.paragraph_format.line_spacing = 1.0
+                                    # For most templates, force tight spacing inside cells so text doesn't
+                                    # push the cell taller. For mini/preroll, leave paragraph spacing on the
+                                    # template's default ("auto") so Word controls the paragraph spacing.
+                                    if template_type not in ('mini', 'preroll'):
+                                        paragraph.paragraph_format.space_before = Pt(0)
+                                        paragraph.paragraph_format.space_after = Pt(0)
+                                        paragraph.paragraph_format.line_spacing = 1.0
                                     
                                     # CRITICAL: Set paragraph alignment to prevent expansion
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT

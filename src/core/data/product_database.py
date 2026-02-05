@@ -6272,6 +6272,7 @@ class ProductDatabase:
                        p."Description_Complexity", p."Total THC", p."THCA", p."CBDA", p."CBN", 0 as total_occurrences, '' as first_seen_date, '' as last_seen_date
                 FROM products p
                 WHERE 1=1
+                  AND (p."Is Sample? (yes/no)" IS NULL OR LOWER(p."Is Sample? (yes/no)") != 'yes')
             '''
             
             params = []

@@ -49,7 +49,7 @@ def create_manual():
     # Title
     title_para = doc.add_paragraph()
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title_para.add_run('AGT Label Maker')
+    title_run = title_para.add_run('AGT Designer')
     title_run.font.size = Pt(36)
     title_run.font.bold = True
     title_run.font.color.rgb = RGBColor(0, 51, 102)
@@ -115,7 +115,7 @@ def create_manual():
     doc.add_heading('1. Overview', 1)
     
     doc.add_paragraph(
-        'AGT Label Maker is a web application for generating professional cannabis product labels. '
+        'AGT Designer is a web application for generating professional cannabis product labels. '
         'It uses store-specific Excel files and/or a product database, and can match products from '
         'external JSON URLs (e.g., Cultivera inventory transfers).'
     )
@@ -763,7 +763,7 @@ def create_manual():
     footer_para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     doc.add_paragraph()
-    final_para = doc.add_paragraph('AGT Label Maker — User Manual v1.0')
+    final_para = doc.add_paragraph('AGT Designer — User Manual v1.0')
     final_para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
     final_para.runs[0].italic = True
     
@@ -773,7 +773,7 @@ if __name__ == '__main__':
     print('Generating professional DOCX user manual...')
     doc = create_manual()
     
-    output_path = os.path.join(os.path.dirname(__file__), '..', 'docs', 'AGT_Label_Maker_User_Manual.docx')
+    output_path = os.path.join(os.path.dirname(__file__), '..', 'docs', 'AGT_Designer_User_Manual.docx')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
     doc.save(output_path)

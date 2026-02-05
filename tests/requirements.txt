@@ -1,4 +1,4 @@
-# Test dependencies for AGT Label Maker test suite
+# Test dependencies for AGT Designer test suite
 
 # Testing framework
 pytest>=7.0.0

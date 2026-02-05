@@ -215,17 +215,32 @@ def fix_description_spacing(desc: str) -> str:
 
 def make_nonbreaking_hyphens(text):
     """
-    Format hyphens with proper spacing: normal space + normal hyphen + non-breaking space.
-    This allows line breaks before the hyphen but prevents breaks after it.
-    Example: "Pre-Roll - 1g" becomes "Pre-Roll -<nbsp>1g"
+    Apply non-breaking behavior to critical hyphens so label text
+    does not split in awkward places.
+
+    Rules:
+    - Inside "Pre-Roll"/"Pre-roll"/"pre-roll[s]" use a non-breaking hyphen
+      (U+2011) so "Pre‑Roll" always stays on one line.
+    - For weight separators like " - 1g", convert the space after the hyphen
+      to a non-breaking space so the hyphen stays attached to the weight:
+      "Pre-Roll - 1g" → "Pre-Roll - 1g".
     """
     if not text or not isinstance(text, str):
         return text
 
     import re
 
-    # Replace " - " (space-hyphen-space) with " -<nbsp>" (space-hyphen-non-breaking-space)
-    # This allows breaks before the hyphen but prevents breaks after
+    # 1) Make the hyphen in "Pre-Roll"/"Pre-roll"/"pre-roll[s]" non-breaking
+    #    so Word/HTML never split between "Pre" and "Roll".
+    def _pre_roll_replacer(match):
+        word = match.group(0)
+        return word.replace('-', '\u2011')  # non-breaking hyphen
+
+    text = re.sub(r'\bpre-rolls?\b', _pre_roll_replacer, text, flags=re.IGNORECASE)
+
+    # 2) Replace " - " (space-hyphen-space) with " -<nbsp>" (space-hyphen-non-breaking-space)
+    #    This allows line breaks before the hyphen but prevents breaks after it,
+    #    keeping the hyphen attached to the units/weight.
     text = re.sub(r'\s+-\s+', ' -\u00A0', text)
 
     return text

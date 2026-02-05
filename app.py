@@ -112,7 +112,8 @@ else:
     PERMANENT_SESSION_LIFETIME = 1800
     
     # More generous memory settings for local (still overridable)
-    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '500'))
+    # Increased default to reduce spurious memory warnings during heavy local use
+    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '800'))
     CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '100'))
     BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '500'))
 

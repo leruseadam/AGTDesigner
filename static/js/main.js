@@ -130,6 +130,89 @@ const safeReload = (delay = 0) => {
 window.safeReload = safeReload;
 window._reloadInProgress = false; // Make flag accessible
 
+// Global inactivity notification (1 hour)
+// After 60 minutes with no user interaction, show a full-screen modal.
+(function setupInactivityAutoReload() {
+    const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 hour
+    let inactivityTimer = null;
+
+    const resetInactivityTimer = () => {
+        // Do not auto-reload if the emergency kill switch is active
+        if (window.EMERGENCY_KILL_SWITCH) {
+            return;
+        }
+
+        if (inactivityTimer) {
+            clearTimeout(inactivityTimer);
+            inactivityTimer = null;
+        }
+
+        inactivityTimer = setTimeout(() => {
+            console.log('⏰ No user activity for 1 hour - showing idle session modal');
+
+            const messageHtml = [
+                '<p style="margin-bottom: 8px;">You have been inactive for an hour.</p>',
+                '<p style="margin-bottom: 0;">Click <strong>OK</strong> to reload the page and ensure your data is fresh.</p>'
+            ].join('');
+
+            // Prefer our custom full-screen modal helper if available
+            if (window.agtShowModal) {
+                window.agtShowModal({
+                    title: 'Session Idle',
+                    message: messageHtml,
+                    buttons: [
+                        { text: 'OK', value: 'ok', primary: true }
+                    ]
+                }).then((result) => {
+                    if (result === 'ok') {
+                        if (typeof window.safeReload === 'function') {
+                            window.safeReload();
+                        } else {
+                            window.location.reload();
+                        }
+                    }
+                });
+            } else if (typeof showToast === 'function') {
+                // Fallback to a toast plus manual reload
+                showToast(
+                    'info',
+                    'You have been inactive for an hour. Please reload the page to ensure your data is fresh.'
+                );
+            } else if (window.Toast && typeof window.Toast.show === 'function') {
+                // Fallback to Toast helper if present
+                window.Toast.show(
+                    'info',
+                    'You have been inactive for an hour. Please reload the page to ensure your data is fresh.'
+                );
+            } else {
+                // Final fallback: simple browser dialog
+                if (window.confirm('You have been inactive for an hour. Reload now to ensure your data is fresh?')) {
+                    if (typeof window.safeReload === 'function') {
+                        window.safeReload();
+                    } else {
+                        window.location.reload();
+                    }
+                }
+            }
+        }, INACTIVITY_LIMIT_MS);
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click', 'focus'];
+    activityEvents.forEach(eventName => {
+        window.addEventListener(eventName, resetInactivityTimer, { passive: true });
+    });
+
+    // When the tab becomes visible again, restart the inactivity timer
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            resetInactivityTimer();
+        }
+    });
+
+    // Initialize on load
+    resetInactivityTimer();
+})();
+
 // Memory-optimized performance utilities
 // Performance detection for slow computers
 const devicePerformance = (function() {
@@ -20499,7 +20582,112 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     });
-    
+
+    // Global Enter/Escape behavior for professional-feeling keyboard UX
+    document.addEventListener('keydown', function (event) {
+        const key = event.key || event.code;
+
+        // Don't interfere with typing in standard text inputs/textareas
+        const activeEl = document.activeElement;
+        const activeTag = activeEl && activeEl.tagName;
+        const isTypingContext =
+            activeEl &&
+            (activeTag === 'INPUT' || activeTag === 'TEXTAREA') &&
+            activeEl.type !== 'button' &&
+            activeEl.type !== 'submit';
+
+        // Helper: get the top‑most visible modal, if any
+        const openModals = Array.from(
+            document.querySelectorAll('.modal.show, .modal[aria-modal="true"][style*="display: block"]')
+        );
+        const topModal = openModals.length ? openModals[openModals.length - 1] : null;
+
+        if (key === 'Enter') {
+            // If user is actively typing into a field, let the browser handle Enter
+            if (isTypingContext) {
+                return;
+            }
+
+            // If a modal is open, treat Enter as "primary action" for that modal
+            if (topModal) {
+                // Store selection modal: pressing Enter should activate the focused store button (if any)
+                if (topModal.id === 'storeSelectionModal') {
+                    const focusedStoreBtn =
+                        document.activeElement &&
+                        document.activeElement.classList &&
+                        document.activeElement.classList.contains('btn-store-option')
+                            ? document.activeElement
+                            : topModal.querySelector('.btn-store-option:focus');
+
+                    if (focusedStoreBtn && typeof focusedStoreBtn.click === 'function') {
+                        event.preventDefault();
+                        focusedStoreBtn.click();
+                    }
+                    return;
+                }
+
+                // Generic modals: click the primary/submit button if present
+                const primaryButton =
+                    topModal.querySelector('button.btn-primary, button.btn-success, button[type="submit"], .modal-footer .btn-primary') ||
+                    topModal.querySelector('button[type="button"].btn-primary');
+
+                if (primaryButton && typeof primaryButton.click === 'function') {
+                    event.preventDefault();
+                    primaryButton.click();
+                    return;
+                }
+            }
+
+            // No modal open: Enter should trigger Generate Tags (if available)
+            const generateBtn = document.getElementById('generateBtn');
+            if (
+                generateBtn &&
+                typeof generateBtn.click === 'function' &&
+                !generateBtn.disabled &&
+                window.getComputedStyle(generateBtn).display !== 'none' &&
+                window.getComputedStyle(generateBtn).visibility !== 'hidden'
+            ) {
+                event.preventDefault();
+                generateBtn.click();
+            }
+        } else if (key === 'Escape' || key === 'Esc') {
+            // First, close the top‑most modal if one is open (except the required store selector)
+            if (topModal && topModal.id !== 'storeSelectionModal') {
+                event.preventDefault();
+
+                try {
+                    if (window.bootstrap && typeof window.bootstrap.Modal !== 'undefined') {
+                        // Prefer Bootstrap's API when available
+                        let modalInstance = window.bootstrap.Modal.getInstance(topModal);
+                        if (!modalInstance) {
+                            modalInstance = window.bootstrap.Modal.getOrCreateInstance(topModal);
+                        }
+                        if (modalInstance && typeof modalInstance.hide === 'function') {
+                            modalInstance.hide();
+                        }
+                    } else {
+                        // Fallback: hide manually
+                        topModal.classList.remove('show');
+                        topModal.style.display = 'none';
+                        topModal.setAttribute('aria-hidden', 'true');
+
+                        const backdrop =
+                            document.getElementById('storeModalBackdrop') ||
+                            document.querySelector('.modal-backdrop.show');
+                        if (backdrop && backdrop.parentNode) {
+                            backdrop.parentNode.removeChild(backdrop);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error hiding modal via Escape key:', err);
+                }
+
+                return;
+            }
+            // If no modal is open, let the existing Esc‑to‑clear‑filters handler run
+        }
+    });
+
     // Ensure proper scrolling behavior (safe to call even if TagManager not fully initialized)
     if (window.TagManager && typeof TagManager.ensureProperScrolling === 'function') {
         TagManager.ensureProperScrolling();

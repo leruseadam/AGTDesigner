@@ -38,7 +38,7 @@ def main():
         sys.exit(1)
     
     print("=" * 60)
-    print("AGT Label Maker - Automated Installation")
+    print("AGT Designer - Automated Installation")
     print("=" * 60)
     print()
     

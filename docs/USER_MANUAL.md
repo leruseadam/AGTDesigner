@@ -1,9 +1,9 @@
-# AGT Label Maker  
+# AGT Designer  
 ## User Manual
 
-**Document version:** 1.0  
-**Application:** AGT Label Maker — Professional Cannabis Label Generation  
-**Last updated:** 2025
+**Document version:** 1.1  
+**Application:** AGT Designer — Professional Cannabis Label Generation  
+**Last updated:** 2026
 
 ---
 
@@ -21,12 +21,13 @@
 10. [Database and Data Tools](#10-database-and-data-tools)
 11. [Troubleshooting](#11-troubleshooting)
 12. [Quick Reference](#12-quick-reference)
+13. [Advanced: QR Codes, Preroll Template, and Product Data](#13-advanced-qr-codes-preroll-template-and-product-data)
 
 ---
 
 ## 1. Overview
 
-AGT Label Maker is a web application for generating professional cannabis product labels. It uses store-specific Excel files and/or a product database, and can match products from external JSON URLs (e.g., Cultivera inventory transfers).
+AGT Designer is a web application for generating professional cannabis product labels. It uses store-specific Excel files and/or a product database, and can match products from external JSON URLs (e.g., Cultivera inventory transfers).
 
 ### What the application does
 
@@ -374,6 +375,129 @@ From the database/analytics UI you may **backup** the database, **restore** from
 
 ---
 
+## 13. Advanced: QR Codes, Preroll Template, and Product Data
+
+### 13.1 QR codes on labels
+
+- **What they are:** QR codes are printed on certain label templates (especially **Preroll**) to provide a detailed, always up-to-date view of products without overloading the physical tag.  
+- **What they link to:**  
+  - For **Preroll** labels, each QR code links to a **live product list page** (a preroll menu) for that vendor and group.  
+  - The page shows product names, weights, THC/CBD information, and compliance details pulled from the same data that powers your tags.  
+- **Vendor- and group-specific:** The QR URL is tied to a particular **preroll group and vendor**, so the page only shows the relevant products (not your entire inventory).  
+- **Expiration behavior:** The preroll list behind a QR code is cached for a limited time (roughly a day). If it expires, the customer will see a message telling them to **scan a fresh QR code** from a newer label or menu.
+
+> **Note:** THC/CBD percentages that used to be printed directly on some templates have been moved into the QR code flow. The label stays clean, while the QR page carries detailed test results when available.
+
+### 13.2 Preroll template and preroll product list
+
+- **Preroll template:**  
+  - Designed specifically for **pre-roll joints and blunts**.  
+  - Groups items into logical **preroll groups** (for example, by vendor, brand, strain, and pack size).  
+  - Centers QR codes on the label so they are easy to scan in menus or on packaging.  
+- **Preroll product list document:**  
+  - When you generate tags with the **Preroll** template, the application also generates a **separate preroll product list DOCX** (a menu-style document) using the same groups.  
+  - This list corresponds directly to the QR codes: scanning the QR on a tag opens the matching preroll group page.  
+  - Use this menu alongside physical tags to give customers a full, readable listing of your prerolls.
+
+> **Tip:** For best results, keep your **Product Type*** and **Description** fields in Excel accurate for prerolls (e.g., clearly indicating pre-roll, pack size, and weight). This helps the system group prerolls correctly and derive a useful **JointRatio** (see below).
+
+### 13.3 Classic vs nonclassic product types
+
+The application treats some product types as **classic** (traditional inhalable or cannabis-forward categories) and others as **nonclassic** (edibles, tinctures, topicals, etc.). This matters for **lineage colors**, **default lineage values**, and some analytics.
+
+- **Classic types (examples):**  
+  - Flower / Bud  
+  - Pre-Roll / Preroll  
+  - Concentrates (e.g., wax, shatter, rosin)  
+  - Many standard Edibles
+- **Nonclassic types (examples):**  
+  - Tinctures, Oils, Capsules  
+  - Topicals, Lotions, Balms  
+  - Certain specialty edibles or non-THC-heavy formats
+
+Key behaviors:
+
+- **Classic types** can use the full set of lineages (Sativa, Indica, Hybrid, etc.).  
+- **Nonclassic types** are normalized to high-level categories like **MIXED** or **CBD** instead of showing misleading Sativa/Indica labels.  
+- The system automatically **enforces rules** so nonclassic products never show invalid classic-only lineages.
+
+### 13.4 Lineages and strain handling
+
+**Lineage** describes the overall Sativa/Indica/CBD character of a product and drives color-coding in many templates.
+
+- **Typical lineage values:**  
+  - `SATIVA`, `INDICA`, `HYBRID`  
+  - `MIXED` (used heavily for nonclassic products and blended items)  
+  - `CBD`, `CBD_BLEND` (for clearly CBD-forward or High CBD products)
+- **Where lineage comes from:**  
+  - Your Excel fields (`Lineage`, `Product Strain`, and strain-related columns).  
+  - JSON product names and data (for JSON-matched products).  
+  - The internal **strain database** when available (for example, filling in missing lineages or aligning vendor names with canonical strain data).
+- **Safeguards:**  
+  - If a classic product is tagged as `MIXED`, the system may normalize it to `HYBRID` to keep lineages consistent.  
+  - Nonclassic products are forced into **MIXED** or **CBD** style categories; they will not show `SATIVA` or `INDICA` lineages on tags.
+
+> **Practical impact:** The lineage you see on a tag is not always a direct copy of the Excel cell—it is often the **result of enrichment and validation** using JSON data, the strain database, and lineage rules designed to keep colors and wording consistent.
+
+### 13.5 DOH compliance and High CBD products
+
+Two important compliance-related concepts appear in filters and on tags: **DOH** and **High CBD**.
+
+- **DOH (Department of Health) fields in Excel/database:**  
+  - `DOH`  
+  - `DOH Compliant (Yes/No)` (and similar variants)  
+  - These are normalized internally so that the application can consistently tell whether a product is DOH-compliant, THC-only, CBD, etc.
+- **High CBD products:**  
+  - Identified primarily from the **Product Type** and DOH-style fields (for example, types beginning with “High CBD”).  
+  - Always treated as **CBD-forward** products, which influences lineage (`CBD` / `CBD_BLEND`) and badge display.  
+
+How this appears in the UI:
+
+- The **High CBD** filter allows you to choose between **High CBD Products** and **Non-High CBD Products**.  
+- On many templates, products can show **badges**:  
+  - DOH badge: indicates DOH compliance for standard products.  
+  - High CBD badge: indicates a High CBD product and often **replaces the DOH badge** (for High CBD items, CBD status takes priority).  
+- For High CBD products, CBD/DOH logic is simplified so the High CBD status is always clear and not mixed with conflicting DOH labels.
+
+### 13.6 Excel processing details (Description, JointRatio, and related fields)
+
+The application does a significant amount of work behind the scenes when reading your Excel file. Some key fields:
+
+- **`Product Name*`**: The primary identifier for products. Used for matching to the product database and JSON data.  
+- **`Product Type*`**: Drives classic vs nonclassic logic, lineage behavior, High CBD detection, and which templates/products are eligible for preroll grouping.  
+- **`Description`**:  
+  - Used as human-readable text on many label templates.  
+  - May be parsed to help detect preroll details (e.g., “infused preroll”, “shorty”, pack sizes).  
+  - Keeping this concise and accurate improves grouping and reduces the chance of odd line breaks on labels.
+- **`Lineage` / `Product Strain` / strain-related fields:**  
+  - Provide initial lineage hints that are later enriched or corrected using the strain database and JSON data.  
+  - Missing or inconsistent values can often be corrected automatically, but cleaner input leads to more predictable tag colors and wording.
+- **`Weight*` and `Weight Unit* (grams/gm or ounces/oz)`**:  
+  - Used to compute display weights and to help infer pack sizes for prerolls.  
+  - Also used as a fallback when other information (like JointRatio) is missing.
+- **`DOH` and `DOH Compliant (Yes/No)`**:  
+  - Normalized into a single internal DOH value.  
+  - Control DOH badge display and can influence how CBD vs. THC status is interpreted.
+
+#### JointRatio for prerolls
+
+**JointRatio** is a derived value used primarily for preroll menus and grouping. It describes **how many grams per joint and how many joints per pack**.
+
+- **If your Excel already has `JointRatio` or `Joint Ratio`:**  
+  - Those values are used directly when they are valid (non-empty and non-zero).  
+  - Example formats: `0.5g x 2`, `1g x 5`.
+- **If `JointRatio` is missing:** the system tries to infer it in several stages:  
+  1. **Look up** a matching product in the product database and reuse its `JointRatio`.  
+  2. **Parse the product name** for patterns like `0.5g x 2 Pack`, `1g x 5`, or `5pk` and calculate a `weight g x count` ratio.  
+  3. **Fallback to weight:** if nothing else is available, build a ratio-like string from `Weight*` and its units (e.g., `1g`, `3.5g`, or `1oz`).
+- **Why this matters:**  
+  - The `JointRatio` is used for preroll grouping and presentation in preroll menus and QR-backed pages.  
+  - Providing a clear pack format in **Product Name*** and/or a valid `JointRatio` column makes preroll menus far more readable.
+
+> **Recommendation:** When you define new preroll products in Excel, include either a clean **JointRatio** (such as `0.5g x 2`) or a product name that clearly encodes weight and pack size. This lets the application calculate sensible preroll groupings and QR-backed menus with minimal manual cleanup.
+
+---
+
 ## Related documentation
 
 - **Installation details:** `INSTALLATION.md`  
@@ -381,4 +505,4 @@ From the database/analytics UI you may **backup** the database, **restore** from
 
 ---
 
-*AGT Label Maker — User Manual v1.0*
+*AGT Designer — User Manual v1.1*

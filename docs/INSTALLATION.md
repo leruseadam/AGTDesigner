@@ -1,4 +1,4 @@
-# AGT Label Maker - Installation Guide
+# AGT Designer - Installation Guide
 
 ## Quick Start
 

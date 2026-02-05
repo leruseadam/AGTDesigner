@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Development startup script for Label Maker app.
+Development startup script for AGT Designer app.
 This script enables auto-reloading so you don't have to restart manually.
 """
 
@@ -18,7 +18,7 @@ os.environ['DISABLE_STARTUP_FILE_LOADING'] = '1'
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 if __name__ == '__main__':
-    print("🚀 Starting Label Maker in DEVELOPMENT mode with auto-reloading...")
+    print("🚀 Starting AGT Designer in DEVELOPMENT mode with auto-reloading...")
     print("📝 Changes to Python files will automatically restart the server")
     print("🌐 Server will be available at: http://127.0.0.1:5002")
     print("⏹️  Press Ctrl+C to stop the server")

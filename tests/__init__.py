@@ -1,4 +1,4 @@
 """
-Comprehensive test suite for AGT Label Maker application.
+Comprehensive test suite for AGT Designer application.
 """
 

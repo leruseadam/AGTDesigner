@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create a fresh, working database for AGT Label Maker
+Create a fresh, working database for AGT Designer
 """
 
 import os

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Quick fix script for web deployment
 
-echo "🚀 AGT Label Maker - Quick Web Fix"
+echo "🚀 AGT Designer - Quick Web Fix"
 echo "=================================="
 
 # Pull latest changes

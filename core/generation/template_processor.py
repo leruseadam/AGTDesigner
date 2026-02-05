@@ -4083,7 +4083,7 @@ class TemplateProcessor:
             
             # Ensure consistent spacing above all marker sections for equal margins
             paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+            paragraph.paragraph_format.space_after = Pt(2)
             
             # Sort markers by position in text
             sorted_markers = sorted(processed_content.items(), key=lambda x: x[1]['start_pos'])
@@ -4241,13 +4241,13 @@ class TemplateProcessor:
                         paragraph.paragraph_format.left_indent = Inches(0)
                         # Ensure consistent spacing above lineage section for equal margins
                         paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        paragraph.paragraph_format.space_after = Pt(2)
                     else:
                         # Non-classic product types should have CENTER alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         # Ensure consistent spacing above lineage section for equal margins
                         paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        paragraph.paragraph_format.space_after = Pt(2)
                     
                     # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage
                     if product_type and 'vape' in product_type.lower():
@@ -4261,7 +4261,7 @@ class TemplateProcessor:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     # Ensure consistent spacing above product brand section for equal margins
                     paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.space_after = Pt(2)
                     for run in paragraph.runs:
                         # Get product type for font sizing
                         product_type = None
@@ -4276,7 +4276,7 @@ class TemplateProcessor:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                     # Ensure consistent spacing above vendor section for equal margins
                     paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.space_after = Pt(2)
                     # Use unified font sizing for vendor text
                     for run in paragraph.runs:
                         # Apply unified font sizing using 'vendor' field type
@@ -4735,7 +4735,7 @@ class TemplateProcessor:
                 if any(keyword in text for keyword in ['indica', 'sativa', 'hybrid', 'cbd', 'alpha crux', 'constellation']):
                     # Set consistent spacing for lineage/brand sections
                     paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.space_after = Pt(2)
                     
                     # Also set at XML level for maximum compatibility
                     pPr = paragraph._element.get_or_add_pPr()
@@ -4744,7 +4744,7 @@ class TemplateProcessor:
                         spacing = OxmlElement('w:spacing')
                         pPr.append(spacing)
                     spacing.set(qn('w:before'), '40')  # 2pt = 40 twips
-                    spacing.set(qn('w:after'), '20')   # 1pt = 20 twips
+                    spacing.set(qn('w:after'), '40')   # 2pt = 40 twips
                     spacing.set(qn('w:lineRule'), 'auto')
             
             # Process all tables
@@ -6296,7 +6296,7 @@ class TemplateProcessor:
             
             # Ensure consistent spacing above lineage/vendor section for equal margins
             paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+            paragraph.paragraph_format.space_after = Pt(2)
             
             # SPECIAL RULE: For Vertical template, automatically force vendor to next line for specific lineages
             if (self.template_type == 'vertical' and 
@@ -6444,7 +6444,7 @@ class TemplateProcessor:
             
             # Ensure consistent spacing above lineage/vendor section for equal margins
             paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+            paragraph.paragraph_format.space_after = Pt(2)
             
             # Set paragraph to right alignment for proper vendor right-alignment
             paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT

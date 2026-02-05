@@ -1,9 +1,9 @@
 #!/bin/bash
-# Startup script for Label Maker application
+# Startup script for AGT Designer application
 # Avoids port 5000 which is used by macOS AirPlay/Control Center
 
 echo "======================================"
-echo "Label Maker - Starting Application"
+echo "AGT Designer - Starting Application"
 echo "======================================"
 
 # Navigate to the application directory

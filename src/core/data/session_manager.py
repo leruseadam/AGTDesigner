@@ -1,5 +1,5 @@
 """
-Session Manager for Label Maker Application
+Session Manager for AGT Designer Application
 Ensures database changes are immediately available to all users while maintaining session isolation.
 """
 

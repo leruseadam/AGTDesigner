@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Ultra-simple Label Maker control script
+# Ultra-simple AGT Designer control script
 # Usage: ./control.sh [start|stop|restart]
 
 APP_DIR="/Users/adamcordova/Desktop/labelMaker_ QR copy final"
@@ -8,7 +8,7 @@ PORT=8001
 
 case "$1" in
     start)
-        echo "Starting Label Maker..."
+        echo "Starting AGT Designer..."
         cd "$APP_DIR"
         # Kill anything on the port first
         lsof -ti:$PORT | xargs kill -9 2>/dev/null
@@ -17,7 +17,7 @@ case "$1" in
         echo "App started! Check http://127.0.0.1:$PORT"
         ;;
     stop)
-        echo "Stopping Label Maker..."
+        echo "Stopping AGT Designer..."
         # Kill by port
         lsof -ti:$PORT | xargs kill -9 2>/dev/null
         # Kill by process name
@@ -27,7 +27,7 @@ case "$1" in
         echo "App stopped!"
         ;;
     restart)
-        echo "Restarting Label Maker..."
+        echo "Restarting AGT Designer..."
         $0 stop
         sleep 2
         $0 start

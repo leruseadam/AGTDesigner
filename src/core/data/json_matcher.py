@@ -836,6 +836,32 @@ class JSONMatcher:
         self._cached_store_name = None
         self._product_table_columns = None
 
+    def _normalize_manifest_name_for_json_key(self, name: str) -> str:
+        """
+        Normalize Cultivera/JSON product_name so that hardware variants like
+        \"Live Resin Prana AIO\" vs \"Live Resin 510 Vape\" normalize to the same
+        canonical key. This lets us treat AIO and 510 vapes as the same product
+        line when the rest of the JSON string (brand, strain, lineage, weight)
+        matches.
+        """
+        if not name:
+            return ""
+        s = str(name).strip().lower()
+        parts = [p.strip() for p in s.split(" - ")]
+        if len(parts) >= 2:
+            type_seg = parts[1]
+            # Normalize common live resin vape hardware variants
+            if "live resin" in type_seg and (
+                "prana aio" in type_seg
+                or "aio" in type_seg
+                or "510" in type_seg
+                or "vape" in type_seg
+                or "cartridge" in type_seg
+                or "disposable" in type_seg
+            ):
+                parts[1] = "live resin vape"
+        return " - ".join(parts)
+
     def _determine_store_name(self) -> str:
         """Determine the best store name to use for ProductDatabase operations."""
         if self._cached_store_name:
@@ -1434,7 +1460,7 @@ class JSONMatcher:
                 exact_name = desc.lower().strip()
                 indexed_cache['exact_names'][exact_name] = cache_item
                 
-                # JSON column lookup: exact match only (incoming names match perfectly)
+                # JSON column lookup: exact match (with normalization helpers)
                 json_value = str(product.get('JSON') or product.get('json') or '').strip()
                 if json_value:
                     products_with_json += 1
@@ -1442,13 +1468,27 @@ class JSONMatcher:
                     if json_value not in lu:
                         lu[json_value] = []
                     lu[json_value].append(product)
-                    # Apostrophe-normalized keys so "God's Gift" JSON matches DB "Gods Gift"
+                    base_list = lu[json_value]
+
+                    # Apostrophe/whitespace-normalized keys so "God's Gift" JSON matches DB "Gods Gift"
                     key_lo = json_value.lower().strip()
                     key_ws = re.sub(r'\s+', ' ', key_lo).strip()
                     key_no_ap = re.sub(r"[''`]", '', key_ws).strip()
                     for k in (key_lo, key_ws, key_no_ap):
                         if k and k not in lu:
-                            lu[k] = lu[json_value]
+                            lu[k] = base_list
+
+                    # Hardware-normalized keys so Live Resin Prana AIO / 510 Vape variants share a key
+                    norm = self._normalize_manifest_name_for_json_key(json_value)
+                    if norm and norm != json_value:
+                        if norm not in lu:
+                            lu[norm] = base_list
+                        norm_lo = norm.lower().strip()
+                        norm_ws = re.sub(r'\s+', ' ', norm_lo).strip()
+                        norm_no_ap = re.sub(r"[''`]", '', norm_ws).strip()
+                        for k in (norm_lo, norm_ws, norm_no_ap):
+                            if k and k not in lu:
+                                lu[k] = base_list
                 # If DB had no JSON but has Description, keep product in-memory for display only (not for matching)
                 description_value = str(product.get('Description', '')).strip()
                 if description_value and not json_value:
@@ -1509,13 +1549,25 @@ class JSONMatcher:
                 if json_value not in lu:
                     lu[json_value] = []
                 lu[json_value].append(product)
-                # Apostrophe-normalized keys so "God's Gift" JSON matches DB "Gods Gift"
+                base_list = lu[json_value]
+                # Apostrophe/whitespace-normalized keys so "God's Gift" JSON matches DB "Gods Gift"
                 key_lo = json_value.lower().strip()
                 key_ws = re.sub(r'\s+', ' ', key_lo).strip()
                 key_no_ap = re.sub(r"[''`]", '', key_ws).strip()
                 for k in (key_lo, key_ws, key_no_ap):
                     if k and k not in lu:
-                        lu[k] = lu[json_value]
+                        lu[k] = base_list
+                # Hardware-normalized keys so Live Resin Prana AIO / 510 Vape variants share a key
+                norm = self._normalize_manifest_name_for_json_key(json_value)
+                if norm and norm != json_value:
+                    if norm not in lu:
+                        lu[norm] = base_list
+                    norm_lo = norm.lower().strip()
+                    norm_ws = re.sub(r'\s+', ' ', norm_lo).strip()
+                    norm_no_ap = re.sub(r"[''`]", '', norm_ws).strip()
+                    for k in (norm_lo, norm_ws, norm_no_ap):
+                        if k and k not in lu:
+                            lu[k] = base_list
                 count += 1
             if count:
                 logging.info(f"📊 Populated JSON column lookup from DB: {count} products, {len(self._indexed_cache['json_column_lookup'])} keys")
@@ -2514,7 +2566,7 @@ class JSONMatcher:
         Returns:
             List of matched product dictionaries
         """
-        print(f"🔍 DEBUG: fetch_and_match called with URL: {url[:100]}...")
+        logging.debug(f"🔍 fetch_and_match called with URL: {url[:100]}...")
         # Special mode: return ALL DB products as matched tags (bypass JSON matching)
         if url.lower().startswith("db:all"):
             try:
@@ -2533,7 +2585,7 @@ class JSONMatcher:
             raise ValueError("Please provide a valid HTTP URL or data URL")
             
         # SIMPLIFIED APPROACH: Use basic matching without strict vendor isolation
-        print("🔍 DEBUG: Using SIMPLIFIED matching approach for maximum matches")
+        logging.debug("🔍 Using SIMPLIFIED matching approach for maximum matches")
         self._sheet_cache = None
         self._indexed_cache = None
         self._build_sheet_cache()
@@ -2542,29 +2594,29 @@ class JSONMatcher:
             logging.warning("JSON column lookup not populated after cache build, populating now...")
             self._populate_json_column_lookup_from_db()
             
-        # DEBUG: Log the current state of Excel data
-        print(f"🔍 DEBUG: Excel processor exists: {self.excel_processor is not None}")
-        if self.excel_processor:
-            print(f"🔍 DEBUG: Excel DataFrame exists: {self.excel_processor.df is not None}")
-            if self.excel_processor.df is not None:
-                print(f"🔍 DEBUG: Excel DataFrame rows: {len(self.excel_processor.df)}")
-                print(f"🔍 DEBUG: Excel DataFrame columns: {list(self.excel_processor.df.columns)}")
-                
-                # Show unique vendors in Excel data
+        # DEBUG: Log the current state of Excel data (debug level only, to avoid slowing production)
+        logging.debug(f"🔍 Excel processor exists: {self.excel_processor is not None}")
+        if self.excel_processor and self.excel_processor.df is not None:
+            logging.debug(f"🔍 Excel DataFrame rows: {len(self.excel_processor.df)}")
+            logging.debug(f"🔍 Excel DataFrame columns: {list(self.excel_processor.df.columns)}")
+            try:
                 vendor_cols = ['Vendor', 'Vendor/Supplier*', 'Vendor/Supplier']
                 excel_vendors = set()
                 for col in vendor_cols:
                     if col in self.excel_processor.df.columns:
                         vendors = self.excel_processor.df[col].dropna().unique()
                         excel_vendors.update([str(v).strip().lower() for v in vendors if str(v).strip()])
-                
-                print(f"🔍 DEBUG: Excel vendors ({len(excel_vendors)}): {sorted(list(excel_vendors))[:10]}...")
-        print(f"🔍 DEBUG: Sheet cache length: {len(self._sheet_cache) if self._sheet_cache else 0}")
+                if excel_vendors:
+                    logging.debug(f"🔍 Excel vendors ({len(excel_vendors)}): {sorted(list(excel_vendors))[:10]}...")
+            except Exception:
+                # Debug-only; never break matching on logging failure
+                pass
+        logging.debug(f"🔍 Sheet cache length: {len(self._sheet_cache) if self._sheet_cache else 0}")
             
         # Note: We can still process JSON items even without Excel data
         # The sheet cache is only needed for Excel-based matching
         if not self._sheet_cache:
-            print("⚠️ No Excel data available - will use Product Database for matching")
+            logging.debug("⚠️ No Excel data available - will use Product Database for matching")
 
         try:
             # Handle data URLs differently from HTTP URLs
@@ -2675,31 +2727,43 @@ class JSONMatcher:
                 
             # CRITICAL FIX: Preserve ALL items from JSON - no deduplication
             logging.info(f"Processing {len(items)} JSON items - preserving ALL items as requested")
-            print(f"🔍 DEBUG: Processing {len(items)} JSON items - preserving ALL items as requested")
             
-            # DEBUG: Show what vendor we're looking for in JSON
+            # DEBUG: Show what vendor we're looking for in JSON (debug log only)
             if items:
-                json_vendors = set()
-                for item in items[:10]:  # Check first 10 items now that vendor is propagated
-                    if isinstance(item, dict):
-                        vendor = str(item.get('vendor', item.get('from_license_name', ''))).strip()
-                        if vendor:
-                            json_vendors.add(vendor)
-                print(f"🔍 DEBUG: JSON VENDORS LOOKING FOR (after propagation): {sorted(list(json_vendors))}")
-                
-                # DEBUG: Show sample of all items to verify vendor propagation worked
-                print(f"🔍 DEBUG: Sample of first 10 items (after vendor propagation):")
-                for i, item in enumerate(items[:10]):
-                    if isinstance(item, dict):
-                        product_name = item.get('product_name', 'NO_NAME')
-                        vendor = item.get('vendor', 'NO_VENDOR')
-                        print(f"🔍 DEBUG:   Item {i}: '{product_name}' - vendor: '{vendor}'")
+                try:
+                    json_vendors = set()
+                    for item in items[:10]:  # Check first 10 items now that vendor is propagated
+                        if isinstance(item, dict):
+                            v = str(item.get('vendor', item.get('from_license_name', ''))).strip()
+                            if v:
+                                json_vendors.add(v)
+                    if json_vendors:
+                        logging.debug(f"🔍 JSON VENDORS LOOKING FOR (after propagation): {sorted(list(json_vendors))}")
+                except Exception:
+                    pass
             
             unique_items = []
             for item in items:
                 if not isinstance(item, dict):
                     continue
-                    
+
+                # HARD RULE: never create labels for trade/vendor samples
+                raw_is_sample = item.get("is_sample")
+                raw_sample_type = item.get("sample_type")
+                is_sample_flag = False
+                if raw_is_sample is not None:
+                    # Cultivera uses \"0\"/\"1\" or 0/1
+                    if str(raw_is_sample).strip() not in ("", "0", "false", "False", "no", "No", "NO"):
+                        is_sample_flag = True
+                # Some feeds only set sample_type for samples
+                if raw_sample_type:
+                    st = str(raw_sample_type).lower()
+                    if st not in ("", "none", "null"):
+                        is_sample_flag = True
+                if is_sample_flag:
+                    logging.info(f"🛑 SKIPPING SAMPLE ITEM from JSON: '{item.get('product_name')}' (is_sample={raw_is_sample}, sample_type={raw_sample_type})")
+                    continue
+
                 product_name = str(item.get("product_name", "")).strip()
                 
                 # CRITICAL FIX: Process ALL items, even those with missing product names
@@ -2827,6 +2891,10 @@ class JSONMatcher:
             strain_vendor_index = defaultdict(list)  # (vendor_lower, strain_lower) -> [products]
             strain_brand_index = defaultdict(list)  # (brand_lower, strain_lower) -> [products]
             strain_only_index = defaultdict(list)    # strain_lower -> [products]
+            # CRITICAL: Also build exact JSON-column lookup so we can match
+            # Cultivera product_name strings directly against the database
+            # JSON column, even when Excel-style names differ.
+            json_exact_lookup: Dict[str, List[Dict]] = {}
             
             # Only build index if we might need DB fallback (when vendor filter is set or cache is small)
             if json_vendor_filter or len(cache_to_search) < 100:
@@ -2841,6 +2909,19 @@ class JSONMatcher:
                         db_product_strain = str(product.get("Product Strain", "") or product.get("product_strain", "") or "").strip()
                         db_extracted_strain = self._extract_strain_from_product_name(db_name) or self._extract_strain_from_product_name(db_json)
                         db_strain = db_product_strain or db_extracted_strain
+
+                        # CRITICAL: Build exact JSON-string lookup for direct Cultivera matching.
+                        # When the DB's JSON column (after hardware-normalization) matches the
+                        # incoming Cultivera product_name, we should treat it as a perfect
+                        # match even if the human‑readable Product Name* differs.
+                        if db_json:
+                            json_key = self._normalize_manifest_name_for_json_key(db_json)
+                            # Respect vendor isolation: if a license/vendor filter is active,
+                            # only index products whose vendor matches the filter.
+                            if not json_vendor_filter or self._is_vendor_match(json_vendor_filter, db_vendor):
+                                if json_key not in json_exact_lookup:
+                                    json_exact_lookup[json_key] = []
+                                json_exact_lookup[json_key].append(product)
 
                         # Collect all unique strain keys to index under (Product Strain + extracted may differ)
                         strain_keys = set()
@@ -2955,9 +3036,9 @@ class JSONMatcher:
                     cache_size = len(self._indexed_cache.get('json_column_lookup', {})) if cache_exists else 0
                     logging.debug(f"🔍 JSON MATCH ATTEMPT: '{product_name[:60]}' (cache: {'exists' if cache_exists else 'MISSING'}, size: {cache_size})")
                     
-                    json_column_match = self._find_json_column_match(product_name)
+                    json_column_match = self._find_json_column_match(product_name, effective_vendor)
                     if not json_column_match and raw_product_name != product_name:
-                        json_column_match = self._find_json_column_match(raw_product_name)
+                        json_column_match = self._find_json_column_match(raw_product_name, effective_vendor)
                     
                     if json_column_match:
                         logging.info(f"✅ JSON COLUMN MATCH FOUND: '{product_name[:50]}'")
@@ -3032,6 +3113,25 @@ class JSONMatcher:
                             best_match = exact_matches[0].get('_db_product', exact_matches[0])
                             best_score = 200.0
                             logging.debug(f"⚡ EXACT MATCH (fast lookup): '{product_name}'")
+
+                    # CRITICAL: If no Excel/cache exact match, try exact match against the
+                    # database JSON column using the pre-built json_exact_lookup. This
+                    # directly combines the "old" JSON match behavior (matching on the
+                    # raw Cultivera product_name) with the current DB-backed flow.
+                    if best_match is None and json_exact_lookup:
+                        # Normalize Cultivera product name so that AIO vs 510 variants share a key
+                        json_key = self._normalize_manifest_name_for_json_key(product_name)
+                        if json_key in json_exact_lookup:
+                            db_products_for_json = json_exact_lookup[json_key]
+                            if db_products_for_json:
+                                best_match = dict(db_products_for_json[0])
+                                best_match['_source'] = 'database_json_exact'
+                                best_match['_match_type'] = 'json_column_exact'
+                                best_score = 190.0
+                                logging.info(
+                                    f"✅ JSON-COLUMN EXACT MATCH: '{product_name}' → "
+                                    f"'{best_match.get('Product Name*', '')[:60]}'"
+                                )
                     
                     # If no exact match, fall back to fuzzy matching with limited candidates
                     if best_match is None:
@@ -3607,6 +3707,32 @@ class JSONMatcher:
                 for i in range(len(matched_products), len(unique_items)):
                     item = unique_items[i]
                     product_name = str(item.get("product_name", "")).strip() or f"Item-{i+1}"
+
+                    # Derive a safer emergency product type using the same mapper used
+                    # for normal JSON fallbacks so classic vs non‑classic rules still hold.
+                    emergency_inventory_type = str(item.get("inventory_type", "")).strip()
+                    emergency_inventory_cat = str(item.get("inventory_category", "")).strip()
+                    emergency_raw_name = product_name
+                    emergency_type = map_inventory_type_to_product_type(
+                        emergency_inventory_type,
+                        emergency_inventory_cat,
+                        emergency_raw_name,
+                    ) or "Unknown"
+
+                    # Derive a minimal but sensible lineage: classic product types
+                    # default to HYBRID, non-classic to MIXED, CBD products to CBD.
+                    name_lower_em = emergency_raw_name.lower()
+                    if 'cbd' in name_lower_em:
+                        lineage_emergency = 'CBD'
+                    elif emergency_type.lower() in [
+                        'flower', 'pre-roll', 'preroll', 'infused pre-roll',
+                        'concentrate', 'live resin', 'vape cartridge',
+                        'disposable vape'
+                    ]:
+                        lineage_emergency = 'HYBRID'
+                    else:
+                        lineage_emergency = 'MIXED'
+
                     emergency_product = {
                         'Product Name*': product_name,
                         'ProductName': product_name,
@@ -3614,8 +3740,8 @@ class JSONMatcher:
                         'displayName': product_name,
                         'Vendor': global_vendor or 'Unknown',
                         'Product Brand': str(item.get("brand", global_vendor or "Unknown")),
-                        'Product Type*': str(item.get("inventory_type", "Mixed")),
-                        'Lineage': 'MIXED',
+                        'Product Type*': emergency_type,
+                        'Lineage': lineage_emergency,
                         'Weight*': str(item.get("weight", "1")),
                         'Units': 'g',
                         'Price*': '',
@@ -3826,8 +3952,11 @@ class JSONMatcher:
             
             # ===== STEP 2: Map to product type =====
             product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, raw_product_name)
+            # CRITICAL: Fallback products should NEVER be typed as "Mixed".
+            # If we truly can't infer a type, use "Unknown" so DOH classic/non‑classic
+            # rules can still behave sensibly without polluting filters.
             if not product_type:
-                product_type = "Mixed"  # Safe fallback
+                product_type = "Unknown"
             
             # ===== STEP 3: Transform SKU to human-readable name =====
             product_name = transform_sku_to_readable_name(raw_product_name) or raw_product_name
@@ -3883,12 +4012,21 @@ class JSONMatcher:
             
             # ===== STEP 5: Ensure brand is populated =====
             if not brand:
-                # Try extracting from product name first
-                if product_name:
+                # FIRST: Try extracting from the original JSON product_name
+                # (e.g. "Pure - Live Resin Prana AIO - ...") so we can reliably
+                # capture Conscious Cannabis brands like Pure, Original, Honey Tree,
+                # Ultra Pure, Honey Stixx, etc.
+                if raw_product_name:
+                    brand = self._extract_brand_from_product_name(raw_product_name) or ''
+
+                # SECOND: Fall back to the human‑readable product_name (which may be
+                # an Excel-style variation or descriptive name).
+                if not brand and product_name:
                     brand = self._extract_brand_from_product_name(product_name) or ''
 
-                # Intentionally DO NOT use vendor as a brand fallback here to avoid vendor being used
-                # where a product brand is expected; leave empty if not found
+                # Intentionally DO NOT use vendor as a brand fallback here to avoid
+                # vendor being used where a product brand is expected; leave empty if
+                # not found.
                 if not brand:
                     brand = ''
 
@@ -6385,7 +6523,82 @@ class JSONMatcher:
                     product_type = map_inventory_type_to_product_type(inventory_type, inventory_category, product_name)
                     weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
                     strain = str(item.get("strain_name", item.get("strain", ""))).strip()
-                    
+
+                    # Detect concentrate/vape JSON items (mL units or obvious vape keywords)
+                    try:
+                        json_name_lower = product_name.lower()
+                        inventory_type_lower = inventory_type.lower()
+                        is_concentrate_vape = (
+                            "concentrate for inhalation" in inventory_type_lower
+                            or any(
+                                kw in json_name_lower
+                                for kw in [
+                                    "live resin",
+                                    "vape",
+                                    "cartridge",
+                                    "aio",
+                                    "prana",
+                                    "disposable",
+                                    "liquid diamonds",
+                                ]
+                            )
+                        )
+                    except Exception:
+                        is_concentrate_vape = False
+
+                    # ABSOLUTE PRIORITY: Try exact JSON-column match first (normalized + vendor‑isolated).
+                    # This path uses the database JSON column we backfilled from Excel, with the
+                    # hardware-normalized key so AIO vs 510 variants share the same entry.
+                    json_column_match = None
+                    try:
+                        json_vendor = vendor or global_vendor or str(item.get("vendor", "")).strip()
+                        # Use the original Cultivera product_name when querying JSON column.
+                        json_key_name = original_product_name or product_name
+                        json_column_match = self._find_json_column_match(json_key_name, json_vendor)
+                    except Exception as e:
+                        logging.debug(f"JSON column match error for '{product_name[:80]}': {e}")
+
+                    if json_column_match:
+                        # Respect global validity rules (void/sample filters, etc.)
+                        if self._is_valid_product(json_column_match):
+                            # CRITICAL: Even for JSON-column matches, enforce strain compatibility
+                            # so we do NOT accept cases like:
+                            #   "Pure - ... Blueberry Cookies ..." JSON → "Cookies & Cream ..." DB.
+                            strain_ok = True
+                            try:
+                                strain_ok = self._validate_strain_match(item, json_column_match, strain)
+                            except Exception as strain_err:
+                                logging.warning(
+                                    f"Error validating strain for JSON column match "
+                                    f"'{original_product_name[:80]}': {strain_err}"
+                                )
+                                # Be conservative: if validation fails, fall back to other paths
+                                strain_ok = False
+
+                            if not strain_ok:
+                                logging.warning(
+                                    "🚫 JSON COLUMN MATCH REJECTED (strain mismatch): "
+                                    f"JSON '{original_product_name[:80]}' → "
+                                    f"DB '{json_column_match.get('Product Name*', 'Unknown')}'"
+                                )
+                            else:
+                                logging.info(
+                                    f"✅ JSON COLUMN PRIORITY MATCH: '{original_product_name[:80]}' → "
+                                    f"'{json_column_match.get('Product Name*', 'Unknown')}'"
+                                )
+                                tag = self._create_tag_from_database_info(json_column_match, vendor, item)
+                                all_tags.append(tag)
+                                matched_count += 1
+                                # Seed sibling cache so strain variants on same line upgrade correctly
+                                signature = self._get_product_line_signature(item)
+                                sibling_matches[signature] = json_column_match
+                                continue  # Skip all other matching paths for this item
+                        else:
+                            logging.info(
+                                "🚫 JSON COLUMN MATCH REJECTED (invalid product: void/sample): "
+                                f"'{json_column_match.get('Product Name*', 'Unknown')}'"
+                            )
+
                     # PRIORITY 1: For SKU-like products, try database search first
                     db_info = None
                     if '_' in product_name and product_db:
@@ -6509,15 +6722,41 @@ class JSONMatcher:
                             valid_products = [p for p in matched_products if self._is_valid_product(p)]
                             if len(valid_products) != len(matched_products):
                                 print(f"🔍 DEBUG: Filtered out {len(matched_products) - len(valid_products)} invalid products (void/sample)")
+
+                            # For concentrate/vape JSON items, be VERY strict about strain alignment
+                            # for any remaining advanced matches. Require the JSON strain (or strain
+                            # extracted from the JSON name) to appear in the DB product name to avoid
+                            # mis-matches like Blueberry Cookies → Grape Gas.
+                            if is_concentrate_vape and valid_products:
+                                json_strain_for_filter = strain or self._extract_strain_from_product_name(original_product_name)
+                                js_norm = (json_strain_for_filter or "").strip().lower()
+                                if js_norm and len(js_norm) >= 3:
+                                    strict_products = []
+                                    for p in valid_products:
+                                        db_name = str(
+                                            p.get("Product Name*")
+                                            or p.get("Description")
+                                            or ""
+                                        ).strip().lower()
+                                        if js_norm in db_name:
+                                            strict_products.append(p)
+                                        else:
+                                            logging.warning(
+                                                "🚫 ADVANCED MATCH REJECTED (strain not in DB name): "
+                                                f"JSON '{original_product_name[:60]}' (strain '{json_strain_for_filter}') → "
+                                                f"DB '{p.get('Product Name*', 'Unknown')[:60]}'"
+                                            )
+                                    valid_products = strict_products
+
                             if valid_products:
                                 signature = self._get_product_line_signature(item)
                                 sibling_matches[signature] = valid_products[0]
-                            for product in valid_products:
-                                tag = self._create_tag_from_product(product, item, global_vendor)
-                                all_tags.append(tag)
-                                matched_count += 1
-                            print(f"🔍 DEBUG: Added {len(valid_products)} valid tags from comprehensive matching")
-                            continue  # Skip the educated guess and JSON processing below
+                                for product in valid_products:
+                                    tag = self._create_tag_from_product(product, item, global_vendor)
+                                    all_tags.append(tag)
+                                    matched_count += 1
+                                print(f"🔍 DEBUG: Added {len(valid_products)} valid tags from comprehensive matching")
+                                continue  # Skip the educated guess and JSON processing below
                         else:
                             print(f"🔍 DEBUG: No products found by comprehensive matching, falling back to AI-powered database lookup")
                     except Exception as main_match_error:
@@ -6703,7 +6942,11 @@ class JSONMatcher:
                     
                     # PRIORITY 3: Try educated guessing if no database match
                     educated_guess = None
-                    if product_db:
+                    # For concentrate/vape JSON items, educated guessing can easily invent
+                    # cross-strain/cross-line products. Disable educated guesses in that case
+                    # and prefer explicit JSON-only fallbacks instead.
+                    disable_educated_guess = is_concentrate_vape
+                    if product_db and not disable_educated_guess:
                         try:
                             logging.info(f"🔍 Attempting educated guess for: {product_name}")
                             logging.info(f"   Vendor: {vendor}")
@@ -7754,7 +7997,8 @@ class JSONMatcher:
                 return None, 0.0, "No product name provided"
 
             # Step 1: Try JSON column exact/normalized match (fastest)
-            json_column_match = self._find_json_column_match(json_name)
+            # CRITICAL: Pass vendor to enforce vendor isolation
+            json_column_match = self._find_json_column_match(json_name, json_vendor)
             if json_column_match:
                 source = json_column_match.get('_source', 'database')
                 logging.info(f"✅ JSON COLUMN MATCH: '{json_name[:50]}' → '{json_column_match.get('Product Name*', 'Unknown')}'")
@@ -8757,10 +9001,17 @@ class JSONMatcher:
             out.add(t)
         return out
 
-    def _find_json_column_match(self, json_description: str) -> Optional[dict]:
+    def _find_json_column_match(self, json_description: str, json_vendor: str = None) -> Optional[dict]:
         """
         Match incoming JSON description to database JSON column.
-        Simple approach: exact match, normalized match, apostrophe-normalized match.
+        
+        - Uses exact / lowercase / whitespace-normalized / apostrophe-normalized keys.
+        - Honors vendor isolation when json_vendor is provided (only products whose
+          Vendor/Supplier* / Vendor / vendor matches json_vendor are eligible).
+        
+        NOTE: Fuzzy JSON-column matching was intentionally removed to avoid
+        cross-vendor / cross-product-line mis-matches (e.g. matching Honey Tree
+        AIOs to completely different vendors).
         """
         if not json_description:
             return None
@@ -8769,6 +9020,14 @@ class JSONMatcher:
         key_lower = exact_key.lower().strip()
         key_ws = re.sub(r'\s+', ' ', key_lower).strip()
         key_no_apos = re.sub(r"[''`]", '', key_ws).strip()
+
+        # Hardware-normalized variant so AIO vs 510 share JSON keys
+        norm_desc = self._normalize_manifest_name_for_json_key(json_description)
+        norm_lower = norm_ws = norm_no_apos = None
+        if norm_desc and norm_desc != exact_key:
+            norm_lower = norm_desc.lower().strip()
+            norm_ws = re.sub(r'\s+', ' ', norm_lower).strip()
+            norm_no_apos = re.sub(r"[''`]", '', norm_ws).strip()
 
         # CRITICAL: Ensure JSON column lookup is populated - create cache if needed
         if self._indexed_cache is None:
@@ -8780,19 +9039,54 @@ class JSONMatcher:
         if self._indexed_cache and 'json_column_lookup' in self._indexed_cache:
             json_lookup = self._indexed_cache['json_column_lookup']
 
-            # Try exact, lower, whitespace-normalized, apostrophe-normalized
-            for key in (exact_key, key_lower, key_ws, key_no_apos):
+            # Helper function to check vendor match
+            def vendor_matches(product_dict, vendor_str):
+                if not vendor_str:
+                    return True  # No vendor filter = match all
+                product_vendor = str(
+                    product_dict.get('Vendor/Supplier*')
+                    or product_dict.get('vendor')
+                    or product_dict.get('Vendor')
+                    or ''
+                ).strip()
+                if not product_vendor:
+                    return False  # Product has no vendor, reject if vendor filter is set
+                return self._is_vendor_match(vendor_str, product_vendor)
+
+            # Try exact, lower, whitespace-normalized, apostrophe-normalized (+ hardware-normalized variants)
+            keys_to_try = [exact_key, key_lower, key_ws, key_no_apos]
+            if norm_desc:
+                keys_to_try.extend([norm_desc, norm_lower, norm_ws, norm_no_apos])
+
+            for key in keys_to_try:
                 if key and key in json_lookup:
                     matched = json_lookup[key]
                     if matched:
-                        product = dict(matched[0])
-                        product['_source'] = 'database'
-                        product['_match_type'] = 'json_column_exact'
-                        logging.info(f"✅ JSON COLUMN MATCH: '{json_description[:60]}' → '{product.get('Product Name*', 'Unknown')[:60]}'")
-                        return product
-            
-            # Debug: log what keys we tried and what's available
-            logging.debug(f"🔍 JSON COLUMN LOOKUP: Tried keys: {[exact_key[:50], key_lower[:50], key_ws[:50], key_no_apos[:50]]}")
+                        # Filter by vendor if provided
+                        for product_candidate in matched:
+                            product = dict(product_candidate)
+                            if vendor_matches(product, json_vendor):
+                                product['_source'] = 'database'
+                                product['_match_type'] = 'json_column_exact'
+                                logging.info(
+                                    f"✅ JSON COLUMN MATCH: '{json_description[:60]}' → "
+                                    f"'{product.get('Product Name*', 'Unknown')[:60]}' "
+                                    f"(vendor: {json_vendor or 'any'})"
+                                )
+                                return product
+                        # If we have vendor filter but no vendor match, log it
+                        if json_vendor:
+                            logging.debug(
+                                "🔍 JSON COLUMN: Found exact key match but vendor mismatch "
+                                f"(JSON vendor: {json_vendor}, product vendors: "
+                                f"{[str(p.get('Vendor/Supplier*') or p.get('vendor') or 'N/A') for p in matched[:3]]})"
+                            )
+
+            # Debug: log what keys we tried and what's available when everything fails
+            logging.debug(
+                "🔍 JSON COLUMN LOOKUP: Tried keys: "
+                f"[{exact_key[:50]}, {key_lower[:50]}, {key_ws[:50]}, {key_no_apos[:50]}]"
+            )
             logging.debug(f"🔍 JSON COLUMN LOOKUP: Cache has {len(json_lookup)} keys")
 
         # Excel fallback
@@ -12455,6 +12749,81 @@ class JSONMatcher:
             logging.debug(f"Unable to obtain product database for fallback upgrade: {db_error}")
             product_db = None
         
+        # ------------------------------------------------------------------
+        # SECOND-CHANCE MATCHING: Reuse existing DB-backed products from the
+        # same manifest when JSON-only fallback products share the same
+        # strain + brand family + product category (e.g. Prana AIO vs 510).
+        # This specifically fixes remaining cases where:
+        #   - A Prana AIO JSON item has the same strain/brand as a 510 cart
+        #   - A multi-pack Honey Stixx item shares strain/brand with another pack
+        # but direct DB lookup or cache matching failed.
+        # ------------------------------------------------------------------
+        def _normalize_strain_key(name: str) -> str:
+            return (name or "").strip().lower()
+
+        def _normalize_brand_family(vendor_or_brand: str) -> str:
+            """Group Conscious Cannabis family brands together."""
+            vb = (vendor_or_brand or "").strip().lower()
+            if not vb:
+                return ""
+            # Conscious Cannabis family (Pure, Original, Honey Tree, Ultra Pure, Honey Stixx)
+            conscious_aliases = {
+                "pure", "original", "honey tree", "ultra pure", "honey stixx",
+                "conscious cannabis", "conscious cannabis proc", "bodhi high",
+            }
+            if any(alias in vb for alias in conscious_aliases):
+                return "conscious_cannabis"
+            return vb
+
+        def _normalize_category(product_type: str) -> str:
+            """Collapse detailed product types into coarse categories."""
+            pt = (product_type or "").strip().lower()
+            if any(w in pt for w in ["vape", "cartridge", "prana aio", "aio", "510"]):
+                return "vape"
+            if "infused pre-roll" in pt or "infused preroll" in pt:
+                return "infused_preroll"
+            if "pre-roll" in pt or "preroll" in pt or "joint" in pt or "blunt" in pt:
+                return "preroll"
+            if any(w in pt for w in ["concentrate", "extract", "crystal", "batter", "wax", "rosin", "resin"]):
+                return "concentrate"
+            if "flower" in pt or "bud" in pt:
+                return "flower"
+            return pt or "unknown"
+
+        # Build a map of existing DB-backed products keyed by (strain, brand_family, category)
+        existing_db_by_key: Dict[Tuple[str, str, str], Dict] = {}
+        for p in products:
+            source = str(p.get("Source") or "")
+            # Only consider products that already have a real DB/Excel match
+            if source.startswith("JSON - No DB Match") or source.startswith("Emergency Fallback"):
+                continue
+            # Derive strain from explicit column or product name
+            strain_name = (
+                p.get("Product Strain")
+                or p.get("ProductStrain")
+                or self._extract_strain_from_product_name(
+                    p.get("Product Name*", "") or p.get("JSON", "") or p.get("product_name", "")
+                )
+            )
+            if not strain_name or len(strain_name.strip()) < 3:
+                continue
+            strain_key = _normalize_strain_key(strain_name)
+            brand_or_vendor = (
+                p.get("Product Brand")
+                or p.get("ProductBrand")
+                or p.get("Vendor/Supplier*")
+                or p.get("Vendor")
+                or ""
+            )
+            brand_family = _normalize_brand_family(brand_or_vendor)
+            if not brand_family:
+                continue
+            category = _normalize_category(p.get("Product Type*") or p.get("product_type") or "")
+            key = (strain_key, brand_family, category)
+            # Prefer the first seen product for a given key
+            if key not in existing_db_by_key:
+                existing_db_by_key[key] = p
+        
         upgraded_products: List[Dict] = []
         
         for product in products:
@@ -12465,26 +12834,110 @@ class JSONMatcher:
             product_type = product.get('Product Type*') or ''
             
             upgraded = False
-            if (product.get('Source') or '').startswith('JSON - No DB Match') and product_db and isinstance(original_item, dict):
-                variations, type_override = self._generate_excel_style_variations(original_item, vendor_norm, product_type)
-                # Only accept type_override for generic types - don't override specific types
-                generic_types = {'unknown', 'mixed', 'flower', ''}
-                if type_override and (not product_type or product_type.lower() in generic_types):
-                    product_type = type_override
-                if variations:
-                    try:
-                        db_match = self._find_best_database_match(
-                            product_name=variations[0],
-                            vendor=vendor_norm,
-                            weight=str(original_item.get("unit_weight", original_item.get("weight", ""))).strip(),
-                            strain=str(original_item.get("strain_name", original_item.get("strain", ""))).strip(),
-                            product_db=product_db
+            source_value = (product.get('Source') or '')
+
+            # PATH 1: Upgrade explicit JSON-only fallbacks (no DB match) using DB + sibling reuse.
+            if source_value.startswith('JSON - No DB Match') and isinstance(original_item, dict):
+                # 1) Try direct DB upgrade using Excel-style variations
+                if product_db:
+                    variations, type_override = self._generate_excel_style_variations(original_item, vendor_norm, product_type)
+                    # Only accept type_override for generic types - don't override specific types
+                    generic_types = {'unknown', 'mixed', 'flower', ''}
+                    if type_override and (not product_type or product_type.lower() in generic_types):
+                        product_type = type_override
+                    if variations:
+                        try:
+                            db_match = self._find_best_database_match(
+                                product_name=variations[0],
+                                vendor=vendor_norm,
+                                weight=str(original_item.get("unit_weight", original_item.get("weight", ""))).strip(),
+                                strain=str(original_item.get("strain_name", original_item.get("strain", ""))).strip(),
+                                product_db=product_db
+                            )
+                            if db_match:
+                                upgraded_products.append(self._create_tag_from_database_info(db_match, vendor_norm, original_item))
+                                upgraded = True
+                        except Exception as upgrade_error:
+                            logging.debug(f"DB upgrade for fallback failed: {upgrade_error}")
+
+                # 2) SECOND-CHANCE: Reuse an existing DB-backed product from this manifest
+                if not upgraded:
+                    # Derive strain and brand family for the fallback product
+                    fp_strain = (
+                        product.get("Product Strain")
+                        or (original_item.get("strain_name") if isinstance(original_item, dict) else "")
+                        or self._extract_strain_from_product_name(
+                            str(original_item.get("product_name", "")) if isinstance(original_item, dict) else ""
                         )
-                        if db_match:
-                            upgraded_products.append(self._create_tag_from_database_info(db_match, vendor_norm, original_item))
+                    )
+                    if fp_strain and len(fp_strain.strip()) >= 3:
+                        strain_key = _normalize_strain_key(fp_strain)
+                        brand_hint = (
+                            product.get("Product Brand")
+                            or (original_item.get("brand") if isinstance(original_item, dict) else "")
+                            or (str(original_item.get("product_name", "")).split(" - ")[0] if isinstance(original_item, dict) and " - " in str(original_item.get("product_name", "")) else "")
+                        )
+                        brand_family = _normalize_brand_family(brand_hint or vendor_norm)
+                        category = _normalize_category(product_type)
+                        reuse_key = (strain_key, brand_family, category)
+                        reuse_product = existing_db_by_key.get(reuse_key)
+                        if reuse_product:
+                            try:
+                                # Use the DB-backed product for full data, but pass the current JSON item so
+                                # weight/price and contextual fields can be respected where appropriate.
+                                upgraded_products.append(self._create_tag_from_database_info(reuse_product, vendor_norm, original_item))
+                                upgraded = True
+                                logging.info(
+                                    f"🔁 SECOND-CHANCE UPGRADE: Reused DB product for strain '{fp_strain}' "
+                                    f"and brand family '{brand_family}' (category '{category}')"
+                                )
+                            except Exception as second_error:
+                                logging.debug(f"Second-chance upgrade for fallback failed: {second_error}")
+
+            # PATH 2: Upgrade high-confidence educated guesses to real DB-backed tags when a
+            # sibling DB product from the same manifest shares strain + brand family + category.
+            # This avoids leaving obvious AIO/510 + Honey Stixx multi-pack items as "educated guess"
+            # when the exact product line is already known in the database for this manifest.
+            elif source_value.startswith('JSON Match - Educated Guess'):
+                fp_strain = strain or ""
+                if not fp_strain and isinstance(original_item, dict):
+                    fp_strain = (
+                        original_item.get("strain_name")
+                        or original_item.get("strain")
+                        or self._extract_strain_from_product_name(
+                            str(original_item.get("product_name", ""))
+                        )
+                    )
+                if fp_strain and len(fp_strain.strip()) >= 3:
+                    strain_key = _normalize_strain_key(fp_strain)
+                    brand_hint = (
+                        product.get("Product Brand")
+                        or (original_item.get("brand") if isinstance(original_item, dict) else "")
+                        or (str(original_item.get("product_name", "")).split(" - ")[0]
+                            if isinstance(original_item, dict) and " - " in str(original_item.get("product_name", ""))
+                            else "")
+                    )
+                    brand_family = _normalize_brand_family(brand_hint or vendor_norm)
+                    category = _normalize_category(product_type)
+                    reuse_key = (strain_key, brand_family, category)
+                    reuse_product = existing_db_by_key.get(reuse_key)
+                    if reuse_product:
+                        try:
+                            upgraded_products.append(
+                                self._create_tag_from_database_info(
+                                    reuse_product,
+                                    vendor_norm,
+                                    original_item if isinstance(original_item, dict) else None,
+                                )
+                            )
                             upgraded = True
-                    except Exception as upgrade_error:
-                        logging.debug(f"DB upgrade for fallback failed: {upgrade_error}")
+                            logging.info(
+                                f"🔁 SECOND-CHANCE UPGRADE (educated guess): "
+                                f"Reused DB product for strain '{fp_strain}' "
+                                f"and brand family '{brand_family}' (category '{category}')"
+                            )
+                        except Exception as eg_upgrade_error:
+                            logging.debug(f"Second-chance upgrade for educated guess failed: {eg_upgrade_error}")
             
             if upgraded:
                 continue
