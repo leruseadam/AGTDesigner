@@ -1517,8 +1517,12 @@ class JSONMatcher:
                 count += 1
             if count:
                 logging.info(f"📊 Populated JSON column lookup from DB: {count} products, {len(self._indexed_cache['json_column_lookup'])} keys")
+            else:
+                logging.warning(f"⚠️ JSON column lookup populated but found 0 products with JSON column values")
         except Exception as e:
-            logging.warning(f"Could not populate JSON column lookup from DB: {e}")
+            logging.error(f"❌ ERROR: Could not populate JSON column lookup from DB: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
         
     def _build_sheet_cache(self):
         """Build a cache of sheet data for fast matching."""
@@ -2930,11 +2934,23 @@ class JSONMatcher:
                 # CRITICAL: Try JSON column matching FIRST - EXACT MATCH ONLY, no filtering
                 json_column_match = None
                 try:
+                    # Check cache status before matching
+                    cache_exists = self._indexed_cache is not None and 'json_column_lookup' in self._indexed_cache
+                    cache_size = len(self._indexed_cache.get('json_column_lookup', {})) if cache_exists else 0
+                    logging.debug(f"🔍 JSON MATCH ATTEMPT: '{product_name[:60]}' (cache: {'exists' if cache_exists else 'MISSING'}, size: {cache_size})")
+                    
                     json_column_match = self._find_json_column_match(product_name)
                     if not json_column_match and raw_product_name != product_name:
                         json_column_match = self._find_json_column_match(raw_product_name)
+                    
+                    if json_column_match:
+                        logging.info(f"✅ JSON COLUMN MATCH FOUND: '{product_name[:50]}'")
+                    else:
+                        logging.debug(f"❌ NO JSON COLUMN MATCH: '{product_name[:50]}'")
                 except Exception as e:
-                    logging.error(f"Error in JSON column matching for '{product_name[:50]}': {e}")
+                    logging.error(f"❌ ERROR in JSON column matching for '{product_name[:50]}': {e}")
+                    import traceback
+                    logging.error(traceback.format_exc())
                 
                 if json_column_match:
                     # JSON COLUMN MATCH = EXACT MATCH - accept it immediately, no vendor/brand/strain checks
