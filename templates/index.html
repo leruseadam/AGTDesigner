@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=5.0, user-scalable=yes">
   <!-- ⚡ PERFORMANCE: Allow aggressive caching with version busting -->
   <meta name="theme-color" content="#198754">
-  <title>AGT Designer - Professional Cannabis Label Generation</title>
+  <title>AGT Label Maker - Professional Cannabis Label Generation</title>
   
   <!-- ⚡ PERFORMANCE: Preconnect to critical CDNs -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
@@ -1180,9 +1180,8 @@
               return Promise.resolve([]);
             }
             
-            // PERFORMANCE: Use fast_load=1 for instant loading, lineage will be enriched in background
-            // Only use fast_load=0 when explicitly needed (e.g., after lineage updates)
-            return fetchWithTimeout('/api/available-tags?fast_load=1', 60000).catch(e => { 
+            // CRITICAL FIX: Use main endpoint with full lineage alignment (no web fast_load path)
+            return fetchWithTimeout('/api/available-tags?fast_load=0&nocache=1', 60000).catch(e => { 
               console.error('Available tags failed:', e); 
               return []; 
             });
@@ -3060,21 +3059,11 @@
                 }
               }
               
-              // Fetch the export file (include credentials so session/store is sent on web)
-              fetch('/api/database-export', { credentials: 'include' })
-                .then(async response => {
+              // Fetch the export file
+              fetch('/api/database-export')
+                .then(response => {
                   if (!response.ok) {
-                    let msg = response.statusText;
-                    try {
-                      const text = await response.text();
-                      try {
-                        const data = JSON.parse(text);
-                        msg = data.error || data.message || msg;
-                      } catch (_) {
-                        if (text && text.length < 300) msg = text;
-                      }
-                    } catch (_) {}
-                    throw new Error(msg);
+                    throw new Error(`Export failed: ${response.statusText}`);
                   }
                   return response.blob();
                 })
@@ -6053,8 +6042,7 @@
     }
 
     #jsonMatchModal .alert-danger,
-    #detailedJsonMatchModal .alert-danger,
-    #detailedJsonMatchModal .modal-body .alert-danger {
+    #detailedJsonMatchModal .alert-danger {
       background-color: #f8d7da !important;
       color: #721c24 !important;
       border-color: #f5c6cb !important;
@@ -6276,8 +6264,6 @@
   <!-- CRITICAL FIX: Show immediate placeholder background while WebGL loads -->
   <div id="lava-background-placeholder" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; z-index: -1 !important; pointer-events: none !important; background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%) !important; background-size: 400% 400% !important; animation: lava-placeholder-fade 3s ease-in-out infinite !important;"></div>
   <canvas id="lava-lamp-canvas" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important; z-index: -1 !important; pointer-events: none !important; display: block !important; background: transparent !important; max-width: none !important; max-height: none !important; min-width: 100% !important; min-height: 100% !important; transform: none !important; object-fit: cover !important; opacity: 0 !important; transition: opacity 0.5s ease-in !important;"></canvas>
-  <!-- Solid Color Background (hidden by default, color controlled via JS) -->
-  <div id="solid-color-background" style="position: fixed !important; top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important; width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; border: none !important; z-index: -1 !important; pointer-events: none !important; background: #23192b; display: none; opacity: 0; transition: opacity 0.5s ease-in-out !important;"></div>
   <!-- CRITICAL FIX: Load lava-lamp.js immediately after canvas element (async for non-blocking) -->
   <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" async></script>
 
@@ -6562,17 +6548,6 @@
               <div class="control-section mb-2">
                 <label class="filter-label">CONTROLS</label>
                 <div class="d-grid controls-buttons-container w-100">
-                  <!-- Clear button (moved to top) -->
-                  <button id="clear-filters-btn" class="btn btn-glass btn-control btn-color-red" title="Clear selected tags and reset app">
-                    <span class="icon-btn">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                      </svg>
-                      Clear & Reset
-                    </span>
-                  </button>
-
                   <!-- Undo on top of redo (stacked) -->
                   <div class="d-grid gap-2">
                     <button type="button" id="undo-move-btn" class="btn btn-glass btn-control btn-color-indigo" title="Undo last selection">
@@ -6594,6 +6569,17 @@
                       </span>
                     </button>
                   </div>
+
+                  <!-- Clear button -->
+                  <button id="clear-filters-btn" class="btn btn-glass btn-control btn-color-red" title="Clear selected tags and reset app">
+                    <span class="icon-btn">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                      Clear & Reset
+                    </span>
+                  </button>
                 </div>
               </div>
 
@@ -8966,11 +8952,10 @@
     // Don't set default store immediately - let checkStoreRequired handle it
 
     // RELIABLE TAG MANAGER INITIALIZATION
-    // Wait for main.js to fully load before initializing.
-    // Make these globally accessible so store selection handler can restart the wait.
-    // SAFETY: Give slower networks more time before declaring failure.
+    // Wait for main.js to fully load before initializing
+    // Make these globally accessible so store selection handler can restart the wait
     window.tagManagerInitAttempts = 0;
-    window.MAX_TAG_MANAGER_INIT_ATTEMPTS = 150; // 15 seconds max (150 * 100ms)
+    window.MAX_TAG_MANAGER_INIT_ATTEMPTS = 200; // 20 seconds max (200 * 100ms) - main.js can load slowly on first load
     
     function waitForTagManagerAndInit() {
       window.tagManagerInitAttempts = (window.tagManagerInitAttempts || 0) + 1;
@@ -9010,30 +8995,31 @@
         }
         setTimeout(waitForTagManagerAndInit, 100);
       } else {
-        // Fallback: something likely went wrong with main.js loading
-        // Use a softer warning here – on very slow networks main.js may still finish later.
-        console.warn('⚠️ TagManager not detected after extended wait (15s). If tags do not load, check console and Network tab for main.js errors.');
+        // Fallback: something went wrong with main.js loading
+        const waitSeconds = (window.MAX_TAG_MANAGER_INIT_ATTEMPTS * 100) / 1000;
+        console.error(`❌ Failed to load full TagManager from main.js after ${waitSeconds} seconds`);
+        console.error('❌ This will cause tags to not load properly. Check browser console for script errors.');
         
         // Diagnostic information
-        console.warn('=== DIAGNOSTICS (TagManager watchdog) ===');
-        console.warn('Script Loading:');
-        console.warn('  - main.js loaded:', window.mainJsLoaded || false);
-        console.warn('  - main.js error:', window.mainJsError || 'None detected');
-        console.warn('TagManager Status:');
-        console.warn('  - window.TagManager exists:', !!window.TagManager);
+        console.error('=== DIAGNOSTICS ===');
+        console.error('Script Loading:');
+        console.error('  - main.js loaded:', window.mainJsLoaded || false);
+        console.error('  - main.js error:', window.mainJsError || 'None detected');
+        console.error('TagManager Status:');
+        console.error('  - window.TagManager exists:', !!window.TagManager);
         if (window.TagManager) {
-          console.warn('  - TagManager.createTagElement exists:', typeof window.TagManager.createTagElement === 'function');
-          console.warn('  - TagManager.init exists:', typeof window.TagManager.init === 'function');
-          console.warn('  - TagManager.uploadFile exists:', typeof window.TagManager.uploadFile === 'function');
-          console.warn('  - TagManager keys (first 10):', Object.keys(window.TagManager).slice(0, 10));
+          console.error('  - TagManager.createTagElement exists:', typeof window.TagManager.createTagElement === 'function');
+          console.error('  - TagManager.init exists:', typeof window.TagManager.init === 'function');
+          console.error('  - TagManager.uploadFile exists:', typeof window.TagManager.uploadFile === 'function');
+          console.error('  - TagManager keys (first 10):', Object.keys(window.TagManager).slice(0, 10));
         } else {
-          console.warn('  - TagManager is completely missing - main.js may have a JavaScript error');
+          console.error('  - TagManager is completely missing - main.js may have a JavaScript error');
         }
-        console.warn('Troubleshooting:');
-        console.warn('  1. Check Network tab - is main.js returning 200 OK?');
-        console.warn('  2. Check Console tab - are there red JavaScript errors?');
-        console.warn('  3. Check if main.js file exists at: /static/js/main.js');
-        console.warn('  4. Try hard refresh (Ctrl+Shift+R or Cmd+Shift+R)');
+        console.error('Troubleshooting:');
+        console.error('  1. Check Network tab - is main.js returning 200 OK?');
+        console.error('  2. Check Console tab - are there red JavaScript errors?');
+        console.error('  3. Check if main.js file exists at: /static/js/main.js');
+        console.error('  4. Try hard refresh (Ctrl+Shift+R or Cmd+Shift+R)');
         
         // Try to initialize anyway as last resort
         if (window.TagManager && typeof window.TagManager.init === 'function') {
@@ -9133,21 +9119,17 @@
     window.initializeTagManagerSafely = initializeTagManagerSafely;
     
     // Start waiting for TagManager to load
-    // IMPORTANT: Only start this logic after DOMContentLoaded so main.js (deferred)
-    // has had a fair chance to execute. This prevents noisy "main.js never loaded"
-    // diagnostics on slower connections where the script is still downloading.
-    document.addEventListener('DOMContentLoaded', function() {
-      // Give it a small delay to ensure main.js execution completes
-      setTimeout(() => {
-        if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
-          console.log('✅ TagManager available immediately after DOMContentLoaded, initializing...');
-          initializeTagManagerSafely();
-        } else {
-          console.log('⏳ TagManager not yet available after DOMContentLoaded, starting wait watchdog...');
-          waitForTagManagerAndInit();
-        }
-      }, 100);
-    });
+    // Since main.js now loads synchronously, it should be available, but we'll wait just in case
+    // Give it a small delay to ensure script execution completes
+    setTimeout(() => {
+      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+        console.log('✅ TagManager available immediately, initializing...');
+        initializeTagManagerSafely();
+      } else {
+        console.log('⏳ TagManager not immediately available, starting wait...');
+        waitForTagManagerAndInit();
+      }
+    }, 100);
     
     // Additional DOM-ready setup
     document.addEventListener('DOMContentLoaded', function() {
@@ -11253,12 +11235,7 @@
           if (activeElement && !modal.contains(activeElement)) {
             activeElement.setAttribute('data-bs-focus-prev', 'true');
           }
-
-          // CRITICAL FIX: Remove inert IMMEDIATELY when modal starts showing
-          // This prevents Bootstrap from closing the modal due to inert state
-          this.removeAttribute('inert');
-          this.removeAttribute('aria-hidden');
-
+          
           console.log('Modal show event triggered:', this.id);
         };
         
@@ -14053,11 +14030,6 @@
     </div>
   </div>
 
-  <!-- Background Toggle Button -->
-  <button id="backgroundToggle" class="background-toggle-btn" onclick="toggleBackground()" title="Toggle Background: Lava / Solid Color">
-    <i class="bi bi-palette"></i>
-  </button>
-
   <!-- Performance Toggle Button -->
   <button id="performanceToggle" class="performance-toggle-btn" onclick="togglePerformanceDashboard()" title="Performance Monitor">
     <i class="bi bi-speedometer2"></i>
@@ -14078,70 +14050,6 @@
   </div>
 
   <script>
-    // Background Toggle Functions (Lava + softer themed solids)
-    const BACKGROUND_THEMES = [
-      { id: 'lava', label: 'Lava', type: 'lava' },
-      // Softer, desaturated theme colors (still blue / green / purple)
-      { id: 'midnight-blue', label: 'Midnight Blue', type: 'solid', color: '#1E7FC9' },   // deep, muted blue
-      { id: 'forest-teal',   label: 'Forest Teal',   type: 'solid', color: '#1E7F48' },   // dark teal/green
-      { id: 'plum-velvet',   label: 'Plum Velvet',   type: 'solid', color: '#7F120C' },   // muted purple
-      { id: 'ember-slate',   label: 'Ember Slate',   type: 'solid', color: '#441248' }    // neutral with a hint of warmth
-    ];
-    
-    let currentBackgroundIndex = 0; // 0 = lava, others = solid theme colors
-    
-    function applyBackgroundTheme(theme) {
-      const lavaPlaceholder = document.getElementById('lava-background-placeholder');
-      const lavaCanvas = document.getElementById('lava-lamp-canvas');
-      const solidBackground = document.getElementById('solid-color-background');
-      const toggle = document.getElementById('backgroundToggle');
-      
-      if (!lavaPlaceholder || !lavaCanvas || !solidBackground || !toggle) {
-        return;
-      }
-      
-      if (theme.type === 'lava') {
-        // Show lava background, hide solid background
-        lavaPlaceholder.style.display = 'block';
-        lavaPlaceholder.style.opacity = '1';
-        
-        lavaCanvas.style.display = 'block';
-        lavaCanvas.style.opacity = '1';
-        
-        solidBackground.style.opacity = '0';
-        solidBackground.style.display = 'none';
-        
-        toggle.classList.remove('active');
-        toggle.setAttribute('data-theme', 'lava');
-        toggle.title = 'Toggle Background: Lava → Solid Theme';
-        return;
-      }
-      
-      // Show themed solid background, hide lava
-      lavaPlaceholder.style.opacity = '0';
-      lavaCanvas.style.opacity = '0';
-      setTimeout(() => {
-        lavaPlaceholder.style.display = 'none';
-        lavaCanvas.style.display = 'none';
-      }, 500);
-      
-      solidBackground.style.background = theme.color;
-      solidBackground.style.display = 'block';
-      // Ensure transition runs
-      requestAnimationFrame(() => {
-        solidBackground.style.opacity = '1';
-      });
-      
-      toggle.classList.add('active');
-      toggle.setAttribute('data-theme', theme.id);
-      toggle.title = `Background: ${theme.label} (click to cycle)`;
-    }
-    
-    function toggleBackground() {
-      currentBackgroundIndex = (currentBackgroundIndex + 1) % BACKGROUND_THEMES.length;
-      applyBackgroundTheme(BACKGROUND_THEMES[currentBackgroundIndex]);
-    }
-
     // Performance Dashboard Functions
     function togglePerformanceDashboard() {
       const dashboard = document.getElementById('performanceDashboard');
