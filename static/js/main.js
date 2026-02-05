@@ -2186,13 +2186,6 @@ const TagManager = {
             verboseLog(`💾 Saved selection state for undo - Action: ${actionType}, Stack size: ${this.state.localUndoStack.length}, Selected tags: ${currentState.selected_tag_names.length}`);
             
             // Background: Also save to backend (non-blocking)
-            // Only perform backend autosave if explicitly enabled (prevents saving on every add)
-            // Set `window.AUTO_SAVE_SELECTION = true` in console to re-enable autosave behavior.
-            if (typeof window.AUTO_SAVE_SELECTION === 'undefined') window.AUTO_SAVE_SELECTION = false;
-            if (!window.AUTO_SAVE_SELECTION) {
-                verboseLog('Autosave disabled (window.AUTO_SAVE_SELECTION=false); skipping backend save');
-                return;
-            }
             // Use fetch instead of sendBeacon for better reliability and error handling
             const payload = JSON.stringify({
                 action_type: actionType,
@@ -3054,8 +3047,8 @@ const TagManager = {
 
             verboseLog(`💾 Saving ${selectedTagNames.length} selected tags to backend...`);
 
-            // Show a saving splash while the backend request is in flight
-            try { this.showSplash && this.showSplash('Saving selection...'); } catch (e) {}
+            // REMOVED: Don't show splash for individual selections - too annoying
+            // The save happens silently in the background
 
             const response = await fetch('/api/selected-tags', {
                 method: 'POST',
@@ -3078,14 +3071,7 @@ const TagManager = {
 
             const result = await response.json();
             verboseLog('✅ Selected tags saved to backend:', result);
-            try {
-                this.hideSplash && this.hideSplash();
-                this.showModal && this.showModal({
-                    title: 'Saved',
-                    message: `Saved ${selectedTagNames.length} selected tags.`,
-                    buttons: [{ text: 'OK', value: 'ok', primary: true }]
-                });
-            } catch (e) {}
+            // REMOVED: Don't show success modal for individual selections - saves silently
         } catch (error) {
             console.warn('⚠️ Error saving selected tags to backend:', error);
         }
@@ -15329,6 +15315,11 @@ const TagManager = {
             });
             if (!response.ok) {
                 const error = await response.json();
+                // Handle stale upload error - prompt user to upload fresh Excel
+                if (error.error === 'stale_upload' || error.message?.includes('stale')) {
+                    this.showStaleUploadModal(error.message || error.stale_reason || 'Your Excel data is stale. Please upload a fresh Excel file.');
+                    throw new Error('STALE_UPLOAD'); // Special error to prevent further processing
+                }
                 throw new Error(error.error || 'Failed to generate labels');
             }
             const blob = await response.blob();
@@ -15392,6 +15383,18 @@ const TagManager = {
             }
         } catch (error) {
             console.error('Error generating labels:', error);
+            // Handle stale upload - don't show generic error, modal already shown
+            if (error.message === 'STALE_UPLOAD') {
+                // Modal already shown, just return
+                return;
+            }
+            // Show error toast for other errors
+            const errorMsg = error.message || 'Failed to generate labels. Please try again.';
+            if (typeof showToast === 'function') {
+                showToast('error', errorMsg);
+            } else {
+                alert(errorMsg);
+            }
             // CRITICAL FIX: Even on error, mark generation time to preserve selections
             // This prevents tags from disappearing if generation partially succeeded
             this._lastTagSelectionTime = Date.now();
@@ -16542,6 +16545,103 @@ const TagManager = {
             verboseLog('✅ Splash hidden');
         } else {
             console.error('❌ Could not find splash element to hide');
+        }
+    },
+
+    showStaleUploadModal(message) {
+        verboseLog('⚠️ Showing stale upload modal:', message);
+        
+        // Create or get modal element
+        let modal = document.getElementById('staleUploadModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'staleUploadModal';
+            modal.className = 'modal fade';
+            modal.setAttribute('tabindex', '-1');
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-labelledby', 'staleUploadModalLabel');
+            modal.setAttribute('aria-hidden', 'true');
+            modal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header bg-warning text-dark">
+                            <h5 class="modal-title" id="staleUploadModalLabel">
+                                <i class="fas fa-exclamation-triangle me-2"></i>Stale Data Detected
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-3">${message || 'Your Excel data is stale. Please upload a fresh Excel file before generating tags.'}</p>
+                            <p class="text-muted small">This prevents generating tags with outdated product information.</p>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="staleUploadModalUploadBtn">
+                                <i class="fas fa-upload me-2"></i>Upload Fresh Excel File
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Handle upload button click
+            const uploadBtn = modal.querySelector('#staleUploadModalUploadBtn');
+            if (uploadBtn) {
+                uploadBtn.addEventListener('click', () => {
+                    const fileInput = document.getElementById('fileInput');
+                    if (fileInput) {
+                        // Close modal first
+                        const bsModal = bootstrap.Modal.getInstance(modal);
+                        if (bsModal) {
+                            bsModal.hide();
+                        }
+                        // Trigger file input click
+                        setTimeout(() => {
+                            fileInput.click();
+                        }, 300);
+                    } else {
+                        console.error('File input not found');
+                        alert('Please use the upload button in the header to upload a new Excel file.');
+                    }
+                });
+            }
+        }
+        
+        // Update message if modal already exists
+        const bodyText = modal.querySelector('.modal-body p');
+        if (bodyText && message) {
+            bodyText.textContent = message;
+        }
+        
+        // Show modal using Bootstrap
+        try {
+            const bsModal = new bootstrap.Modal(modal);
+            bsModal.show();
+        } catch (e) {
+            // Fallback if Bootstrap not available
+            console.warn('Bootstrap Modal not available, using fallback:', e);
+            modal.style.display = 'block';
+            modal.classList.add('show');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+    },
+    
+    hideStaleUploadModal() {
+        const modal = document.getElementById('staleUploadModal');
+        if (modal) {
+            try {
+                const bsModal = bootstrap.Modal.getInstance(modal);
+                if (bsModal) {
+                    bsModal.hide();
+                } else {
+                    modal.style.display = 'none';
+                    modal.classList.remove('show');
+                    modal.setAttribute('aria-hidden', 'true');
+                }
+            } catch (e) {
+                modal.style.display = 'none';
+            }
         }
     },
 
@@ -21700,59 +21800,3 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
-
-    // Dedupe lineage options to avoid duplicate entries like 'CBD' appearing twice
-    function dedupeLineageOptions() {
-        const selectors = [
-            '.lineage-dropdown',
-            '#lineageFilter',
-            '#bulkLineageSelect',
-            'select[id^="lineage-"]',
-            '#lineageSelect',
-            '#singleProductLineage',
-            '#bulkStrainLineage',
-            '#multiStrainLineage',
-            '#editLineage'
-        ];
-
-        selectors.forEach(sel => {
-            document.querySelectorAll(sel).forEach(select => {
-                const seen = new Set();
-                for (let i = select.options.length - 1; i >= 0; i--) {
-                    const opt = select.options[i];
-                    let rawVal = (opt.value || '').toString().trim();
-                    if (rawVal === '') continue;
-                    // Normalize common variants (PARAPHERNALIA -> PARA, CBD_BLEND -> CBD, THC -> MIXED)
-                    let normVal = rawVal;
-                    try {
-                        if (typeof window.normalizeLineageValue === 'function') {
-                            normVal = window.normalizeLineageValue(rawVal || '') || rawVal;
-                        } else {
-                            normVal = rawVal.toUpperCase();
-                            if (normVal === 'PARAPHERNALIA') normVal = 'PARA';
-                            if (normVal === 'CBD_BLEND') normVal = 'CBD';
-                            if (normVal === 'THC') normVal = 'MIXED';
-                        }
-                    } catch (e) {
-                        normVal = rawVal.toUpperCase();
-                    }
-
-                    if (seen.has(normVal)) {
-                        select.remove(i);
-                    } else {
-                        seen.add(normVal);
-                    }
-                }
-            });
-        });
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-        try {
-            dedupeLineageOptions();
-            window.dedupeLineageOptions = dedupeLineageOptions;
-            verboseLog('lineage option dedupe complete');
-        } catch (err) {
-            console.warn('dedupeLineageOptions failed', err);
-        }
-    });

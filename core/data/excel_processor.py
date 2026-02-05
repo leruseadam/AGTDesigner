@@ -1991,7 +1991,16 @@ class ExcelProcessor:
             # Reset index immediately after assignment to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
-            
+
+            # CRITICAL: Capture original Description values into JSON column BEFORE any transformations
+            # This preserves the original Excel Description for JSON URL matching later
+            if "Description" in self.df.columns:
+                self.df["JSON"] = self.df["Description"].astype(str).str.strip()
+                self.logger.info(f"✅ Captured {len(self.df)} original Description values into JSON column for matching")
+            else:
+                self.df["JSON"] = ""
+                self.logger.debug("No Description column found - JSON column initialized empty")
+
             # 2) Trim product names
             if "Product Name*" in self.df.columns:
                 self.df["Product Name*"] = self.df["Product Name*"].str.lstrip()

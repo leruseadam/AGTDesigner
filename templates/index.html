@@ -6707,39 +6707,19 @@
 
           window.STORE_MODAL_BLOCKING = true;
 
-          let attemptCount = 0;
-          const MAX_ATTEMPTS = 50; // 10 seconds max (50 * 200ms)
+          // CRITICAL FIX (PC stuck on loading): Store modal must show BEFORE TagManager.init()
+          // TagManager.init() only runs after store is selected - so loading splash would never
+          // hide on its own. Hide splash immediately and show modal - no waiting.
+          const loadingSplash = document.getElementById('appLoadingSplash') || 
+                               document.getElementById('loadingOverlay') ||
+                               document.querySelector('#loadingOverlay');
+          if (loadingSplash) {
+            loadingSplash.style.display = 'none';
+            loadingSplash.classList.add('fade-out');
+            console.log('✅ Hid loading splash for store selection modal');
+          }
           
-          const attemptShow = () => {
-            attemptCount++;
-            
-            // CRITICAL FIX: Prevent infinite loop - timeout after max attempts
-            if (attemptCount > MAX_ATTEMPTS) {
-              console.warn('⚠️ Loading splash check timeout - showing modal anyway');
-              // Force hide loading splash if it exists
-              const loadingSplash = document.getElementById('appLoadingSplash');
-              if (loadingSplash) {
-                loadingSplash.style.display = 'none';
-                loadingSplash.classList.add('fade-out');
-              }
-              // Continue to show modal
-            }
-            
-            // Check for loading splash (try multiple possible IDs)
-            const loadingSplash = document.getElementById('appLoadingSplash') || 
-                                 document.getElementById('loadingOverlay') ||
-                                 document.querySelector('#loadingOverlay');
-            
-            if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
-              // Loading splash is still visible, wait a bit longer
-              if (attemptCount % 5 === 0 || attemptCount <= 2) {
-                console.log(`⏳ Waiting for loading splash to hide... (attempt ${attemptCount}/${MAX_ATTEMPTS})`);
-              }
-              setTimeout(attemptShow, 200);
-              return;
-            }
-            
-            // Loading splash is hidden or doesn't exist - proceed to show modal
+          const doShowModal = () => {
             if (typeof window.showStoreSelectionModal === 'function') {
               window.showStoreSelectionModal();
             } else {
@@ -6767,11 +6747,11 @@
                   }
                 } catch (err) {
                   console.warn('⚠️ Failed to show modal via bootstrap, falling back:', err);
-                  setTimeout(attemptShow, 100);
+                  setTimeout(doShowModal, 100);
                   return;
                 }
               } else {
-                setTimeout(attemptShow, 100);
+                setTimeout(doShowModal, 100);
                 return;
               }
             }
@@ -6787,9 +6767,9 @@
           };
 
           if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', attemptShow);
+            document.addEventListener('DOMContentLoaded', doShowModal);
           } else {
-            attemptShow();
+            doShowModal();
           }
         };
         
@@ -8335,6 +8315,22 @@
       } else {
         console.error('❌ TagManager or hydrateAvailableTagsFromCache not available');
       }
+
+      // CRITICAL FIX (PC stuck on loading): Global safety timeout to force-hide splash
+      // If init hangs (store check, TagManager, API), splash would never hide. Force it after 6s.
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const safetyMs = isLocalhost ? 6000 : 5000; // 6s for PC/desktop, 5s for web
+      setTimeout(function forceHideLoadingSplash() {
+        const splash = document.getElementById('appLoadingSplash');
+        if (splash && !splash.classList.contains('fade-out')) {
+          console.warn('⚡ Safety timeout: Forcing loading splash to hide after', safetyMs, 'ms (PC/desktop stuck fix)');
+          splash.classList.add('fade-out');
+          setTimeout(function() { splash.style.display = 'none'; }, 300);
+          if (typeof AppLoadingSplash !== 'undefined') {
+            AppLoadingSplash.isVisible = false;
+          }
+        }
+      }, safetyMs);
 
       // Check TagManager after deferred scripts have executed
       (function checkTagManager() {

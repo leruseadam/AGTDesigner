@@ -7893,13 +7893,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         cursor = conn.cursor()
         
         # CRITICAL FIX: Use EXACT same query as docx generation for consistency
-        # Match by "Product Name*" exactly like docx generation (tag_generator.py line 909)
+        # PERFORMANCE: One row per product name (latest by id) to avoid redundant DB rows slowing tag load
         chunk_size = 400
         for start in range(0, len(product_names), chunk_size):
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
-        # EXACT same query as docx generation - but also return individual fields to preserve priority
-        # CRITICAL FIX: Also select Product Brand and DOH to enrich tags with brand and DOH data
             cursor.execute(f'''
                 SELECT p."Product Name*", 
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
@@ -7912,8 +7910,9 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
+                  AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) GROUP BY "Product Name*")
                 ORDER BY p.id DESC
-            ''', chunk)
+            ''', chunk + chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
                 db_lineage_raw = row[1]
@@ -8595,6 +8594,20 @@ def generate_labels():
             logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly - SKIPPING ALL FILE I/O")
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
+            # CRITICAL: Ensure Price is populated for DOCX (web sends full tag objects; UI may have Price* only)
+            _df = excel_processor.df
+            if _df is not None and not _df.empty:
+                if 'Price*' in _df.columns and ('Price' not in _df.columns or _df['Price'].isna().all()):
+                    if 'Price' not in _df.columns:
+                        _df['Price'] = _df['Price*']
+                    else:
+                        _df['Price'] = _df['Price'].fillna(_df['Price*'])
+                if 'Price' in _df.columns:
+                    # Fill NaN in Price from Price* where available
+                    if 'Price*' in _df.columns:
+                        _df['Price'] = _df['Price'].fillna(_df['Price*'])
+                    if 'Price* (Tier Name for Bulk)' in _df.columns:
+                        _df['Price'] = _df['Price'].fillna(_df['Price* (Tier Name for Bulk)'])
             excel_processor._last_loaded_file = file_path or 'direct_from_request'
             excel_processor._skip_enrichment = True  # Skip database enrichment for speed
             logging.info(f"⚡ PERFORMANCE: Loaded {len(excel_processor.df)} tags directly (0s file load time)")
@@ -8661,6 +8674,48 @@ def generate_labels():
         # CRITICAL FIX: JSON tags work exactly like Excel tags - no special restoration needed
         # They're processed through the same pipeline as Excel tags
 
+        # CRITICAL: Check for stale data - prevent generation with old Excel uploads
+        upload_timestamp = session.get('upload_timestamp', 0)
+        session_file_path = session.get('file_path')
+        current_time = time.time()
+        stale_threshold = 21600  # 6 hours in seconds
+        
+        # Check if upload is stale (missing timestamp or older than 1 hour)
+        is_stale = False
+        stale_reason = None
+        
+        if not upload_timestamp or upload_timestamp == 0:
+            is_stale = True
+            stale_reason = "No upload timestamp found"
+        elif current_time - upload_timestamp > stale_threshold:
+            is_stale = True
+            age_hours = (current_time - upload_timestamp) / 3600
+            stale_reason = f"Upload is {age_hours:.1f} hours old (max 6 hours allowed)"
+        
+        # Also check if file exists and matches session
+        if session_file_path and os.path.exists(session_file_path):
+            file_mtime = os.path.getmtime(session_file_path)
+            file_age = current_time - file_mtime
+            if file_age > stale_threshold:
+                is_stale = True
+                stale_reason = f"Excel file is {file_age / 3600:.1f} hours old (max 6 hours allowed)"
+        elif session_file_path and not os.path.exists(session_file_path):
+            is_stale = True
+            stale_reason = "Excel file no longer exists"
+        
+        # Block generation if data is stale - always check, even if tags come from request
+        # UI may show stale data if cache is stale, so we must verify upload freshness
+        if is_stale:
+            logging.warning(f"⚠️ STALE DATA BLOCK: {stale_reason} - blocking tag generation")
+            generate_labels._processing_requests.discard(request_fingerprint)
+            return jsonify({
+                'error': 'stale_upload',
+                'message': f'Your Excel data is stale ({stale_reason}). Please upload a fresh Excel file before generating tags.',
+                'stale_reason': stale_reason,
+                'upload_timestamp': upload_timestamp,
+                'current_time': current_time
+            }), 400
+        
         # Check if we have data in Excel processor OR database
         has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
         has_database = False
@@ -9089,6 +9144,7 @@ def generate_labels():
                                 # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
                                 # This ensures DOCX uses the same lineage shown in the UI
                                 ui_lineage_map = {}
+                                ui_price_map = {}  # Price from UI (selected tags) - DOCX must match what user sees
                                 for tag in selected_tags_from_request:
                                     if isinstance(tag, dict):
                                         product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
@@ -9096,6 +9152,15 @@ def generate_labels():
                                         ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
                                         if product_name and ui_lineage:
                                             ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
+                                        # Price from UI - same source as "Selected Tags" display (incl. best_match)
+                                        ui_price = (
+                                            tag.get('Price') or tag.get('Price*') or tag.get('Price* (Tier Name for Bulk)') or tag.get('Med Price') or
+                                            (tag.get('best_match') or {}).get('Price') or (tag.get('best_match') or {}).get('Price*')
+                                        )
+                                        if product_name and ui_price and str(ui_price).strip() and str(ui_price).strip().lower() not in ('nan', 'none', 'null', ''):
+                                            key = str(product_name).strip()
+                                            ui_price_map[key] = str(ui_price).strip()
+                                            ui_price_map[key.lower()] = str(ui_price).strip()
                                 
                                 # PERFORMANCE FIX: Batch query all lineages at once instead of N+1 queries
                                 # This replaces individual get_product_lineage() calls which were causing 5-minute delays
@@ -9230,28 +9295,36 @@ def generate_labels():
                                         is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
                                         docx_lineage = 'HYBRID' if is_classic else 'MIXED'
                                     
-                                    # Extract price from Excel cache first, then database
-                                    if product_name_for_record in price_cache_from_excel:
-                                        extracted_price = price_cache_from_excel[product_name_for_record]
-                                        logging.info(f"💰 Using price from Excel cache: '{product_name_debug}' -> '{extracted_price}'")
+                                    # Extract price: UI first (what user sees), then Excel cache, then database
+                                    extracted_price = None
+                                    if ui_price_map:
+                                        key = product_name_for_record.strip()
+                                        extracted_price = ui_price_map.get(key) or ui_price_map.get(key.lower())
+                                    if extracted_price is not None:
+                                        logging.info(f"💰 Using price from UI (selected tags): '{product_name_for_record[:50]}' -> '{extracted_price}'")
+                                    elif price_cache_from_excel and (product_name_for_record in price_cache_from_excel or product_name_for_record.strip().lower() in price_cache_from_excel):
+                                        extracted_price = price_cache_from_excel.get(product_name_for_record) or price_cache_from_excel.get(product_name_for_record.strip().lower())
+                                        logging.info(f"💰 Using price from Excel cache: '{product_name_for_record[:50]}' -> '{extracted_price}'")
                                     else:
                                         extracted_price = _extract_price_from_database_product(processed_record)
+                                    if not extracted_price:
+                                        raw_price = db_record.get('Price') or db_record.get('Price*') or db_record.get('Med Price')
+                                        if raw_price and str(raw_price).strip() and str(raw_price).strip().lower() not in ('none', 'nan', ''):
+                                            extracted_price = str(raw_price).strip()
+                                            logging.info(f"💰 Using price from raw db_record: '{product_name_for_record[:50]}' -> '{extracted_price}'")
                                     
                                     formatted_price = _format_price_value(extracted_price)
-                                    
-                                    # CRITICAL FIX: Ensure Price is always set - use fallback if empty
                                     if not formatted_price or str(formatted_price).strip() in ['', 'None', 'nan', 'N/A', '$0', '$0.00']:
-                                        # Try to get price from other fields
                                         price_fallback = (
                                             processed_record.get('Price', '') or
                                             processed_record.get('Price*', '') or
                                             processed_record.get('Med Price', '') or
                                             ''
                                         )
-                                        if price_fallback:
+                                        if price_fallback and str(price_fallback).strip():
                                             formatted_price = _format_price_value(price_fallback)
-                                        else:
-                                            formatted_price = ''  # Leave empty instead of $0.00
+                                        if not formatted_price:
+                                            formatted_price = ''
                                     
                                     # CRITICAL FIX: Ensure DescAndWeight is always set - use fallback if empty
                                     desc_and_weight = processed_record.get('DescAndWeight', '')
@@ -9518,15 +9591,22 @@ def generate_labels():
             # PERFORMANCE: Fast validation loop - only process records that need fixing
             for record in records:
                 # CRITICAL FIX: NEVER set default prices - preserve existing price or leave empty
-                # Only use existing price fields, never fallback to $0.00 or any default
-                price = record.get('Price', '') or record.get('Price*', '') or record.get('Med Price', '')
-                if price and price.strip() and price.strip().lower() not in ['none', 'nan', 'n/a', '']:
+                # Treat NaN as missing so we fall back to Price* (web/UI may have Price* only)
+                def _safe_price_val(r, key, default=''):
+                    v = r.get(key, default)
+                    if v is None: return default
+                    if hasattr(pd, 'isna') and pd.isna(v): return default
+                    s = str(v).strip()
+                    if not s or s.lower() in ('nan', 'none', 'null', 'n/a', ''): return default
+                    return s
+                price = _safe_price_val(record, 'Price') or _safe_price_val(record, 'Price*') or _safe_price_val(record, 'Med Price')
+                if price:
                     # Only set price if we have a valid value from Excel
-                    if not record.get('Price'):
+                    if not _safe_price_val(record, 'Price'):
                         record['Price'] = price
-                    if not record.get('Price*'):
+                    if not _safe_price_val(record, 'Price*'):
                         record['Price*'] = price
-                    if not record.get('Price* (Tier Name for Bulk)'):
+                    if not record.get('Price* (Tier Name for Bulk)') or (hasattr(pd, 'isna') and pd.isna(record.get('Price* (Tier Name for Bulk)'))):
                         record['Price* (Tier Name for Bulk)'] = price
                 
                 # Ensure DescAndWeight is always set (fast check)
@@ -12780,6 +12860,7 @@ def get_available_tags():
                                             placeholders = ','.join(['?'] * len(chunk))
                                             # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                                             # Also handle case where normalized_product_strain is NULL - fall back to name-based join
+                                            # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                             chunk_query = f'''
                                                 SELECT DISTINCT
                                                     COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
@@ -12790,10 +12871,11 @@ def get_available_tags():
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                            WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
+                              AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
                                                 ORDER BY p.id DESC
                                             '''
-                                            cur.execute(chunk_query, chunk + chunk)
+                                            cur.execute(chunk_query, chunk + chunk + chunk + chunk)
                                             all_batch_results.extend(cur.fetchall())
                                         except Exception as chunk_err:
                                             logging.warning(f"Batch chunk query failed: {chunk_err}")
@@ -12803,6 +12885,7 @@ def get_available_tags():
                                     placeholders = ','.join(['?'] * len(all_search_names))
                                     # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
                                     # Also handle case where normalized_product_strain is NULL - fall back to name-based join
+                                    # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                     batch_query = f'''
                                         SELECT DISTINCT
                                             COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
@@ -12813,7 +12896,8 @@ def get_available_tags():
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders})
+                            WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
+                              AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
                                         ORDER BY p.id DESC
                                     '''
                                     # Add query timing to detect slow queries
@@ -12822,7 +12906,7 @@ def get_available_tags():
                                     # Target: <100ms for fast loading, <500ms for normal loading
                                     MAX_QUERY_TIME = 0.1 if fast_load else 0.5  # Stricter timeout in fast mode
                                     try:
-                                        cur.execute(batch_query, all_search_names + all_search_names)
+                                        cur.execute(batch_query, all_search_names + all_search_names + all_search_names + all_search_names)
                                         batch_results = cur.fetchall()
                                         
                                         query_duration = (time.time() - query_start) * 1000
@@ -14307,12 +14391,12 @@ def download_processed_excel():
             product_db = get_product_database(store_name)
             if product_db:
                 try:
-                    # Get all products from database
-                    db_products = product_db.get_all_products(limit=10000)
-                    if db_products:
-                        # Convert database products to DataFrame
+                    # Fast path: get products as DataFrame in one query (avoids slow get_all_products row-by-row)
+                    products_df = product_db.get_products_dataframe(limit=10000)
+                    if products_df is not None and not products_df.empty:
                         import pandas as pd
-                        processed_products = [process_database_product_for_api(p) for p in db_products]
+                        records = products_df.to_dict('records')
+                        processed_products = [process_database_product_for_api(p) for p in records]
                         df = pd.DataFrame(processed_products)
                         logging.info(f"Using {len(df)} database products for Excel download")
                     else:
@@ -14406,24 +14490,24 @@ def download_processed_excel():
         if df is None or df.empty:
             return jsonify({'error': 'No data available after filtering'}), 400
 
-        # Create output buffer
+        # Create output buffer (xlsxwriter is faster than openpyxl for writing)
         output_buffer = BytesIO()
         logging.debug(f"Creating Excel file with {df.shape[0]} rows and {df.shape[1]} columns")
-        df.to_excel(output_buffer, index=False, engine='openpyxl')
+        try:
+            df.to_excel(output_buffer, index=False, engine='xlsxwriter')
+        except Exception:
+            df.to_excel(output_buffer, index=False, engine='openpyxl')
         output_buffer.seek(0)
 
-        # Generate descriptive filename with vendor and record count
+        # Generate descriptive filename with vendor and record count (value_counts is much faster than iterrows)
         today_str = datetime.now().strftime('%Y%m%d')
         time_str = datetime.now().strftime('%H%M%S')
-        
-        # Get vendor information for filename
-        vendor_counts = {}
-        for _, row in df.iterrows():
-            vendor = str(row.get('Vendor', 'Unknown')).strip()
-            if vendor and vendor != 'Unknown':
-                vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
-        
-        primary_vendor = max(vendor_counts.items(), key=lambda x: x[1])[0] if vendor_counts else 'Unknown'
+        vendor_col = next((c for c in ['Vendor', 'Vendor/Supplier*', 'vendor'] if c in df.columns), None)
+        if vendor_col is not None:
+            counts = df[vendor_col].astype(str).str.strip().replace('', None).replace('nan', None).dropna().value_counts()
+            primary_vendor = str(counts.index[0]).strip() if len(counts) else 'Unknown'
+        else:
+            primary_vendor = 'Unknown'
         vendor_clean = primary_vendor.replace(' ', '_').replace('&', 'AND').replace(',', '').replace('.', '')[:15]
         
         filename = f"AGT_{vendor_clean}_Processed_Data_{len(df)}RECORDS_{today_str}_{time_str}.xlsx"
@@ -14631,6 +14715,28 @@ def update_lineage():
                 if similar_products_updated > 0:
                     logging.info(f"✅ Updated {similar_products_updated} Classic Type products with strain '{strain_name}' (linked: {strain_linked_count}, name-matched: {name_match_count})")
         
+        # CRITICAL FIX: Also copy canonical/sovereign lineage to products for ALL product types
+        # This ensures the main products table has the canonical lineage set so downstream
+        # queries and UI lookups that rely on p."Lineage" reflect the strain canonical value.
+        try:
+            total_copied = 0
+            for strain_id, strain_name in strain_rows:
+                try:
+                    cursor.execute("""
+                        UPDATE products
+                        SET "Lineage" = ?, sovereign_lineage = ?
+                        WHERE strain_id = ? OR LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
+                    """, (new_lineage, new_lineage, strain_id, strain_name))
+                    copied = cursor.rowcount
+                    total_copied += copied
+                    if copied > 0:
+                        logging.info(f"✅ Copied canonical lineage to {copied} product(s) for strain '{strain_name}' (id: {strain_id})")
+                except Exception as copy_err:
+                    logging.warning(f"⚠️ Could not copy canonical lineage to products for strain '{strain_name}' (id: {strain_id}): {copy_err}")
+            if total_copied > 0:
+                logging.info(f"✅ Total products updated with canonical/sovereign lineage copy: {total_copied}")
+        except Exception as overall_copy_err:
+            logging.warning(f"⚠️ Failed to copy canonical lineage to products (overall): {overall_copy_err}")
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
 
