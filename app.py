@@ -2100,111 +2100,19 @@ def simple_initialize_excel_processor():
 
 
 def initialize_excel_processor():
-    """Initialize Excel processor and load default data."""
+    """Initialize Excel processor and load default data (deprecated no-op).
+
+    Excel processors are now created lazily per request. This function is kept
+    only so the startup hook below doesn't do any heavy work that slows or
+    hangs app startup.
+    """
     try:
-        # Skip initialization if startup file loading is disabled for performance
         if DISABLE_STARTUP_FILE_LOADING:
-            logging.info("Startup file loading disabled for faster application startup")
-            return
-
-        # CRITICAL FIX: get_excel_processor() is deprecated and returns None
-        # Skip initialization - processors are now created per-request
-        excel_processor = get_excel_processor()
-        if excel_processor is None:
-            logging.info("Excel processor initialization skipped - using per-request processors")
-            return
-
-        # Safety check: ensure excel_processor has a logger attribute
-        if not hasattr(excel_processor, 'logger') or excel_processor.logger is None:
-            logging.warning("Excel processor does not have a logger - skipping logger configuration")
+            logging.info("Startup Excel initialization skipped (startup file loading disabled)")
         else:
-            excel_processor.logger.setLevel(logging.WARNING)
-        
-        # Enable product database integration by default
-        if hasattr(excel_processor, 'enable_product_db_integration'):
-            excel_processor.enable_product_db_integration(True)
-            logging.info("Product database integration enabled by default")
-        
-        # CRITICAL FIX: Check for session file FIRST before loading default file
-        # This ensures uploaded files persist across page reloads
-        session_file_path = None
-        try:
-            from flask import session, has_request_context
-            if has_request_context():
-                session_file_path = session.get('file_path')
-                if session_file_path and os.path.exists(session_file_path):
-                    # CRITICAL FIX: Validate that session file is not an exported file
-                    # Exported files have patterns like "AGT_*_Transformed_Data_*.xlsx" or are in downloads
-                    filename = os.path.basename(session_file_path)
-                    is_exported_file = (
-                        'Transformed_Data' in filename or
-                        'processed_excel' in filename.lower() or
-                        filename.startswith('AGT_') and '_Transformed_' in filename
-                    )
-                    
-                    if is_exported_file:
-                        logging.warning(f"⚠️ Session file_path points to exported file, clearing: {session_file_path}")
-                        session['file_path'] = None
-                        session['uploaded_filename'] = None
-                        session.modified = True
-                        session_file_path = None
-                    else:
-                        logging.info(f"✅ Found session file in initialize_excel_processor: {session_file_path}")
-                        # Check if already loaded
-                        if excel_processor._last_loaded_file != session_file_path or not hasattr(excel_processor, 'df') or excel_processor.df is None or excel_processor.df.empty:
-                            logging.info(f"📂 Loading session file in initialize_excel_processor: {session_file_path}")
-                            success = excel_processor.load_file(session_file_path)
-                            if success:
-                                excel_processor._last_loaded_file = session_file_path
-                                row_count = len(excel_processor.df) if hasattr(excel_processor, 'df') and excel_processor.df is not None else 0
-                                logging.info(f"✅ Session file loaded successfully with {row_count} records")
-                                return  # Don't load default file if session file was loaded
-                            else:
-                                logging.warning(f"⚠️ Failed to load session file: {session_file_path}")
-                        else:
-                            logging.info(f"✅ Session file already loaded: {session_file_path}")
-                            return  # Don't load default file if session file is already loaded
-        except Exception as session_check_error:
-            logging.debug(f"Could not check session in initialize_excel_processor: {session_check_error}")
-        
-        # Only load default file if no session file was found/loaded
-        from src.core.data.excel_processor import get_default_upload_file
-        # CRITICAL FIX: Use allow_fallback=True for default file loading on startup
-        # This ensures default file loads even if store hasn't been selected yet
-        selected_store = get_current_store_name(allow_fallback=True)
-        default_file = get_default_upload_file(selected_store)
-        
-        if default_file and os.path.exists(default_file):
-            logging.info(f"Loading default file on startup: {default_file}")
-            try:
-                # CRITICAL FIX: Use safe_load_file_with_timeout for Windows compatibility
-                success = safe_load_file_with_timeout(excel_processor, default_file, timeout_seconds=30)
-                
-                if success:
-                    excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
-                else:
-                    logging.warning("Failed to load default file")
-                    # Try to move corrupted file if timeout occurred
-                    try:
-                        corrupted_path = default_file + '.corrupted'
-                        if os.path.exists(default_file):
-                            os.rename(default_file, corrupted_path)
-                            logging.info(f"Moved potentially corrupted file to: {corrupted_path}")
-                    except Exception as move_err:
-                        logging.error(f"Could not move corrupted file: {move_err}")
-                        
-            except Exception as load_error:
-                logging.error(f"Error loading default file: {load_error}")
-                logging.error(f"Traceback: {traceback.format_exc()}")
-        else:
-            logging.info("No default file found, waiting for user upload")
-            if default_file:
-                logging.info(f"Default file path was found but file doesn't exist: {default_file}")
-            
+            logging.info("Startup Excel initialization skipped (using per-request processors)")
     except Exception as e:
-        logging.error(f"Error initializing Excel processor: {e}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
+        logging.warning(f"initialize_excel_processor no-op encountered an error: {e}")
 
 # Initialize on startup
 # Load Excel file on startup for immediate availability

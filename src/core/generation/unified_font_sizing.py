@@ -29,7 +29,7 @@ def _load_font_sizing_config():
         return {
             'standard': {
                 'mini': {
-                    'description': [(5, 20), (20, 19), (25, 18), (30, 17), (35, 16), (40, 15), (45, 14), (50, 13), (55, 12), (60, 11), (70, 10), (100, 9), (float('inf'), 8)],
+                    'description': [(5, 20), (20, 19), (25, 18), (30, 17), (35, 16), (40, 15), (45, 14), (50, 13), (60, 12), (80, 11), (100, 10), (120, 9), (float('inf'), 8)],
                     'brand': [(5, 10.5), (20, 9), (30, 7.5), (float('inf'), 6.5)],
                     'price': [(1, 18), (2, 16), (float('inf'), 14)],
                     'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
@@ -390,8 +390,8 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
 
             # Special rule: Descriptions with any word longer than 8 characters
             # should render 1pt smaller than the base size that would normally be chosen.
-            # Originally applied only to vertical; now also applied to double for consistency.
-            if field_type.lower() == 'description' and orientation.lower() in ('vertical', 'double'):
+            # Applied to vertical, double, and mini templates for consistency.
+            if field_type.lower() == 'description' and orientation.lower() in ('vertical', 'double', 'mini'):
                 try:
                     words = [w for w in str(text).split() if w]
                     if any(len(w) > 8 for w in words):
@@ -402,7 +402,7 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                             f"base_size={size}pt, adjusted_size={adjusted_size}pt"
                         )
                 except Exception:
-                    logger.exception("Error applying vertical description long-word rule")
+                    logger.exception("Error applying description long-word rule")
 
             final_size = adjusted_size * scale_factor
             logger.debug(f"Selected size {adjusted_size}pt (final: {final_size}pt)")

@@ -9133,17 +9133,21 @@
     window.initializeTagManagerSafely = initializeTagManagerSafely;
     
     // Start waiting for TagManager to load
-    // Since main.js now loads synchronously, it should be available, but we'll wait just in case
-    // Give it a small delay to ensure script execution completes
-    setTimeout(() => {
-      if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
-        console.log('✅ TagManager available immediately, initializing...');
-        initializeTagManagerSafely();
-      } else {
-        console.log('⏳ TagManager not immediately available, starting wait...');
-        waitForTagManagerAndInit();
-      }
-    }, 100);
+    // IMPORTANT: Only start this logic after DOMContentLoaded so main.js (deferred)
+    // has had a fair chance to execute. This prevents noisy "main.js never loaded"
+    // diagnostics on slower connections where the script is still downloading.
+    document.addEventListener('DOMContentLoaded', function() {
+      // Give it a small delay to ensure main.js execution completes
+      setTimeout(() => {
+        if (window.TagManager && typeof window.TagManager.createTagElement === 'function') {
+          console.log('✅ TagManager available immediately after DOMContentLoaded, initializing...');
+          initializeTagManagerSafely();
+        } else {
+          console.log('⏳ TagManager not yet available after DOMContentLoaded, starting wait watchdog...');
+          waitForTagManagerAndInit();
+        }
+      }, 100);
+    });
     
     // Additional DOM-ready setup
     document.addEventListener('DOMContentLoaded', function() {

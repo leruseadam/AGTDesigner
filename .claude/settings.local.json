@@ -51,7 +51,8 @@
       "Bash(for db in /Users/adamcordova/Desktop/labelMaker_ QR copy final/uploads/product_database*.db)",
       "Bash(do)",
       "Bash(du:*)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(cd /Users/adamcordova/Desktop/labelMaker_\\\\ QR\\\\ copy\\\\ final && PYTHONPATH=. python3:*)"
     ],
     "deny": [],
     "ask": [],
