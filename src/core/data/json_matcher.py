@@ -3401,7 +3401,7 @@ class JSONMatcher:
                         # JSON format is very different from DB format, so exact name match isn't always possible
                         has_brand_strain_match = (json_brand and json_strain_lower and 
                                                  best_match.get('_match_type', '').startswith('brand_strain'))
-                        has_vendor_strain_match = (ev and json_strain_lower and 
+                        has_vendor_strain_match = (effective_vendor and json_strain_lower and 
                                                    best_match.get('_match_type', '').startswith('vendor_strain'))
                         
                         # Lower threshold for brand/vendor+strain matches (they're already validated)
