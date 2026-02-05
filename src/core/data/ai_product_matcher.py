@@ -445,7 +445,7 @@ class AIProductMatcher:
             else:
                 jaro_similarity = _jaro_winkler_similarity_fallback(product_name.lower(), strain_name.lower())
             similarities.append(jaro_similarity)
-        except:
+        except Exception:
             pass
         
         # 3. Levenshtein distance (normalized)
@@ -457,7 +457,7 @@ class AIProductMatcher:
                 else:
                     levenshtein_similarity = 1 - (_levenshtein_distance_fallback(product_name.lower(), strain_name.lower()) / max_len)
                 similarities.append(levenshtein_similarity)
-        except:
+        except Exception:
             pass
         
         # 4. Token-based similarity

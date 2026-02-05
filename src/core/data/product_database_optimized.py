@@ -96,7 +96,7 @@ class OptimizedProductDatabase:
                 logger.warning(f"Connection for thread {thread_id} is invalid, creating new one")
                 try:
                     conn.close()
-                except:
+                except Exception:
                     pass
                 del self._connection_pool[thread_id]
         
@@ -121,14 +121,14 @@ class OptimizedProductDatabase:
                     # Try to rollback any pending transaction
                     try:
                         conn.rollback()
-                    except:
+                    except Exception:
                         pass
                     # Close the connection
                     try:
                         conn.close()
-                    except:
+                    except Exception:
                         pass
-                except:
+                except Exception:
                     pass
                 del self._connection_pool[thread_id]
                 logger.debug(f"Cleared connection for thread {thread_id}")
@@ -172,7 +172,7 @@ class OptimizedProductDatabase:
                     journal_mode = cursor.fetchone()[0]
                     if journal_mode.upper() != 'WAL':
                         logger.warning(f"WAL mode not enabled, current mode: {journal_mode}")
-                except:
+                except Exception:
                     pass  # Non-critical
                 
                 # Create strains table
@@ -405,11 +405,11 @@ class OptimizedProductDatabase:
             for thread_id, conn in list(self._connection_pool.items()):
                 try:
                     conn.rollback()  # Rollback any pending transactions
-                except:
+                except Exception:
                     pass
                 try:
                     conn.close()
-                except:
+                except Exception:
                     pass
             self._connection_pool.clear()
             logger.debug("Closed all database connections")

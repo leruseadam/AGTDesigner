@@ -133,7 +133,7 @@ def get_memory_usage():
         try:
             import resource
             return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-        except:
+        except Exception:
             return 0
 
 def cleanup_memory():
@@ -1782,6 +1782,24 @@ def create_app():
                 # Ultimate fallback - this should never happen
                 return Response('{"success": false, "error": "Unknown error"}', status=500, mimetype='application/json')
     
+    # Return JSON for API when product database is missing (avoids generic 500)
+    @app.errorhandler(FileNotFoundError)
+    def handle_file_not_found(e):
+        from flask import request, has_request_context
+        msg = str(e) if e else "Resource not found"
+        try:
+            if has_request_context() and hasattr(request, 'path') and request.path and request.path.startswith('/api/'):
+                # Friendly message for "no database" case
+                if "product database" in msg.lower() or "database file" in msg.lower():
+                    return jsonify({
+                        'success': False,
+                        'error': 'Product database not available. Upload the database via admin tools or select a store that has one.',
+                        'error_type': 'FileNotFoundError'
+                    }), 503
+                return jsonify({'success': False, 'error': msg, 'error_type': 'FileNotFoundError'}), 404
+        except Exception:
+            pass
+        raise e
     
     # Check if we're in development mode
     development_mode = app.config.get('DEVELOPMENT_MODE', False)
@@ -2301,16 +2319,18 @@ class LabelMakerApp:
             return False
             
     def run(self):
-        host = os.environ.get('HOST', '127.0.0.1')
+        # Default 0.0.0.0 so other computers on the network can connect (e.g. coworkers).
+        # Set HOST=127.0.0.1 in the environment to restrict to same machine only.
+        host = os.environ.get('HOST', '0.0.0.0')
         port = int(os.environ.get('FLASK_PORT', 8001))
         development_mode = self.app.config.get('DEVELOPMENT_MODE', False)
         
-        # PREVENT MULTIPLE RESTARTS: Check if app is already running
+        # PREVENT MULTIPLE RESTARTS: Check if app is already running (use 127.0.0.1 for check so we don't depend on network)
         import socket
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(1)
-            result = sock.connect_ex((host, port))
+            result = sock.connect_ex(('127.0.0.1', port))
             sock.close()
             
             if result == 0:
@@ -2332,7 +2352,19 @@ class LabelMakerApp:
             logging.info("🚀 PERFORMANCE OPTIMIZATION: Startup file loading disabled for faster app startup")
         
         logging.info(f"Starting Label Maker application on {host}:{port}")
-        print(f"🌐 App will be available at: http://{host}:{port}")
+        print(f"🌐 App will be available at: http://127.0.0.1:{port}")
+        if host == '0.0.0.0':
+            # Show how to connect from other computers on the network
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(0.5)
+                s.connect(('8.8.8.8', 80))
+                lan_ip = s.getsockname()[0]
+                s.close()
+                print(f"   From other computers (same network): http://{lan_ip}:{port}")
+            except Exception:
+                print(f"   From other computers: use this machine's IP address with port {port}")
+            print(f"   (If others can't connect, allow port {port} in this computer's firewall)")
         logging.info(f"Development mode: {development_mode}")
         
         # DEVELOPMENT MODE: Keep debug but disable reloader to prevent multiple restarts
@@ -2358,7 +2390,7 @@ def get_session_excel_processor():
             fallback.df = pd.DataFrame()
             fallback.selected_tags = []
             return fallback
-        except:
+        except Exception:
             return None
     
     try:
@@ -7825,7 +7857,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         skip_if_aligned: If True, skip alignment if tags already have canonical_lineage/currentLineage AND sovereign_lineage
     """
     try:
-        product_db = get_product_database(store_name)
+        try:
+            product_db = get_product_database(store_name)
+        except FileNotFoundError:
+            # No database for this store - return tags unchanged (alignment is optional)
+            logging.debug("No product database available for lineage alignment; returning tags unchanged")
+            return tags
         if not product_db:
             return tags
         
@@ -10666,7 +10703,7 @@ def get_session_cache_key(base_key):
             sid = session.get('_id', None) or session.sid if hasattr(session, 'sid') else None
         else:
             sid = 'background'  # Use 'background' for background processing
-    except:
+    except Exception:
         sid = 'background'  # Fallback for any session access issues
 
     # OPTIMIZATION: Get file path from global _excel_processor if it exists, without loading
@@ -16621,6 +16658,7 @@ def database_stats():
             product_db.init_database()
         
         # Test database connection
+        test_conn = None
         try:
             import sqlite3
             test_conn = create_db_connection(product_db.db_path)
@@ -16628,22 +16666,25 @@ def database_stats():
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
-                # If store-specific database doesn't have products table, fall back to main database
                 logging.info(f"Not falling back to main database; honoring store selection '{getattr(_product_database, '_store_name', 'unknown')}'.")
-                # Re-test using store-specific DB only
+                test_conn.close()
+                test_conn = None
                 test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
                     logging.error("Products table not found in main database either")
                     return jsonify({'error': 'Products table not found in any database'}), 500
-                test_conn.close()
                 logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-            # Products table exists, proceed
-            test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
+        finally:
+            if test_conn is not None:
+                try:
+                    test_conn.close()
+                except Exception:
+                    pass
         
         # Get vendor stats for the frontend
         vendor_stats = {}
@@ -16871,27 +16912,32 @@ def database_vendor_stats():
             product_db.init_database()
         
         # Test database connection and fallback if needed
+        test_conn = None
         try:
             test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
-                # If store-specific database doesn't have products table, fall back to main database
                 logging.info("Not falling back to main database; honoring current store selection")
-                # Re-test using the current store-specific database only
+                test_conn.close()
+                test_conn = None
                 test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
                     logging.error("Products table not found in main database either")
                     return jsonify({'error': 'Products table not found in any database'}), 500
-                test_conn.close()
                 logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-            test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
+        finally:
+            if test_conn is not None:
+                try:
+                    test_conn.close()
+                except Exception:
+                    pass
         
         with db_connection(product_db.db_path) as conn:
             # Get all vendors with their product counts
@@ -17327,8 +17373,8 @@ def database_export():
             
             # Create temp file in the writable directory
             temp_file_path = os.path.join(temp_dir, f"export_{int(time.time())}_{uuid.uuid4().hex[:8]}.xlsx")
-            temp_file = open(temp_file_path, 'wb')
-            temp_file.close()
+            with open(temp_file_path, 'wb') as temp_file:
+                pass  # create empty file; export_database will write to path
             temp_file_name = temp_file_path
             logging.info(f"Created temp export file at: {temp_file_name}")
         except Exception as temp_err:
@@ -17680,36 +17726,39 @@ def database_analytics():
             }), 500
         
         # Test database connection and fallback if needed
+        test_conn = None
         try:
             test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
-                # Fall back to main database
                 logging.info("Falling back to main database for analytics")
-                # Create main database instance directly (don't clear the global variable!)
+                test_conn.close()
+                test_conn = None
                 from src.core.data.product_database import ProductDatabase
                 main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
                 product_db = ProductDatabase(main_db_path)
                 if not product_db._initialized:
                     product_db.init_database()
-                # Update the global reference to use the main database
                 global _product_database
                 _product_database = product_db
-                # Test main database
                 test_conn = create_db_connection(product_db.db_path)
                 test_cursor = test_conn.cursor()
                 test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not test_cursor.fetchone():
                     logging.error("Products table not found in main database either")
                     return jsonify({'error': 'Products table not found in any database'}), 500
-                test_conn.close()
                 logging.info(f"Successfully fell back to main database: {product_db.db_path}")
-            test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
             return jsonify({'error': f'Database connection failed: {test_error}'}), 500
+        finally:
+            if test_conn is not None:
+                try:
+                    test_conn.close()
+                except Exception:
+                    pass
         
         with db_connection(product_db.db_path) as conn:
             # Get product type distribution
@@ -17942,15 +17991,21 @@ def database_test():
         dir_writable = os.access(db_dir, os.W_OK) if dir_exists else False
         
         # Test 3: Try to create a simple connection
+        conn = None
         try:
             conn = create_db_connection(db_path)
             cursor = conn.cursor()
             cursor.execute("SELECT 1")
             result = cursor.fetchone()
-            conn.close()
             connection_test = "SUCCESS"
         except Exception as e:
             connection_test = f"FAILED: {e}"
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         
         # Test 4: Try to initialize the database
         try:

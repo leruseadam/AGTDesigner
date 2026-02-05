@@ -11909,11 +11909,23 @@ const TagManager = {
                 const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
-                    // Just hide the splash, don't show error message
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
-                    // Don't show error message - let the app continue working
+                    // Replace spinner in panel so user isn't stuck with endless loading
+                    const container = document.getElementById('availableTags');
+                    if (container && !cacheUsedForDisplay) {
+                        container.innerHTML = `
+                            <div class="text-center py-4">
+                                <div class="alert alert-info mx-3">
+                                    <p class="mb-2">Loading is taking longer than usual. If you've uploaded an Excel file, wait a bit longer or retry. If not, upload an Excel file to see products.</p>
+                                    <button class="btn btn-primary btn-sm" onclick="TagManager.retryLoadTags()">
+                                        <i class="bi bi-arrow-clockwise"></i> Retry Loading Tags
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
                 }, safetyTimeoutMs);
             }
 
@@ -12394,6 +12406,11 @@ const TagManager = {
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
                     AppLoadingSplash.complete();
+                }
+                // Clear safety timeout so it doesn't overwrite this message
+                if (safetyTimeout) {
+                    clearTimeout(safetyTimeout);
+                    safetyTimeout = null;
                 }
                 // Return true to indicate initialization completed (even with no tags)
                 return true;

@@ -557,7 +557,7 @@ class ProductDatabase:
         for conn in self._connection_pool.values():
             try:
                 conn.close()
-            except:
+            except Exception:
                 pass
         self._connection_pool.clear()
 

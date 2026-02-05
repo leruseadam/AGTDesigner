@@ -666,7 +666,7 @@ class ProductTypeSpecificMatcher:
             if thc:
                 try:
                     return float(thc)
-                except:
+                except Exception:
                     pass
                     
         # Check product name for THC percentage

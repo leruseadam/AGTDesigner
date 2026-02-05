@@ -2985,7 +2985,7 @@ class ExcelProcessor:
                         else:
                             # Round to 2 decimal places and remove trailing zeros
                             return f"${v:.2f}".rstrip('0').rstrip('.')
-                    except:
+                    except Exception:
                         return f"${s}"
                 self.df["Price"] = self.df["Price"].apply(lambda x: format_p(x) if pd.notnull(x) else "")
                 self.df["Price"] = self.df["Price"].astype("string")
@@ -5460,7 +5460,7 @@ class ExcelProcessor:
                                 try:
                                     if '$' in str(v):
                                         formatted_prices.add(str(v).strip())
-                                except:
+                                except Exception:
                                     pass  # Skip invalid values
                         # Add "No Price" if we found products without prices
                         if has_no_price:
@@ -6610,7 +6610,7 @@ class ExcelProcessor:
                 return f"0:{cbd:.0f}"
             else:
                 return "0:0"
-        except:
+        except Exception:
             return "20:1"  # Default ratio
     
     def _generate_description(self, product_name, product_type, product_brand):

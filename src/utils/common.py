@@ -8,7 +8,7 @@ def safe_get(record, key, default=''):
         # Handle DataFrame row objects
         try:
             value = getattr(record, key, default)
-        except:
+        except Exception:
             return default
             
     if value is None or str(value).strip().lower() == 'nan':

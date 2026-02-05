@@ -464,7 +464,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                         representative['Price'] = f"${int(price_val)}"
                     else:
                         representative['Price'] = f"${price_val:.2f}".rstrip('0').rstrip('.')
-                except:
+                except Exception:
                     representative['Price'] = f"${original_price}" if not str(original_price).startswith('$') else str(original_price)
         
         # Store group_id and group_info for QR code generation

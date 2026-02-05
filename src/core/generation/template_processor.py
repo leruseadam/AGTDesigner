@@ -1833,7 +1833,7 @@ class TemplateProcessor:
                 from datetime import datetime
                 date_obj = datetime.strptime(context['AcceptedDate'], '%Y-%m-%d')
                 context['AcceptedDate'] = date_obj.strftime('%m/%d/%Y')
-            except:
+            except Exception:
                 pass  # Keep original format if parsing fails
         
         # Ensure all values are strings
@@ -3068,7 +3068,7 @@ class TemplateProcessor:
                     unwrapped = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
                     if unwrapped and str(unwrapped).strip():
                         existing_vendor_has_content = True
-                except:
+                except Exception:
                     # If unwrapping fails, check if it's just the plain value (no markers)
                     if 'PRODUCTVENDOR_START' not in str(existing_vendor):
                         existing_vendor_has_content = True
@@ -3758,7 +3758,7 @@ class TemplateProcessor:
                     unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
                     if not unwrapped or not unwrapped.strip():
                         vendor_is_empty = True
-                except:
+                except Exception:
                     # If unwrapping fails, check if it's just empty markers
                     if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
                         match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))

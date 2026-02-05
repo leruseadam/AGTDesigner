@@ -160,7 +160,7 @@ class FeatureExtractor:
             tfidf_matrix = vectorizer.fit_transform([text1, text2])
             similarity = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:2])[0][0]
             return similarity
-        except:
+        except Exception:
             return 0.0
     
     def _calculate_weight_similarity(self, json_product: Dict, db_product: Dict) -> float:
@@ -232,7 +232,7 @@ class FeatureExtractor:
             if price_field in product and product[price_field]:
                 try:
                     return float(product[price_field])
-                except:
+                except Exception:
                     pass
         
         # Check product name/description for price patterns
@@ -243,7 +243,7 @@ class FeatureExtractor:
             if match:
                 try:
                     return float(match.group(1))
-                except:
+                except Exception:
                     pass
         
         return None
@@ -323,7 +323,7 @@ class FeatureExtractor:
                 if value:
                     try:
                         cannabinoids[cannabinoid] = float(value)
-                    except:
+                    except Exception:
                         pass
         
         # Check product name
@@ -334,7 +334,7 @@ class FeatureExtractor:
             if match and cannabinoid not in cannabinoids:
                 try:
                     cannabinoids[cannabinoid] = float(match.group(1))
-                except:
+                except Exception:
                     pass
         
         return cannabinoids
@@ -392,7 +392,7 @@ class FeatureExtractor:
             soundex2 = jellyfish.soundex(text2)
             
             return 1.0 if soundex1 == soundex2 else 0.0
-        except:
+        except Exception:
             return 0.0
 
 class EnsembleMLMatcher:

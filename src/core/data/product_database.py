@@ -378,7 +378,7 @@ class ProductDatabase:
                         logging.error(f"Database corruption detected during connection validation: {e}")
                         try:
                             conn.close()
-                        except:
+                        except Exception:
                             pass
                         del self._connection_pool[thread_id]
                         # Attempt recovery
@@ -392,7 +392,7 @@ class ProductDatabase:
                         logging.warning(f"Connection validation failed for thread {thread_id}: {e}, creating new connection")
                         try:
                             conn.close()
-                        except:
+                        except Exception:
                             pass
                         del self._connection_pool[thread_id]
 
@@ -473,7 +473,7 @@ class ProductDatabase:
             if thread_id in self._connection_pool:
                 try:
                     self._connection_pool[thread_id].close()
-                except:
+                except Exception:
                     pass
                 del self._connection_pool[thread_id]
     
@@ -483,7 +483,7 @@ class ProductDatabase:
             for conn in self._connection_pool.values():
                 try:
                     conn.close()
-                except:
+                except Exception:
                     pass
             self._connection_pool.clear()
     

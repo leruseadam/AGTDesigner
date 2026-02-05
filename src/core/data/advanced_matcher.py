@@ -181,7 +181,7 @@ class AdvancedMatcher:
                 import jellyfish
                 if jellyfish.soundex(v1_clean) == jellyfish.soundex(v2_clean):
                     return True
-            except:
+            except Exception:
                 pass
         
         return False
@@ -271,7 +271,7 @@ class AdvancedMatcher:
         try:
             from rapidfuzz import fuzz
             return fuzz.ratio(str1, str2)
-        except:
+        except Exception:
             return 0.0
     
     def _calculate_levenshtein_ratio(self, str1: str, str2: str) -> float:
@@ -279,7 +279,7 @@ class AdvancedMatcher:
         try:
             from rapidfuzz import fuzz
             return fuzz.ratio(str1, str2)
-        except:
+        except Exception:
             return 0.0
     
     def _calculate_jaccard_similarity(self, str1: str, str2: str) -> float:
@@ -324,7 +324,7 @@ class AdvancedMatcher:
             soundex1 = jellyfish.soundex(str1)
             soundex2 = jellyfish.soundex(str2)
             return 100.0 if soundex1 == soundex2 else 0.0
-        except:
+        except Exception:
             return 0.0
     
     def _calculate_metaphone_similarity(self, str1: str, str2: str) -> float:
@@ -334,7 +334,7 @@ class AdvancedMatcher:
             meta1 = jellyfish.metaphone(str1)
             meta2 = jellyfish.metaphone(str2)
             return 100.0 if meta1 == meta2 else 0.0
-        except:
+        except Exception:
             return 0.0
     
     def _calculate_partial_match_score(self, str1: str, str2: str) -> float:
@@ -819,7 +819,7 @@ class AdvancedMatcher:
                             best_ratio = max(vendor_ratio, partial_ratio)
                             if best_ratio >= 60:  # Reduced from 70 to 60 for more lenient matching
                                 vendor_match = True
-                        except:
+                        except Exception:
                             pass
                     # 5. Check for common vendor name patterns
                     elif self._is_vendor_match_flexible(json_vendor_clean, candidate_vendor_clean):
@@ -887,7 +887,7 @@ class AdvancedMatcher:
                             if ratio >= 70:  # 70% similarity threshold
                                 is_match = True
                                 match_reason = f"fuzzy ({ratio}%)"
-                        except:
+                        except Exception:
                             pass
                     
                     # 5. Check for common business name patterns

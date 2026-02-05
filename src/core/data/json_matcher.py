@@ -3108,6 +3108,24 @@ class JSONMatcher:
                             except Exception as e:
                                 continue
                 
+                # DB FALLBACK: When cache (Excel) has no match, try vendor+strain and strain+type from full DB.
+                # This finds Honey Tree / Prana AIO etc. when they exist in the DB but aren't in the current Excel.
+                if best_match is None and (effective_vendor or product_name):
+                    db_fallback = self._find_vendor_keyword_match(
+                        product_name, (effective_vendor or "").strip(), (product_type or "").strip()
+                    )
+                    if not db_fallback:
+                        db_fallback = self._find_strain_type_match(
+                            product_name,
+                            (effective_vendor or "").strip(),
+                            (product_type or "").strip(),
+                            (strain or "").strip(),
+                        )
+                    if db_fallback:
+                        best_match = db_fallback
+                        best_score = 85.0
+                        logging.info(f"✅ DB FALLBACK MATCH: '{product_name[:50]}' → '{best_match.get('Product Name*', '')[:50]}' (vendor/strain+type)")
+                
                 # If we found a good match, create a product
                 # PROFESSIONAL-GRADE ACCURACY: Strict threshold (90.0) for high confidence
                 # Scores 50-90: Use AI validation for extra verification
@@ -3267,7 +3285,7 @@ class JSONMatcher:
                             matched_products.append(emergency_product)
                             items_fallback += 1
                             logging.debug(f"🚨 EMERGENCY RECOVERY #{items_fallback}: Created minimal product for '{product_name[:40]}'")
-                        except:
+                        except Exception:
                             logging.error(f"💀 TOTAL FAILURE: Could not create ANY product for '{product_name[:40]}'")
             
             # Return all matched products
@@ -3454,7 +3472,7 @@ class JSONMatcher:
                     if isinstance(lab_data, dict):
                         thc = str(lab_data.get("thc", lab_data.get("THC", ""))).strip()
                         cbd = str(lab_data.get("cbd", lab_data.get("CBD", ""))).strip()
-            except:
+            except Exception:
                 pass
             
             # ===== STEP 2: Map to product type =====
@@ -3618,7 +3636,7 @@ class JSONMatcher:
                         weight_match = re.search(r'(\d+\.?\d*)', weight_label)
                         if weight_match:
                             weight_value_only = weight_match.group(1)
-                    except:
+                    except Exception:
                         pass
                 
                 weight_already_in_name = False
@@ -3786,7 +3804,7 @@ class JSONMatcher:
                     'Ratio_or_THC_CBD': '',
                     'Product Strain': ''
                 }
-            except:
+            except Exception:
                 # Last resort - return empty dict will be filtered out
                 logging.error("❌ Emergency fallback also failed")
                 return {}
@@ -3926,7 +3944,7 @@ class JSONMatcher:
                     weight_match = re.search(r'(\d+\.?\d*)', formatted_weight)
                     if weight_match:
                         weight_value_only = weight_match.group(1)
-                except:
+                except Exception:
                     pass
             
             # Check if weight is already in the product name (to avoid duplication)
@@ -5939,6 +5957,13 @@ class JSONMatcher:
             else:
                 logging.info(f"Processing {len(items)} JSON items without deduplication (deduplicate=False)")
             
+            # Ensure sheet cache is built for matching (from Excel or DB when no Excel).
+            # Without this, _process_item_with_main_matching and cache-based logic have no candidates → "no matches found".
+            if not self._sheet_cache or len(self._sheet_cache) == 0:
+                logging.info("Sheet cache empty or missing - building from Excel or ProductDatabase...")
+                self._build_sheet_cache()
+                logging.info(f"Sheet cache now has {len(self._sheet_cache) if self._sheet_cache else 0} items for matching")
+            
             # Initialize tracking variables
             matched_idxs = set()
             match_scores = {}
@@ -5949,6 +5974,7 @@ class JSONMatcher:
             educated_guess_count = 0
             new_product_count = 0
             new_database_entries_count = 0
+            sibling_matches = {}  # same product line (vendor, weight, price, type) -> matched product for strain-variant lookup
             
             # Helper function to clean product names
             def clean_product_name(name):
@@ -9989,7 +10015,7 @@ class JSONMatcher:
                                     if vendor_ratio >= 75:
                                         vendor_match = True
                                         print(f"🔍 FUZZY VENDOR MATCH: '{vendor_clean}' matches '{excel_vendor_clean}' via fuzzy matching ({vendor_ratio}%)")
-                                except:
+                                except Exception:
                                     pass
                             # Check for common vendor name patterns
                             elif self._is_vendor_match_flexible(vendor_clean, excel_vendor_clean):
@@ -13370,7 +13396,7 @@ class JSONMatcher:
                         char_similarity = len(set(v1_clean).intersection(set(v2_clean))) / max(len(set(v1_clean)), len(set(v2_clean)))
                         if char_similarity >= 0.6:
                             return True
-            except:
+            except Exception:
                 pass
         
         return False
