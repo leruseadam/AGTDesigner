@@ -1567,9 +1567,9 @@ def apply_custom_formatting(doc, template_settings):
             # Set line spacing
             paragraph.paragraph_format.line_spacing = line_spacing
             
-            # Set paragraph spacing to 0 before and 0 after
-            paragraph.paragraph_format.space_before = Pt(0)
-            paragraph.paragraph_format.space_after = Pt(0)
+            # Set paragraph spacing to 3pt before and 3pt after for all templates
+            paragraph.paragraph_format.space_before = Pt(3)
+            paragraph.paragraph_format.space_after = Pt(3)
             
             # Apply formatting to runs
             for run in paragraph.runs:

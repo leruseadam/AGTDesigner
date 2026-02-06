@@ -5040,17 +5040,22 @@ class ProductDatabase:
             logger.error(f"Error updating product lineage for '{product_name}': {e}")
             return False 
 
-    def get_product_lineage(self, product_name: str) -> Optional[str]:
+    def get_product_lineage(self, product_name: str, bypass_cache: bool = False) -> Optional[str]:
         """Get the lineage for a specific product by name.
 
         Uses case-insensitive and whitespace-insensitive matching to ensure
         updates are found even if there are minor differences in formatting.
         Also applies sativa hybrid override for known sativa hybrid strains.
+        
+        Args:
+            product_name: The product name to look up
+            bypass_cache: If True, skip cache and query database directly (default: False)
         """
-        # PERFORMANCE: Check cache first
-        cached_result = _get_cached_lineage(product_name)
-        if cached_result is not None:
-            return cached_result
+        # PERFORMANCE: Check cache first (unless bypassed)
+        if not bypass_cache:
+            cached_result = _get_cached_lineage(product_name)
+            if cached_result is not None:
+                return cached_result
 
         try:
             self.init_database()
