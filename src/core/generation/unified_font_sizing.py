@@ -315,6 +315,10 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
                 # Enforce upper cap of 28pt to satisfy requirement
                 font_size = min(font_size, 28)
                 final_size = font_size * scale_factor
+                # If more than 5 words, reduce font 2pt
+                if len(words) > 5:
+                    final_size = max(8, final_size - 2)
+                    logger.debug(f"Vertical description >5 words: reduced font 2pt to {final_size}pt")
                 logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font (capped at 28pt)")
                 return Pt(final_size)
     
@@ -410,6 +414,12 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.info(f"PRICE DEBUG: threshold {threshold} -> size {size}, comp {comp} <= threshold? {comp <= threshold}")
         if comp <= threshold:  # Fixed: Use <= instead of < for proper threshold matching
             final_size = size * scale_factor
+            # Vertical template description: if more than 5 words, reduce font 2pt
+            if field_type.lower() == 'description' and orientation.lower() == 'vertical':
+                words = str(text).split()
+                if len(words) > 5:
+                    final_size = max(8, final_size - 2)
+                    logger.debug(f"Vertical description >5 words: reduced font 2pt to {final_size}pt")
             logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
             if field_type.lower() == 'price':
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
@@ -425,6 +435,12 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         fallback_size = 6.5 * scale_factor  # Use the configured size from the config
     else:
         fallback_size = 8 * scale_factor
+    # Vertical template description: if more than 5 words, reduce font 2pt
+    if field_type.lower() == 'description' and orientation.lower() == 'vertical':
+        words = str(text).split()
+        if len(words) > 5:
+            fallback_size = max(8, fallback_size - 2)
+            logger.debug(f"Vertical description >5 words (fallback): reduced font 2pt to {fallback_size}pt")
     return Pt(fallback_size)
 
 def set_run_font_size(run, font_size):

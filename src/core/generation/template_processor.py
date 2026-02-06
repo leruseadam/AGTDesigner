@@ -5098,6 +5098,8 @@ class TemplateProcessor:
         # Apply vertical template specific optimizations for minimal spacing
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
+            if self.template_type == 'double':
+                self._ensure_equal_spacing_around_lineage_band_double(doc)
             
         # Apply unified font sizing to all text in vertical and double templates (not just markers)
         if self.template_type in ['vertical', 'double']:
@@ -5431,6 +5433,38 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error optimizing vertical/double template spacing: {e}")
             # Don't raise the exception - this is an optimization that shouldn't break the main process
+
+    def _ensure_equal_spacing_around_lineage_band_double(self, doc):
+        """
+        For double template: ensure equal space above and below the lineage/brand band.
+        Sets space_before and space_after on lineage paragraphs so the band has symmetric padding.
+        """
+        try:
+            LINEAGE_VALUES = {"SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARA", "PARAPHERNALIA"}
+            EQUAL_SPACING_PT = 3  # Equal padding above and below lineage band
+
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            text = (para.text or "").strip().upper()
+                            if not text:
+                                continue
+                            # Check if this paragraph is lineage band content (classic lineage or brand-like)
+                            clean = text.replace("PRODUCTBRAND_CENTER_START", "").replace("PRODUCTBRAND_CENTER_END", "")
+                            clean = clean.replace("LINEAGE_START", "").replace("LINEAGE_END", "")
+                            is_lineage = (
+                                clean in LINEAGE_VALUES or
+                                ("CONSTELLATION" in clean and "CANNABIS" in clean) or
+                                (len(clean) <= 30 and clean.replace(" ", "").replace("/", "").isalpha())
+                            )
+                            if is_lineage:
+                                para.paragraph_format.space_before = Pt(EQUAL_SPACING_PT)
+                                para.paragraph_format.space_after = Pt(EQUAL_SPACING_PT)
+                                self.logger.debug(f"Double template: set equal spacing {EQUAL_SPACING_PT}pt above/below lineage: '{text[:40]}'")
+            self.logger.debug("Applied equal spacing around lineage band for double template")
+        except Exception as e:
+            self.logger.warning(f"Error ensuring equal lineage band spacing: {e}")
 
     def _recursive_autosize_template_specific(self, element, marker_name):
         """
