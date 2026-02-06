@@ -319,98 +319,8 @@ class ProductTypeSpecificMatcher:
         
     def match_by_type(self, product_type: str, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
         """Match using product type-specific strategy"""
-        # First, check for exact JSON-column matches (high-confidence shortcut)
-        json_matches = self._find_json_column_matches(json_product, database_products)
-        if json_matches:
-            return json_matches
-
         strategy = self.type_strategies.get(product_type.lower().replace('-', '_'), self._match_generic)
         return strategy(json_product, database_products)
-
-    def _normalize_json_text(self, obj: Any) -> str:
-        """Normalize JSON-like input (dict or string) into a compact canonical string for comparison."""
-        try:
-            if isinstance(obj, str):
-                s = obj.strip()
-                # Try to parse as JSON string
-                try:
-                    parsed = json.loads(s)
-                    return json.dumps(parsed, sort_keys=True, separators=(',', ':')).lower()
-                except Exception:
-                    # fallback: collapse whitespace
-                    return re.sub(r"\s+", ' ', s).strip().lower()
-            else:
-                return json.dumps(obj, sort_keys=True, separators=(',', ':')).lower()
-        except Exception:
-            try:
-                return str(obj).strip().lower()
-            except Exception:
-                return ''
-
-    def _find_json_column_matches(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
-        """Look for DB products whose `JSON` column matches the incoming JSON description.
-        The JSON column in the database stores original Description values from Excel files.
-        Returns a list of perfect MatchResult entries if any matches found.
-        """
-        matches: List[MatchResult] = []
-
-        # PRIORITY 1: Use the description field from incoming JSON product
-        # This is the primary matching field - it should match the database JSON column exactly
-        in_text = None
-        for desc_key in ('description', 'product_description', 'Description'):
-            if desc_key in json_product and json_product.get(desc_key):
-                in_text = str(json_product.get(desc_key)).strip()
-                break
-
-        # FALLBACK: Try raw JSON fields if no description
-        if not in_text:
-            for raw_key in ('raw_json', 'original_json', 'json', 'JSON'):
-                if raw_key in json_product and json_product.get(raw_key):
-                    in_text = json_product.get(raw_key)
-                    break
-
-        # Last resort: use product name
-        if not in_text:
-            in_text = json_product.get('product_name', json_product.get('name', ''))
-
-        if not in_text:
-            return []
-
-        # Normalize the incoming text for comparison
-        norm_in = str(in_text).strip().lower()
-        if not norm_in:
-            return []
-
-        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{norm_in[:50]}...' in database JSON column")
-
-        for db_product in database_products:
-            # Look for JSON column in DB product
-            db_json_val = None
-            for col in ('JSON', 'json', 'raw_json', 'Original JSON'):
-                if col in db_product and db_product.get(col):
-                    db_json_val = db_product.get(col)
-                    break
-            if not db_json_val:
-                continue
-
-            norm_db = str(db_json_val).strip().lower()
-            if not norm_db:
-                continue
-
-            # Exact normalized equality -> perfect match
-            if norm_db == norm_in:
-                logging.info(f"✅ JSON COLUMN EXACT MATCH: '{norm_in[:50]}...' → '{db_product.get('Product Name*', 'Unknown')}'")
-                matches.append(MatchResult(
-                    score=1.0,
-                    match_data=db_product,
-                    strategy_used=MatchStrategy.HYBRID,
-                    confidence=1.0,
-                    processing_time=0.0,
-                    match_factors={'json_column_match': True, 'match_type': 'exact'}
-                ))
-
-        # Return matches sorted (though all have score 1.0)
-        return sorted(matches, key=lambda x: x.score, reverse=True)
         
     def _match_flower(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
         """Flower-specific matching focusing on strain, weight, and THC content"""
@@ -458,7 +368,7 @@ class ProductTypeSpecificMatcher:
         """Concentrate-specific matching focusing on extraction method and potency"""
         matches = []
         json_name = self._get_product_name(json_product).lower()
-        
+
         # Extract concentrate type indicators
         concentrate_indicators = ['live resin', 'rosin', 'shatter', 'wax', 'badder', 'diamonds', 'sauce']
         json_concentrate_type = None
@@ -466,63 +376,81 @@ class ProductTypeSpecificMatcher:
             if indicator in json_name:
                 json_concentrate_type = indicator
                 break
-                
+
         for db_product in database_products:
             score = 0.0
             factors = {}
-            
+
             db_name = str(db_product.get('Product Name*', '')).lower()
-            
-            # Concentrate type matching (35% weight)
+
+            # CRITICAL: Strain matching FIRST - this is the most important factor
+            strain_score = self._extract_strain_similarity(json_name, db_name)
+            factors['strain_match'] = strain_score
+
+            # MINIMUM STRAIN THRESHOLD: If strain score is too low, skip this product
+            # This prevents "Skunk #1 Live Resin" from matching "Alien Runtz Live Resin"
+            if strain_score < 0.4:
+                continue  # Skip products with completely different strains
+
+            # Concentrate type matching (20% weight - reduced since strain is more important)
             if json_concentrate_type:
                 type_score = 1.0 if json_concentrate_type in db_name else 0.3
             else:
                 type_score = fuzz.partial_ratio(json_name, db_name) / 100.0
             factors['concentrate_type_match'] = type_score
-            score += type_score * 0.35
-            
-            # Strain matching (30% weight)
-            strain_score = self._extract_strain_similarity(json_name, db_name)
-            factors['strain_match'] = strain_score
-            score += strain_score * 0.3
-            
+            score += type_score * 0.20
+
+            # Strain matching gets higher weight (45% - most important for accuracy)
+            score += strain_score * 0.45
+
             # Potency matching (20% weight)
             potency_score = self._compare_potency(json_product, db_product)
             factors['potency_match'] = potency_score
-            score += potency_score * 0.2
-            
+            score += potency_score * 0.20
+
             # Vendor matching (15% weight)
             vendor_score = self._compare_vendors(json_product, db_product)
             factors['vendor_match'] = vendor_score
             score += vendor_score * 0.15
-            
-            if score > 0.15:  # Ultra-lenient threshold for concentrates
+
+            # Require minimum overall score of 0.45 (raised from 0.15)
+            if score > 0.45:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
                     strategy_used=MatchStrategy.HYBRID,
-                    confidence=min(score * 1.1, 1.0),
+                    confidence=score,  # Use actual score, not inflated
                     processing_time=0.0,
                     match_factors=factors
                 ))
-                
+
         return sorted(matches, key=lambda x: x.score, reverse=True)
         
     def _match_vape(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
         """Vape cartridge matching focusing on strain, potency, and hardware type"""
         matches = []
         json_name = self._get_product_name(json_product).lower()
-        
+
         # Vape-specific indicators
         vape_indicators = ['cart', 'cartridge', 'pod', 'disposable', 'pen', '510']
-        
+
         for db_product in database_products:
             score = 0.0
             factors = {}
-            
+
             db_name = str(db_product.get('Product Name*', '')).lower()
-            
-            # Vape type matching (25% weight)
+
+            # CRITICAL: Strain matching FIRST - this is the most important factor
+            # If strains don't match reasonably well, don't consider this a match
+            strain_score = self._extract_strain_similarity(json_name, db_name)
+            factors['strain_match'] = strain_score
+
+            # MINIMUM STRAIN THRESHOLD: If strain score is too low, skip this product
+            # This prevents "Skunk #1" from matching "Alien Runtz" just because both are "disposable vapes"
+            if strain_score < 0.4:
+                continue  # Skip products with completely different strains
+
+            # Vape type matching (15% weight - reduced since strain is more important)
             vape_type_score = 0.0
             for indicator in vape_indicators:
                 if indicator in json_name and indicator in db_name:
@@ -530,31 +458,30 @@ class ProductTypeSpecificMatcher:
                     break
                 elif indicator in json_name or indicator in db_name:
                     vape_type_score = 0.5
-                    
+
             factors['vape_type_match'] = vape_type_score
-            score += vape_type_score * 0.25
-            
-            # Strain matching (30% weight)
-            strain_score = self._extract_strain_similarity(json_name, db_name)
-            factors['strain_match'] = strain_score
-            score += strain_score * 0.3
-            
-            # Volume/size matching (20% weight)
+            score += vape_type_score * 0.15
+
+            # Strain matching gets higher weight (45% - most important for accuracy)
+            score += strain_score * 0.45
+
+            # Volume/size matching (15% weight)
             volume_score = self._compare_volumes(json_product, db_product)
             factors['volume_match'] = volume_score
-            score += volume_score * 0.2
-            
+            score += volume_score * 0.15
+
             # THC potency (15% weight)
             thc_score = self._compare_thc_content(json_product, db_product)
             factors['thc_match'] = thc_score
             score += thc_score * 0.15
-            
+
             # Brand/vendor matching (10% weight)
             vendor_score = self._compare_vendors(json_product, db_product)
             factors['vendor_match'] = vendor_score
             score += vendor_score * 0.1
-            
-            if score > 0.1:  # Ultra-lenient threshold for vapes
+
+            # Require minimum overall score of 0.45 (raised from 0.1)
+            if score > 0.45:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
@@ -563,7 +490,7 @@ class ProductTypeSpecificMatcher:
                     processing_time=0.0,
                     match_factors=factors
                 ))
-                
+
         return sorted(matches, key=lambda x: x.score, reverse=True)
         
     def _match_edible(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
@@ -714,23 +641,34 @@ class ProductTypeSpecificMatcher:
         """Generic matching for unknown product types"""
         matches = []
         json_name = self._get_product_name(json_product).lower()
-        
+
         for db_product in database_products:
             db_name = str(db_product.get('Product Name*', '')).lower()
-            
-            # Simple fuzzy matching
-            score = fuzz.ratio(json_name, db_name) / 100.0
-            
-            if score > 0.1:  # Ultra-lenient threshold for generic
+
+            # Use improved strain similarity which extracts actual product names
+            strain_score = self._extract_strain_similarity(json_name, db_name)
+
+            # MINIMUM STRAIN THRESHOLD: Require reasonable similarity
+            if strain_score < 0.4:
+                continue  # Skip products with completely different names
+
+            # Simple fuzzy matching on full names as backup
+            full_name_score = fuzz.ratio(json_name, db_name) / 100.0
+
+            # Use the better of strain-focused or full name matching
+            score = max(strain_score, full_name_score)
+
+            # Require minimum score of 0.45 (raised from 0.1)
+            if score > 0.45:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
                     strategy_used=MatchStrategy.FUZZY,
                     confidence=score * 0.8,  # Lower confidence for generic matching
                     processing_time=0.0,
-                    match_factors={'name_similarity': score}
+                    match_factors={'name_similarity': full_name_score, 'strain_similarity': strain_score}
                 ))
-                
+
         return sorted(matches, key=lambda x: x.score, reverse=True)
     
     # Helper methods for specific comparisons
@@ -906,14 +844,12 @@ class ProductTypeSpecificMatcher:
         
         # Extract pack size patterns (e.g., "2 pack", "twin pack", "single", "1g x 2")
         pack_patterns = [
-            r'(\d+)\s*pack',           # "2 pack"
+            r'(\d+)\s*pack',           # "2 pack", "twin pack"
             r'(\d+)\s*count',          # "5 count"
-            r'twin|double',              # "twin pack" -> 2
-            r'single',                   # "single" -> 1
+            r'twin|double',            # "twin pack" -> 2
+            r'single',                 # "single" -> 1
             r'(\d+(?:\.\d+)?)\s*g\s*x\s*(\d+)',  # "0.5g x 2"
             r'(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*g',  # "2 x 0.5g"
-            r'(\d+(?:\.\d+)?)g\s*x\s*(\d+)',      # "0.5g x 2" variant
-            r'(\d+)\s*x\s*(\d+(?:\.\d+)?)g',      # "2 x 0.5g" variant
         ]
         
         for pattern in pack_patterns:
@@ -932,110 +868,183 @@ class ProductTypeSpecificMatcher:
         
         # Compare with database JointRatio
         best_score = 0.0
-
-        # Direct fuzzy comparison (name vs db joint ratio string)
-        try:
-            fuzzy_score = fuzz.ratio(json_name, db_joint_ratio) / 100.0
-        except Exception:
-            fuzzy_score = 0.0
+        
+        # Direct fuzzy comparison
+        fuzzy_score = fuzz.ratio(json_name, db_joint_ratio) / 100.0
         best_score = max(best_score, fuzzy_score)
-
-        # Pattern-based numeric comparison: try to normalize numeric pack info
-        def normalize_joint_ratio_text(text: str) -> str:
-            if not text:
-                return ''
-            t = str(text).lower()
-            t = t.replace('x', 'x').replace('pack', '').replace('pack(s)', '')
-            t = re.sub(r'[^0-9gx\.\s:]', '', t)
-            return t.strip()
-
-        norm_db = normalize_joint_ratio_text(db_joint_ratio)
+        
+        # Pattern-based comparison
         for indicator in json_pack_indicators:
-            ind = str(indicator).lower()
-            # if indicator is numeric and appears in normalized DB joint ratio -> strong match
-            if ind and ind in norm_db:
-                best_score = max(best_score, 0.85)
-            # Also try numeric cross-structure: e.g., json found amount & count -> build pattern
-            if isinstance(indicator, (list, tuple)) and len(indicator) >= 2:
-                # try to form patterns like '0.5g x 2' or '2 x 0.5g'
-                candidate = ' x '.join([str(x) for x in indicator])
-                if candidate in norm_db:
-                    best_score = max(best_score, 0.95)
-
+            if indicator in db_joint_ratio:
+                best_score = max(best_score, 0.8)
+        
+        # Special patterns (e.g., if JSON has "twin" and DB has "x 2")
+        if 'twin' in json_name and ('x 2' in db_joint_ratio or '2 pack' in db_joint_ratio):
+            best_score = max(best_score, 0.9)
+        
+        if 'single' in json_name and ('x 1' in db_joint_ratio or '1 pack' in db_joint_ratio or '1g' in db_joint_ratio):
+            best_score = max(best_score, 0.9)
+        
         return best_score
 
     def _compare_strains(self, json_product: Dict, db_product: Dict) -> float:
         """Compare strain names with fuzzy matching"""
         # Extract strain from JSON
-        # First, prefer authoritative strain_id when available or inferable
-        try:
-            # If JSON provides strain_id directly, use it
-            json_strain_id = json_product.get('strain_id') or json_product.get('strainId') or None
-            # If not present, attempt to infer strain_id from JSON product name
-            if not json_strain_id:
-                inferred = self._infer_strain_from_json(json_product)
-                json_strain = inferred.get('strain_name') if inferred else None
-                json_strain_id = inferred.get('id') if inferred else None
-            else:
-                json_strain = None
-
-            db_strain_id = db_product.get('strain_id') or db_product.get('strainId') or db_product.get('strain_id')
-
-            # If both IDs present and equal -> perfect match
-            if json_strain_id and db_strain_id and str(json_strain_id) == str(db_strain_id):
-                return 1.0
-        except Exception:
-            pass
-
-        # Fallback to name-based matching
-        json_strain = json_strain or ''
-        # Try common fields
-        if not json_strain:
-            for field in ['strain', 'strain_name', 'product_strain']:
-                if field in json_product:
-                    json_strain = str(json_product[field]).lower().strip()
-                    break
-
-        # If still missing, attempt to extract strain-like token from product name
+        json_strain = ""
+        for field in ['strain', 'strain_name', 'product_strain']:
+            if field in json_product:
+                json_strain = str(json_product[field]).lower().strip()
+                break
+        
+        # If no explicit strain field, try to extract from product name
         if not json_strain:
             json_name = self._get_product_name(json_product).lower()
-            # Use product DB helper to extract probable strain if available
-            try:
-                inferred = self._infer_strain_from_json(json_product)
-                if inferred and inferred.get('strain_name'):
-                    json_strain = str(inferred.get('strain_name')).lower().strip()
-            except Exception:
-                pass
-
+            # Look for common strain patterns in name
+            strain_patterns = [
+                r'og\s+kush', r'sour\s+diesel', r'blue\s+dream', r'white\s+widow',
+                r'granddaddy\s+purple', r'green\s+crack', r'northern\s+lights'
+            ]
+            for pattern in strain_patterns:
+                if re.search(pattern, json_name):
+                    json_strain = re.search(pattern, json_name).group()
+                    break
+        
+        # Extract strain from database
         db_strain = str(db_product.get('Product Strain', '') or db_product.get('Strain', '')).lower().strip()
-
+        
         # If no strain info available, return neutral score
         if not json_strain or not db_strain or db_strain in ['', 'mixed', 'unknown']:
             return 0.5
-
+        
         # Perfect match
         if json_strain == db_strain:
             return 1.0
-
+        
         # Fuzzy matching
         score = fuzz.ratio(json_strain, db_strain) / 100.0
         partial_score = fuzz.partial_ratio(json_strain, db_strain) / 100.0
-
+        
         return max(score, partial_score)
         
+    def _extract_strain_from_name(self, product_name: str) -> str:
+        """
+        Extract the strain name from a product name.
+
+        Common formats:
+        - "Brand Line - Strain Name Live Resin - Hybrid - 1mL"
+        - "Strain Name by Brand - 1g"
+        - "Brand Strain Name Type"
+
+        Returns the extracted strain name or empty string if not found.
+        """
+        if not product_name:
+            return ''
+
+        name = product_name.lower().strip()
+
+        # Product type/descriptor words to remove when extracting strain
+        descriptor_words = {
+            'pure', 'live', 'resin', 'rosin', 'disposable', 'vape', 'cartridge',
+            'cart', 'aio', 'pulse', 'hybrid', 'indica', 'sativa', 'pen', 'pod',
+            '510', 'wax', 'shatter', 'badder', 'diamonds', 'sauce', 'budder',
+            'sugar', 'crumble', 'distillate', 'cured', 'fresh', 'frozen',
+            'premium', 'organic', 'indoor', 'outdoor', 'greenhouse',
+            'full', 'spectrum', 'broad', 'co2', 'bho', 'pho', 'solventless'
+        }
+
+        # Split by ' - ' to get segments
+        segments = [s.strip() for s in re.split(r'\s+-\s+', name)]
+
+        # If we have multiple segments (e.g., "Brand - Strain Live Resin - Hybrid - 1mL")
+        if len(segments) >= 2:
+            # The strain is typically in the second segment, before type descriptors
+            # e.g., "Skunk #1 Live Resin" -> "Skunk #1"
+            potential_strain = segments[1]
+
+            # Remove descriptor words from this segment
+            words = potential_strain.split()
+            strain_words = []
+            for word in words:
+                # Keep words that aren't descriptors and aren't sizes
+                clean_word = re.sub(r'[^\w#]', '', word)
+                if clean_word and clean_word not in descriptor_words:
+                    # Skip size patterns like "1ml", "1g"
+                    if not re.match(r'^\d+(?:\.\d+)?(?:ml|g|mg|oz)$', clean_word, re.IGNORECASE):
+                        strain_words.append(word)
+
+            if strain_words:
+                return ' '.join(strain_words).strip()
+
+        # Fallback: try to extract strain from full name by removing descriptors
+        # This handles formats like "Alien Runtz Pure Live Resin Disposable Vape by Brand"
+
+        # Remove "by Brand" suffix
+        name_cleaned = re.sub(r'\s+by\s+[\w\s]+$', '', name, flags=re.IGNORECASE)
+
+        # Remove size patterns
+        name_cleaned = re.sub(r'\b\d+(?:\.\d+)?\s*(?:ml|g|mg|oz)\b', '', name_cleaned, re.IGNORECASE)
+
+        # Remove descriptor words
+        words = name_cleaned.split()
+        strain_words = []
+        for word in words:
+            clean_word = re.sub(r'[^\w#]', '', word).lower()
+            if clean_word and clean_word not in descriptor_words:
+                strain_words.append(word)
+
+        return ' '.join(strain_words).strip()
+
     def _extract_strain_similarity(self, json_name: str, db_name: str) -> float:
-        """Extract and compare strain names"""
-        # Remove common product type words to focus on strain names
-        common_words = ['cart', 'cartridge', 'live', 'resin', 'rosin', 'wax', 'shatter', 'gummy', 'chocolate']
-        
-        json_clean = json_name
-        db_clean = db_name
-        
-        for word in common_words:
-            json_clean = re.sub(rf'\b{word}\b', '', json_clean, flags=re.IGNORECASE)
-            db_clean = re.sub(rf'\b{word}\b', '', db_clean, flags=re.IGNORECASE)
-            
-        return fuzz.token_sort_ratio(json_clean.strip(), db_clean.strip()) / 100.0
+        """Extract and compare strain names with improved accuracy"""
+        # Extract strain names from both products
+        json_strain = self._extract_strain_from_name(json_name)
+        db_strain = self._extract_strain_from_name(db_name)
+
+        # If we couldn't extract strains, fall back to basic cleaning
+        if not json_strain or not db_strain:
+            common_words = ['cart', 'cartridge', 'live', 'resin', 'rosin', 'wax',
+                          'shatter', 'gummy', 'chocolate', 'pure', 'disposable', 'vape']
+
+            json_clean = json_name.lower()
+            db_clean = db_name.lower()
+
+            for word in common_words:
+                json_clean = re.sub(rf'\b{word}\b', '', json_clean, flags=re.IGNORECASE)
+                db_clean = re.sub(rf'\b{word}\b', '', db_clean, flags=re.IGNORECASE)
+
+            json_clean = json_clean.strip()
+            db_clean = db_clean.strip()
+
+            if not json_clean or not db_clean:
+                return 0.3  # Low score if we can't extract meaningful content
+
+            return fuzz.token_sort_ratio(json_clean, db_clean) / 100.0
+
+        # Compare extracted strain names
+        json_strain_lower = json_strain.lower()
+        db_strain_lower = db_strain.lower()
+
+        # Exact match
+        if json_strain_lower == db_strain_lower:
+            return 1.0
+
+        # Check if one contains the other (partial match)
+        if json_strain_lower in db_strain_lower or db_strain_lower in json_strain_lower:
+            return 0.9
+
+        # Fuzzy matching on extracted strain names
+        ratio = fuzz.ratio(json_strain_lower, db_strain_lower) / 100.0
+        partial_ratio = fuzz.partial_ratio(json_strain_lower, db_strain_lower) / 100.0
+        token_sort = fuzz.token_sort_ratio(json_strain_lower, db_strain_lower) / 100.0
+
+        # Use the best score but penalize if strains look completely different
+        best_score = max(ratio, partial_ratio, token_sort)
+
+        # If even the best fuzzy score is low, the strains are likely different products
+        if best_score < 0.5:
+            return best_score * 0.5  # Penalize further for likely mismatches
+
+        return best_score
         
     def _compare_potency(self, json_product: Dict, db_product: Dict) -> float:
         """Compare overall potency/cannabinoid content"""
@@ -1069,18 +1078,6 @@ class ProductTypeSpecificMatcher:
                     volume *= 29.5735  # Convert fl oz to ml
                 return volume
                 
-        # Fallback: try to interpret gram weights as approx ml (1g ~= 1ml for concentrated liquids/resins)
-        gram_patterns = [r'(\d+(?:\.\d+)?)\s*g\b', r'(\d+(?:\.\d+)?)g\b']
-        for pattern in gram_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                try:
-                    grams = float(match.group(1))
-                    return grams  # treat grams as ml-equivalent
-                except Exception:
-                    continue
-
-        # If text contains only mg (e.g., '100mg') it's likely a potency/dosage, not volume — ignore
         return None
         
     def _extract_dosage(self, text: str) -> Optional[float]:
@@ -1097,53 +1094,6 @@ class ProductTypeSpecificMatcher:
                 
         return None
 
-    def _infer_strain_from_json(self, json_product: Dict) -> Optional[Dict[str, Any]]:
-        """Infer a strain name and strain_id from a JSON product using the ProductDatabase.
-
-        Returns a dict like {'id': <strain_id or None>, 'strain_name': <string or None>} or None.
-        """
-        try:
-            name = self._get_product_name(json_product)
-            if not name:
-                return None
-
-            # Try to use ProductDatabase to extract a candidate strain name and lookup id
-            from .product_database import get_database_path, ProductDatabase
-            store_name = 'AGT_Bothell'
-            if self.excel_processor and hasattr(self.excel_processor, '_store_name'):
-                store_name = self.excel_processor._store_name
-            db_path = get_database_path(store_name)
-            if not db_path or not os.path.exists(db_path):
-                # No DB available
-                # Try simple regex extraction
-                inferred = None
-                try:
-                    # Look for patterns like 'Skunk #1', 'OG Kush', 'Blue Dream'
-                    m = re.search(r"([A-Za-z0-9\'\- ]+#?\d*)", name)
-                    if m:
-                        inferred = m.group(1).strip()
-                except Exception:
-                    inferred = None
-                return {'id': None, 'strain_name': inferred} if inferred else None
-
-            product_db = ProductDatabase(db_path)
-            # Use product_db helper to extract strain_name from product name
-            strain_name = product_db._extract_strain_from_product_name(name, product_type=json_product.get('inventory_type') or json_product.get('type'))
-            if not strain_name:
-                # fallback: try some regex heuristics
-                m = re.search(r"([A-Za-z0-9\'\- ]+#?\d+)", name)
-                strain_name = m.group(1).strip() if m else None
-
-            if not strain_name:
-                return None
-
-            strain_info = product_db.get_strain_info(strain_name)
-            if strain_info:
-                return {'id': strain_info.get('id'), 'strain_name': strain_info.get('strain_name')}
-            return {'id': None, 'strain_name': strain_name}
-        except Exception:
-            return None
-
     def _infer_lineage_from_ratio(self, json_product: Dict) -> Optional[str]:
         """Infer a likely lineage from ratio/JointRatio fields or product name.
 
@@ -1159,31 +1109,20 @@ class ProductTypeSpecificMatcher:
             try:
                 s = str(val).strip().lower()
             except Exception:
-                # If value can't be stringified, skip this field
                 continue
-            # Normalize common separators (e.g., '1 to 1' -> '1:1') and remove spaces
-            s_norm = re.sub(r"\s+to\s+", ":", s)
-            s_norm = s_norm.replace(' ', '')
-            # If the ratio field explicitly mentions CBD (or CBD appears near the ratio), prefer CBD_BLEND
-            if 'cbd' in s_norm or 'cbd' in s:
-                return 'CBD_BLEND'
-
-            # Treat an explicit 1:1 (or 1/1, '1 to 1') as a CBD blend marker.
-            if re.search(r'\b1\s*[:/]\s*1\b', s) or re.search(r'\b1\s+to\s+1\b', s):
-                return 'CBD_BLEND'
-
-            # If ratio is numeric like '2:1' but the product name or ratio string also contains CBD, treat as CBD_BLEND
-            if re.search(r'\b\d+\s*[:/]\s*\d+\b', s_norm):
-                # check for explicit cannabinoid tokens in the same field
-                if any(tok in s_norm for tok in ['cbd', 'cbg', 'cbn', 'cbc']):
+                # Normalize common separators (e.g., '1 to 1' -> '1:1') and remove spaces
+                s_norm = re.sub(r"\s+to\s+", ":", s)
+                s_norm = s_norm.replace(' ', '')
+                # If any numeric ratio is present (e.g., '1:1', '2:1', '1/2'), treat as CBD blend marker
+                if re.search(r'\b\d+\s*[:/]\s*\d+\b', s_norm):
                     return 'CBD_BLEND'
 
-        # Fallback: inspect product name for explicit ratio markers or CBD tokens
+        # Fallback: inspect product name for explicit ratio markers
         name = self._get_product_name(json_product)
         if name:
             name_l = name.lower()
-            # Only infer CBD_BLEND from explicit 1:1 style ratios in product names.
-            if re.search(r'\b1\s*[:/]\s*1\b', name_l) or re.search(r'\b1\s+to\s+1\b', name_l) or 'cbd' in name_l:
+            # Any colon/slash ratio in the product name indicates a ratioed product (assume CBD blend)
+            if re.search(r'\b\d+\s*[:/]\s*\d+\b', name_l) or re.search(r'\b\d+\s+to\s+\d+\b', name_l):
                 return 'CBD_BLEND'
 
         # Not detected

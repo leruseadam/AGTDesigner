@@ -557,40 +557,6 @@ p, span, div {
   max-width: 90vw !important;
 }
 
-/* Make the detailed JSON match modal take up more of the viewport so more matches are visible */
-#detailedJsonMatchModal .modal-dialog {
-  max-width: 96vw !important;
-  max-height: 96vh !important;
-}
-
-#detailedJsonMatchModal .modal-content {
-  height: 96vh !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-
-#detailedJsonMatchModal .modal-body {
-  max-height: calc(96vh - 140px) !important; /* allow for header+footer */
-  overflow-y: auto !important;
-}
-
-/* Also apply to the simpler JSON modal */
-#jsonMatchModal .modal-dialog {
-  max-width: 96vw !important;
-  max-height: 96vh !important;
-}
-
-#jsonMatchModal .modal-content {
-  height: 96vh !important;
-  display: flex !important;
-  flex-direction: column !important;
-}
-
-#jsonMatchModal .modal-body {
-  max-height: calc(96vh - 140px) !important;
-  overflow-y: auto !important;
-}
-
 #detailedJsonMatchModal .table td,
 #detailedJsonMatchModal .table th {
   padding: 0.85rem !important;
@@ -4012,6 +3978,21 @@ body.modal-open #mainContent.store-selection-disabled,
     border-color: rgba(160, 132, 232, 0.5) !important;
     background: rgba(255, 255, 255, 0.22) !important;
   }
+
+/* Ensure lineage dropdown uses a compact, readable font size (override global scaling) */
+.lineage-select, .lineage-dropdown, .form-select.lineage-dropdown {
+  font-size: 0.9rem !important; /* readable, not oversized */
+  line-height: 1.1 !important;
+  padding: 4px 6px !important;
+  min-width: 60px !important;
+  max-width: 160px !important; /* allow wider when needed */
+}
+
+.lineage-dropdown option, .form-select.lineage-dropdown option {
+  font-size: 0.9rem !important;
+  line-height: 1.2 !important;
+  padding: 6px 8px !important;
+}
   
   /* Legacy lineage dropdown option styling removed - now using lineage-specific colors with white text */
   
@@ -7319,7 +7300,8 @@ body.modal-open #mainContent.store-selection-disabled,
     margin: 1.75rem auto !important;
     max-width: 1200px !important;
     width: auto !important;
-    height: auto !important;
+    /* Make the dialog much taller so users can see long match lists */
+    height: 96vh !important;
     position: relative !important;
   }
   
@@ -7328,40 +7310,19 @@ body.modal-open #mainContent.store-selection-disabled,
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
     border-radius: 12px !important;
     margin: 0 !important;
-    height: auto !important;
+    height: 100% !important;
     display: flex !important;
     flex-direction: column !important;
   }
-
-  /* Match visual style used by other modals (glass card) */
-  #jsonMatchModal .modal-content,
-  #detailedJsonMatchModal .modal-content {
-    background: var(--glass-bg) !important;
-    border: 1px solid var(--glass-border) !important;
-    backdrop-filter: blur(10px) !important;
-    -webkit-backdrop-filter: blur(10px) !important;
-    color: var(--text-primary) !important;
-  }
-
-  #jsonMatchModal .modal-header,
-  #detailedJsonMatchModal .modal-header {
-    background: transparent !important;
-    color: var(--text-primary) !important;
-    border-bottom: 1px solid rgba(255,255,255,0.04) !important;
-  }
-
-  #jsonMatchModal .modal-footer,
-  #detailedJsonMatchModal .modal-footer {
-    background: transparent !important;
-    border-top: 1px solid rgba(255,255,255,0.04) !important;
-  }
   
   #jsonMatchModal .modal-body {
-    flex: 0 1 auto !important;
+    flex: 1 1 auto !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     -webkit-overflow-scrolling: touch !important;
-    max-height: calc(100vh - 200px) !important;
+    /* Reserve space for header/footer and controls so list area is maximized */
+    max-height: calc(96vh - 160px) !important;
+    min-height: 320px !important;
   }
   
   #jsonMatchModal .modal-header {

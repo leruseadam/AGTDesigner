@@ -131,7 +131,6 @@ class UltraFastDatabase:
                     cbd_content TEXT,
                     vendor TEXT,
                     barcode TEXT,
-                    json TEXT,  -- Original Description value before processing
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )

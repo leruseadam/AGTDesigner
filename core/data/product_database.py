@@ -1381,7 +1381,6 @@ class ProductDatabase:
                         'Weight Unit* (grams/gm or ounces/oz)': product_data.get('Weight Unit* (grams/gm or ounces/oz)', product_data.get('Units', '')),
                         'THC test result': product_data.get('THC test result', ''),
                         'CBD test result': product_data.get('CBD test result', ''),
-                        'JSON': product_data.get('JSON', ''),  # Original Description from Excel for JSON matching
                     }
                     
                     # Only include columns that exist in the database

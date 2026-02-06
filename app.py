@@ -14631,28 +14631,6 @@ def update_lineage():
                 if similar_products_updated > 0:
                     logging.info(f"✅ Updated {similar_products_updated} Classic Type products with strain '{strain_name}' (linked: {strain_linked_count}, name-matched: {name_match_count})")
         
-        # CRITICAL FIX: Also copy canonical/sovereign lineage to products for ALL product types
-        # This ensures the main products table has the canonical lineage set so downstream
-        # queries and UI lookups that rely on p."Lineage" reflect the strain canonical value.
-        try:
-            total_copied = 0
-            for strain_id, strain_name in strain_rows:
-                try:
-                    cursor.execute("""
-                        UPDATE products
-                        SET "Lineage" = ?, sovereign_lineage = ?
-                        WHERE strain_id = ? OR LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
-                    """, (new_lineage, new_lineage, strain_id, strain_name))
-                    copied = cursor.rowcount
-                    total_copied += copied
-                    if copied > 0:
-                        logging.info(f"✅ Copied canonical lineage to {copied} product(s) for strain '{strain_name}' (id: {strain_id})")
-                except Exception as copy_err:
-                    logging.warning(f"⚠️ Could not copy canonical lineage to products for strain '{strain_name}' (id: {strain_id}): {copy_err}")
-            if total_copied > 0:
-                logging.info(f"✅ Total products updated with canonical/sovereign lineage copy: {total_copied}")
-        except Exception as overall_copy_err:
-            logging.warning(f"⚠️ Failed to copy canonical lineage to products (overall): {overall_copy_err}")
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
 

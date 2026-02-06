@@ -28,6 +28,44 @@ import multiprocessing
 _DIGIT_UNIT_RE = re.compile(r"\b\d+(?:g|mg)\b")
 _NON_WORD_RE = re.compile(r"[^\w\s-]")
 _SPLIT_RE = re.compile(r"[-\s]+")
+_MULTIPACK_RE = re.compile(r'(\d+pk|\d+pack|100mg\s*thc|10mg)', re.IGNORECASE)
+_SINGLE_RE = re.compile(r'\bsingle\b', re.IGNORECASE)
+
+
+def is_single_item(name_or_sku: str) -> bool:
+    """Check if product name/SKU indicates a single-serve item (not multi-pack)."""
+    if not name_or_sku:
+        return False
+    return bool(_SINGLE_RE.search(name_or_sku))
+
+
+def is_multipack_item(name_or_sku: str) -> bool:
+    """Check if product name/SKU indicates a multi-pack item (10pk, 100mg, etc.)."""
+    if not name_or_sku:
+        return False
+    return bool(_MULTIPACK_RE.search(name_or_sku))
+
+
+def package_types_compatible(json_name: str, product_name: str) -> bool:
+    """
+    Check if JSON item and product have compatible package types.
+    SINGLE items should NOT match multi-pack products and vice versa.
+    """
+    json_is_single = is_single_item(json_name)
+    json_is_multipack = is_multipack_item(json_name)
+    product_is_single = is_single_item(product_name)
+    product_is_multipack = is_multipack_item(product_name)
+
+    # If JSON is SINGLE, product must NOT be multipack
+    if json_is_single and product_is_multipack:
+        return False
+
+    # If JSON is multipack, product should NOT be single
+    if json_is_multipack and product_is_single:
+        return False
+
+    return True
+
 
 def extract_keywords_from_sku(sku: str) -> set:
     """
@@ -364,9 +402,6 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
 
     # Additional product-name based heuristics
     if product_name_lower:
-        # RSO/CO2 tankers - check FIRST before other concentrate types
-        if any(keyword in product_name_lower for keyword in ["rso", "applicator", "tanker", "syringe", "co2 oil", "co2 extract", "ethanol extract", "alcohol extract"]):
-            return _log_and_return("RSO/CO2 Tankers", 'name_rso_co2_keywords')
         if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
             return _log_and_return("Pre-Roll", 'name_preroll_keywords')
         if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "vape", "510", "all-in-one", "aio", "disposable"]):
@@ -939,7 +974,7 @@ class JSONMatcher:
                 self._product_table_columns = set()
         return column_name in self._product_table_columns
 
-    def _find_best_database_match(self, product_name: str, vendor: str, weight: str, strain: str, product_db, lineage: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def _find_best_database_match(self, product_name: str, vendor: str, weight: str, strain: str, product_db) -> Optional[Dict[str, Any]]:
         """Find the best matching product directly from the product database."""
         try:
             conn = product_db._get_connection()
@@ -1046,7 +1081,6 @@ class JSONMatcher:
                     return None
 
             item_weight = parse_weight(weight)
-            item_lineage = str(lineage or '').strip().lower()
 
             for candidate in candidates:
                 candidate_name = str(candidate.get('Product Name*') or candidate.get('product_name') or '').strip()
@@ -1067,17 +1101,6 @@ class JSONMatcher:
                     candidate_strain = str(candidate.get('Product Strain') or candidate.get('product_strain') or '').lower()
                     if candidate_strain and strain.lower() in candidate_strain:
                         score += 5
-
-                # Consider lineage when available: boost score if matches, penalize if mismatched
-                try:
-                    candidate_lineage = str(candidate.get('Lineage') or candidate.get('canonical_lineage') or '').strip().lower()
-                    if item_lineage and candidate_lineage:
-                        if item_lineage == candidate_lineage:
-                            score += 8
-                        else:
-                            score -= 6
-                except Exception:
-                    pass
 
                 if score > best_score:
                     best_score = score
@@ -1278,16 +1301,6 @@ class JSONMatcher:
             logging.warning("Cannot build sheet cache: DataFrame is None, attempting to load default file")
             # Try to load a default file
             try:
-                # Avoid trying to load default file when not in Flask app context
-                try:
-                    from flask import has_app_context
-                    if not has_app_context():
-                        logging.warning("Skipping default file load: no Flask app context")
-                        self._build_cache_from_database()
-                        return
-                except Exception:
-                    # If Flask isn't available or check fails, proceed cautiously
-                    pass
                 from .excel_processor import get_default_upload_file
                 default_file = get_default_upload_file()
                 if default_file:
@@ -2092,17 +2105,6 @@ class JSONMatcher:
                     weight_bonus = 0.1
                 elif json_weight in cache_weight or cache_weight in json_weight:
                     weight_bonus = 0.05
-
-            # --- BEGIN: Pre-roll pack matching ---
-            # Check for pre-roll pack matching (2pk, 5pk, 10pk) - only if both have pack indicators
-            preroll_pack_bonus = 0.0
-            json_name_lower = json_name_raw.lower()
-            cache_name_lower = cache_name_raw.lower()
-            if ('pk' in json_name_lower or 'pack' in json_name_lower) and ('pk' in cache_name_lower or 'pack' in cache_name_lower):
-                pack_match_score = self._match_preroll_pack(json_name_raw, json_weight, cache_name_raw)
-                if pack_match_score is not None:
-                    preroll_pack_bonus = pack_match_score * 0.3  # Up to 0.3 bonus for perfect pack match
-            # --- END: Pre-roll pack matching ---
             # --- END: Enhanced weight matching ---
             
             # --- BEGIN: Enhanced description matching ---
@@ -2144,109 +2146,50 @@ class JSONMatcher:
                 return 0.0
             # --- END: Strict cannabis type filtering ---
 
-            # Calculate base score with STRICT requirements to prevent wrong strain matches
+            # Calculate base score with more stringent requirements
             base_score = 0.0
 
             # Exact match (highest score)
             if json_name == cache_name:
                 base_score = 1.0
-            # Contains match (high score) - but must be meaningful containment
+            # Contains match (high score)
             elif json_name in cache_name or cache_name in json_name:
-                # Verify it's not just matching generic words
-                shorter = json_name if len(json_name) < len(cache_name) else cache_name
-                if len(shorter) >= 5:  # Must be at least 5 chars to count as containment
-                    base_score = 0.9
-                else:
-                    base_score = 0.0
-            # Strain match bonus (good score) - ONLY if strains actually match
+                base_score = 0.9
+            # Strain match bonus (good score)
             elif json_strain and cache_strain and json_strain == cache_strain:
                 base_score = 0.8
-            # Word overlap analysis - VERY STRICT to prevent "GSC" matching "Wedding Cake"
+            # Word overlap analysis (more stringent)
             else:
                 json_words = set(json_name.split())
                 cache_words = set(cache_name.split())
-
-                # Only remove true stop words - NOT product type words like "live", "resin"
-                # The strain name words must overlap!
-                stop_words = {'and', 'or', 'the', 'a', 'an', 'with', 'for', 'by', '-'}
+                
+                # Remove common words that don't add value
+                stop_words = {'and', 'or', 'the', 'a', 'an', 'with', 'for', 'live', 'resin', 'cart', 'cartridge'}
                 json_words = json_words - stop_words
                 cache_words = cache_words - stop_words
-
+                
                 if len(json_words) == 0 or len(cache_words) == 0:
-                    return 0.0  # No words to compare - reject
-
-                overlap = json_words & cache_words
-
-                # CRITICAL: Extract strain-like words by removing product type/brand/format words
-                # These are words that don't identify the actual strain
-                product_type_words = {
-                    # Product types
-                    'live', 'resin', 'cart', 'cartridge', 'vape', 'vaporizer',
-                    'diamond', 'liquid', 'honey', 'crystal', 'disposable',
-                    'concentrate', 'flower', 'preroll', 'pre-roll', 'edible',
-                    'cured', 'rosin', 'badder', 'sauce', 'sugar', 'wax',
-                    'aio', 'c-cell', 'ccell', 'pod', 'pen',
-                    # Brands (should not count as strain match)
-                    'dabstract', 'oleum', 'phat', 'panda', 'sticky', 'frog',
-                    'hot', 'sugar', 'grow', 'op', 'farms',
-                    # Format words
-                    'lr', 'indica', 'sativa', 'hybrid', 'thc', 'cbd',
-                    'infused', 'core', 'platinum', 'line', 'bong', 'buddies',
-                    'firecracker', 'gummiez', 'drops', 'fruit', 'bites',
-                    # Size/weight words
-                    '1g', '2g', '3.5g', '7g', '14g', '28g', '100mg',
-                    # Common filler
-                    'by', '-', 'x', '(i)', '(s)', '(h)', '(h/i)', '(h/s)'
-                }
-
-                json_strain_words = json_words - product_type_words
-                cache_strain_words = cache_words - product_type_words
-
-                # Also extract strain from parentheses format like "(Bone Collector/7g)"
-                import re
-                paren_match_json = re.search(r'\(([^/]+)/', json_name)
-                paren_match_cache = re.search(r'\(([^/]+)/', cache_name)
-                if paren_match_json:
-                    paren_strain = set(paren_match_json.group(1).lower().split())
-                    json_strain_words = json_strain_words | paren_strain
-                if paren_match_cache:
-                    paren_strain = set(paren_match_cache.group(1).lower().split())
-                    cache_strain_words = cache_strain_words | paren_strain
-
-                # The strain words MUST have overlap - this is the key fix
-                strain_overlap = json_strain_words & cache_strain_words
-
-                if not strain_overlap and json_strain_words and cache_strain_words:
-                    # Different strains - reject completely
-                    # "Bone Collector" has no overlap with "Citronella" - reject
-                    return 0.0
-
-                if overlap:
-                    # Calculate overlap ratio including strain requirement
-                    overlap_ratio = len(overlap) / min(len(json_words), len(cache_words))
-                    strain_overlap_ratio = len(strain_overlap) / min(len(json_strain_words), len(cache_strain_words)) if json_strain_words and cache_strain_words else 0
-
-                    # Require at least 50% strain word overlap
-                    if strain_overlap_ratio >= 0.5:
-                        if overlap_ratio >= 0.8:
+                    base_score = 0.1
+                else:
+                    overlap = json_words & cache_words
+                    if overlap:
+                        # Require higher overlap for good matches
+                        overlap_ratio = len(overlap) / min(len(json_words), len(cache_words))
+                        if overlap_ratio >= 0.8:  # Raised from 0.5
                             base_score = 0.7
-                        elif overlap_ratio >= 0.6:
+                        elif overlap_ratio >= 0.6:  # Raised from 0.3
                             base_score = 0.5
-                        elif overlap_ratio >= 0.4:
+                        elif overlap_ratio >= 0.4:  # New middle tier
                             base_score = 0.3
                         else:
-                            base_score = 0.0
+                            base_score = 0.1  # Lower score for weak overlap
                     else:
-                        # Strain words don't overlap enough - reject
-                        return 0.0
-                else:
-                    # No word overlap at all - reject match entirely
-                    return 0.0
+                        # No word overlap - very low score
+                        base_score = 0.05
             
             # Apply bonuses for additional field matches (with diminishing returns)
             # Description bonus gets highest priority since it's the most comprehensive field
-            # Pre-roll pack bonus gets high weight since it's a strong matching signal
-            final_score = base_score + (description_bonus * 1.0) + (brand_bonus * 0.8) + (type_bonus * 0.6) + (weight_bonus * 0.4) + (preroll_pack_bonus * 1.0)
+            final_score = base_score + (description_bonus * 1.0) + (brand_bonus * 0.8) + (type_bonus * 0.6) + (weight_bonus * 0.4)
             final_score = min(1.0, final_score)  # Cap at 1.0
             
             # Additional penalty for mismatched product types
@@ -2620,16 +2563,16 @@ class JSONMatcher:
                             if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
                                 candidates_to_check.append(cache_item)
                     else:
-                        # No vendor filter - check all items
-                        candidates_to_check = self._sheet_cache
-
+                        # No vendor filter - check all items but limit to first 500 for performance
+                        candidates_to_check = self._sheet_cache[:500]
+                    
                     # If vendor filtering found too few candidates, expand search
-                    if len(candidates_to_check) < 50 and current_vendor_filter:
-                        # Add all candidates regardless of vendor for fallback
-                        candidates_to_check.extend(self._sheet_cache)
-
-                    # PERFORMANCE: Limit candidates to check (max 1000 for better coverage)
-                    candidates_to_check = candidates_to_check[:1000]
+                    if len(candidates_to_check) < 10 and current_vendor_filter:
+                        # Add top 100 candidates regardless of vendor for fallback
+                        candidates_to_check.extend(self._sheet_cache[:100])
+                    
+                    # PERFORMANCE: Limit candidates to check (max 200 for speed)
+                    candidates_to_check = candidates_to_check[:200]
                     
                     # Match against filtered candidates
                     for cache_item in candidates_to_check:
@@ -2786,13 +2729,14 @@ class JSONMatcher:
                         from fuzzywuzzy import fuzz
                         name_similarity = fuzz.token_sort_ratio(json_name, db_name)
                         
-                        # Require at least 40% name similarity for ANY match (lowered from 60% for better discovery)
+                        # Require at least 60% name similarity for ANY match (lowered from 70% for better discovery)
                         # This allows legitimate matches like:
                         # - "Jet Fuel Gelato Vaporizer" → "Jet Fuel Gelato Live Resin" (75%+)
                         # - "Wedding Cake Cartridge" → "Wedding Cake Live Resin" (75%+)
-                        # - Products with different naming conventions but same strain
-                        # But prevents completely wrong matches
-                        if name_similarity < 40:
+                        # - Products with slight variations in naming
+                        # But prevents wrong matches like:
+                        # - "Jet Fuel Gelato" → "Bubblegum Gelato" (below 60%)
+                        if name_similarity < 60:
                             logging.warning(f"🚫 REJECTED: Low name similarity ({name_similarity}%) - '{product_name}' vs '{db_name}'")
                             best_match = None
                             best_score = 0
@@ -2809,10 +2753,10 @@ class JSONMatcher:
                         else:
                             name_similarity_required = True
                 
-                if best_match is not None and best_score >= 80.0:  # High confidence - auto-approve (lowered from 100)
+                if best_match is not None and best_score >= 100.0:  # Very high confidence - auto-approve
                     validated = True
-                    logging.info(f"✅ HIGH CONFIDENCE: Score {best_score:.1f} >= 80.0")
-                elif best_match is not None and best_score >= 30.0 and name_similarity_required:
+                    logging.info(f"✅ HIGH CONFIDENCE: Score {best_score:.1f} >= 100.0")
+                elif best_match is not None and best_score >= 50.0 and name_similarity_required:
                     # Medium confidence (50-100) - perform additional validation
                     json_name_str = product_name
                     db_name_str = str(best_match.get('Product Name*', '') or best_match.get('Description', '')).strip()
@@ -3145,8 +3089,7 @@ class JSONMatcher:
                             vendor=vendor,
                             weight=str(item.get("unit_weight", item.get("weight", ""))).strip(),
                             strain=strain,
-                            product_db=product_db,
-                            lineage=str(item.get('lineage', item.get('Lineage', ''))).strip()
+                            product_db=product_db
                         )
                         if db_match:
                             return self._create_tag_from_database_info(db_match, vendor, item)
@@ -3802,7 +3745,7 @@ class JSONMatcher:
             def clean_product_name(name):
                 if not name:
                     return name
-                # Use module-level `re` (avoid local import which causes UnboundLocalError)
+                import re
                 # Replace "Vaporizer" with "Disposable Vape"
                 cleaned = re.sub(r'\bVaporizer\b', 'Disposable Vape', name, flags=re.IGNORECASE)
                 # Only remove obvious suffixes that are clearly not part of the product name
@@ -5286,86 +5229,6 @@ class JSONMatcher:
                     weight = str(item.get("unit_weight", item.get("weight", ""))).strip()
                     strain = str(item.get("strain_name", item.get("strain", ""))).strip()
                     
-                    # PRIORITY 0: Exact JSON internal-ID match (use JSON column to find perfect DB match)
-                    try:
-                        # Look for common JSON fields that represent an internal product identifier
-                        internal_json_id = (item.get('Internal Product Identifier') or
-                                            item.get('internal_product_identifier') or
-                                            item.get('inventory_id') or
-                                            item.get('integrator_data') or
-                                            item.get('internal_id') or
-                                            item.get('sku') or
-                                            item.get('product_sku'))
-
-                        if internal_json_id and product_db:
-                            logging.info(f"🔎 Exact JSON ID present: '{internal_json_id}' — trying direct DB lookup")
-                            try:
-                                with sqlite3.connect(product_db.db_path) as conn:
-                                    cursor = conn.cursor()
-                                    # Safely determine which internal-id column exists in the products table
-                                    try:
-                                        cursor.execute("PRAGMA table_info(products)")
-                                        cols = [r[1] for r in cursor.fetchall()]
-                                    except Exception:
-                                        cols = []
-
-                                    raw_col = None
-                                    # Determine the actual column name (without SQL quoting)
-                                    if 'Internal Product Identifier' in cols:
-                                        raw_col = 'Internal Product Identifier'
-                                    elif 'internal_product_identifier' in cols:
-                                        raw_col = 'internal_product_identifier'
-                                    elif 'internal_id' in cols:
-                                        raw_col = 'internal_id'
-
-                                    if raw_col:
-                                        # Always reference the column with explicit quoting and table alias to avoid
-                                        # "no such column" errors when column names contain spaces or mixed case.
-                                        col_ref = f'p."{raw_col}"'
-                                        coalesce_ref = f'COALESCE({col_ref}, '')'
-                                        sql = f'''
-                                            SELECT p.id, p."Product Name*", p."Description", p."Product Brand",
-                                                   p."Lineage", p."Product Type*", p."Weight*", p."Units",
-                                                   p."Price", p."Vendor/Supplier*", p."Product Strain",
-                                                   {col_ref} as internal_id
-                                            FROM products p
-                                            WHERE {coalesce_ref} = ?
-                                            LIMIT 1
-                                        '''
-                                        logging.debug(f"Exact-ID SQL: {sql.strip()} | params: {(str(internal_json_id),)}")
-                                        cursor.execute(sql, (str(internal_json_id),))
-                                        res = cursor.fetchone()
-                                        if res:
-                                            db_info = {
-                                                'Product Name*': res[1],
-                                                'Description': res[2],
-                                                'Product Brand': res[3],
-                                                'Lineage': res[4],
-                                                'Product Type*': res[5],
-                                                'Weight*': res[6],
-                                                'Units': res[7],
-                                                'Price': res[8],
-                                                'Vendor/Supplier*': res[9],
-                                                'Product Strain': res[10],
-                                                'Internal Product Identifier': res[11]
-                                            }
-                                            if self._is_valid_product(db_info):
-                                                logging.info(f"✅ Exact JSON ID matched DB product: {db_info.get('Product Name*')}")
-                                                tag = self._create_tag_from_database_info(db_info, vendor, item)
-                                                all_tags.append(tag)
-                                                matched_count += 1
-                                                # Skip remaining matching for this item
-                                                continue
-                                            else:
-                                                logging.info("🚫 Exact-ID match found but product flagged invalid (void/sample)")
-                                    else:
-                                        logging.debug("Exact ID lookup skipped: no internal-ID column in products table")
-                            except Exception as id_lookup_err:
-                                logging.warning(f"Exact ID DB lookup failed: {id_lookup_err}")
-                    except Exception:
-                        # Defensive: don't let exact-id lookup crash the whole processing loop
-                        logging.exception("Unexpected error during exact JSON-ID lookup")
-
                     # PRIORITY 1: For SKU-like products, try database search first
                     db_info = None
                     if '_' in product_name and product_db:
@@ -5471,7 +5334,7 @@ class JSONMatcher:
                     # PRIORITY 2: Use comprehensive matching logic (Excel) if no SKU database match
                     try:
                         if product_db:
-                            db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db, lineage=str(item.get('lineage', item.get('Lineage', ''))).strip())
+                            db_direct_match = self._find_best_database_match(product_name, vendor, weight, strain, product_db)
                             if db_direct_match:
                                 tag = self._create_tag_from_database_info(db_direct_match, vendor, item)
                                 all_tags.append(tag)
@@ -5571,8 +5434,7 @@ class JSONMatcher:
                                         
                                         logging.info(f"✅ AI-Powered Strain Database match found for: {best_match.strain_name} -> {strain_info.get('canonical_lineage', 'HYBRID')}")
                         except Exception as ai_error:
-                            # Log full traceback to diagnose UnboundLocalError and similar issues
-                            logging.exception("AI matching error for '%s'", product_name)
+                            logging.warning(f"AI matching error for '{product_name}': {ai_error}")
                             
                     
                     # PRIORITY 3: Try educated guessing if no database match
@@ -5687,7 +5549,7 @@ class JSONMatcher:
                         
                         # Look for "by [Brand]" pattern
                         if not brand:
-                            # Use module-level `re` instead of importing here
+                            import re
                             by_match = re.search(r'by\s+([A-Za-z0-9\s]+)(?:\s|$)', product_name, re.IGNORECASE)
                             if by_match:
                                 brand = by_match.group(1).strip().title()
@@ -5824,7 +5686,7 @@ class JSONMatcher:
                     
                     # If weight is still empty, try to extract from product name
                     if not weight:
-                        # Use module-level `re` instead of importing here
+                        import re
                         # Look for weight patterns in product name
                         weight_patterns = [
                             r'(\d+\.?\d*)\s*(g|gram|grams|gm)',  # 3.5g, 3.5 gram, etc.
@@ -6602,27 +6464,16 @@ class JSONMatcher:
             json_type = str(json_item.get("product_type", "")).strip().lower()
             json_weight = str(json_item.get("weight", "")).strip()
             json_strain = str(json_item.get("strain_name", "")).strip().lower()
-            # Extract description from JSON item - this is the primary field for JSON column matching
-            json_description = str(json_item.get("description", json_item.get("product_description", ""))).strip()
-
+            
             # Normalize the product name for better matching
             json_name_normalized = self._normalize_name(json_name)
-
+            
             # Reduced logging for performance
-            logging.debug(f"🔍 INTELLIGENT MATCHING: '{json_name}' → '{json_name_normalized}' (vendor: {json_vendor}, brand: {json_brand}, type: {json_type}, weight: {json_weight}, strain: {json_strain}, description: '{json_description[:50]}...' if len(json_description) > 50 else json_description)")
-
+            logging.debug(f"🔍 INTELLIGENT MATCHING: '{json_name}' → '{json_name_normalized}' (vendor: {json_vendor}, brand: {json_brand}, type: {json_type}, weight: {json_weight}, strain: {json_strain})")
+            
             if not json_name:
                 return None, 0.0, "No product name provided"
-
-            # Step 0: HIGHEST PRIORITY - Check JSON column for exact match
-            # The JSON column stores original Description values from Excel files
-            # Match using the incoming description field against the database JSON column
-            json_column_match = self._find_json_column_match(json_name, json_description)
-            if json_column_match:
-                source = json_column_match.get('_source', 'database')
-                logging.debug(f"✅ JSON COLUMN EXACT MATCH: '{json_name}' → '{json_column_match.get('original_name', json_column_match.get('Product Name*', 'Unknown'))}'")
-                return json_column_match, 1.0, f"JSON column exact match ({source})"
-
+            
             # Step 0.5: Try exact name matching with normalized names
             exact_matches = self._find_exact_name_matches(json_name)
             if exact_matches:
@@ -6751,50 +6602,7 @@ class JSONMatcher:
                     best_match = weight_matches[0]
                     logging.debug(f"✅ WEIGHT+TYPE MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}'")
                     return best_match, 0.5, "Weight + type based match"
-
-            # Step 7b: Try intelligent pre-roll pack matching for products like "2pk", "5pk", "10pk"
-            # Only run if the JSON name contains pack indicators to avoid slow iteration
-            pack_pattern = re.search(r'(\d+)\s*pk\b|\d+\s*pack\b|x\s*\d+\s*pack', json_name.lower())
-            if pack_pattern:
-                json_pack_info = self._extract_preroll_pack_info(json_name)
-                if json_pack_info and json_pack_info.get('pack_count'):
-                    pack_count = json_pack_info['pack_count']
-                    logging.debug(f"🔍 PRE-ROLL PACK DETECTION: '{json_name}' → detected {pack_count}pk")
-
-                    # Search for matching pack products in the cache (limit to 200 for performance)
-                    pack_matches = []
-                    checked = 0
-                    for product in self.product_cache:
-                        if checked >= 200:
-                            break
-                        cache_name = str(product.get("original_name", product.get("Product Name*", ""))).lower()
-
-                        # Quick filter: skip if cache doesn't have pack indicators
-                        if 'pack' not in cache_name and 'pk' not in cache_name:
-                            continue
-
-                        checked += 1
-                        cache_vendor = str(product.get("vendor", "")).lower()
-
-                        # Vendor filtering if available
-                        if json_vendor and cache_vendor and json_vendor not in cache_vendor and cache_vendor not in json_vendor:
-                            continue
-
-                        # Check for pack matching
-                        pack_score = self._match_preroll_pack(json_name, json_weight, cache_name)
-                        if pack_score is not None and pack_score > 0.5:
-                            match_dict = dict(product)
-                            match_dict['fuzzy_score'] = pack_score * 100
-                            match_dict['_preroll_pack_score'] = pack_score
-                            pack_matches.append(match_dict)
-
-                    if pack_matches:
-                        pack_matches.sort(key=lambda x: x.get('fuzzy_score', 0), reverse=True)
-                        best_match = pack_matches[0]
-                        score = best_match.get('_preroll_pack_score', 0.6)
-                        logging.debug(f"✅ PRE-ROLL PACK MATCH: '{json_name}' → '{best_match.get('original_name', 'Unknown')}' (score: {score:.2f})")
-                        return best_match, score, f"Pre-roll pack match ({pack_count}pk)"
-
+            
             # Step 8: Try comprehensive multi-field matching with all available data
             comprehensive_matches = self._find_comprehensive_matches(json_item)
             if comprehensive_matches:
@@ -6865,13 +6673,19 @@ class JSONMatcher:
             all_products = self._get_all_products()
             
             for product in all_products:
+                product_name = product.get('Product Name*', '')
+
+                # CRITICAL: Check package type compatibility (SINGLE vs multipack)
+                if not package_types_compatible(json_name, product_name):
+                    continue  # Skip incompatible package types
+
                 score = 0.0
                 match_details = []
-                
-                # Name similarity (highest weight) - MUST have reasonable name match
+
+                # Name similarity (highest weight)
                 if json_name:
-                    name_similarity = self._calculate_name_similarity(json_name, product.get('Product Name*', ''))
-                    if name_similarity > 0.4:  # Require at least 40% name similarity
+                    name_similarity = self._calculate_name_similarity(json_name, product_name)
+                    if name_similarity > 0.1:  # Extremely lenient threshold
                         score += name_similarity * 0.4
                         match_details.append(f"name:{name_similarity:.2f}")
                 
@@ -6910,9 +6724,8 @@ class JSONMatcher:
                         score += strain_similarity * 0.05
                         match_details.append(f"strain:{strain_similarity:.2f}")
                 
-                # Require meaningful score AND name match to prevent random matches
-                has_name_match = any('name:' in d for d in match_details)
-                if score > 0.25 and has_name_match:  # Require 25% score AND name component
+                # If we have any score at all, include this match
+                if score > 0.05:  # Extremely lenient threshold
                     product['comprehensive_score'] = score
                     product['match_details'] = '|'.join(match_details)
                     matches.append(product)
@@ -6927,53 +6740,38 @@ class JSONMatcher:
     
     def _find_partial_field_matches(self, json_item: dict) -> List[dict]:
         """
-        Find matches using available field data with stricter thresholds to prevent random matches.
+        Find matches using any available field data with very lenient thresholds.
         """
         try:
             matches = []
             all_products = self._get_all_products()
-
-            json_name = str(json_item.get('product_name', '')).strip().lower()
-
+            
             for product in all_products:
                 score = 0.0
                 match_fields = []
-                has_name_match = False
-
-                product_name = str(product.get('Product Name*', '')).strip().lower()
-
-                # CRITICAL: Must have some name similarity to prevent random matches
-                if json_name and product_name:
-                    name_sim = self._calculate_text_similarity(json_name, product_name)
-                    if name_sim > 0.5:  # Require 50% name similarity
-                        score += name_sim * 0.5
-                        match_fields.append(f"name:{name_sim:.2f}")
-                        has_name_match = True
-
-                # Only check other fields if we have a name match
-                if not has_name_match:
-                    continue
-
-                # Try to match key fields only (not arbitrary fields)
-                key_fields = [
-                    ('vendor', 'Vendor/Supplier*'),
-                    ('brand', 'Product Brand'),
-                    ('product_type', 'Product Type*'),
-                    ('strain_name', 'Product Strain'),
-                ]
-
-                for json_key, product_key in key_fields:
-                    json_value = str(json_item.get(json_key, '')).strip().lower()
-                    product_value = str(product.get(product_key, '')).strip().lower()
-
-                    if json_value and product_value:
-                        similarity = self._calculate_text_similarity(json_value, product_value)
-                        if similarity > 0.6:  # Require 60% similarity for supporting fields
+                
+                # Try to match any available field
+                for json_key, json_value in json_item.items():
+                    if not json_value or str(json_value).strip() == '':
+                        continue
+                    
+                    json_str = str(json_value).strip().lower()
+                    
+                    # Try to find a corresponding field in the product
+                    for product_key, product_value in product.items():
+                        if not product_value or str(product_value).strip() == '':
+                            continue
+                        
+                        product_str = str(product_value).strip().lower()
+                        
+                        # Calculate similarity
+                        similarity = self._calculate_text_similarity(json_str, product_str)
+                        if similarity > 0.4:  # Lenient threshold
                             score += similarity * 0.1
-                            match_fields.append(f"{json_key}:{similarity:.2f}")
-
-                # Require meaningful score with name match
-                if score > 0.3 and has_name_match:
+                            match_fields.append(f"{json_key}->{product_key}:{similarity:.2f}")
+                
+                # If we found any matches, include this product
+                if score > 0.1:  # Very lenient threshold
                     product['partial_score'] = score
                     product['match_fields'] = '|'.join(match_fields)
                     matches.append(product)
@@ -7138,7 +6936,11 @@ class JSONMatcher:
                 product_type = str(product.get('Product Type*', '')).strip().lower()
                 product_weight = str(product.get('Weight*', '')).strip().lower()
                 product_strain = str(product.get('Strain*', '')).strip().lower()
-                
+
+                # CRITICAL: Check package type compatibility (SINGLE vs multipack)
+                if not package_types_compatible(json_name, product_name):
+                    continue  # Skip incompatible package types (e.g., SINGLE vs 10pk)
+
                 # STRICT VENDOR ISOLATION: Skip products from different vendors
                 if json_vendor and product_vendor:
                     vendor_matches = self._is_vendor_match(json_vendor, product_vendor)
@@ -7169,21 +6971,13 @@ class JSONMatcher:
                         match_reasons.append(f"brand_prefix:{prefix}")
                         break
                 
-                # Strategy 3: Package count matching (10pk, 5pk, etc.) with pre-roll intelligence
+                # Strategy 3: Package count matching (10pk, 5pk, etc.)
                 json_pk_match = re.search(r'(\d+)pk', json_name)
                 product_pk_match = re.search(r'(\d+)pk', product_name)
                 if json_pk_match and product_pk_match:
                     if json_pk_match.group(1) == product_pk_match.group(1):
                         score += 0.25
                         match_reasons.append(f"package_count:{json_pk_match.group(1)}")
-
-                # Strategy 3b: Intelligent pre-roll pack matching (only if both have pack indicators)
-                if ('pk' in json_name or 'pack' in json_name) and ('pk' in product_name or 'pack' in product_name):
-                    json_weight = str(json_item.get("weight", ""))
-                    preroll_pack_score = self._match_preroll_pack(json_name, json_weight, product_name)
-                    if preroll_pack_score is not None and preroll_pack_score > 0.3:
-                        score += preroll_pack_score * 0.35
-                        match_reasons.append(f"preroll_pack_match:{preroll_pack_score:.2f}")
                 
                 # Strategy 4: Weight matching (3.4oz, 1oz, etc.)
                 json_weight_match = re.search(r'(\d+\.?\d*)oz', json_name)
@@ -7562,70 +7356,10 @@ class JSONMatcher:
             logging.error(f"Error getting all products: {e}")
             return []
     
-    def _find_json_column_match(self, json_name: str, json_description: str = None) -> Optional[dict]:
-        """
-        Find exact match in the JSON column of database/excel products.
-        The JSON column stores original Description values from Excel files.
-        This is the highest priority matching method for repeat imports.
-
-        Args:
-            json_name: The product name from the incoming JSON URL
-            json_description: The description field from the incoming JSON URL (primary match field)
-        """
-        if not json_name and not json_description:
-            return None
-
-        # Primary match: Use description if provided (this is what comes from the JSON URL)
-        # The database JSON column contains original Excel Description values
-        match_value = json_description.strip().lower() if json_description else None
-
-        # Fallback to product name if no description
-        if not match_value:
-            match_value = json_name.strip().lower() if json_name else None
-
-        if not match_value:
-            return None
-
-        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{match_value}' in JSON column")
-
-        # Check Excel data first
-        if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
-            try:
-                df = self.excel_processor.df
-                if 'JSON' in df.columns:
-                    for _, row in df.iterrows():
-                        json_col_value = str(row.get('JSON', '')).strip()
-                        if json_col_value and json_col_value.lower() == match_value:
-                            match = row.to_dict()
-                            match['_source'] = 'excel'
-                            match['_match_type'] = 'json_column'
-                            logging.info(f"✅ JSON COLUMN MATCH (Excel): '{match_value}' → '{match.get('Product Name*', 'Unknown')}'")
-                            return match
-            except Exception as e:
-                logging.debug(f"Error checking Excel JSON column: {e}")
-
-        # Check database products
-        try:
-            from app import get_product_database
-            product_db = get_product_database()
-            db_products = product_db.get_all_products()
-            if db_products:
-                for product in db_products:
-                    json_col_value = str(product.get('JSON', '')).strip()
-                    if json_col_value and json_col_value.lower() == match_value:
-                        product['_source'] = 'database'
-                        product['_match_type'] = 'json_column'
-                        logging.info(f"✅ JSON COLUMN MATCH (Database): '{match_value}' → '{product.get('Product Name*', 'Unknown')}'")
-                        return product
-        except Exception as e:
-            logging.debug(f"Error checking database JSON column: {e}")
-
-        return None
-
     def _find_exact_name_matches(self, json_name: str) -> List[dict]:
         """Find exact name matches in the cache using indexed lookup."""
         normalized_name = self._normalize(json_name)
-
+        
         # Use indexed cache for O(1) lookup instead of O(n) linear search
         if self._indexed_cache and 'exact_names' in self._indexed_cache:
             return self._indexed_cache['exact_names'].get(normalized_name, [])
@@ -8019,125 +7753,7 @@ class JSONMatcher:
             return float(weight_clean)
         except (ValueError, AttributeError):
             return None
-
-    def _extract_preroll_pack_info(self, product_name: str) -> Optional[dict]:
-        """
-        Extract pre-roll pack information from product name.
-
-        Detects patterns like '2pk', '5pk', '10pk' and calculates expected weights:
-        - 2pk = 0.5g x 2 = 1g total
-        - 5pk = 0.5g x 5 = 2.5g total (user says 3.75g, but using standard 0.5g joints)
-        - 10pk = 0.5g x 10 = 5g total
-
-        Returns dict with pack_count, individual_weight, total_weight, or None if not a pack.
-        """
-        if not product_name:
-            return None
-
-        name_lower = product_name.lower()
-
-        # Check if this is a pre-roll product
-        preroll_keywords = ['pre-roll', 'preroll', 'pre roll', 'joint', 'cone', 'infused pre']
-        is_preroll = any(keyword in name_lower for keyword in preroll_keywords)
-
-        # Extract pack count from patterns like "2pk", "5pk", "10pk", "2 pk", "5 pack", "10pack"
-        pack_patterns = [
-            r'(\d+)\s*pk\b',           # 2pk, 5pk, 10pk
-            r'(\d+)\s*pack\b',         # 2pack, 5 pack, 10pack
-            r'x\s*(\d+)\s*pack',       # x 2 Pack, x 5 Pack
-            r'(\d+)\s*ct\b',           # 2ct, 5ct (count)
-            r'(\d+)\s*count\b',        # 2 count, 5count
-        ]
-
-        pack_count = None
-        for pattern in pack_patterns:
-            match = re.search(pattern, name_lower)
-            if match:
-                pack_count = int(match.group(1))
-                break
-
-        if pack_count is None:
-            return None
-
-        # Standard pre-roll individual weight is 0.5g
-        # Some may be different (1g joints, mini 0.35g, etc.) but 0.5g is most common
-        individual_weight = 0.5
-
-        # Check for individual weight hints in the name
-        individual_weight_match = re.search(r'(\d+(?:\.\d+)?)\s*g\s*x\s*\d+', name_lower)
-        if individual_weight_match:
-            individual_weight = float(individual_weight_match.group(1))
-
-        total_weight = individual_weight * pack_count
-
-        return {
-            'pack_count': pack_count,
-            'individual_weight': individual_weight,
-            'total_weight': total_weight,
-            'is_preroll': is_preroll
-        }
-
-    def _match_preroll_pack(self, json_name: str, json_weight: str, cache_name: str) -> Optional[float]:
-        """
-        Intelligently match pre-roll packs based on pack count and weight.
-
-        Matching rules:
-        - 2pk with ~1g total should match "0.5g x 2 Pack" products
-        - 5pk with ~2.5g total should match "0.5g x 5 Pack" products
-        - 10pk with ~5g total should match "0.5g x 10 Pack" products
-
-        Returns a match score (0.0 to 1.0) or None if not applicable.
-        """
-        if not json_name or not cache_name:
-            return None
-
-        json_pack_info = self._extract_preroll_pack_info(json_name)
-        cache_pack_info = self._extract_preroll_pack_info(cache_name)
-
-        # Both must be packs for this matching to apply
-        if not json_pack_info or not cache_pack_info:
-            return None
-
-        json_pack_count = json_pack_info['pack_count']
-        cache_pack_count = cache_pack_info['pack_count']
-
-        # Extract JSON weight value
-        json_weight_val = None
-        if json_weight:
-            weight_match = re.search(r'(\d+(?:\.\d+)?)', str(json_weight))
-            if weight_match:
-                json_weight_val = float(weight_match.group(1))
-
-        score = 0.0
-
-        # Exact pack count match is a strong signal
-        if json_pack_count == cache_pack_count:
-            score += 0.6
-
-            # Also check weight compatibility
-            if json_weight_val is not None:
-                expected_total = cache_pack_info['total_weight']
-                # Allow 20% tolerance for weight matching
-                weight_tolerance = 0.2
-                weight_diff = abs(json_weight_val - expected_total) / expected_total if expected_total > 0 else 1.0
-
-                if weight_diff <= weight_tolerance:
-                    score += 0.4  # Full weight match bonus
-                elif weight_diff <= 0.5:
-                    score += 0.2  # Partial weight match bonus
-        else:
-            # Pack counts don't match - check if weights might indicate same product
-            # e.g., JSON says "5pk" with 2.5g might still match "0.5g x 5 Pack"
-            if json_weight_val is not None:
-                cache_expected_total = cache_pack_info['total_weight']
-                json_expected_total = json_pack_info['total_weight']
-
-                # If JSON weight matches cache expected total weight, partial match
-                if abs(json_weight_val - cache_expected_total) / cache_expected_total <= 0.2:
-                    score += 0.3
-
-        return score if score > 0 else None
-
+    
     def _calculate_weight_similarity(self, weight1: float, weight2: float) -> float:
         """Calculate similarity score between two weights."""
         try:
@@ -8226,13 +7842,12 @@ class JSONMatcher:
         # Define product type categories
         type_categories = {
             'flower': ['flower', 'bud', 'nug', 'usable marijuana'],
-            'concentrate': ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate', 'badder', 'diamonds', 'sauce', 'crumble'],
-            'vape': ['vape', 'cartridge', 'cart', 'all-in-one', 'disposable', 'vape cartridge'],
+            'concentrate': ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate'],
+            'vape': ['vape', 'cartridge', 'cart', 'all-in-one'],
             'edible': ['edible', 'gummy', 'chocolate', 'cookie', 'brownie'],
             'pre-roll': ['pre-roll', 'preroll', 'joint', 'blunt'],
             'tincture': ['tincture', 'drops', 'sublingual'],
-            'topical': ['topical', 'cream', 'lotion', 'salve'],
-            'rso_co2': ['rso', 'co2', 'rso/co2 tankers', 'rso/co2', 'applicator', 'tanker', 'syringe', 'co2 extract', 'ethanol extract']
+            'topical': ['topical', 'cream', 'lotion', 'salve']
         }
         
         # Find JSON type category
@@ -8262,28 +7877,37 @@ class JSONMatcher:
         # Return True if categories match or if either is None (unknown)
         return json_category is None or cache_category is None or json_category == cache_category
     
-    def _weights_compatible(self, json_weight: str, cache_name: str, json_name: str = None) -> bool:
-        """Check if weights are compatible, with special handling for pre-roll packs."""
+    def _weights_compatible(self, json_weight: str, cache_name: str) -> bool:
+        """Check if weights are compatible."""
         if not json_weight or not cache_name:
             return False
 
-        # Check for pre-roll pack matching first (only if both have pack indicators)
-        if json_name:
-            json_lower = json_name.lower()
-            cache_lower = cache_name.lower()
-            if ('pk' in json_lower or 'pack' in json_lower) and ('pk' in cache_lower or 'pack' in cache_lower):
-                pack_match_score = self._match_preroll_pack(json_name, json_weight, cache_name)
-                if pack_match_score is not None and pack_match_score > 0.5:
-                    return True
+        json_weight_lower = json_weight.lower()
+        cache_name_lower = cache_name.lower()
+
+        # CRITICAL: Check for SINGLE vs multi-pack mismatch
+        # "SINGLE" items should NEVER match products with "10pk", "100mg", "10pack", etc.
+        json_is_single = 'single' in json_weight_lower or '_single' in json_weight_lower
+        cache_is_multipack = bool(re.search(r'(\d+pk|\d+pack|100mg|10mg)', cache_name_lower))
+
+        if json_is_single and cache_is_multipack:
+            return False
+
+        # Also check reverse: multi-pack JSON shouldn't match single items
+        json_is_multipack = bool(re.search(r'(\d+pk|\d+pack)', json_weight_lower))
+        cache_is_single = 'single' in cache_name_lower
+
+        if json_is_multipack and cache_is_single:
+            return False
 
         # Extract weight from cache name using regex
-        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|mg)', cache_name.lower())
+        weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|mg|oz)', cache_name_lower)
         if weight_match:
             cache_weight = float(weight_match.group(1))
             cache_unit = weight_match.group(2)
 
             # Extract weight from JSON
-            json_weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|mg)', json_weight.lower())
+            json_weight_match = re.search(r'(\d+(?:\.\d+)?)\s*(g|mg|oz)', json_weight_lower)
             if json_weight_match:
                 json_weight_val = float(json_weight_match.group(1))
                 json_unit = json_weight_match.group(2)
@@ -8293,11 +7917,15 @@ class JSONMatcher:
                     json_weight_val = json_weight_val / 1000
                 elif json_unit == 'g' and cache_unit == 'mg':
                     json_weight_val = json_weight_val * 1000
+                elif json_unit == 'oz' and cache_unit == 'g':
+                    json_weight_val = json_weight_val * 28.35
+                elif json_unit == 'g' and cache_unit == 'oz':
+                    json_weight_val = json_weight_val / 28.35
 
                 # Allow 10% tolerance
                 tolerance = 0.1
                 return abs(json_weight_val - cache_weight) / cache_weight <= tolerance
-        
+
         return False
 
     def get_product_database_priority_info(self) -> Dict[str, Any]:
@@ -8782,12 +8410,11 @@ class JSONMatcher:
             # ALWAYS use the transformed primary_product_name as the base (not the raw description field)
             base_description = primary_product_name
             weight_display = f"{weight}{units}" if weight and units else ""
-
-            # Check if description already contains ANY weight pattern (not just the exact weight)
-            # This prevents "0.5g x - 1g" duplications
-            import re
-            has_weight_in_desc = bool(base_description and re.search(r'\d+\.?\d*\s*g\b', base_description.lower()))
-
+            
+            # Check if description already contains the weight
+            has_weight_in_desc = (base_description and weight_display and 
+                                 weight_display.lower() in base_description.lower())
+            
             if weight_display and not has_weight_in_desc:
                 # Append weight to description with soft hyphen format
                 formatted_description = f"{base_description} - {weight_display}"
@@ -8995,8 +8622,7 @@ class JSONMatcher:
                             vendor=vendor,
                             weight=str(fallback_weight),
                             strain=fallback_strain,
-                            product_db=product_db,
-                            lineage=str(item.get('lineage', item.get('Lineage', ''))).strip()
+                            product_db=product_db
                         )
                         if direct_match:
                             db_match = direct_match
@@ -9638,10 +9264,9 @@ class JSONMatcher:
             'capsules': ['capsule', 'pill', 'cap'],
             'topicals': ['topical ointment', 'topical', 'cream', 'balm', 'lotion', 'salve'],
             'flower': ['core flower', 'flower', 'bud', 'nug'],
-            'concentrates': ['concentrate', 'wax', 'shatter', 'resin', 'rosin', 'badder', 'diamonds', 'sauce', 'crumble', 'live resin'],
-            'vapes': ['vape', 'cartridge', 'cart', 'pen', 'vape cartridge', 'disposable'],
-            'tinctures': ['tincture', 'drops', 'liquid edible'],
-            'rso_co2': ['rso', 'co2', 'rso/co2 tankers', 'rso/co2', 'applicator', 'tanker', 'syringe', 'co2 extract', 'ethanol extract']
+            'concentrates': ['concentrate', 'wax', 'shatter', 'oil', 'resin'],
+            'vapes': ['vape', 'cartridge', 'cart', 'pen'],
+            'tinctures': ['tincture', 'drops', 'liquid edible']
         }
         
         # Check if both types are in the same compatibility group
@@ -11083,8 +10708,7 @@ class JSONMatcher:
                             vendor=vendor_norm,
                             weight=str(original_item.get("unit_weight", original_item.get("weight", ""))).strip(),
                             strain=str(original_item.get("strain_name", original_item.get("strain", ""))).strip(),
-                            product_db=product_db,
-                            lineage=str(original_item.get('lineage', original_item.get('Lineage', ''))).strip()
+                            product_db=product_db
                         )
                         if db_match:
                             upgraded_products.append(self._create_tag_from_database_info(db_match, vendor_norm, original_item))

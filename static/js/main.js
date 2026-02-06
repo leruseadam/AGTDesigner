@@ -2186,6 +2186,13 @@ const TagManager = {
             verboseLog(`💾 Saved selection state for undo - Action: ${actionType}, Stack size: ${this.state.localUndoStack.length}, Selected tags: ${currentState.selected_tag_names.length}`);
             
             // Background: Also save to backend (non-blocking)
+            // Only perform backend autosave if explicitly enabled (prevents saving on every add)
+            // Set `window.AUTO_SAVE_SELECTION = true` in console to re-enable autosave behavior.
+            if (typeof window.AUTO_SAVE_SELECTION === 'undefined') window.AUTO_SAVE_SELECTION = false;
+            if (!window.AUTO_SAVE_SELECTION) {
+                verboseLog('Autosave disabled (window.AUTO_SAVE_SELECTION=false); skipping backend save');
+                return;
+            }
             // Use fetch instead of sendBeacon for better reliability and error handling
             const payload = JSON.stringify({
                 action_type: actionType,
@@ -3047,8 +3054,8 @@ const TagManager = {
 
             verboseLog(`💾 Saving ${selectedTagNames.length} selected tags to backend...`);
 
-            // REMOVED: Don't show splash for individual selections - too annoying
-            // The save happens silently in the background
+            // Show a saving splash while the backend request is in flight
+            try { this.showSplash && this.showSplash('Saving selection...'); } catch (e) {}
 
             const response = await fetch('/api/selected-tags', {
                 method: 'POST',
@@ -3071,7 +3078,14 @@ const TagManager = {
 
             const result = await response.json();
             verboseLog('✅ Selected tags saved to backend:', result);
-            // REMOVED: Don't show success modal for individual selections - saves silently
+            try {
+                this.hideSplash && this.hideSplash();
+                this.showModal && this.showModal({
+                    title: 'Saved',
+                    message: `Saved ${selectedTagNames.length} selected tags.`,
+                    buttons: [{ text: 'OK', value: 'ok', primary: true }]
+                });
+            } catch (e) {}
         } catch (error) {
             console.warn('⚠️ Error saving selected tags to backend:', error);
         }
@@ -11769,13 +11783,13 @@ const TagManager = {
         this._fetchingAvailableTagsStartTime = Date.now();
         
         // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
-        const safetyTimeoutMs = isWebClient ? 30000 : 60000; // 30s web (match 25s fetch), 60s desktop
+        // This prevents infinite loading state on reload
         if (this._fetchingTimeout) {
             clearTimeout(this._fetchingTimeout);
         }
         this._fetchingTimeout = setTimeout(() => {
             if (this._fetchingAvailableTags) {
-                console.warn(`⚠️ Tag fetch timeout - resetting flag after ${safetyTimeoutMs / 1000}s`);
+                console.warn('⚠️ Tag fetch timeout - resetting flag after 60 seconds');
                 this._fetchingAvailableTags = false;
                 // CRITICAL: Clear loading UI when timeout occurs
                 if (this.hideActionSplash) {
@@ -11807,8 +11821,8 @@ const TagManager = {
                     }
                 }
             }
-        }, safetyTimeoutMs);
-
+        }, 60000); // 60 second safety timeout
+        
         // CRITICAL FIX: Immediately show loading state if container is empty
         // This prevents upload prompt from flashing while tags are being fetched
         if (availableTagsContainer && (!this.state.tags || this.state.tags.length === 0)) {
@@ -11901,17 +11915,15 @@ const TagManager = {
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
             if (!hasExistingTags) {
-                // Don't hide splash while tag fetch is in progress - avoids "sketchy" empty UI
+                // PERFORMANCE: Much shorter timeout for faster failure recovery
                 const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
                 safetyTimeout = setTimeout(() => {
-                    if (this._fetchingAvailableTags) {
-                        verboseLog(`⚠️ Safety timeout (${safetyTimeoutMs}ms): Tag fetch still in progress - keeping splash visible`);
-                        return;
-                    }
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
+                    // Just hide the splash, don't show error message
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
+                    // Don't show error message - let the app continue working
                 }, safetyTimeoutMs);
             }
 
@@ -12021,21 +12033,26 @@ const TagManager = {
             const timestamp = Date.now();
             
             // PERFORMANCE vs CORRECTNESS:
-            // - Web: always use fast_load=1 so tags appear quickly; backend aligns lineage; we can refresh lineage in background.
-            // - Desktop first load (no cache): fast_load=0 for correct lineage from the start.
-            // - Desktop subsequent: fast_load=1 for speed.
+            // - On true "first load" (no existing tags and no cache), we MUST load with full database lineage
+            //   to avoid showing Excel/stale lineage that then "flips" a moment later.
+            // - On subsequent loads (or when cache exists), we can safely use fast_load=1 for speed.
+            //
+            // So:
+            // - First load (no tags, no cache) → fast_load=0  (no flash, correct lineage from the start)
+            // - All other cases               → fast_load=1  (fast, backend does lightweight alignment)
             const isFirstTrueLoad = !hasExistingTags && !hasCache && !this._hasLoadedOnce;
-            const fastLoadParam = isWebClient ? '&fast_load=1' : (isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1');
+            const fastLoadParam = isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1';
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
             let response;
             let responseData;
             
-            // ⚡ WEB CLIENT: Shorter timeout so we don't wait too long; fall back to cache/lite/retry
-            const maxRetries = isWebClient ? 2 : 2;
-            const maxProcessingRetries = isWebClient ? 2 : 2;
-            const fetchTimeout = isWebClient ? 25000 : 45000; // 25s for web (was 60s), 45s for desktop
+            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (60s for large datasets on web)
+            // Desktop/localhost should respond quickly with fast_load=1
+            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for web (was 1, but timeouts need retries)
+            const maxProcessingRetries = isWebClient ? 2 : 2; // Allow 2 processing retries for web
+            const fetchTimeout = isWebClient ? 60000 : 45000; // 60s timeout for web clients (large datasets), 45s for desktop
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -20251,9 +20268,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 window.TagManager._checkingExistingData = false;
             }
             
-            // Only reset fetch flag after 60s+ so we don't kill an in-progress 60s web request
-            if (fetchingStuck && fetchingDuration > 60000) {
-                console.warn('⚠️ Resetting stuck _fetchingAvailableTags flag on visibility change (after 60s)');
+            if (fetchingStuck && fetchingDuration > 30000) {
+                console.warn('⚠️ Resetting stuck _fetchingAvailableTags flag on visibility change');
                 window.TagManager._fetchingAvailableTags = false;
             }
             
@@ -21684,3 +21700,59 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+    // Dedupe lineage options to avoid duplicate entries like 'CBD' appearing twice
+    function dedupeLineageOptions() {
+        const selectors = [
+            '.lineage-dropdown',
+            '#lineageFilter',
+            '#bulkLineageSelect',
+            'select[id^="lineage-"]',
+            '#lineageSelect',
+            '#singleProductLineage',
+            '#bulkStrainLineage',
+            '#multiStrainLineage',
+            '#editLineage'
+        ];
+
+        selectors.forEach(sel => {
+            document.querySelectorAll(sel).forEach(select => {
+                const seen = new Set();
+                for (let i = select.options.length - 1; i >= 0; i--) {
+                    const opt = select.options[i];
+                    let rawVal = (opt.value || '').toString().trim();
+                    if (rawVal === '') continue;
+                    // Normalize common variants (PARAPHERNALIA -> PARA, CBD_BLEND -> CBD, THC -> MIXED)
+                    let normVal = rawVal;
+                    try {
+                        if (typeof window.normalizeLineageValue === 'function') {
+                            normVal = window.normalizeLineageValue(rawVal || '') || rawVal;
+                        } else {
+                            normVal = rawVal.toUpperCase();
+                            if (normVal === 'PARAPHERNALIA') normVal = 'PARA';
+                            if (normVal === 'CBD_BLEND') normVal = 'CBD';
+                            if (normVal === 'THC') normVal = 'MIXED';
+                        }
+                    } catch (e) {
+                        normVal = rawVal.toUpperCase();
+                    }
+
+                    if (seen.has(normVal)) {
+                        select.remove(i);
+                    } else {
+                        seen.add(normVal);
+                    }
+                }
+            });
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        try {
+            dedupeLineageOptions();
+            window.dedupeLineageOptions = dedupeLineageOptions;
+            verboseLog('lineage option dedupe complete');
+        } catch (err) {
+            console.warn('dedupeLineageOptions failed', err);
+        }
+    });

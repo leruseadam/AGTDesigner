@@ -2380,21 +2380,11 @@ class ExcelProcessor:
                         
                         # Ensure product_names is a Series before calling .str
                         if isinstance(product_names, pd.Series):
-                            # Copy original Description values to "JSON" column before overwriting
-                            if "Description" in self.df.columns:
-                                self.df["JSON"] = self.df["Description"].copy()
-                                self.logger.debug(f"Copied original Description values to JSON column")
-
                             # CRITICAL FIX: Replace ALL Description values with processed Product Name
                             # This ensures consistent Description formatting using our established formula
                             self.df["Description"] = product_names.str.strip()
                             self.logger.debug(f"Replaced all Description values with processed Product Name")
                         else:
-                            # Copy original Description values to "JSON" column before overwriting
-                            if "Description" in self.df.columns:
-                                self.df["JSON"] = self.df["Description"].copy()
-                                self.logger.debug(f"Copied original Description values to JSON column (fallback)")
-
                             # Fallback: convert to string and strip manually
                             self.df["Description"] = product_names.astype(str).str.strip()
                             self.logger.debug(f"Replaced all Description values with processed Product Name (fallback)")
@@ -8444,12 +8434,7 @@ class ExcelProcessor:
             # Ensure we have a Description column
             if "Description" not in self.df.columns:
                 self.df["Description"] = ""
-
-            # Copy original Description values to "JSON" column before overwriting
-            if "Description" in self.df.columns:
-                self.df["JSON"] = self.df["Description"].copy()
-                self.logger.debug(f"Copied original Description values to JSON column")
-
+            
             # Replace ALL Description values with processed Product Name
             self.df["Description"] = self.df[product_name_col].astype(str).str.strip()
             self.logger.debug(f"Replaced all Description values with processed Product Name from {product_name_col}")
