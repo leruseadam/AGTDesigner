@@ -5095,8 +5095,9 @@ class TemplateProcessor:
         # Process all markers in a single pass to avoid conflicts
         self._recursive_autosize_template_specific_multi(doc, markers)
         
-        # Apply vertical template specific optimizations for minimal spacing
-        if self.template_type in ['vertical', 'double']:
+        # Apply template-specific paragraph spacing (2pt before/after) for label content
+        # Vertical, double, and mini templates all want 2pt space before/after paragraphs
+        if self.template_type in ['vertical', 'double', 'mini']:
             self._optimize_vertical_template_spacing(doc)
             if self.template_type == 'double':
                 self._ensure_equal_spacing_around_lineage_band_double(doc)
@@ -5388,21 +5389,19 @@ class TemplateProcessor:
 
     def _optimize_vertical_template_spacing(self, doc):
         """
-        Apply minimal spacing optimizations specifically for vertical and double templates
-        to ensure all labels fit on one page.
+        Apply paragraph spacing optimizations for vertical, double, and mini templates.
+        All label content in these templates should use 2pt space before and 2pt space after.
         """
         try:
             from docx.shared import Pt
             
             def optimize_paragraph_spacing(paragraph):
-                """Set minimal spacing for all paragraphs in vertical and double templates."""
-                # Set absolute minimum spacing
-                paragraph.paragraph_format.space_before = Pt(0)
-                paragraph.paragraph_format.space_after = Pt(0)
+                """Set consistent spacing for all paragraphs in supported templates."""
+                # Paragraph spacing: 2pt before and 2pt after
+                paragraph.paragraph_format.space_before = Pt(2)
+                paragraph.paragraph_format.space_after = Pt(2)
                 
-                # All content now uses standard spacing
-                
-                # Default spacing for non-THC_CBD content
+                # Default line spacing
                 paragraph.paragraph_format.line_spacing = 1.0
                 
                 # Set at XML level for maximum compatibility
@@ -5412,8 +5411,9 @@ class TemplateProcessor:
                     spacing = OxmlElement('w:spacing')
                     pPr.append(spacing)
                 
-                spacing.set(qn('w:before'), '0')
-                spacing.set(qn('w:after'), '0')
+                # 2pt paragraph spacing at XML level (1pt = 20 twips)
+                spacing.set(qn('w:before'), '40')
+                spacing.set(qn('w:after'), '40')
                 spacing.set(qn('w:line'), '240')  # 1.0 line spacing
                 spacing.set(qn('w:lineRule'), 'auto')
             
@@ -5428,7 +5428,7 @@ class TemplateProcessor:
             for paragraph in doc.paragraphs:
                 optimize_paragraph_spacing(paragraph)
             
-            self.logger.debug("Applied vertical/double template spacing optimizations")
+            self.logger.debug("Applied 2pt paragraph spacing for vertical/double/mini templates")
             
         except Exception as e:
             self.logger.error(f"Error optimizing vertical/double template spacing: {e}")
@@ -5441,7 +5441,8 @@ class TemplateProcessor:
         """
         try:
             LINEAGE_VALUES = {"SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARA", "PARAPHERNALIA"}
-            EQUAL_SPACING_PT = 3  # Equal padding above and below lineage band
+            # Use 2pt space above and below the lineage/brand band to match overall paragraph spacing
+            EQUAL_SPACING_PT = 2
 
             for table in doc.tables:
                 for row in table.rows:
