@@ -3054,9 +3054,7 @@ const TagManager = {
 
             verboseLog(`💾 Saving ${selectedTagNames.length} selected tags to backend...`);
 
-            // Show a saving splash while the backend request is in flight
-            try { this.showSplash && this.showSplash('Saving selection...'); } catch (e) {}
-
+            // No splash/toast for autosave - only show feedback on explicit save or error
             const response = await fetch('/api/selected-tags', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3066,7 +3064,6 @@ const TagManager = {
             if (!response.ok) {
                 console.warn(`⚠️ Failed to save selected tags to backend: ${response.status}`);
                 try {
-                    this.hideSplash && this.hideSplash();
                     this.showModal && this.showModal({
                         title: 'Save Failed',
                         message: `Failed to save ${selectedTagNames.length} tags (server returned ${response.status}).`,
@@ -3078,14 +3075,7 @@ const TagManager = {
 
             const result = await response.json();
             verboseLog('✅ Selected tags saved to backend:', result);
-            try {
-                this.hideSplash && this.hideSplash();
-                this.showModal && this.showModal({
-                    title: 'Saved',
-                    message: `Saved ${selectedTagNames.length} selected tags.`,
-                    buttons: [{ text: 'OK', value: 'ok', primary: true }]
-                });
-            } catch (e) {}
+            // No success modal for autosave - prevents "Saved" popup on every tag selection
         } catch (error) {
             console.warn('⚠️ Error saving selected tags to backend:', error);
         }
