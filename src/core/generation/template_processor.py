@@ -4455,8 +4455,8 @@ class TemplateProcessor:
                             image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             
                             # Set proper spacing to prevent DOH logo from being cut off
-                            image_paragraph.paragraph_format.space_before = Pt(3)
-                            image_paragraph.paragraph_format.space_after = Pt(3)
+                            image_paragraph.paragraph_format.space_before = Pt(0)
+                            image_paragraph.paragraph_format.space_after = Pt(0)
                             image_paragraph.paragraph_format.line_spacing = 1.0
                             
                             # Set cell vertical alignment to center
@@ -4479,8 +4479,8 @@ class TemplateProcessor:
                             
                             # Add proper spacing to prevent DOH logo from being cut off
                             spacing = OxmlElement('w:spacing')
-                            spacing.set(qn('w:before'), '60')  # 3pt = 60 twips
-                            spacing.set(qn('w:after'), '60')   # 3pt = 60 twips
+                            spacing.set(qn('w:before'), '0')
+                            spacing.set(qn('w:after'), '0')
                             spacing.set(qn('w:line'), '240')
                             spacing.set(qn('w:lineRule'), 'auto')
                             pPr.append(spacing)
@@ -4584,8 +4584,8 @@ class TemplateProcessor:
                                     if spacing is None:
                                         spacing = OxmlElement('w:spacing')
                                         pPr.append(spacing)
-                                    spacing.set(qn('w:before'), '60')  # 3pt = 60 twips
-                                    spacing.set(qn('w:after'), '60')   # 3pt = 60 twips
+                                    spacing.set(qn('w:before'), '0')
+                                    spacing.set(qn('w:after'), '0')
                                     spacing.set(qn('w:line'), '240')
                                     spacing.set(qn('w:lineRule'), 'auto')
                                     
@@ -4627,8 +4627,8 @@ class TemplateProcessor:
                             # Apply generous vertical margins to prevent DOH logo cutoff
                             for paragraph in cell.paragraphs:
                                 # Set generous spacing above and below
-                                paragraph.paragraph_format.space_before = Pt(4)
-                                paragraph.paragraph_format.space_after = Pt(4)
+                                paragraph.paragraph_format.space_before = Pt(0)
+                                paragraph.paragraph_format.space_after = Pt(0)
                                 
                                 # Set XML-level spacing for maximum compatibility
                                 pPr = paragraph._element.get_or_add_pPr()
@@ -4638,8 +4638,8 @@ class TemplateProcessor:
                                     pPr.append(spacing)
                                 
                                 # Set generous margins: 4pt = 80 twips
-                                spacing.set(qn('w:before'), '80')
-                                spacing.set(qn('w:after'), '80')
+                                spacing.set(qn('w:before'), '0')
+                                spacing.set(qn('w:after'), '0')
                                 spacing.set(qn('w:line'), '240')
                                 spacing.set(qn('w:lineRule'), 'auto')
                                 
@@ -4722,8 +4722,8 @@ class TemplateProcessor:
                                     if spacing is None:
                                         spacing = OxmlElement('w:spacing')
                                         pPr.append(spacing)
-                                    spacing.set(qn('w:before'), '60')  # 3pt = 60 twips
-                                    spacing.set(qn('w:after'), '60')   # 3pt = 60 twips
+                                    spacing.set(qn('w:before'), '0')
+                                    spacing.set(qn('w:after'), '0')
                                     spacing.set(qn('w:line'), '240')
                                     spacing.set(qn('w:lineRule'), 'auto')
                                     
@@ -4785,7 +4785,7 @@ class TemplateProcessor:
                     from docx.oxml.ns import qn
                     pPr = spacer_para._element.get_or_add_pPr()
                     spacing = OxmlElement('w:spacing')
-                    spacing.set(qn('w:after'), '120')  # 6pt = 120 twips after spacing
+                    spacing.set(qn('w:after'), '0')
                     pPr.append(spacing)
                 except Exception as xml_error:
                     self.logger.debug(f"XML spacing addition failed: {xml_error}")
@@ -5526,8 +5526,8 @@ class TemplateProcessor:
             paragraph.clear()
             
             # Ensure consistent spacing above all marker sections for equal margins
-            paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
             
             # Sort markers by position in text
             sorted_markers = sorted(processed_content.items(), key=lambda x: x[1]['start_pos'])
@@ -5692,8 +5692,8 @@ class TemplateProcessor:
                     if is_classic_lineage_value:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         paragraph.paragraph_format.left_indent = Inches(0)
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
                         self.logger.debug(f"LINEAGE ALIGNMENT: Forced LEFT alignment for classic lineage value: '{clean_content}'")
                     elif is_classic_product:
                         # Classic product types should have LEFT alignment for lineage
@@ -5701,14 +5701,14 @@ class TemplateProcessor:
                         # NO LEFT INDENT - this was causing lineage indentation
                         paragraph.paragraph_format.left_indent = Inches(0)
                         # Ensure consistent spacing above lineage section for equal margins
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
                     else:
                         # Non-classic product types should have CENTER alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         # Ensure consistent spacing above lineage section for equal margins
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
                     
                     # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage
                     if product_type and 'vape' in product_type.lower():
@@ -5721,8 +5721,8 @@ class TemplateProcessor:
                 if marker_name in ('PRODUCTBRAND', 'PRODUCTBRAND_CENTER') or 'PRODUCTBRAND' in marker_name:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     # Ensure consistent spacing above product brand section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
                     for run in paragraph.runs:
                         # Get product type for font sizing
                         product_type = None
@@ -5736,8 +5736,8 @@ class TemplateProcessor:
                 if marker_name == 'PRODUCTVENDOR':
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                     # Ensure consistent spacing above vendor section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
                     # Use unified font sizing for vendor text
                     for run in paragraph.runs:
                         # Apply unified font sizing using 'vendor' field type
@@ -5768,8 +5768,8 @@ class TemplateProcessor:
                     # Left-align PRODUCTSTRAIN markers
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     # Ensure consistent spacing above strain section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
                     strain_content = str(marker_data.get('content') or '').strip()
                     for run in paragraph.runs:
                         run_text = run.text or ''
@@ -6048,14 +6048,14 @@ class TemplateProcessor:
                                 if is_classic or is_classic_lineage_value:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                     paragraph.paragraph_format.left_indent = Inches(0)
-                                    paragraph.paragraph_format.space_before = Pt(2)
-                                    paragraph.paragraph_format.space_after = Pt(1)
+                                    paragraph.paragraph_format.space_before = Pt(0)
+                                    paragraph.paragraph_format.space_after = Pt(0)
                                     if is_classic_lineage_value:
                                         self.logger.debug(f"Left-aligned lineage for classic lineage value: '{clean_lineage}'")
                                 else:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    paragraph.paragraph_format.space_before = Pt(2)
-                                    paragraph.paragraph_format.space_after = Pt(1)
+                                    paragraph.paragraph_format.space_before = Pt(0)
+                                    paragraph.paragraph_format.space_after = Pt(0)
                                 
                                 # Update the content to only show the actual lineage (remove any markers)
                                 if actual_lineage.startswith('LINEAGE_START'):
@@ -6105,21 +6105,21 @@ class TemplateProcessor:
                             # For Classic Lineage Values, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
                             self.logger.debug(f"Left-justified lineage for classic lineage value: '{clean_content}' (content: '{content}')")
                         elif is_classic_product:
                             # For Classic Types, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
                             self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
                         else:
                             # For non-classic types, center the ProductBrand content in Lineage field
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
                             self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
                         
                         # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
@@ -6271,8 +6271,8 @@ class TemplateProcessor:
                 text = paragraph.text.lower()
                 if any(keyword in text for keyword in ['indica', 'sativa', 'hybrid', 'cbd', 'alpha crux', 'constellation']):
                     # Set consistent spacing for lineage/brand sections
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
                     
                     # Also set at XML level for maximum compatibility
                     pPr = paragraph._element.get_or_add_pPr()
@@ -6280,8 +6280,8 @@ class TemplateProcessor:
                     if spacing is None:
                         spacing = OxmlElement('w:spacing')
                         pPr.append(spacing)
-                    spacing.set(qn('w:before'), '40')  # 2pt = 40 twips
-                    spacing.set(qn('w:after'), '20')   # 1pt = 20 twips
+                    spacing.set(qn('w:before'), '0')
+                    spacing.set(qn('w:after'), '0')
                     spacing.set(qn('w:lineRule'), 'auto')
             
             # Process all tables
@@ -6314,12 +6314,9 @@ class TemplateProcessor:
                     current_before = paragraph.paragraph_format.space_before
                     current_after = paragraph.paragraph_format.space_after
                     
-                    # Only add spacing if it's not already set to our target values
-                    if current_before == Pt(0) or current_before is None:
-                        paragraph.paragraph_format.space_before = Pt(1)
-                    
-                    if current_after == Pt(0) or current_after is None:
-                        paragraph.paragraph_format.space_after = Pt(0.5)
+                    # Paragraph spacing 0 before and 0 after
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
                     
                     # Also set at XML level for maximum compatibility
                     pPr = paragraph._element.get_or_add_pPr()
@@ -6327,11 +6324,8 @@ class TemplateProcessor:
                     if spacing is None:
                         spacing = OxmlElement('w:spacing')
                         pPr.append(spacing)
-                    
-                    if current_before == Pt(0) or current_before is None:
-                        spacing.set(qn('w:before'), '20')  # 1pt = 20 twips
-                    if current_after == Pt(0) or current_after is None:
-                        spacing.set(qn('w:after'), '10')   # 0.5pt = 10 twips
+                    spacing.set(qn('w:before'), '0')
+                    spacing.set(qn('w:after'), '0')
                     
                     spacing.set(qn('w:lineRule'), 'auto')
             
@@ -7299,10 +7293,10 @@ class TemplateProcessor:
                             if not paragraph_text:
                                 continue
                             
-                            # CRITICAL FIX: Don't override LEFT-aligned paragraphs (classic lineage should stay left-aligned)
-                            # If paragraph is already left-aligned, skip it - this preserves classic type lineage alignment
-                            if paragraph.alignment == WD_ALIGN_PARAGRAPH.LEFT:
-                                continue
+                            # CRITICAL FIX: Center ALL nonclassic brand content regardless of current alignment.
+                            # Do NOT skip LEFT-aligned paragraphs - other code (e.g. enforce_fixed_cell_dimensions)
+                            # may have set LEFT to prevent expansion, which overrides center. We must re-apply
+                            # center for brand content. Classic lineage is excluded by is_brand_name below.
                             
                             # Look for actual brand content that should be centered
                             # This includes all brand names regardless of case or length
@@ -7445,8 +7439,8 @@ class TemplateProcessor:
                                 if existing_spacing is not None:
                                     pPr.remove(existing_spacing)
                                 spacing = OxmlElement('w:spacing')
-                                spacing.set(qn('w:before'), '60')
-                                spacing.set(qn('w:after'), '60')
+                                spacing.set(qn('w:before'), '0')
+                                spacing.set(qn('w:after'), '0')
                                 spacing.set(qn('w:line'), '240')
                                 spacing.set(qn('w:lineRule'), 'auto')
                                 pPr.append(spacing)
@@ -7508,8 +7502,8 @@ class TemplateProcessor:
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                             
                             # Set proper spacing for QR code
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(2)
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
                             paragraph.paragraph_format.line_spacing = 1.0
                             
                             try:
@@ -7914,8 +7908,8 @@ class TemplateProcessor:
             paragraph.clear()
             
             # Ensure consistent spacing above lineage/vendor section for equal margins
-            paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
             
             # SPECIAL RULE: For Vertical template, automatically force vendor to next line for specific lineages
             if (self.template_type == 'vertical' and 
@@ -8067,8 +8061,8 @@ class TemplateProcessor:
             paragraph.clear()
             
             # Ensure consistent spacing above lineage/vendor section for equal margins
-            paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+            paragraph.paragraph_format.space_before = Pt(0)
+            paragraph.paragraph_format.space_after = Pt(0)
             
             # Set paragraph to right alignment for proper vendor right-alignment
             paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
