@@ -11865,16 +11865,10 @@ const TagManager = {
                 // Store not confirmed - don't show loading, let store modal show
                 verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
             } else if (storeConfirmed && hasExistingTags) {
-                // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
-                this.showActionSplash('Refreshing tags...');
-                // Also show loading indicator in container if it exists
-                // BUT don't grey out on initial page load - only on refresh
-                if (availableTagsContainer && this._hasLoadedOnce) {
-                    const existingContent = availableTagsContainer.innerHTML;
-                    // Add a loading overlay or indicator
-                    availableTagsContainer.style.opacity = '0.6';
-                    availableTagsContainer.style.pointerEvents = 'none';
-                }
+                // Reload/refresh when tags are already visible:
+                // keep refresh non-blocking so the UI feels instant.
+                // We'll refresh data in the background without showing a full-screen splash.
+                verboseLog('Refreshing tags in background (no blocking splash)');
             }
         }
         // If cache exists and no existing tags, skip splash for instant load
