@@ -2419,24 +2419,6 @@ class TemplateProcessor:
                         weight_units = weight_value
                     self.logger.warning(f"⚠️ WEIGHT FALLBACK: No Excel processor available, using simple concatenation: '{weight_units}'")
             
-            # CRITICAL FIX: For nonclassic types, ensure weight from record (e.g. "32g") is converted to oz
-            if weight_units and self.excel_processor:
-                product_type_pt = (label_context.get('Product Type*', '') or record.get('Product Type*', '') or '').strip().lower()
-                from src.core.constants import CLASSIC_TYPES
-                is_nonclassic_pt = product_type_pt not in [ct.lower() for ct in CLASSIC_TYPES]
-                weight_lower = str(weight_units).lower()
-                if is_nonclassic_pt and ('g' in weight_lower or 'gram' in weight_lower) and 'oz' not in weight_lower:
-                    weight_record = {
-                        'Weight*': weight_units,
-                        'Units': '',
-                        'Product Type*': product_type_pt,
-                        'Product Name*': label_context.get('ProductName', '') or record.get('ProductName', '')
-                    }
-                    normalized = self.excel_processor._format_weight_units(weight_record, excel_priority=False)
-                    if normalized and normalized != weight_units:
-                        weight_units = normalized
-                        self.logger.info(f"🔧 NONCLASSIC WEIGHT CONVERTED: '{weight_units}' for '{record.get('ProductName', 'N/A')}'")
-            
             label_context['WeightUnits'] = weight_units
             
             # CRITICAL FIX: Remove any weight markers that might interfere with display
@@ -5147,17 +5129,11 @@ class TemplateProcessor:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            # CRITICAL FIX: When paragraph has brand, strain, or vendor markers, process ALL markers
-                            # so brand content gets brand font (10-16pt) not vendor (5-6pt) or strain (1pt).
-                            # Brand was getting vendor font when concatenated with vendor lane.
+                            # CRITICAL FIX: Check for ProductStrain markers first before processing individual runs
                             full_text = "".join(run.text for run in paragraph.runs)
-                            has_strain = 'PRODUCTSTRAIN_START' in full_text and 'PRODUCTSTRAIN_END' in full_text
-                            has_brand = ('PRODUCTBRAND_CENTER_START' in full_text and 'PRODUCTBRAND_CENTER_END' in full_text) or \
-                                        ('PRODUCTBRAND_START' in full_text and 'PRODUCTBRAND_END' in full_text)
-                            has_vendor = 'PRODUCTVENDOR_START' in full_text and 'PRODUCTVENDOR_END' in full_text
-                            if has_strain or has_brand or has_vendor:
-                                markers_to_process = ['PRODUCTBRAND_CENTER', 'PRODUCTBRAND', 'PRODUCTSTRAIN', 'PRODUCTVENDOR']
-                                self._process_paragraph_for_markers_template_specific(paragraph, markers_to_process)
+                            if 'PRODUCTSTRAIN_START' in full_text and 'PRODUCTSTRAIN_END' in full_text:
+                                # Process ProductStrain markers using the marker processing system
+                                self._process_paragraph_for_markers_template_specific(paragraph, ['PRODUCTSTRAIN'])
                                 continue
                             
                             # Process other text normally
@@ -5301,14 +5277,10 @@ class TemplateProcessor:
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
         is_short_wordy = all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped)
 
-        # Marker-based overrides - check brand BEFORE vendor so brand content never gets vendor font (5-6pt)
+        # Marker-based overrides
         if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
             self.logger.debug(f"🎯 BRAND MARKER DETECTED: '{text_stripped}' classified as brand (marker-based)")
             return 'brand'
-
-        if any(marker in text for marker in ['PRODUCTVENDOR_START', 'PRODUCTVENDOR_END']):
-            self.logger.debug(f"🎯 VENDOR MARKER DETECTED: '{text_stripped}' classified as vendor (marker-based)")
-            return 'vendor'
 
         if '__LINEAGE_HINT_' in text:
             self.logger.debug(f"🎯 LINEAGE HINT DETECTED: '{text_stripped}' classified as lineage (marker-based)")
@@ -5356,18 +5328,6 @@ class TemplateProcessor:
             self.logger.debug(f"🎯 MIXED-CASE BRAND CLASSIFIED: '{text_stripped}' classified as brand")
             return 'brand'
         
-        # CRITICAL FIX: If text has multiple words and ends with a strain token (Mixed, CBD, etc.),
-        # the preceding words are likely brand - use 'brand' so brand remains visible.
-        # Prevents "Constellation Brands Mixed" or "Obscure Brand Mixed" from getting 1pt (invisible).
-        words = text_stripped.split()
-        strain_suffixes = ['mixed', 'cbd', 'blend', 'para', 'paraphernalia', 'n/a']
-        if len(words) >= 2:
-            last_word = words[-1].strip().lower()
-            if last_word in strain_suffixes:
-                # First part looks like brand - treat as brand so it's visible
-                self.logger.debug(f"🎯 BRAND+STRAIN SUFFIX: '{text_stripped}' ends with strain token - classifying as brand for visibility")
-                return 'brand'
-
         # CRITICAL: Default everything else to 'strain' (1pt font)
         # This includes: strain codes, product types (like "mixed"), vendor codes, etc.
         # Since strain is 1pt (invisible), this is the safest default for vertical templates
@@ -5442,25 +5402,25 @@ class TemplateProcessor:
             from docx.shared import Pt
             
             def optimize_paragraph_spacing(paragraph):
-                """Set vertical paragraph spacing (3pt before, 3pt after) for vertical and double templates."""
-                # Vertical paragraph spacing: 3pt before and 3pt after as requested
-                paragraph.paragraph_format.space_before = Pt(3)
-                paragraph.paragraph_format.space_after = Pt(3)
+                """Set minimal spacing for all paragraphs in vertical and double templates."""
+                # Set absolute minimum spacing
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
                 
                 # All content now uses standard spacing
                 
                 # Default spacing for non-THC_CBD content
                 paragraph.paragraph_format.line_spacing = 1.0
                 
-                # Set at XML level for maximum compatibility (3pt = 60 twips)
+                # Set at XML level for maximum compatibility
                 pPr = paragraph._element.get_or_add_pPr()
                 spacing = pPr.find(qn('w:spacing'))
                 if spacing is None:
                     spacing = OxmlElement('w:spacing')
                     pPr.append(spacing)
                 
-                spacing.set(qn('w:before'), '60')  # 3pt = 60 twips
-                spacing.set(qn('w:after'), '60')   # 3pt = 60 twips
+                spacing.set(qn('w:before'), '0')
+                spacing.set(qn('w:after'), '0')
                 spacing.set(qn('w:line'), '240')  # 1.0 line spacing
                 spacing.set(qn('w:lineRule'), 'auto')
             
@@ -5591,16 +5551,11 @@ class TemplateProcessor:
                         run = paragraph.add_run(text_before)
                         run.font.name = "Arial"
                         run.font.bold = True
-                        # CRITICAL: Use brand sizing when text contains brand markers - prevents brand being invisible
-                        from src.core.generation.unified_font_sizing import get_font_size, get_font_size_by_marker
-                        if 'PRODUCTBRAND_CENTER_START' in text_before or 'PRODUCTBRAND_START' in text_before:
-                            font_size = get_font_size_by_marker(text_before, 'PRODUCTBRAND_CENTER', self.template_type, self.scale_factor)
-                            if not font_size:
-                                font_size = get_font_size(text_before, 'brand', self.template_type, self.scale_factor)
-                        else:
-                            font_size = get_font_size(text_before, 'default', self.template_type, self.scale_factor)
+                        # Use unified font sizing for non-marker text
+                        from src.core.generation.unified_font_sizing import get_font_size
+                        font_size = get_font_size(text_before, 'default', self.template_type, self.scale_factor)
                         run.font.size = font_size
-                        self.logger.debug(f"Added text before '{marker_name}': '{text_before[:50]}...' -> {font_size.pt}pt")
+                        self.logger.debug(f"Added text before '{marker_name}': '{text_before}' -> {font_size.pt}pt")
                 # Add the processed marker content (use the potentially modified content)
                 display_content = marker_data.get('display_content', marker_data['content'])
                 # --- BULLETPROOF: Only one run for the entire marker content, preserving line breaks ---
@@ -5632,16 +5587,11 @@ class TemplateProcessor:
                     run = paragraph.add_run(text_after)
                     run.font.name = "Arial"
                     run.font.bold = True
-                    # CRITICAL: Use brand sizing when text contains brand markers - prevents brand being invisible
-                    from src.core.generation.unified_font_sizing import get_font_size, get_font_size_by_marker
-                    if 'PRODUCTBRAND_CENTER_START' in text_after or 'PRODUCTBRAND_START' in text_after:
-                        font_size = get_font_size_by_marker(text_after, 'PRODUCTBRAND_CENTER', self.template_type, self.scale_factor)
-                        if not font_size:
-                            font_size = get_font_size(text_after, 'brand', self.template_type, self.scale_factor)
-                    else:
-                        font_size = get_font_size(text_after, 'default', self.template_type, self.scale_factor)
+                    # Use unified font sizing for non-marker text
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    font_size = get_font_size(text_after, 'default', self.template_type, self.scale_factor)
                     run.font.size = font_size
-                    self.logger.debug(f"Added text after: '{text_after[:50]}...' -> {font_size.pt}pt")
+                    self.logger.debug(f"Added text after: '{text_after}' -> {font_size.pt}pt")
             
             # Convert |BR| markers to actual line breaks after marker processing
             self._convert_br_markers_to_line_breaks(paragraph)

@@ -3956,25 +3956,25 @@ class TemplateProcessor:
             from docx.shared import Pt
             
             def optimize_paragraph_spacing(paragraph):
-                """Set vertical paragraph spacing (3pt before, 3pt after) for vertical and double templates."""
-                # Vertical paragraph spacing: 3pt before and 3pt after as requested
-                paragraph.paragraph_format.space_before = Pt(3)
-                paragraph.paragraph_format.space_after = Pt(3)
+                """Set minimal spacing for all paragraphs in vertical and double templates."""
+                # Set absolute minimum spacing
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
                 
                 # All content now uses standard spacing
                 
                 # Default spacing for non-THC_CBD content
                 paragraph.paragraph_format.line_spacing = 1.0
                 
-                # Set at XML level for maximum compatibility (3pt = 60 twips)
+                # Set at XML level for maximum compatibility
                 pPr = paragraph._element.get_or_add_pPr()
                 spacing = pPr.find(qn('w:spacing'))
                 if spacing is None:
                     spacing = OxmlElement('w:spacing')
                     pPr.append(spacing)
                 
-                spacing.set(qn('w:before'), '60')  # 3pt = 60 twips
-                spacing.set(qn('w:after'), '60')   # 3pt = 60 twips
+                spacing.set(qn('w:before'), '0')
+                spacing.set(qn('w:after'), '0')
                 spacing.set(qn('w:line'), '240')  # 1.0 line spacing
                 spacing.set(qn('w:lineRule'), 'auto')
             

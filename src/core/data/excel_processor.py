@@ -5157,30 +5157,7 @@ class ExcelProcessor:
             if allow_nonclassic_conversion and 'moonshot' in product_name.lower() and 'g' in weight_val.lower():
                 self.logger.info(f"FORCING Moonshot conversion: {product_name} {weight_val} -> 2.5oz")
                 return "2.5oz"
-            # CRITICAL FIX: For nonclassic types with embedded grams (e.g. "32g"), convert to oz
-            if allow_nonclassic_conversion and is_nonclassic and ('g' in weight_val.lower() or 'gram' in weight_val.lower()):
-                import re
-                match = re.match(r'^([\d.]+)\s*(g|gram|grams|gm|gms)\b', weight_val, re.IGNORECASE)
-                if match:
-                    try:
-                        weight_float = float(match.group(1))
-                        if product_name:
-                            identical_ounce_weight = self._find_identical_product_ounce_weight(product_name, product_type)
-                            if identical_ounce_weight:
-                                return identical_ounce_weight
-                            most_likely_oz_weight = self._find_most_likely_ounce_weight(product_name, product_type)
-                            if most_likely_oz_weight:
-                                return most_likely_oz_weight
-                        oz_val = round(weight_float / 28.3495, 2)
-                        if oz_val.is_integer():
-                            result = f"{int(oz_val)}oz"
-                        else:
-                            result = f"{oz_val:.2f}".rstrip("0").rstrip(".") + "oz"
-                        self.logger.info(f"Embedded grams nonclassic conversion for {product_name}: {weight_val} -> {result}")
-                        return result
-                    except (ValueError, TypeError):
-                        pass
-            # Weight* already has units embedded, return as-is (e.g. already oz, or classic type)
+            # Weight* already has units embedded, return as-is
             result = weight_val
         elif product_type in preroll_types:
             # For pre-rolls and infused pre-rolls, use JointRatio if available

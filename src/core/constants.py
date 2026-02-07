@@ -51,15 +51,14 @@ FONT_SCHEME_HORIZONTAL = {
 }
 
 FONT_SCHEME_VERTICAL = {
-    # Same as horizontal for consistent styling across templates
-    'Description': {'min': 12, 'max': 34, 'weight': 1},
-    'WeightUnits': {'min': 12, 'max': 34, 'weight': 1},
-    'ProductBrand': {'min': 12, 'max': 30, 'weight': 1},
-    'Price': {'min': 12, 'max': 28, 'weight': 1},
-    'Lineage': {'min': 10, 'max': 24, 'weight': 1},
+    'Description': {'min': 12, 'max': 30, 'weight': 1},
+    'WeightUnits': {'min': 12, 'max': 30, 'weight': 1},
+    'ProductBrand': {'min': 12, 'max': 28, 'weight': 1},
+    'Price': {'min': 12, 'max': 26, 'weight': 1},
+    'Lineage': {'min': 10, 'max': 22, 'weight': 1},
     'DOH': {'min': 8, 'max': 12, 'weight': 1},
-    'THC_CBD': {'min': 10, 'max': 24, 'weight': 1},
-    'Ratio': {'min': 10, 'max': 24, 'weight': 1}
+    'THC_CBD': {'min': 10, 'max': 22, 'weight': 1},
+    'Ratio': {'min': 10, 'max': 22, 'weight': 1}
 }
 
 FONT_SCHEME_MINI = {

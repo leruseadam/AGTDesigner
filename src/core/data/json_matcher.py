@@ -8524,7 +8524,7 @@ class JSONMatcher:
         Normalize weight and units for JSON products following Excel processor rules.
         
         Args:
-            weight: Original weight value (may have embedded units like "32g")
+            weight: Original weight value
             units: Original units
             product_type: Product type
             product_name: Product name for special cases
@@ -8532,7 +8532,6 @@ class JSONMatcher:
         Returns:
             Tuple of (normalized_weight, normalized_units)
         """
-        import re
         from src.core.constants import CLASSIC_TYPES
         
         if not weight or str(weight).strip() in ['', 'nan', 'NaN', 'None']:
@@ -8541,18 +8540,11 @@ class JSONMatcher:
         weight = str(weight).strip()
         units = str(units).strip() if units else 'g'
         
-        # CRITICAL FIX: Parse embedded units from weight string (e.g. "32g" -> 32, "g")
-        weight_match = re.match(r'^([\d.]+)\s*(g|gram|grams|gm|gms|oz|ounce|ounces)?\s*$', weight, re.IGNORECASE)
-        if weight_match:
-            weight = weight_match.group(1)
-            if weight_match.group(2):
-                units = weight_match.group(2)
-        
         # Determine if this is a nonclassic product
         is_nonclassic = product_type.lower() not in [ct.lower() for ct in CLASSIC_TYPES]
         
         # For nonclassic types, convert grams to ounces
-        if is_nonclassic and units.lower() in ['g', 'gram', 'grams', 'gm', 'gms']:
+        if is_nonclassic and units.lower() in ['g', 'gram', 'grams']:
             try:
                 weight_val = float(weight)
                 # Convert grams to ounces (1 oz = 28.3495 g)

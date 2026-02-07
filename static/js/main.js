@@ -18,9 +18,14 @@ function abbreviateLineage(lineage) {
     return map[key] || key;
 }
 // Detect Windows platform for optimizations
-// CRITICAL FIX: Guard navigator.platform - it can be undefined in some browsers (esp. on PC/Edge)
-const isWindows = ((navigator.platform || '').toLowerCase().includes('win')) ||
-                 ((navigator.userAgent || '').toLowerCase().includes('windows'));
+// navigator.platform is deprecated; use userAgentData when available, fallback to userAgent
+const isWindows = (() => {
+    if (typeof navigator.userAgentData !== 'undefined' && navigator.userAgentData?.platform) {
+        return navigator.userAgentData.platform.toLowerCase().includes('windows');
+    }
+    return (navigator.platform || '').toLowerCase().includes('win') ||
+           (navigator.userAgent || '').toLowerCase().includes('windows');
+})();
 
 // Fast reload mode: set localStorage.setItem('fastReload', 'true') to suppress
 // heavy logging and some re-inits during refresh.
@@ -47,17 +52,16 @@ const verboseWarn = (...args) => {
 };
 
 // Windows-specific performance optimizations
-// CRITICAL FIX: Guard document.body - may not exist when script runs early (esp. on PC)
-if (isWindows && document.body && typeof document.documentElement?.style?.transition !== 'undefined') {
+if (isWindows) {
     // CRITICAL FIX: Remove continuous repaint loop - it causes flashing/glitching
     // Instead, only enable hardware acceleration for smoother rendering
-    try {
+    if (typeof document.documentElement.style.transition !== 'undefined') {
+        // Enable hardware acceleration to reduce repaints without continuous loop
         document.body.style.transform = 'translateZ(0)';
         document.body.style.willChange = 'auto'; // Changed from 'contents' to 'auto' to reduce repaints
-        verboseLog('Windows performance optimizations enabled (hardware acceleration only)');
-    } catch (e) {
-        verboseLog('Windows optimization skipped (body/style not ready):', e);
     }
+    
+    verboseLog('Windows performance optimizations enabled (hardware acceleration only)');
 }
 
 // CRITICAL: Prevent multiple simultaneous page reloads
@@ -18227,8 +18231,8 @@ const TagManager = {
         verboseLog('Setting up Mac-like fast filter event listeners...');
         
         // Detect Windows platform for optimized performance
-        const isWindows = (navigator.platform || '').toLowerCase().includes('win') || 
-                         (navigator.userAgent || '').toLowerCase().includes('windows');
+        const isWindows = navigator.platform.toLowerCase().includes('win') || 
+                         navigator.userAgent.toLowerCase().includes('windows');
         
         // Store reference to this for use in closures
         const self = this;
