@@ -1992,17 +1992,13 @@ class TemplateProcessor:
             label_context['_vendor_from_record'] = vendor_from_record
             # Also set ProductVendor directly in label_context so it's available immediately
             # This ensures vendor is preserved even if later logic tries to clear it
-            if self.template_type == 'vertical':
-                label_context['ProductVendor'] = vendor_from_record
-            else:
-                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
+            # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
+            label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
         else:
             # CRITICAL FIX: Always initialize ProductVendor, even if empty, so fallback logic can detect and populate it
             # Initialize as empty with markers so the fallback logic can properly detect it needs to be populated
-            if self.template_type == 'vertical':
-                label_context['ProductVendor'] = ''
-            else:
-                label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
+            # Use wrap_with_marker for consistency so marker processing applies correct styling
+            label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
             # Log warning with all available keys for debugging
             all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
             # Also log actual values from vendor fields to see if they're empty or have different names
@@ -3082,31 +3078,23 @@ class TemplateProcessor:
                 # ProductVendor was set at the start with content, keep it
                 self.logger.info(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
             elif vendor_val and str(vendor_val).strip():
-                # For vertical template, don't wrap with markers since it uses simple placeholders
-                if self.template_type == 'vertical':
-                    label_context['ProductVendor'] = str(vendor_val).strip()
-                else:
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val).strip()}PRODUCTVENDOR_END"
+                # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
+                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val).strip()}PRODUCTVENDOR_END"
                 self.logger.info(f"✅ Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
             else:
                 # CRITICAL: Even if vendor_val is empty, check _vendor_from_record one more time
                 # This catches cases where vendor reading at the start found it but it wasn't used above
                 final_vendor = label_context.get('_vendor_from_record', '')
                 if final_vendor and str(final_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                    if self.template_type == 'vertical':
-                        label_context['ProductVendor'] = str(final_vendor).strip()
-                    else:
-                        label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(final_vendor).strip()}PRODUCTVENDOR_END"
+                    # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(final_vendor).strip()}PRODUCTVENDOR_END"
                     self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
                 else:
                     # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
                     # CRITICAL FIX: Set with markers when empty so fallback logic can detect and populate it
                     # Use the same check as above to see if existing_vendor has content
                     if not existing_vendor_has_content:
-                        if self.template_type == 'vertical':
-                            label_context['ProductVendor'] = ""
-                        else:
-                            label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
+                        label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
                         self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
@@ -3820,11 +3808,8 @@ class TemplateProcessor:
 
                 # Set vendor if we found one
                 if enriched_vendor and str(enriched_vendor).strip():
-                    # For vertical template, don't wrap with markers since it uses simple placeholders
-                    if self.template_type == 'vertical':
-                        label_context['ProductVendor'] = str(enriched_vendor).strip()
-                    else:
-                        label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
+                    # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
+                    label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
                     self.logger.info(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}'")
                 else:
                     # No vendor found anywhere, set to empty
@@ -3977,10 +3962,8 @@ class TemplateProcessor:
             if vendor_is_empty:
                 fallback_vendor = label_context.get('_vendor_from_record') or record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor')
                 if fallback_vendor and str(fallback_vendor).strip() and str(fallback_vendor).lower() not in ['nan', 'none', 'null', '']:
-                    if self.template_type == 'vertical':
-                        label_context['ProductVendor'] = str(fallback_vendor).strip()
-                    else:
-                        label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(fallback_vendor).strip()}PRODUCTVENDOR_END"
+                    # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(fallback_vendor).strip()}PRODUCTVENDOR_END"
                     self.logger.info(f"✅ FINAL CHECK: Set ProductVendor to '{fallback_vendor}' for classic type (was empty)")
                 else:
                     # CRITICAL: Always set ProductVendor to empty string if no vendor found
