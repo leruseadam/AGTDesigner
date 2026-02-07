@@ -293,13 +293,14 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             return Pt(first_size * scale_factor)
         return Pt(12 * scale_factor)
     
-    # Special rule: If Description has any word longer than 8 characters in Vertical Template,
-    # reduce font size so that it's 28pt or smaller (user requirement: >8-letter words must be 28pt or smaller)
+    # Special rule: If Description has any word 8+ characters in Vertical Template,
+    # reduce font size so that it's 28pt or smaller (user requirement: 8+ letter words must be 28pt or smaller).
+    # Additional rule: if description has more than 3 words AND one word is 8+ letters, reduce font size by 2 pts.
     if field_type.lower() == 'description' and orientation.lower() == 'vertical':
         words = str(text).split()
         if words:
             max_word_length = max(len(word) for word in words)
-            if max_word_length > 8:
+            if max_word_length >= 8:
                 # Calculate appropriate font size based on the longest word, but cap at 28pt
                 if max_word_length <= 10:
                     font_size = 28
@@ -314,8 +315,11 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
 
                 # Enforce upper cap of 28pt to satisfy requirement
                 font_size = min(font_size, 28)
+                # If more than 3 words and at least one is 8+ letters, reduce font size by 2 pts
+                if len(words) > 3:
+                    font_size = max(10, font_size - 2)
                 final_size = font_size * scale_factor
-                logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, using {font_size}pt font (capped at 28pt)")
+                logger.debug(f"Special vertical description rule: text='{text}', max_word_length={max_word_length}, words={len(words)}, using {font_size}pt font (capped at 28pt)")
                 return Pt(final_size)
     
     

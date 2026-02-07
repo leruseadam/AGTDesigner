@@ -10773,6 +10773,16 @@
         displayDetailedMatchResults(result);
         document.getElementById('detailedMatchResults').classList.remove('d-none');
         document.getElementById('detailedMatchLoading').classList.add('d-none');
+        // Persist results for recall when user re-opens JSON Match
+        try {
+          sessionStorage.setItem('agt_json_match_cache', JSON.stringify({
+            url: jsonUrl,
+            result: result,
+            timestamp: Date.now()
+          }));
+        } catch (e) {
+          console.warn('Could not cache JSON match results:', e);
+        }
       })
       .catch(error => {
         console.error('Detailed matching error:', error);
@@ -11074,6 +11084,113 @@
     window.selectCustomMatches = function() {
       alert('Custom selection feature coming soon! For now, please use the individual match cards to review specific items.');
     }
+
+    // Reset JSON match cached results
+    window.resetJsonMatchResults = function() {
+      try {
+        sessionStorage.removeItem('agt_json_match_cache');
+        const resultsDiv = document.getElementById('jsonMatchResults');
+        if (resultsDiv) {
+          resultsDiv.classList.add('d-none');
+        }
+        const urlInput = document.getElementById('jsonUrlInput');
+        if (urlInput) {
+          urlInput.value = '';
+        }
+        const viewDetailedWrap = document.getElementById('jsonMatchViewDetailedWrap');
+        if (viewDetailedWrap) {
+          viewDetailedWrap.classList.add('d-none');
+        }
+        const detailedResults = document.getElementById('detailedMatchResults');
+        const detailedLoading = document.getElementById('detailedMatchLoading');
+        if (detailedResults) {
+          detailedResults.classList.add('d-none');
+        }
+        if (detailedLoading) {
+          detailedLoading.classList.remove('d-none');
+          detailedLoading.innerHTML = `
+            <div class="spinner-border text-info" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-3">Enter a JSON URL and click Match JSON to begin.</p>
+          `;
+        }
+        const acceptAllBtn = document.getElementById('acceptAllBtn');
+        if (acceptAllBtn) {
+          acceptAllBtn.disabled = true;
+          acceptAllBtn.removeAttribute('data-matches');
+        }
+        console.log('JSON match results reset');
+      } catch (e) {
+        console.warn('Error resetting JSON match:', e);
+      }
+    };
+
+    // Show cached JSON match results in detailed modal
+    window.showCachedJsonMatchDetails = function() {
+      try {
+        const cached = sessionStorage.getItem('agt_json_match_cache');
+        if (!cached) return;
+        const { result } = JSON.parse(cached);
+        const detailedModal = document.getElementById('detailedJsonMatchModal');
+        if (!detailedModal) return;
+        const modal = new bootstrap.Modal(detailedModal);
+        document.getElementById('detailedMatchResults').classList.remove('d-none');
+        document.getElementById('detailedMatchLoading').classList.add('d-none');
+        displayDetailedMatchResults(result);
+        modal.show();
+      } catch (e) {
+        console.warn('Error showing cached details:', e);
+      }
+    };
+
+    // Restore cached JSON match results when modal opens
+    document.addEventListener('DOMContentLoaded', function() {
+      const jsonMatchModal = document.getElementById('jsonMatchModal');
+      if (jsonMatchModal) {
+        jsonMatchModal.addEventListener('show.bs.modal', function() {
+          try {
+            const cached = sessionStorage.getItem('agt_json_match_cache');
+            if (!cached) return;
+            const { url, result } = JSON.parse(cached);
+            if (!result) return;
+            const urlInput = document.getElementById('jsonUrlInput');
+            if (urlInput && url) {
+              urlInput.value = url;
+            }
+            const resultsDiv = document.getElementById('jsonMatchResults');
+            const matchCountEl = document.getElementById('matchCount');
+            const matchedListEl = document.getElementById('matchedProductsList');
+            const subtitleEl = document.getElementById('jsonMatchResultsSubtitle');
+            const viewDetailedWrap = document.getElementById('jsonMatchViewDetailedWrap');
+            if (resultsDiv && matchCountEl && matchedListEl) {
+              const totalMatches = result.total_matches || 0;
+              const highConf = result.high_confidence_matches || [];
+              matchCountEl.textContent = totalMatches;
+              if (subtitleEl) {
+                subtitleEl.textContent = 'Previous results – view or run a new match';
+              }
+              if (viewDetailedWrap) {
+                viewDetailedWrap.classList.remove('d-none');
+              }
+              const matches = result.detailed_matches || result.matches || [];
+              const items = highConf.length ? highConf : (matches.filter(m => m.best_match).map(m => m.best_match));
+              const getName = (item) => {
+                if (!item) return 'Unknown';
+                const t = item.best_match || item;
+                return t['Product Name*'] || t['ProductName'] || t['Product Name'] || 'Unknown';
+              };
+              matchedListEl.innerHTML = items.length ? items.map((item, i) => {
+                return `<div class="small py-1">${i + 1}. ${getName(item)}</div>`;
+              }).join('') : '<em class="text-muted">No matched products</em>';
+              resultsDiv.classList.remove('d-none');
+            }
+          } catch (e) {
+            console.warn('Error restoring cached JSON match:', e);
+          }
+        });
+      }
+    });
 
     // Allow Enter key to trigger the match in modal
     document.addEventListener('DOMContentLoaded', function() {
@@ -11713,7 +11830,8 @@
               <div class="text-muted small">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
             </div>
             <div class="col-md-4 text-md-end mt-3 mt-md-0">
-              <div class="d-inline-flex json-actions">
+              <div class="d-inline-flex json-actions gap-2">
+                <button type="button" class="btn btn-outline-warning" onclick="resetJsonMatchResults()" title="Clear cached results and start fresh" id="jsonMatchResetBtn"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
                 <button type="button" class="btn btn-outline-info" onclick="testStrainSearch()" title="Test strain search API"><i class="bi bi-bug me-1"></i>Test API</button>
                 <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
               </div>
@@ -11725,10 +11843,15 @@
               <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0 text-success">✅ Matching Results</h6>
-                  <small class="text-muted">Results update live as matching completes</small>
+                  <small class="text-muted" id="jsonMatchResultsSubtitle">Results update live as matching completes</small>
                 </div>
                 <div class="alert alert-success py-2">
                   <strong id="matchCount">0</strong> products matched and selected
+                </div>
+                <div class="mb-2 d-none" id="jsonMatchViewDetailedWrap">
+                  <button type="button" class="btn btn-sm btn-outline-info" onclick="showCachedJsonMatchDetails()" id="jsonMatchViewDetailedBtn">
+                    <i class="bi bi-eye me-1"></i>View Detailed Comparison
+                  </button>
                 </div>
                 <label class="form-label">Matched Products:</label>
                 <div id="matchedProductsList" class="border rounded p-3" style="max-height: 420px; overflow-y: auto;">
@@ -11792,6 +11915,9 @@
           </div>
         </div>
         <div class="modal-footer border-0">
+          <button type="button" class="btn btn-outline-warning me-auto" onclick="resetJsonMatchResults(); bootstrap.Modal.getInstance(document.getElementById('detailedJsonMatchModal')).hide();" title="Clear cached results">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Reset Results
+          </button>
           <button type="button" class="btn btn-primary btn-glass me-2" onclick="saveJsonMatchAnalysis()" id="detailedJsonMatchSaveBtn" title="Accept current matches and save to selection">
             <i class="bi bi-save me-1"></i>Save
           </button>

@@ -2735,7 +2735,7 @@ class JSONMatcher:
                             # 3. PRODUCT TYPE COMPATIBILITY: Reject clearly different categories
                             if inventory_type:
                                 json_type_lower = (inventory_type or '').lower()
-                                excel_type = (cache_item.get('product_type', '') or '').lower()
+                                excel_type = (cache_item.get('product_type', '') or (cache_item.get('_db_product') or {}).get('Product Type*', '') or '').lower()
                                 # Cross-category: edible vs concentrate/flower
                                 if 'edible' in json_type_lower or 'solid edible' in json_type_lower:
                                     if 'concentrate' in excel_type or 'flower' in excel_type or 'preroll' in excel_type or 'pre-roll' in excel_type or 'vape' in excel_type:
@@ -2743,6 +2743,11 @@ class JSONMatcher:
                                 if 'concentrate' in json_type_lower and 'inhalation' in json_type_lower:
                                     if 'edible' in excel_type or 'gummy' in excel_type or 'chocolate' in excel_type:
                                         continue
+                                    # CRITICAL: Vape/Concentrate for Inhalation (AIO, disposable, cart) must NOT match Flower
+                                    # Honey Tree AIO, Live Resin Prana AIO etc. were incorrectly matching Flower (e.g. GMO Cookies by Conscious Cannabis Proc)
+                                    flower_indicators = ['flower', 'bud', 'nug', 'usable marijuana', 'core flower']
+                                    if any(fi in excel_type for fi in flower_indicators):
+                                        continue  # Reject Flower - Concentrate for Inhalation is vape/concentrate, not flower
 
                             # 4. STRICT word-by-word matching to prevent incorrect matches
                             json_words = set(product_name.lower().split())
@@ -6609,7 +6614,8 @@ class JSONMatcher:
             json_name = str(json_item.get("product_name", "")).strip()
             json_vendor = str(json_item.get("vendor", "")).strip().lower()
             json_brand = str(json_item.get("brand", "")).strip().lower()
-            json_type = str(json_item.get("product_type", "")).strip().lower()
+            # Bamboo JSON uses inventory_type (e.g. "Concentrate for Inhalation"); fallback to product_type
+            json_type = str(json_item.get("product_type", "") or json_item.get("inventory_type", "")).strip().lower()
             json_weight = str(json_item.get("weight", "")).strip()
             json_strain = str(json_item.get("strain_name", "")).strip().lower()
 
