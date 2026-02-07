@@ -10850,6 +10850,27 @@ def process_database_product_for_api(db_product):
 
     combined_weight = _normalize_weight_string(combined_weight)
     
+    # CRITICAL FIX: For nonclassic types with grams in CombinedWeight (e.g. "32g"), convert to oz
+    product_type_check = str(processed_product.get('Product Type*', '')).lower()
+    CLASSIC_TYPES_CHECK = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
+    is_nonclassic_check = product_type_check not in [ct.lower() for ct in CLASSIC_TYPES_CHECK]
+    cw_lower = str(combined_weight).lower()
+    if (is_nonclassic_check and combined_weight and 'oz' not in cw_lower and
+            ('g' in cw_lower or 'gram' in cw_lower) and product_type_check not in ['pre-roll', 'infused pre-roll']):
+        match = re.search(r'^([\d.]+)\s*(g|gram|grams|gm|gms)\b', combined_weight, re.IGNORECASE)
+        if match:
+            try:
+                weight_float = float(match.group(1))
+                most_likely = _find_most_likely_ounce_weight_for_database(
+                    str(processed_product.get('Product Name*', '')), product_type_check)
+                if most_likely:
+                    combined_weight = most_likely
+                else:
+                    oz_val = round(weight_float / 28.3495, 2)
+                    combined_weight = f"{int(oz_val)}oz" if oz_val == int(oz_val) else f"{oz_val:.2f}".rstrip('0').rstrip('.') + "oz"
+            except (ValueError, TypeError):
+                pass
+    
     # CRITICAL FIX: Set all weight field variations for frontend compatibility
     processed_product['CombinedWeight'] = combined_weight
     processed_product['WeightWithUnits'] = combined_weight

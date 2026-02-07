@@ -2116,7 +2116,16 @@ class ExcelProcessor:
             # Reset index immediately after assignment to prevent duplicate labels
             self.df.reset_index(drop=True, inplace=True)
             self.logger.debug(f"Original columns: {self.df.columns.tolist()}")
-            
+
+            # CRITICAL: Capture original Description values into JSON column BEFORE any transformations
+            # This preserves the original Excel Description for JSON URL matching later
+            if "Description" in self.df.columns:
+                self.df["JSON"] = self.df["Description"].astype(str).str.strip()
+                self.logger.info(f"✅ Captured {len(self.df)} original Description values into JSON column for matching")
+            else:
+                self.df["JSON"] = ""
+                self.logger.debug("No Description column found - JSON column initialized empty")
+
             # 2) Trim product names
             if "Product Name*" in self.df.columns:
                 self.df["Product Name*"] = self.df["Product Name*"].str.lstrip()
@@ -4253,6 +4262,19 @@ class ExcelProcessor:
             records = filtered_df.to_dict('records')
             logger.debug(f"Converted to {len(records)} records")
             
+            # CRITICAL: Ensure Price is set for DOCX (web/UI may have Price* only; template expects 'Price')
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                price = rec.get('Price')
+                price_star = rec.get('Price*') or rec.get('Price* (Tier Name for Bulk)') or rec.get('Med Price')
+                if price_star is not None and str(price_star).strip() and str(price_star).lower() not in ('nan', 'none', 'null', ''):
+                    if price is None or (hasattr(pd, 'isna') and pd.isna(price)) or not str(price).strip() or str(price).lower() in ('nan', 'none', 'null', ''):
+                        rec['Price'] = price_star
+                if price is not None and str(price).strip() and str(price).lower() not in ('nan', 'none', 'null', ''):
+                    if not rec.get('Price*') or (hasattr(pd, 'isna') and pd.isna(rec.get('Price*'))):
+                        rec['Price*'] = price
+            
             # Sort records by lineage order, then by the order they appear in selected_tags
             lineage_order = [
                 'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA',
@@ -5135,7 +5157,30 @@ class ExcelProcessor:
             if allow_nonclassic_conversion and 'moonshot' in product_name.lower() and 'g' in weight_val.lower():
                 self.logger.info(f"FORCING Moonshot conversion: {product_name} {weight_val} -> 2.5oz")
                 return "2.5oz"
-            # Weight* already has units embedded, return as-is
+            # CRITICAL FIX: For nonclassic types with embedded grams (e.g. "32g"), convert to oz
+            if allow_nonclassic_conversion and is_nonclassic and ('g' in weight_val.lower() or 'gram' in weight_val.lower()):
+                import re
+                match = re.match(r'^([\d.]+)\s*(g|gram|grams|gm|gms)\b', weight_val, re.IGNORECASE)
+                if match:
+                    try:
+                        weight_float = float(match.group(1))
+                        if product_name:
+                            identical_ounce_weight = self._find_identical_product_ounce_weight(product_name, product_type)
+                            if identical_ounce_weight:
+                                return identical_ounce_weight
+                            most_likely_oz_weight = self._find_most_likely_ounce_weight(product_name, product_type)
+                            if most_likely_oz_weight:
+                                return most_likely_oz_weight
+                        oz_val = round(weight_float / 28.3495, 2)
+                        if oz_val.is_integer():
+                            result = f"{int(oz_val)}oz"
+                        else:
+                            result = f"{oz_val:.2f}".rstrip("0").rstrip(".") + "oz"
+                        self.logger.info(f"Embedded grams nonclassic conversion for {product_name}: {weight_val} -> {result}")
+                        return result
+                    except (ValueError, TypeError):
+                        pass
+            # Weight* already has units embedded, return as-is (e.g. already oz, or classic type)
             result = weight_val
         elif product_type in preroll_types:
             # For pre-rolls and infused pre-rolls, use JointRatio if available

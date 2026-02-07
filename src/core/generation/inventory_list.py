@@ -359,9 +359,9 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                     for run in paragraph.runs:
                         run.font.bold = True
                         run.font.size = Pt(10)  # Increased from 7 to 10
-                    # All templates use 3pt spacing before and after paragraphs
-                    paragraph.paragraph_format.space_before = Pt(3)
-                    paragraph.paragraph_format.space_after = Pt(3)
+                    # Compact header spacing
+                    paragraph.paragraph_format.space_before = Pt(0)
+                    paragraph.paragraph_format.space_after = Pt(0)
                     paragraph.paragraph_format.line_spacing = 1.0
 
             # Make header row more compact
@@ -402,9 +402,8 @@ def generate_inventory_list(records: List[Dict[str, Any]]) -> Optional[Document]
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
                             run.font.size = Pt(9)  # Increased from 6 to 9 (50% larger)
-                        # All templates use 3pt spacing before and after paragraphs
-                        paragraph.paragraph_format.space_before = Pt(3)
-                        paragraph.paragraph_format.space_after = Pt(3)
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
                         paragraph.paragraph_format.line_spacing = 1.0
 
                 # Row height adjusted for larger font
