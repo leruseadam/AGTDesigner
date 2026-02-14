@@ -64,6 +64,34 @@ def compute_display_lineage_like_ui(record: Dict[str, Any]) -> str:
     )
     lower_product_type = str(product_type_check).strip().lower()
 
+    # Defensive: if product_type is missing/ambiguous on the record, prefer the authoritative
+    # database `Product Type*` when a JSON/SKU identifier is present. This prevents client-side
+    # overrides or cached tag payloads from misclassifying products across different machines.
+    if (not lower_product_type or lower_product_type in {"", "unknown", "not_found"}):
+        try:
+            # Try to look up the product type from the product database when JSON token is available
+            json_token = record.get('JSON') or record.get('json') or record.get('product_json')
+            if json_token:
+                import sqlite3
+                from src.core.data.product_database import get_database_path
+                db_path = get_database_path('AGT_Bothell')
+                # Direct lightweight query to avoid depending on ProductDatabase helpers
+                try:
+                    conn = sqlite3.connect(db_path)
+                    cur = conn.cursor()
+                    cur.execute('SELECT "Product Type*" FROM products WHERE JSON = ? COLLATE NOCASE', (str(json_token).strip(),))
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        lower_product_type = str(row[0]).strip().lower()
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+        except Exception:
+            # Fall back silently if DB not available or lookup fails
+            pass
+
     # Classic vs nonclassic
     is_classic_type = lower_product_type in CLASSIC_TYPES
     is_paraphernalia_type = lower_product_type == "paraphernalia"
