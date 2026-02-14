@@ -1707,6 +1707,8 @@ def create_app():
     CORS(app, resources={
         r"/*": {"origins": allowed_origins}
     })
+
+    # Admin endpoints removed per operator request
     
     # CRITICAL FIX: Add error handler to ensure API routes always return JSON, not HTML
     @app.errorhandler(500)

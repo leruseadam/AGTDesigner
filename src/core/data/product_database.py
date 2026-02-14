@@ -4470,11 +4470,22 @@ class ProductDatabase:
                 'id', 'strain_id'  # These are handled separately or shouldn't be updated
             }
             
+            # Fields that should NOT be overwritten by blank/empty Excel values
+            preserve_nonblank_fields = {'Vendor/Supplier*', 'Vendor', 'Product Brand'}
+
             for col_name, col_value in product_data.items():
                 if col_name in skip_fields:
                     continue
                 # Only include if column exists in database
                 if col_name in available_columns:
+                    # If this is a vendor/brand-like field, only update when Excel provides a non-empty value
+                    if col_name in preserve_nonblank_fields:
+                        val = col_value
+                        if val is None or (isinstance(val, str) and val.strip().lower() in ['', 'nan', 'none', 'null']):
+                            # Skip updating vendor/brand with blank Excel value to avoid clobbering DB
+                            logger.debug(f"Skipping update of '{col_name}' for product ID {product_id} because Excel provided empty value")
+                            continue
+
                     update_fields.append(f'"{col_name}" = ?')
                     # Handle special calculated fields
                     if col_name == 'AI':
