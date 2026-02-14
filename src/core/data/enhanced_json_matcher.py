@@ -1565,9 +1565,34 @@ class EnhancedJSONMatcher:
         except Exception:
             text_syn = str(text)
 
+        # Replace underscores with spaces (improves tokenization for SKUs like "BALL_SAT_CARAMEL")
+        try:
+            text_syn = text_syn.replace('_', ' ')
+        except Exception:
+            pass
+
+        # Replace ampersands with ' and ' for consistent tokenization
+        try:
+            text_syn = text_syn.replace('&', ' and ')
+        except Exception:
+            pass
+
         # Remove special characters, normalize whitespace
         normalized = re.sub(r'[^\w\s-]', '', text_syn.lower())
         normalized = re.sub(r'\s+', ' ', normalized).strip()
+        # Remove trailing "by <vendor>" suffixes (e.g., ' - Chocolate by Ceres')
+        try:
+            normalized = re.sub(r"\s+by\s+[a-z0-9\s]+$", '', normalized)
+        except Exception:
+            pass
+
+        # Remove common trailing size tokens like '10mg', '10pk', '10pack', '2oz'
+        try:
+            normalized = re.sub(r"\b\d+(?:mg|g|ml|oz|pk|pack)\b", '', normalized)
+            normalized = re.sub(r'\s+', ' ', normalized).strip()
+        except Exception:
+            pass
+
         return normalized
     
     def _get_product_name(self, product: Dict) -> str:
@@ -1753,8 +1778,29 @@ class EnhancedJSONMatcher:
                 ]
                 self.cache.set(cache_key, vendor_filtered_products, ttl=300)
             
+            # Only apply vendor filter when the vendor-filtered set is likely relevant.
+            # Heuristics: require at least one vendor-filtered product to share token overlap
+            # with the JSON product name, otherwise keep the broader database_products.
             if vendor_filtered_products:
-                database_products = vendor_filtered_products
+                try:
+                    norm_json_name = self._normalize_text(self._get_product_name(json_product))
+                except Exception:
+                    norm_json_name = (self._get_product_name(json_product) or '').lower()
+
+                use_vendor_filter = False
+                json_tokens = set(norm_json_name.split()) if norm_json_name else set()
+                for db in vendor_filtered_products:
+                    try:
+                        norm_db_name = self._normalize_text(str(db.get('Product Name*', '') or db.get('ProductName') or ''))
+                    except Exception:
+                        norm_db_name = str(db.get('Product Name*', '') or db.get('ProductName') or '').lower()
+                    db_tokens = set(norm_db_name.split()) if norm_db_name else set()
+                    if json_tokens and db_tokens and (json_tokens & db_tokens):
+                        use_vendor_filter = True
+                        break
+
+                if use_vendor_filter:
+                    database_products = vendor_filtered_products
         
         matches = []
         
@@ -1840,9 +1886,58 @@ class EnhancedJSONMatcher:
         json_name = self._normalize_text(self._get_product_name(json_product))
         
         for db_product in database_products:
-            db_name = self._normalize_text(str(db_product.get('Product Name*', '')))
+            # Collect candidate identifier fields from DB product (Product Name, SKU, JSON raw column)
+            db_identifiers = []
+            try:
+                # Common canonical name
+                db_identifiers.append(str(db_product.get('Product Name*', '') or db_product.get('ProductName') or ''))
+            except Exception:
+                pass
+            try:
+                # SKU or code fields
+                db_identifiers.append(str(db_product.get('SKU', '') or db_product.get('sku', '') or ''))
+            except Exception:
+                pass
+            try:
+                # A column named 'JSON' is sometimes present (contains original JSON keys)
+                db_identifiers.append(str(db_product.get('JSON', '') or db_product.get('json', '') or ''))
+            except Exception:
+                pass
+
+            # Also include vendor/product brand aware names
+            try:
+                db_identifiers.append(str(db_product.get('ProductName', '') or ''))
+            except Exception:
+                pass
+
+            # Normalize all identifier candidates and dedupe
+            norm_candidates = []
+            for candidate in db_identifiers:
+                if candidate:
+                    try:
+                        nn = self._normalize_text(candidate)
+                    except Exception:
+                        nn = str(candidate).lower()
+                    if nn and nn not in norm_candidates:
+                        norm_candidates.append(nn)
             
-            if json_name == db_name:
+            # Exact equality or token-set containment considered "exact" for robustness.
+            # Check normalized candidate identifiers for equality
+            matched_exact = False
+            for db_name in norm_candidates:
+                if json_name == db_name:
+                    matches.append(MatchResult(
+                        score=1.0,
+                        match_data=db_product,
+                        strategy_used=MatchStrategy.EXACT,
+                        confidence=1.0,
+                        processing_time=0.0,
+                        match_factors={'exact_match': 1.0}
+                    ))
+                    matched_exact = True
+                    break
+            if matched_exact:
+                continue
                 matches.append(MatchResult(
                     score=1.0,
                     match_data=db_product,
@@ -1851,6 +1946,32 @@ class EnhancedJSONMatcher:
                     processing_time=0.0,
                     match_factors={'exact_match': 1.0}
                 ))
+                continue
+
+            # Token-set based exactness: if one side's tokens are subset of the other, treat as exact
+            try:
+                json_tokens = set(re.findall(r"\w+", json_name)) if json_name else set()
+                # Check token-subset relation against any normalized DB identifier
+                for db_name in norm_candidates:
+                    try:
+                        db_tokens = set(re.findall(r"\w+", db_name)) if db_name else set()
+                        if json_tokens and db_tokens and (json_tokens.issubset(db_tokens) or db_tokens.issubset(json_tokens)):
+                            matches.append(MatchResult(
+                                score=0.98,
+                                match_data=db_product,
+                                strategy_used=MatchStrategy.EXACT,
+                                confidence=0.99,
+                                processing_time=0.0,
+                                match_factors={'token_subset_match': 0.98}
+                            ))
+                            matched_exact = True
+                            break
+                    except Exception:
+                        continue
+                if matched_exact:
+                    continue
+            except Exception:
+                pass
                 
         return matches
         
@@ -2097,6 +2218,16 @@ class EnhancedJSONMatcher:
         """Classify product type from JSON data"""
         inventory_type = str(json_product.get('inventory_type', '')).lower()
         product_name = self._get_product_name(json_product).lower()
+
+        # Normalize tokens for more reliable classification
+        try:
+            inventory_type = self._normalize_text(inventory_type)
+        except Exception:
+            inventory_type = inventory_type
+        try:
+            product_name = self._normalize_text(product_name)
+        except Exception:
+            product_name = product_name
         
         # Product type classification logic
         if any(term in inventory_type or term in product_name for term in ['flower', 'bud']):

@@ -1620,7 +1620,19 @@
                         </div>
                       </div>
                     </div>
-                    
+                    <div class="d-flex justify-content-end mb-3">
+                      <button class="btn btn-glass btn-control btn-color-purple" onclick="openEnhancedLineageEditor()" id="openFullLineageEditorBtn" title="Open full Lineage Editor">
+                        <span class="icon-btn">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                            <path d="M2 17l10 5 10-5"></path>
+                            <path d="M2 12l10 5 10-5"></path>
+                          </svg>
+                          Open Lineage Editor
+                        </span>
+                      </button>
+                    </div>
+
                     <!-- Strains List Panel -->
                     <div class="col-md-8">
                       <div class="card">
@@ -5294,71 +5306,119 @@
       align-items: center !important;
     }
 
-    /* COMPACT CENTER COLUMN - reduce spacing to eliminate scrolling */
+    /* CENTER COLUMN - compact spacing, no scrolling */
     .control-section.mb-2 {
-      margin-bottom: 0.3rem !important;
+      margin-bottom: 0.35rem !important;
     }
 
     .control-section .d-grid.gap-2 {
-      gap: 0.25rem !important;
+      gap: 0.3rem !important;
     }
 
     .control-panel .btn-control {
-      padding: 0.3rem 0.6rem !important;
-      font-size: 0.78rem !important;
+      padding: 0.35rem 0.6rem !important;
+      font-size: 0.8rem !important;
     }
 
     .control-panel .btn-control .icon-btn svg {
-      width: 12px !important;
-      height: 12px !important;
+      width: 13px !important;
+      height: 13px !important;
     }
 
     #generateBtn {
-      margin-top: 0.4rem !important;
+      margin-top: 0.5rem !important;
       margin-bottom: 0 !important;
-      padding: 0.5rem 0.9rem !important;
+      padding: 0.6rem 1rem !important;
     }
 
     .help-button-container {
-      margin-top: 0.3rem !important;
+      margin-top: 0.35rem !important;
     }
 
-    /* Center the template label */
+    /* Center column labels */
     .control-section .filter-label {
       text-align: center !important;
       width: 100% !important;
-      margin-bottom: 0.15rem !important;
+      margin-bottom: 0.2rem !important;
     }
 
-    /* Larger template select */
-    #templateSelect {
-      min-height: 52px !important;
-      font-size: 17px !important;
-      padding: 0.7rem 54px 0.7rem 42px !important;
+    /* Template dropdowns - centered wrapper */
+    .template-dropdowns-center {
+      display: flex !important;
+      justify-content: center !important;
+      width: 100% !important;
+      margin-bottom: 0.2rem !important;
     }
 
-    /* Template select styling - white text to match generate button */
+    .template-dropdowns-center .template-select-centered,
+    .template-dropdowns-center #templateSelect,
+    .template-dropdowns-center #templateGroupSelect,
+    .template-dropdowns-center .template-group-select {
+      margin-left: auto !important;
+      margin-right: auto !important;
+    }
+
+    .template-dropdowns-center #generateBtn {
+      width: 100% !important;
+      max-width: 280px !important;  /* Match width of other control buttons */
+    }
+    
+    .template-dropdowns-center #manageTemplatesBtn {
+      /* Wide Manage button, same width as other controls */
+      width: 100% !important;
+      max-width: 280px !important;
+      font-size: 0.95rem !important;
+      padding: 0.35rem 1rem !important;
+      border-radius: 0 !important;
+      margin-top: 0.25rem !important;
+    }
+
+    /* Template select sizing – same width column as other controls, taller vertically */
     #templateSelect {
+      min-height: 72px !important;
+      height: 72px !important;
+      font-size: 1.4rem !important;
+      padding: 1.2rem 2.5rem 1.2rem 1.1rem !important;  /* More vertical padding for taller look */
+      max-width: 280px !important;
+      width: 100% !important;
+    }
+
+    #templateGroupSelect {
+      max-width: 280px !important;
+      font-size: 0.8rem !important;
+      padding: 0.25rem 2rem 0.25rem 0.5rem !important; /* Add right padding for arrow */
+      -webkit-appearance: none !important;
+      -moz-appearance: none !important;
+      appearance: none !important;
+    }
+
+    /* Template section: both dropdowns use same subtle style (like Design Set) */
+    .template-dropdowns-center #templateGroupSelect,
+    .template-dropdowns-center #templateSelect {
       background-color: rgba(44, 34, 58, 0.85) !important;
-      border-color: rgba(0, 212, 170, 0.95) !important;
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+      box-shadow: none !important;
       color: #ffffff !important;
+      text-align: center !important;
+      text-align-last: center !important;
       -webkit-text-fill-color: #ffffff !important;
-      mix-blend-mode: normal !important;
-      filter: none !important;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%2300d4aa' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
       background-repeat: no-repeat !important;
-      background-position: right 16px center !important;
-      background-size: 18px 18px !important;
+      background-position: right 12px center !important;
+      background-size: 14px 14px !important;
     }
 
-    #templateSelect:hover,
-    #templateSelect:focus,
-    #templateSelect:active {
+    .template-dropdowns-center #templateGroupSelect:hover,
+    .template-dropdowns-center #templateGroupSelect:focus,
+    .template-dropdowns-center #templateGroupSelect:active,
+    .template-dropdowns-center #templateSelect:hover,
+    .template-dropdowns-center #templateSelect:focus,
+    .template-dropdowns-center #templateSelect:active {
       background-color: rgba(44, 34, 58, 0.95) !important;
-      border-color: rgba(0, 212, 170, 1) !important;
+      border-color: rgba(255, 255, 255, 0.5) !important;
       color: #ffffff !important;
       -webkit-text-fill-color: #ffffff !important;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.45) !important;
+      box-shadow: none !important;
       outline: none !important;
     }
 
@@ -5369,6 +5429,50 @@
       text-align: center !important;
       -webkit-text-align-last: center !important;
       -moz-text-align-last: center !important;
+    }
+
+    /* Radio-style design set buttons */
+    .template-group-radio-wrapper {
+      display: flex !important;
+      justify-content: center !important;
+      gap: 0.5rem !important;
+      width: 100% !important;
+      max-width: 280px !important;
+    }
+
+    .template-group-option {
+      display: inline-flex !important;
+      align-items: center !important;
+    }
+
+    .template-group-option input[type="radio"] {
+      display: none !important;
+    }
+
+    .template-group-label-btn {
+      display: inline-block !important;
+      min-width: 120px !important;
+      text-align: center !important;
+      padding: 0.5rem 0.75rem !important;
+      /* neutral, unselected style */
+      background-color: rgba(44, 34, 58, 0.85) !important;
+      color: #ffffff !important;
+      border: 1px solid rgba(255,255,255,0.12) !important;
+      border-radius: 0 !important;
+      cursor: pointer !important;
+      font-size: 0.85rem !important;
+      font-weight: 700 !important;
+      box-shadow: none !important;
+    }
+
+    .template-group-option input[type="radio"]:checked + .template-group-label-btn,
+    .template-group-label-btn:focus {
+      /* active/checked style (blue gradient) */
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.6)) !important;
+      border-color: rgba(59, 130, 246, 1) !important;
+      color: #ffffff !important;
+      box-shadow: 0 4px 20px rgba(59, 130, 246, 0.6), 0 0 20px rgba(59, 130, 246, 0.5) !important;
+      outline: none !important;
     }
 
     /* Ensure the template select's selected text and options are centered in its container */
@@ -6097,14 +6201,16 @@
       height: 100% !important;
     }
 
-    /* Control panel should fill available space and match tag list heights */
+    /* Control panel - tall enough to fit all content without scrolling */
     .control-panel {
       display: flex !important;
       flex-direction: column !important;
       height: var(--center-panel-height) !important;
       min-height: var(--center-panel-height) !important;
-      overflow-y: hidden !important;
+      overflow-y: auto !important;
       overflow-x: hidden !important;
+      justify-content: flex-start !important;
+      align-items: center !important;
     }
 
     /* Side columns (Available & Selected Tags) establish shared height using CSS variables */
@@ -6130,10 +6236,13 @@
       flex-direction: column !important;
     }
 
-    /* Center column tracks shared height variables instead of hard vh offsets */
+    /* Center column - full height to match side columns, no scrolling needed */
     div[data-container-type="center"] {
       height: var(--center-panel-height) !important;
       min-height: var(--center-panel-height) !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
     }
 
     /* Mobile responsive - stack columns vertically on small screens */
@@ -6485,7 +6594,7 @@
                 </div>
               </div>
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
-                <div id="availableTags" class="tag-list-container">>
+                <div id="availableTags" class="tag-list-container">
                   <div class="tag-list">
                     <div class="d-flex align-items-center gap-3 mb-2">
                       <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
@@ -6514,24 +6623,49 @@
           </div>
           
           <!-- Center Column with Controls -->
-          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center" data-container-type="center">
+          <div class="mb-2 mt-0 d-flex flex-column justify-content-start align-items-center center-column-wrapper" data-container-type="center">
             <!-- Controls -->
             <div class="control-panel" style="width: 100%;">
-              <!-- Template Section -->
-              <div class="control-section mb-2">
+              <!-- Template Section - centered dropdowns (TEMPLATE, DESIGN SET, then Manage/Generate) -->
+              <div class="control-section control-section-template mb-2">
                 <label for="templateSelect" class="filter-label">TEMPLATE</label>
-                <select id="templateSelect" class="form-select filter-select" aria-label="Template" style="min-height: 80px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; max-width: 300px !important; text-align: center !important; text-align-last: center !important; color: #ffffff !important;">
-                  <option value="horizontal">Horizontal</option>
-                  <option value="vertical">Vertical</option>
-                  <option value="mini">Mini</option>
-                  <option value="double">Double</option>
-                  <option value="preroll">Preroll</option>
-                  <option value="inventory">Inventory</option>
-                </select>
-
-                <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()" style="width: 100% !important; min-height: 60px !important; padding: 1rem 1.25rem !important; font-size: 20px !important; font-weight: 700 !important; border-radius: 14px !important; margin-top: 1rem !important; display: block !important;">
-                  Generate Tags
-                </button>
+                <div class="template-dropdowns-center">
+                  <select id="templateSelect" class="form-select filter-select template-select-centered" aria-label="Template">
+                    <option value="horizontal">Horizontal</option>
+                    <option value="vertical">Vertical</option>
+                    <option value="mini">Mini</option>
+                    <option value="double">Double</option>
+                    <option value="preroll">Preroll</option>
+                    <option value="inventory">Inventory</option>
+                  </select>
+                </div>
+                <!-- Generate button directly under TEMPLATE -->
+                <div class="template-dropdowns-center">
+                  <button id="generateBtn" class="btn-generate-themed" title="Generate labels based on selected tags" onclick="TagManager.debouncedGenerate()">
+                    Generate Tags
+                  </button>
+                </div>
+                <label class="filter-label template-group-label">DESIGN SET</label>
+                <div class="template-dropdowns-center">
+                  <div class="template-group-radio-wrapper" role="radiogroup" aria-label="Design set">
+                    <div class="template-group-option">
+                      <input type="radio" id="templateGroupClassic" name="templateGroup" value="classic" checked>
+                      <label for="templateGroupClassic" class="template-group-label-btn">Classic</label>
+                    </div>
+                    <div class="template-group-option">
+                      <input type="radio" id="templateGroupUser" name="templateGroup" value="user">
+                      <label for="templateGroupUser" class="template-group-label-btn">User</label>
+                    </div>
+                  </div>
+                </div>
+                <div class="template-dropdowns-center">
+                  <button type="button"
+                          id="manageTemplatesBtn"
+                          class="btn-manage-templates"
+                          title="Add, replace, or view your custom template designs">
+                    Manage Template
+                  </button>
+                </div>
 
                 <select id="fontSelect" class="d-none" aria-label="Font">
                   <option value="Arial">Arial</option>
@@ -6618,26 +6752,16 @@
                       Reset Cache
                     </span>
                   </button>
-                  <button class="btn btn-glass btn-control btn-color-purple" onclick="openLineageEditor()" title="Open lineage editor for strain management">
-                    <span class="icon-btn">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                        <path d="M2 17l10 5 10-5"></path>
-                        <path d="M2 12l10 5 10-5"></path>
-                      </svg>
-                      Lineage Editor
-                    </span>
-                  </button>
+                  <!-- Lineage Editor entry moved into Data & Analytics modal -->
                 </div>
               </div>
 
-              <!-- Help Button -->
+              <!-- Help button inside center column so layout stays 3 columns -->
               <div class="help-button-container">
                 <button class="big-glow-help-btn" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
                   <span style="font-size: 16px; font-weight: bold; color: white;">?</span>
                 </button>
               </div>
-
             </div>
           </div>
           
@@ -7204,6 +7328,27 @@
         <div class="modal-footer border-0">
           <button type="button" class="btn-close" data-bs-dismiss="modal" title="Close modal">Close</button>
           <button type="button" class="btn btn-primary" id="saveLineageBtn">Save changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Templates Modal: add, replace, view custom .docx designs (same sizes as Classic) -->
+  <div class="modal fade" id="userTemplatesModal" tabindex="-1" aria-labelledby="userTemplatesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content glass-card">
+        <div class="modal-header border-0">
+          <h5 class="modal-title text-white" id="userTemplatesModalLabel">User template designs</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-white-50 small mb-3">Upload your own .docx design for each template type. Sizes and options stay the same; only the layout/design changes. Choose &quot;User&quot; in the Design set dropdown to use these when generating.</p>
+          <div id="userTemplatesList" class="list-group list-group-flush">
+            <!-- Rows filled by JS: Horizontal, Vertical, Mini, Double, Preroll, Inventory -->
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>
@@ -11144,49 +11289,29 @@
       }
     };
 
-    // Restore cached JSON match results when modal opens
+    // Clear stale JSON match cache on page load so old URLs don't persist across restarts
+    document.addEventListener('DOMContentLoaded', function() {
+      sessionStorage.removeItem('agt_json_match_cache');
+    });
+
+    // Reset JSON modal to clean state when it opens (no old URLs or results)
     document.addEventListener('DOMContentLoaded', function() {
       const jsonMatchModal = document.getElementById('jsonMatchModal');
       if (jsonMatchModal) {
         jsonMatchModal.addEventListener('show.bs.modal', function() {
-          try {
-            const cached = sessionStorage.getItem('agt_json_match_cache');
-            if (!cached) return;
-            const { url, result } = JSON.parse(cached);
-            if (!result) return;
-            const urlInput = document.getElementById('jsonUrlInput');
-            if (urlInput && url) {
-              urlInput.value = url;
-            }
-            const resultsDiv = document.getElementById('jsonMatchResults');
-            const matchCountEl = document.getElementById('matchCount');
-            const matchedListEl = document.getElementById('matchedProductsList');
-            const subtitleEl = document.getElementById('jsonMatchResultsSubtitle');
-            const viewDetailedWrap = document.getElementById('jsonMatchViewDetailedWrap');
-            if (resultsDiv && matchCountEl && matchedListEl) {
-              const totalMatches = result.total_matches || 0;
-              const highConf = result.high_confidence_matches || [];
-              matchCountEl.textContent = totalMatches;
-              if (subtitleEl) {
-                subtitleEl.textContent = 'Previous results – view or run a new match';
-              }
-              if (viewDetailedWrap) {
-                viewDetailedWrap.classList.remove('d-none');
-              }
-              const matches = result.detailed_matches || result.matches || [];
-              const items = highConf.length ? highConf : (matches.filter(m => m.best_match).map(m => m.best_match));
-              const getName = (item) => {
-                if (!item) return 'Unknown';
-                const t = item.best_match || item;
-                return t['Product Name*'] || t['ProductName'] || t['Product Name'] || 'Unknown';
-              };
-              matchedListEl.innerHTML = items.length ? items.map((item, i) => {
-                return `<div class="small py-1">${i + 1}. ${getName(item)}</div>`;
-              }).join('') : '<em class="text-muted">No matched products</em>';
-              resultsDiv.classList.remove('d-none');
-            }
-          } catch (e) {
-            console.warn('Error restoring cached JSON match:', e);
+          // Always start with a clean URL input — never restore old URLs
+          const urlInput = document.getElementById('jsonUrlInput');
+          if (urlInput) {
+            urlInput.value = '';
+          }
+          // Hide previous results
+          const resultsDiv = document.getElementById('jsonMatchResults');
+          if (resultsDiv) {
+            resultsDiv.classList.add('d-none');
+          }
+          const viewDetailedWrap = document.getElementById('jsonMatchViewDetailedWrap');
+          if (viewDetailedWrap) {
+            viewDetailedWrap.classList.add('d-none');
           }
         });
       }
@@ -11824,7 +11949,7 @@
               <p class="small text-muted mb-2">Paste a JSON URL containing inventory transfer data to automatically match and select products from your loaded Excel file.</p>
 
               <div class="input-group mb-2">
-                <input type="url" class="form-control form-control-lg" id="jsonUrlInput" placeholder="https://example.com/inventory-transfer.json" autocomplete="off" required>
+                <input type="text" inputmode="url" class="form-control form-control-lg" id="jsonUrlInput" placeholder="https://example.com/inventory-transfer.json" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" required>
                 <button class="btn btn-primary btn-lg" type="button" onclick="performDetailedJsonMatch()">Match JSON</button>
               </div>
               <div class="text-muted small">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
@@ -11861,6 +11986,27 @@
             </div>
           </div>
         </div>
+                <script>
+                  // Prevent browser autocomplete/history dropdown on JSON URL input.
+                  (function(){
+                    try{
+                      var el = document.getElementById('jsonUrlInput');
+                      if(!el) return;
+                      el.setAttribute('autocomplete','off');
+                      el.setAttribute('autocorrect','off');
+                      el.setAttribute('autocapitalize','off');
+                      el.setAttribute('spellcheck','false');
+                      // Trick: make readonly to suppress browser suggestions, then remove on focus
+                      el.setAttribute('readonly','readonly');
+                      var onFocus = function(){
+                        el.removeAttribute('readonly');
+                        el.removeEventListener('focus', onFocus);
+                        setTimeout(function(){ try{ el.select(); }catch(e){} }, 0);
+                      };
+                      el.addEventListener('focus', onFocus);
+                    }catch(e){ console && console.debug && console.debug('jsonUrlInput autocomplete suppression failed', e); }
+                  })();
+                </script>
       </div>
     </div>
   </div>
@@ -11951,9 +12097,9 @@
             
             <div class="mb-3">
               <label for="jsonInventoryUrlInput" class="form-label">JSON URL:</label>
-              <input type="url" class="form-control form-control-modern" id="jsonInventoryUrlInput" 
-                     placeholder="https://example.com/inventory-transfer.json" 
-                     autocomplete="off" required>
+              <input type="text" inputmode="url" class="form-control form-control-modern" id="jsonInventoryUrlInput"
+                     placeholder="https://example.com/inventory-transfer.json"
+                     autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other" required>
               <div class="form-text">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
             </div>
             

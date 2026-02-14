@@ -27,9 +27,9 @@
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
   
-  --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
+  --tag-list-height: max(var(--tag-list-min-height), calc(110vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: 78rem;     /* Height of center control panel */
+  --center-panel-height: 64rem;   /* Center column - natural content height */
   --tag-list-scroll-padding: 1rem;
 }
 
@@ -757,42 +757,42 @@ canvas#lava-lamp-canvas {
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
 :root {
   --tag-list-vertical-offset: clamp(3.25rem, 4.5vh, 5rem);
-  --tag-list-min-height: 58rem;
+  --tag-list-min-height: 20rem;  /* Reasonable min so tag lists fill viewport, don't explode layout */
 }
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: 64rem;
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: 64rem;
   }
 }
 
-/* Direct overrides for fixed vh panels */
+/* Direct overrides for fixed vh panels - tag lists use viewport height, not giant rem */
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: 64rem;
   }
   #availableTags,
   #selectedTags {
-    height: var(--center-panel-height) !important;
-    min-height: var(--center-panel-height) !important;
+    height: var(--tag-list-height) !important;
+    min-height: var(--tag-list-height) !important;
   }
 }
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: 64rem;
   }
   #availableTags,
   #selectedTags {
-    height: var(--center-panel-height) !important;
-    min-height: var(--center-panel-height) !important;
+    height: var(--tag-list-height) !important;
+    min-height: var(--tag-list-height) !important;
   }
 }
 
@@ -832,10 +832,10 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 72vh);
-    --center-panel-height: max(78rem, var(--tag-list-height));
+    --center-panel-height: 57rem;
   }
   @supports (height: 100dvh) {
-    :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: max(78rem, var(--tag-list-height)); }
+  :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: 64rem; }
   }
   .control-panel,
   .center-panel,
@@ -870,7 +870,7 @@ body.modal-open #mainContent.store-selection-disabled,
 .control-panel {
   justify-content: flex-start !important;
   align-items: stretch !important;
-  gap: 0 !important;
+  gap: 0.5rem !important;
   overflow-y: visible !important;
   overflow-x: hidden !important;
   height: auto !important;
@@ -921,7 +921,7 @@ body.modal-open #mainContent.store-selection-disabled,
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
-  gap: 0 !important;
+  gap: 0.5rem !important;
 }
  
 .control-section .d-grid,
@@ -1010,7 +1010,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: 57rem;     /* Height of center control panel */
+    --center-panel-height: 64rem;     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
 
     /* Dynamic filter border sizing */
@@ -1755,18 +1755,33 @@ body.modal-open #mainContent.store-selection-disabled,
     
     /* Generate button on mobile */
     #generateBtn {
-      padding: 0.85rem 1.2rem !important;
-      font-size: 1.15rem !important;
-      min-height: 52px !important;
-      height: auto !important;
-      width: 100% !important;
-      max-width: 100% !important;
-      margin: 0 auto !important;
-      display: flex !important;
+      background: linear-gradient(135deg, rgba(34, 197, 94, 0.5), rgba(22, 163, 74, 0.6)) !important;
+      backdrop-filter: blur(20px) saturate(1.2) !important;
+      -webkit-backdrop-filter: blur(20px) saturate(1.2) !important;
+      border: 2px solid rgba(34, 197, 94, 0.8) !important;
+      color: #ecfdf5 !important;
+      padding: 1.15rem 1.5rem !important;
+      border-radius: 0 !important;
+      font-weight: 600 !important;
+      font-size: 1.35rem !important;
+      min-height: 60px !important;
+      transition: all 0.2s ease !important;
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        0 0 12px rgba(34, 197, 94, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+      text-decoration: none !important;
+      display: inline-flex !important;
       align-items: center !important;
       justify-content: center !important;
-      line-height: 1.2 !important;
-      text-align: center !important;
+      gap: 8px !important;
+      cursor: pointer !important;
+      outline: none !important;
+      position: relative !important;
+      overflow: hidden !important;
+      text-shadow: none !important;
+      width: 100% !important;
+      max-width: 100% !important;
       white-space: nowrap !important;
       overflow: visible !important;
     }
@@ -3044,14 +3059,14 @@ body.modal-open #mainContent.store-selection-disabled,
   padding-bottom: 0.15rem !important;
 }
   
-  /* Ensure center panel uses full available height */
+  /* Ensure center panel lays out naturally without forcing massive height */
   .control-panel {
     justify-content: flex-start !important;
     align-items: stretch !important;
     gap: 0 !important;
     overflow-y: visible !important;
-    height: var(--center-panel-height) !important;
-    min-height: var(--center-panel-height) !important;
+    height: auto !important;
+    min-height: auto !important;
   }
   
   /* Center panel grid alignment */
@@ -3139,7 +3154,9 @@ body.modal-open #mainContent.store-selection-disabled,
     -moz-text-align-last: center !important;
     text-align-last: center !important;
     font-size: 1em !important;
-    padding: 10px 54px 10px 42px !important;  /* Balanced padding to center text with arrow */
+    padding: 16px 54px 18px 42px !important;  /* Increased vertical padding for taller appearance */
+    min-height: 60px !important;  /* Increased height */
+    height: 60px !important;  /* Increased height */
     border: 1px solid #ffffff !important;
     box-shadow: 0 0 20px rgba(0, 212, 170, 0.847) !important;
     color: #f7f8ff !important;
@@ -3161,8 +3178,8 @@ body.modal-open #mainContent.store-selection-disabled,
     margin: 1.5rem auto 0.2rem auto !important; /* Increased top margin for healthy gap from template select */
     padding: 0.7rem 1.2rem !important;
     font-size: 1.05rem !important;
-    width: 70% !important; /* Match control buttons width */
-    max-width: 70% !important; /* Match control buttons width */
+    width: 75% !important; /* Match control buttons width */
+    max-width: 75% !important; /* Match control buttons width */
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -3202,7 +3219,7 @@ body.modal-open #mainContent.store-selection-disabled,
     padding: 1.15rem 1.5rem !important;
     border-radius: 12px !important;
     font-weight: 600 !important;
-    font-size: 1.1rem !important;
+    font-size: 1.3rem !important;
     min-height: 60px !important;
     transition: all 0.2s ease !important;
     box-shadow: 
@@ -3260,6 +3277,58 @@ body.modal-open #mainContent.store-selection-disabled,
   
   .btn-generate-themed:hover::before,
   #generateBtn:hover::before {
+    left: 100%;
+  }
+  
+  /* Manage templates button - same visual style and shape as Generate button */
+  .btn-manage-templates,
+  #manageTemplatesBtn.btn-manage-templates {
+    background: linear-gradient(135deg, rgba(51, 153, 102)) !important;
+    border-color: rgba(251, 146, 60, 0.8) !important;
+    color: #ffffff !important;
+    max-width: 70%; 
+    box-shadow: 
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(251, 146, 60, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding */
+    min-height: 42px !important; /* Ensure consistent height */
+    }
+
+  .btn-manage-templates:hover,
+  #manageTemplatesBtn.btn-manage-templates:hover {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.65), rgba(22, 163, 74, 0.75)) !important;
+    border-color: rgba(34, 197, 94, 1) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 20px rgba(34, 197, 94, 0.6), 0 0 20px rgba(34, 197, 94, 0.5) !important;
+    transform: translateY(-2px) scale(1.02) !important;
+  }
+  .btn-manage-templates:active,
+  #manageTemplatesBtn.btn-manage-templates:active {
+    transform: translateY(0) scale(1) !important;
+    transition: transform 0.1s ease !important;
+  }
+  .btn-manage-templates:focus,
+  #manageTemplatesBtn.btn-manage-templates:focus {
+    box-shadow:
+      0 0 0 4px rgba(34, 197, 94, 0.3),
+      0 2px 8px rgba(0, 0, 0, 0.15),
+      0 0 12px rgba(34, 197, 94, 0.4) !important;
+    outline: none !important;
+  }
+  .btn-manage-templates::before,
+  #manageTemplatesBtn.btn-manage-templates::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    transition: left 0.5s ease;
+  }
+  .btn-manage-templates:hover::before,
+  #manageTemplatesBtn.btn-manage-templates:hover::before {
     left: 100%;
   }
   
@@ -6802,17 +6871,17 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.4em; /* Increased substantially */
+    font-size: 1.6em; /* Larger than before, below vendor */
     font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
     letter-spacing: 0.03em;
     color: #cbb6f6;
   }
-
+  
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.35em; /* Increased substantially */
+    font-size: 1.45em; /* Larger than before, below brand */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -6821,10 +6890,10 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Ensure checkboxes within product type headers are clickable */
     pointer-events: auto;
   }
-
+  
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 0.98em;
+    font-size: 1.1em; /* Slightly larger for better readability */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 3.2em;
@@ -6916,10 +6985,10 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1.5px solid rgba(160, 132, 232, 0.3) !important;
     box-shadow: none !important;
     border-radius: 10px !important;
-    padding: 14px 54px 16px 42px !important;  /* Balanced padding to center text with arrow */
-    font-size: 1em !important;
-    min-height: auto !important;
-    height: auto !important;
+    padding: 20px 54px 22px 42px !important;  /* More vertical padding for taller look */
+    font-size: 1.4rem !important;
+    min-height: 72px !important;              /* Taller control for better visibility */
+    height: 72px !important;
     backdrop-filter: blur(8px) !important;
     -webkit-backdrop-filter: blur(8px) !important;
     transition: border 0.2s, box-shadow 0.2s !important;
@@ -6932,9 +7001,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
     /* Layout and sizing */
     box-sizing: border-box !important;
-    width: auto !important;
-    min-width: 250px !important;
-    max-width: none !important;
+    width: 100% !important;          /* Fill available width in the center column */
+    min-width: 220px !important;     /* Match narrow control-column width */
+    max-width: 280px !important;     /* Same as other control buttons */
     line-height: 1.6 !important;
 
     /* Text alignment - FORCE centered, accounting for arrow */
@@ -7787,9 +7856,12 @@ body.modal-open #mainContent.store-selection-disabled,
     padding-top: 0 !important;
     margin-top: auto !important;
     margin-bottom: auto !important;
-    height: var(--center-panel-height) !important;
+    height: auto !important;
+    min-height: auto !important;
     display: flex;
     flex-direction: column;
+    overflow-y: visible !important;
+    max-height: none !important;
   }
 
 .main-content-row {
@@ -9620,6 +9692,20 @@ body.modal-open #mainContent.store-selection-disabled,
   .strain-lineage-editor .form-control:focus {
     border-color: #007bff;
     box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+  }
+
+  /* Apply the same light-blue focus/border to other dropdowns and selects site-wide */
+  .form-select:focus,
+  select:focus,
+  .filter-select:focus,
+  #templateSelect:focus,
+  #templateGroupSelect:focus,
+  .template-group-radio-wrapper select:focus,
+  .control-panel .filter-select:focus,
+  .template-dropdowns-center .form-select:focus {
+    border-color: #007bff !important;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+    outline: none !important;
   }
 
   /* Alert Styles */

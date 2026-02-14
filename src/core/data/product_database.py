@@ -1410,9 +1410,54 @@ class ProductDatabase:
                 brand_value = product_data.get(get_canonical_field('Product Brand'), '')
                 weight_value = product_data.get('Weight*', '')
                 
+                # Import CLASSIC_TYPES for unit preference logic
+                import re
+                from src.core.constants import CLASSIC_TYPES
+                product_type_for_cbd = product_data.get('Product Type*', '').strip().lower()
+                is_classic_type = product_type_for_cbd in CLASSIC_TYPES or any(ct in product_type_for_cbd for ct in CLASSIC_TYPES)
+                
+                # Helper function to check if units are "better" (proper units preferred over g for non-classic types)
+                def has_better_units(new_units: str, existing_units: str, is_nonclassic: bool) -> bool:
+                    """Return True if new_units is better than existing_units for non-classic types.
+                    
+                    For edibles/non-classic types, proper units are:
+                    - mg (milligrams) - preferred over grams
+                    - count/each/pieces - preferred over grams  
+                    - oz - preferred over grams
+                    - ml (milliliters) - preferred over grams
+                    """
+                    if not is_nonclassic:
+                        return False  # No preference for classic types
+                    new_units_lower = (new_units or '').strip().lower()
+                    existing_units_lower = (existing_units or '').strip().lower()
+                    
+                    # Proper units for edibles/non-classic types (in order of preference)
+                    proper_units = ['mg', 'milligram', 'count', 'each', 'piece', 'pieces', 'oz', 'ounce', 'ml', 'milliliter']
+                    
+                    # Check if new has proper units and existing has grams
+                    new_has_proper = any(unit in new_units_lower for unit in proper_units)
+                    existing_has_grams = 'g' in existing_units_lower or 'gram' in existing_units_lower
+                    
+                    if new_has_proper and existing_has_grams:
+                        return True  # New has proper units, existing has grams -> prefer new
+                    
+                    # Also prefer oz over g (already handled above, but keep for clarity)
+                    if ('oz' in new_units_lower or 'ounce' in new_units_lower) and ('g' in existing_units_lower or 'gram' in existing_units_lower):
+                        return True
+                    
+                    # Prefer mg over g
+                    if ('mg' in new_units_lower or 'milligram' in new_units_lower) and ('g' in existing_units_lower or 'gram' in existing_units_lower):
+                        return True
+                    
+                    # Prefer count/each/pieces over g
+                    if any(unit in new_units_lower for unit in ['count', 'each', 'piece', 'pieces']) and ('g' in existing_units_lower or 'gram' in existing_units_lower):
+                        return True
+                    
+                    return False
+                
                 # First check exact match (name + vendor + brand + weight) - matches UNIQUE constraint
                 cursor.execute('''
-                    SELECT id, total_occurrences, "Product Name*"
+                    SELECT id, total_occurrences, "Product Name*", Units, "Product Type*"
                     FROM products 
                     WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
                 ''', (normalized_name, vendor_value, brand_value, weight_value))
@@ -1420,10 +1465,38 @@ class ProductDatabase:
                 existing = cursor.fetchone()
                 
                 if existing:
-                    product_id, occurrences, existing_name = existing
+                    product_id, occurrences, existing_name, existing_units, existing_product_type = existing
+                    
+                    # Check if we should prefer existing or new based on units (for non-classic types)
+                    new_units = product_data.get('Units', '') or product_data.get('Weight Unit* (grams/gm or ounces/oz)', '')
+                    existing_is_nonclassic = existing_product_type and existing_product_type.strip().lower() not in CLASSIC_TYPES and not any(ct in existing_product_type.strip().lower() for ct in CLASSIC_TYPES)
+                    
+                    # Check if existing has better units - if so, keep existing
+                    if existing_is_nonclassic and has_better_units(existing_units or '', new_units, True):
+                        # Existing has better units (mg/count/oz vs g), keep existing and skip update
+                        logger.info(f"Found existing product '{existing_name}' (ID: {product_id}) with better units ({existing_units} vs {new_units}) - KEEPING EXISTING")
+                        conn.commit()
+                        return product_id
+                    
+                    # Check if new has better units - if so, prefer new (update existing)
+                    if existing_is_nonclassic and has_better_units(new_units, existing_units or '', True):
+                        # New has better units (mg/count/oz vs g), prefer new - will update below
+                        logger.info(f"Found existing product '{existing_name}' (ID: {product_id}) - NEW has better units ({new_units} vs {existing_units}) - PREFERRING NEW")
                     
                     # Log duplicate detection and update
                     logger.info(f"Found existing product: '{existing_name}' (ID: {product_id}, occurrences: {occurrences}) - REPLACING WITH NEW EXCEL DATA")
+                    
+                    # CBD detection before update: Check product name/description for ratios/CBD tokens
+                    if not is_classic_type:
+                        product_name_upper = (product_name or '').upper()
+                        description_upper = (product_data.get('Description', '') or '').upper()
+                        has_ratio = bool(re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', product_name_upper) or re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', description_upper))
+                        has_cbd_token = any(token in product_name_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']) or any(token in description_upper for token in ['CBD', 'CBG', 'CBN', 'CBC'])
+                        
+                        if has_ratio or has_cbd_token:
+                            product_data['Product Strain'] = 'CBD Blend'
+                            product_data['Lineage'] = 'CBD'
+                            logger.info(f"✅ CBD DETECTION (update): Product '{product_name}' has CBD indicators -> Product Strain='CBD Blend', Lineage='CBD'")
                     
                     # Update existing product with new data (new data always replaces old values)
                     try:
@@ -1442,32 +1515,78 @@ class ProductDatabase:
                         raise
                 
                 # If no exact match, check by name and vendor only (ignore brand differences)
+                # Also check for duplicates with different weights but prefer ones with better units
                 cursor.execute('''
-                    SELECT id, total_occurrences, "Product Name*", "Product Brand"
+                    SELECT id, total_occurrences, "Product Name*", "Product Brand", Units, "Product Type*", "Weight*"
                     FROM products 
                     WHERE normalized_name = ? AND "Vendor/Supplier*" = ?
                     ORDER BY updated_at DESC
-                    LIMIT 1
                 ''', (normalized_name, vendor_value))
                 
-                vendor_match = cursor.fetchone()
-                if vendor_match:
-                    product_id, occurrences, existing_name, existing_brand = vendor_match
-                    logger.info(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
-                    try:
-                        self._update_existing_product(cursor, product_id, product_data)
-                        conn.commit()
-                        logger.info(f"Successfully updated product '{existing_name}' with new Excel data")
-                        return product_id
-                    except RuntimeError as e:
-                        # Handle database corruption recovery - retry the entire operation
-                        if "corruption" in str(e).lower() or "recovered" in str(e).lower():
-                            logger.info(f"🔄 Retrying product update after corruption recovery...")
-                            conn.rollback()
-                            # Close connection and retry from the beginning
-                            self.close_all_connections()
-                            return self.add_or_update_product(product_data)
-                        raise
+                vendor_matches = cursor.fetchall()
+                if vendor_matches:
+                    # For non-classic types, prefer matches with proper units (mg, count, oz) over grams
+                    best_match = None
+                    best_match_score = -1
+                    
+                    for match in vendor_matches:
+                        match_id, match_occurrences, match_name, match_brand, match_units, match_product_type, match_weight = match
+                        match_is_nonclassic = match_product_type and match_product_type.strip().lower() not in CLASSIC_TYPES and not any(ct in match_product_type.strip().lower() for ct in CLASSIC_TYPES)
+                        
+                        # Score: prefer proper units (mg, count, oz, ml) over grams for non-classic types
+                        score = 0
+                        if match_is_nonclassic:
+                            match_units_lower = (match_units or '').strip().lower()
+                            # Highest priority: mg, count, each, pieces (proper units for edibles)
+                            if 'mg' in match_units_lower or 'milligram' in match_units_lower:
+                                score = 4  # mg is most preferred for edibles
+                            elif any(unit in match_units_lower for unit in ['count', 'each', 'piece', 'pieces']):
+                                score = 4  # count/each/pieces also most preferred
+                            elif 'oz' in match_units_lower or 'ounce' in match_units_lower:
+                                score = 3  # oz is preferred
+                            elif 'ml' in match_units_lower or 'milliliter' in match_units_lower:
+                                score = 3  # ml is preferred
+                            elif 'g' in match_units_lower or 'gram' in match_units_lower:
+                                score = 1  # g is least preferred for non-classic types
+                        
+                        if score > best_match_score:
+                            best_match_score = score
+                            best_match = match
+                    
+                    if best_match:
+                        product_id, occurrences, existing_name, existing_brand, existing_units, existing_product_type, existing_weight = best_match
+                        
+                        # Check if new data has better units
+                        new_units = product_data.get('Units', '') or product_data.get('Weight Unit* (grams/gm or ounces/oz)', '')
+                        existing_is_nonclassic = existing_product_type and existing_product_type.strip().lower() not in CLASSIC_TYPES and not any(ct in existing_product_type.strip().lower() for ct in CLASSIC_TYPES)
+                        
+                        # Check if existing has better units - if so, keep existing
+                        if existing_is_nonclassic and has_better_units(existing_units or '', new_units, True):
+                            # Existing has better units (mg/count/oz vs g), keep existing
+                            logger.info(f"Found similar product '{existing_name}' (ID: {product_id}) with better units ({existing_units} vs {new_units}) - KEEPING EXISTING")
+                            conn.commit()
+                            return product_id
+                        
+                        # Check if new has better units - if so, prefer new (update existing)
+                        if existing_is_nonclassic and has_better_units(new_units, existing_units or '', True):
+                            # New has better units (mg/count/oz vs g), prefer new - will update below
+                            logger.info(f"Found similar product '{existing_name}' (ID: {product_id}) - NEW has better units ({new_units} vs {existing_units}) - PREFERRING NEW")
+                        
+                        logger.info(f"Found similar product by name+vendor: '{existing_name}' (Brand: {existing_brand}) - REPLACING WITH NEW DATA")
+                        try:
+                            self._update_existing_product(cursor, product_id, product_data)
+                            conn.commit()
+                            logger.info(f"Successfully updated product '{existing_name}' with new Excel data")
+                            return product_id
+                        except RuntimeError as e:
+                            # Handle database corruption recovery - retry the entire operation
+                            if "corruption" in str(e).lower() or "recovered" in str(e).lower():
+                                logger.info(f"🔄 Retrying product update after corruption recovery...")
+                                conn.rollback()
+                                # Close connection and retry from the beginning
+                                self.close_all_connections()
+                                return self.add_or_update_product(product_data)
+                            raise
                 
                 # Check for similar products (same name + vendor, different brand)
                 cursor.execute('''
@@ -1496,16 +1615,39 @@ class ProductDatabase:
                     columns_to_insert = []
                     values_to_insert = []
                     
+                    # CBD detection: Check product name/description for ratios (1:1:1, etc.) or CBD tokens
+                    # Only for nonclassic types - classic types keep their Lineage
+                    import re
+                    from src.core.constants import CLASSIC_TYPES
+                    product_type_for_cbd = product_data.get('Product Type*', '').strip().lower()
+                    is_classic_type = product_type_for_cbd in CLASSIC_TYPES or any(ct in product_type_for_cbd for ct in CLASSIC_TYPES)
+                    
+                    product_name_upper = (product_name or '').upper()
+                    description_upper = (product_data.get('Description', '') or '').upper()
+                    has_ratio = bool(re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', product_name_upper) or re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', description_upper))
+                    has_cbd_token = any(token in product_name_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']) or any(token in description_upper for token in ['CBD', 'CBG', 'CBN', 'CBC'])
+                    
+                    # Calculate Product Strain first
+                    calculated_strain = self._calculate_product_strain_original(
+                        product_data.get('Product Type*', ''),
+                        product_data.get('Product Name*', ''),
+                        product_data.get('Description', ''),
+                        product_data.get('Ratio', '')
+                    )
+                    
+                    # For nonclassic types: if CBD indicators found, override Product Strain and Lineage
+                    final_strain = calculated_strain
+                    final_lineage = lineage_to_use
+                    if not is_classic_type and (has_ratio or has_cbd_token):
+                        final_strain = 'CBD Blend'
+                        final_lineage = 'CBD'
+                        logger.info(f"✅ CBD DETECTION: Product '{product_name}' has CBD indicators -> Product Strain='CBD Blend', Lineage='CBD'")
+                    
                     # Map of data to potential column names
                     column_data_map = {
                         'Product Name*': product_name,
                         'normalized_name': normalized_name,
-                        'Product Strain': self._calculate_product_strain_original(
-                            product_data.get('Product Type*', ''),
-                            product_data.get('Product Name*', ''),
-                            product_data.get('Description', ''),
-                            product_data.get('Ratio', '')
-                        ),
+                        'Product Strain': final_strain,
                         'Product Type*': product_data.get('Product Type*'),  # EXCEL PRIORITY: Excel Product Type (High THC/CBD) always overwrites DB
                         'Vendor/Supplier*': product_data.get('Vendor/Supplier*'),
                         'Product Brand': product_data.get('Product Brand'),
@@ -1513,7 +1655,7 @@ class ProductDatabase:
                         'Weight*': product_data.get('Weight*'),
                         'Units': product_data.get('Units'),
                         'Price': product_data.get('Price'),  # EXCEL PRIORITY: Excel Price always overwrites DB
-                        'Lineage': lineage_to_use,  # SOVEREIGN PRIORITY: Use sovereign_lineage if set, otherwise Excel
+                        'Lineage': final_lineage,  # CBD override for nonclassic types
                         'first_seen_date': current_date,
                         'last_seen_date': current_date,
                         'created_at': current_date,
@@ -1871,10 +2013,35 @@ class ProductDatabase:
                                  '')
                     vendor_value = self._ensure_crucial_value(vendor_raw, 'Unknown Vendor', 'Vendor')
                     
+                    # CBD detection: Check product name/description for ratios (1:1:1, etc.) or CBD tokens
+                    # Only for nonclassic types - classic types keep their Lineage
+                    import re
+                    from src.core.constants import CLASSIC_TYPES
+                    product_name_for_cbd = row_dict.get('Product Name*', '')
+                    product_type_for_cbd = self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type').strip().lower()
+                    is_classic_type = product_type_for_cbd in CLASSIC_TYPES or any(ct in product_type_for_cbd for ct in CLASSIC_TYPES)
+                    
+                    product_name_upper = (product_name_for_cbd or '').upper()
+                    description_upper = (row_dict.get('Description', '') or '').upper()
+                    has_ratio = bool(re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', product_name_upper) or re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', description_upper))
+                    has_cbd_token = any(token in product_name_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']) or any(token in description_upper for token in ['CBD', 'CBG', 'CBN', 'CBC'])
+                    
+                    # Determine Product Strain and Lineage
+                    original_strain = row_dict.get('Product Strain', '')
+                    original_lineage = row_dict.get('Lineage', '')
+                    
+                    # For nonclassic types: if CBD indicators found, override Product Strain and Lineage
+                    final_strain = original_strain
+                    final_lineage = original_lineage
+                    if not is_classic_type and (has_ratio or has_cbd_token):
+                        final_strain = 'CBD Blend'
+                        final_lineage = 'CBD'
+                        logger.info(f"✅ CBD DETECTION (store_excel_data): Product '{product_name_for_cbd}' has CBD indicators -> Product Strain='CBD Blend', Lineage='CBD'")
+                    
                     product_data = {
-                        'Product Name*': row_dict.get('Product Name*', ''),
+                        'Product Name*': product_name_for_cbd,
                         'Product Type*': self._ensure_crucial_value(row_dict.get('Product Type*', ''), 'Unknown', 'Product Type'),
-                        'Lineage': row_dict.get('Lineage', ''),
+                        'Lineage': final_lineage,
                         'Vendor/Supplier*': vendor_value,
                         'Vendor': vendor_value,
                         'Product Brand': self._ensure_crucial_value(row_dict.get('Product Brand', ''), 'Unknown Brand', 'Product Brand'),
@@ -1885,7 +2052,7 @@ class ProductDatabase:
                         'Weight*': weight_value,
                         'Units': units_value,
                         'Price': self._ensure_crucial_value(row_dict.get('Price*', row_dict.get('Price', '')), '0.00', 'Price'),
-                        'Product Strain': row_dict.get('Product Strain', ''),
+                        'Product Strain': final_strain,
                         'Quantity*': row_dict.get('Quantity*', ''),
                         # CRITICAL FIX: Check multiple DOH column names from Excel
                         'DOH': (row_dict.get('DOH', '') or 
@@ -4845,6 +5012,157 @@ class ProductDatabase:
         return ratio
     
     
+    def batch_fix_cbd_products(self) -> Dict[str, Any]:
+        """Batch update all products in database: set Product Strain='CBD Blend' and Lineage='CBD' for products with CBD indicators."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            import re
+            from src.core.constants import CLASSIC_TYPES
+            
+            # Get all nonclassic products
+            cursor.execute('''
+                SELECT id, "Product Name*", "Product Type*", "Description", "Product Strain", "Lineage"
+                FROM products
+            ''')
+            
+            products = cursor.fetchall()
+            updated_count = 0
+            
+            for product_id, product_name, product_type, description, current_strain, current_lineage in products:
+                if not product_name:
+                    continue
+                    
+                product_type_lower = (product_type or '').strip().lower()
+                is_classic_type = product_type_lower in CLASSIC_TYPES or any(ct in product_type_lower for ct in CLASSIC_TYPES)
+                
+                if is_classic_type:
+                    continue  # Skip classic types
+                
+                # Check for CBD indicators
+                product_name_upper = (product_name or '').upper()
+                description_upper = (description or '').upper()
+                has_ratio = bool(re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', product_name_upper) or re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', description_upper))
+                has_cbd_token = any(token in product_name_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']) or any(token in description_upper for token in ['CBD', 'CBG', 'CBN', 'CBC'])
+                
+                if has_ratio or has_cbd_token:
+                    # Update to CBD Blend / CBD
+                    cursor.execute('''
+                        UPDATE products 
+                        SET "Product Strain" = ?,
+                            "Lineage" = ?,
+                            sovereign_lineage = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''', ('CBD Blend', 'CBD', 'CBD', product_id))
+                    updated_count += 1
+                    logger.info(f"✅ BATCH CBD FIX: Updated '{product_name}' -> Product Strain='CBD Blend', Lineage='CBD'")
+            
+            conn.commit()
+            logger.info(f"✅ BATCH CBD FIX: Updated {updated_count} products with CBD indicators")
+            
+            return {
+                'success': True,
+                'updated_count': updated_count,
+                'message': f'Successfully updated {updated_count} products with CBD indicators'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error batch fixing CBD products: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to batch fix CBD products: {str(e)}'
+            }
+    
+    def batch_fix_nonclassic_gram_weights(self) -> Dict[str, Any]:
+        """Batch fix non-classic products that have gram weights by converting them to ounces."""
+        try:
+            self.init_database()
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            from src.core.constants import CLASSIC_TYPES
+            
+            # Get all non-classic products with gram weights
+            cursor.execute('''
+                SELECT id, "Product Name*", "Product Type*", "Weight*", Units
+                FROM products
+            ''')
+            
+            products = cursor.fetchall()
+            updated_count = 0
+            skipped_count = 0
+            
+            for product_id, product_name, product_type, weight, units in products:
+                if not product_name or not product_type:
+                    continue
+                
+                product_type_lower = (product_type or '').strip().lower()
+                is_classic_type = product_type_lower in CLASSIC_TYPES or any(ct in product_type_lower for ct in CLASSIC_TYPES)
+                
+                if is_classic_type:
+                    continue  # Skip classic types
+                
+                # Check if units are grams
+                units_lower = (units or '').strip().lower()
+                if 'g' not in units_lower and 'gram' not in units_lower:
+                    continue  # Not grams, skip
+                
+                # Check if already has oz
+                if 'oz' in units_lower or 'ounce' in units_lower:
+                    skipped_count += 1
+                    continue  # Already has ounces
+                
+                # Convert grams to ounces
+                try:
+                    weight_val = float(str(weight).strip())
+                    oz_val = round(weight_val / 28.3495, 2)
+                    
+                    # Format weight without trailing zeros
+                    if oz_val.is_integer():
+                        formatted_weight = str(int(oz_val))
+                    else:
+                        formatted_weight = f"{oz_val:.2f}".rstrip('0').rstrip('.')
+                    
+                    # Update product with ounces
+                    cursor.execute('''
+                        UPDATE products 
+                        SET "Weight*" = ?,
+                            Units = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''', (formatted_weight, 'oz', product_id))
+                    updated_count += 1
+                    logger.info(f"✅ BATCH GRAM FIX: Converted '{product_name}' from {weight}g to {formatted_weight}oz")
+                    
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"⚠️ Could not convert weight '{weight}' for product '{product_name}': {e}")
+                    skipped_count += 1
+                    continue
+            
+            conn.commit()
+            logger.info(f"✅ BATCH GRAM FIX: Converted {updated_count} non-classic products from grams to ounces (skipped {skipped_count})")
+            
+            return {
+                'success': True,
+                'updated_count': updated_count,
+                'skipped_count': skipped_count,
+                'message': f'Successfully converted {updated_count} non-classic products from grams to ounces'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error batch fixing non-classic gram weights: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'error': str(e),
+                'message': f'Failed to batch fix non-classic gram weights: {str(e)}'
+            }
+    
     def update_all_product_strains(self) -> Dict[str, Any]:
         """Update all products with correct Product Strain values based on Excel logic."""
         try:
@@ -6235,10 +6553,16 @@ class ProductDatabase:
                     'solid edible': ['solid edible', 'edible', 'gummy', 'chocolate', 'candy', 'cookie', 'brownie'],
                     'topical ointment': ['topical ointment', 'topical', 'cream', 'balm', 'lotion', 'salve'],
                     'liquid edible': ['liquid edible', 'tincture', 'drops'],
-                    'core flower': ['core flower', 'flower', 'bud', 'nug']
+                    'core flower': ['core flower', 'flower', 'bud', 'nug'],
+                    # Vape/Concentrate for Inhalation must NOT match Flower - add explicit mappings
+                    'vape cartridge': ['vape', 'cartridge', 'cart', 'disposable', 'all-in-one', 'vape cartridge'],
+                    'concentrate': ['concentrate', 'rosin', 'wax', 'shatter', 'live resin', 'distillate', 'badder', 'diamonds', 'sauce', 'crumble'],
                 }
                 
                 product_type_lower = product_type.lower().strip()
+                # Also match "concentrate for inhalation" -> vape/concentrate (exclude flower)
+                if 'concentrate' in product_type_lower and 'inhalation' in product_type_lower:
+                    product_type_lower = 'vape cartridge'  # Treat as vape for filtering
                 if product_type_lower in product_type_mapping:
                     type_conditions = []
                     for db_type in product_type_mapping[product_type_lower]:

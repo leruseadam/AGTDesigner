@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 """
+Compatibility wrapper for the unified font sizing system.
+
+All actual logic now lives in `src.core.generation.unified_font_sizing`.
+This module exists only so older imports like `core.generation.unified_font_sizing`
+continue to work without duplicating any logic or configuration.
+"""
+
+from src.core.generation.unified_font_sizing import *  # noqa: F401,F403
+
+#!/usr/bin/env python3
+"""
 Unified font sizing system that consolidates all font sizing logic.
 This module replaces the repetitive font sizing functions across the codebase.
 """
@@ -43,10 +54,10 @@ def _load_font_sizing_config():
                     'default': [(10, 12), (20, 11), (float('inf'), 10)]
                 },
                 'double': {
-                    'description': [(10, 28), (20, 26), (30, 23), (40, 22), (50, 20), (60, 19), (70, 18), (80, 17), (90, 16), (100, 15), (110, 14), (120, 13), (130, 12), (float('inf'), 10)],
+                    'description': [(10, 32), (20, 28), (30, 26), (40, 24), (50, 23), (60, 22), (80, 21), (100, 20), (140, 18), (130, 17), (140, 16), (150, 15), (160, 14), (170, 13), (180, 12), (float('inf'), 10)],
                     'brand': [(5, 12), (15, 10), (20, 8), (30, 7.5), (40, 7), (float('inf'), 6.5)],
                     'price': [(10, 26), (15, 20), (float('inf'), 14)],
-                    'lineage': [(15, 13), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
+                    'lineage': [(15, 12), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
                     'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
@@ -223,15 +234,16 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             )
             return Pt(final_size)
     
-    # Special rule: If double template description has multiple words with 9+ characters each, automatically reduce to 18pt
+    # Double template description: flag for "more than 2 words and one word over 7 letters" → reduce computed size by 2pt (applied after config lookup)
+    double_description_reduce_2pt = False
     if orientation.lower() == 'double' and field_type.lower() == 'description':
         words = str(text).split()
-        long_words = [word for word in words if len(word) >= 9]
-        if len(long_words) >= 2:  # Multiple words with 9+ characters each
-            final_size = 18 * scale_factor
-            logger.debug(f"Double template description word length rule: text='{text}' has {len(long_words)} words with 9+ chars each: {long_words}, forcing 18pt font")
-            return Pt(final_size)
-    
+        word_count = len(words)
+        has_long_word = any(len(word) > 7 for word in words)  # over 7 letters = 8+
+        if word_count > 4 and has_long_word:
+            double_description_reduce_2pt = True
+            logger.debug(f"Double template description rule: text='{text}' has {word_count} words and a word over 7 letters, will reduce font by 2pt")
+
     # Get the appropriate configuration
     config = FONT_SIZING_CONFIG.get(complexity_type, {}).get(orientation.lower(), {}).get(field_type.lower(), [])
     
@@ -272,6 +284,9 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
             logger.info(f"PRICE DEBUG: threshold {threshold} -> size {size}, comp {comp} <= threshold? {comp <= threshold}")
         if comp <= threshold:  # Fixed: Use <= instead of < for proper threshold matching
             final_size = size * scale_factor
+            if double_description_reduce_2pt:
+                final_size = max(10.0, final_size - 2.0)
+                logger.debug(f"Double template description: applied 2pt reduction -> {final_size}pt")
             logger.debug(f"Selected size {size}pt (final: {final_size}pt)")
             if field_type.lower() == 'price':
                 logger.info(f"PRICE DEBUG: SELECTED {size}pt for '{text}'")
@@ -287,6 +302,8 @@ def get_font_size(text: str, field_type: str = 'default', orientation: str = 've
         fallback_size = 6.5 * scale_factor  # Use the configured size from the config
     else:
         fallback_size = 8 * scale_factor
+    if double_description_reduce_2pt:
+        fallback_size = max(8.0, fallback_size - 2.0)
     return Pt(fallback_size)
 
 def set_run_font_size(run, font_size):

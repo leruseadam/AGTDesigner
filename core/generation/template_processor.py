@@ -3602,8 +3602,8 @@ class TemplateProcessor:
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
             
-        # Apply unified font sizing to all text in vertical and double templates (not just markers)
-        if self.template_type in ['vertical', 'double']:
+        # Apply unified font sizing to all text in vertical, double, and horizontal templates (not just markers)
+        if self.template_type in ['vertical', 'double', 'horizontal']:
             self._apply_unified_font_sizing_to_all_text(doc)
         
         # Style vendor text in vertical templates (italic and gray)
@@ -3620,12 +3620,27 @@ class TemplateProcessor:
         try:
             from src.core.generation.unified_font_sizing import get_font_size
             
-            template_orientation = self.template_type if self.template_type in {'vertical', 'double'} else 'vertical'
+            # Use template-specific orientation when available so config matches (vertical, double, horizontal)
+            template_orientation = self.template_type if self.template_type in {'vertical', 'double', 'horizontal'} else 'vertical'
 
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
+                            # Paragraph-level reduction: same long-text rule we used on double template,
+                            # now applied to vertical & horizontal as well.
+                            full_text = "".join(r.text or "" for r in paragraph.runs)
+                            paragraph_reduce_pt = 0.0
+                            if template_orientation in ('double', 'vertical', 'horizontal') and full_text:
+                                if '$' not in full_text and '%' not in full_text:
+                                    words = full_text.split()
+                                    words_over_6 = sum(1 for w in words if len(w) > 6)  # 7+ letters
+                                    words_over_7 = sum(1 for w in words if len(w) > 7)  # 8+ letters
+                                    if words_over_6 >= 3:
+                                        paragraph_reduce_pt = 1.0
+                                    if len(words) >= 6 or words_over_7 >= 3:
+                                        paragraph_reduce_pt = 3.0
+
                             for run in paragraph.runs:
                                 run_text = run.text or ''
                                 if not run_text.strip():
@@ -3645,6 +3660,19 @@ class TemplateProcessor:
                                 
                                 # Apply unified font sizing
                                 font_size = get_font_size(run_text, field_type, template_orientation, self.scale_factor)
+
+                                # Paragraph-based reduction for long description-like text:
+                                # use the same rule that we originally applied to double templates,
+                                # but extend it to vertical and horizontal as requested.
+                                if paragraph_reduce_pt and field_type in ('description', 'default', 'ratio'):
+                                    try:
+                                        from docx.shared import Pt
+                                        pt_val = getattr(font_size, 'pt', float(font_size))
+                                        # Don't let anything shrink below 10pt for readability.
+                                        new_pt = max(10.0, pt_val - float(paragraph_reduce_pt))
+                                        font_size = Pt(new_pt)
+                                    except (TypeError, ValueError, AttributeError):
+                                        pass
                                 # Apply at run and XML level to prevent Word from overriding
                                 from src.core.generation.unified_font_sizing import set_run_font_size
                                 set_run_font_size(run, font_size)

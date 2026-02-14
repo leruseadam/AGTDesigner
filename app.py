@@ -1,4 +1,4 @@
-# AGT Label Maker - Consolidated Web Application
+# AGT Designer - Consolidated Web Application
 # ============================================
 # This is the sole, consolidated web version of the AGT Label Maker application.
 # All web deployment functionality has been consolidated into this single file.
@@ -2212,6 +2212,36 @@ def save_template_settings(template_type, font_settings):
     except Exception as e:
         logging.error(f"Error saving template settings: {str(e)}")
         raise
+
+# --- User template uploads (designs per template type, per store) ---
+USER_TEMPLATE_TYPES = ['horizontal', 'vertical', 'mini', 'double', 'preroll', 'inventory']
+
+def _sanitize_store_for_path(store_name):
+    """Return a filesystem-safe subdir name for the store (no slashes, no parent path)."""
+    if not store_name or not isinstance(store_name, str):
+        return 'default'
+    # Keep alphanumeric, underscore, hyphen; replace rest with single underscore
+    safe = re.sub(r'[^\w\-]', '_', store_name.strip())
+    return safe or 'default'
+
+def get_user_template_dir(store_name=None):
+    """Return the directory for user-uploaded template .docx files for the given store (create if needed)."""
+    if store_name is None:
+        store_name = get_current_store_name(allow_fallback=True)
+    subdir = _sanitize_store_for_path(store_name)
+    user_dir = os.path.join(current_dir, 'user_templates', subdir)
+    try:
+        os.makedirs(user_dir, exist_ok=True)
+    except OSError as e:
+        logging.warning(f"Could not create user_templates dir: {e}")
+    return user_dir
+
+def get_user_template_path(template_type, store_name=None):
+    """Return the path to the user-uploaded .docx for this template type and store, or None if not set."""
+    if template_type not in USER_TEMPLATE_TYPES:
+        return None
+    path = os.path.join(get_user_template_dir(store_name=store_name), f'{template_type}.docx')
+    return path if os.path.isfile(path) else None
 
 # Global enhanced logger instance
 enhanced_logger = None
@@ -5704,6 +5734,72 @@ def edit_template():
         logging.error(f"Error in edit_template: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/user-templates', methods=['GET'])
+def list_user_templates():
+    """Return which template types have user-uploaded designs."""
+    try:
+        result = {}
+        for t in USER_TEMPLATE_TYPES:
+            result[t] = get_user_template_path(t) is not None
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"List user templates: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user-templates', methods=['POST'])
+def upload_user_template():
+    """Upload a .docx as the user design for a template type. Form: type=<horizontal|...>, file=<file>."""
+    try:
+        template_type = (request.form.get('type') or '').strip().lower()
+        if template_type not in USER_TEMPLATE_TYPES:
+            return jsonify({'error': f'Invalid type. Use one of: {", ".join(USER_TEMPLATE_TYPES)}'}), 400
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        f = request.files['file']
+        if not f or f.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        if not (f.filename or '').lower().endswith('.docx'):
+            return jsonify({'error': 'File must be a .docx'}), 400
+        dest_path = os.path.join(get_user_template_dir(), f'{template_type}.docx')
+        f.save(dest_path)
+        logging.info(f"User template uploaded: {template_type}")
+        return jsonify({'success': True, 'type': template_type})
+    except Exception as e:
+        logging.error(f"Upload user template: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user-templates/<template_type>', methods=['DELETE'])
+def delete_user_template(template_type):
+    """Remove the user-uploaded design for a template type."""
+    try:
+        template_type = (template_type or '').strip().lower()
+        if template_type not in USER_TEMPLATE_TYPES:
+            return jsonify({'error': 'Invalid type'}), 400
+        path = get_user_template_path(template_type)
+        if not path:
+            return jsonify({'error': 'No user template for this type'}), 404
+        os.remove(path)
+        logging.info(f"User template removed: {template_type}")
+        return jsonify({'success': True, 'type': template_type})
+    except Exception as e:
+        logging.error(f"Delete user template: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/user-templates/<template_type>/download', methods=['GET'])
+def download_user_template(template_type):
+    """Download the user-uploaded .docx for a template type (for View)."""
+    try:
+        template_type = (template_type or '').strip().lower()
+        if template_type not in USER_TEMPLATE_TYPES:
+            return jsonify({'error': 'Invalid type'}), 400
+        path = get_user_template_path(template_type)
+        if not path:
+            return jsonify({'error': 'No user template for this type'}), 404
+        return send_file(path, as_attachment=True, download_name=f'user_{template_type}.docx')
+    except Exception as e:
+        logging.error(f"Download user template: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/template-settings', methods=['POST'])
 def save_template_settings_api():
     """
@@ -8549,6 +8645,7 @@ def generate_labels():
         
         data = request.get_json()
         template_type = data.get('template_type', 'vertical')
+        template_group = data.get('template_group', 'classic')  # 'classic' | 'user'
         scale_factor = float(data.get('scale_factor', 1.0))
         selected_tags_from_request = data.get('selected_tags', [])
         file_path = data.get('file_path') or session.get('file_path')  # Use session file_path if not provided
@@ -9142,16 +9239,34 @@ def generate_labels():
                                     logging.info(f"⚠️ {len(missing_from_db)} products not found in database, will use Excel data for: {missing_from_db[:5]}")
                                 
                                 # CRITICAL FIX: Build a map of lineage from selected tags (UI values)
-                                # This ensures DOCX uses the same lineage shown in the UI
+                                # This ensures DOCX uses the SAME final lineage the UI uses for coloring.
+                                # Priority: displayLineage (UI's CBD/MIXED/CBD_BLEND decision) > canonical/current > Lineage fields.
                                 ui_lineage_map = {}
                                 ui_price_map = {}  # Price from UI (selected tags) - DOCX must match what user sees
                                 for tag in selected_tags_from_request:
                                     if isinstance(tag, dict):
-                                        product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
-                                        # Use canonical_lineage or currentLineage (what UI displays) as source of truth
-                                        ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
+                                        product_name = (
+                                            tag.get('Product Name*')
+                                            or tag.get('ProductName')
+                                            or tag.get('displayName')
+                                        )
+                                        # Prefer displayLineage from TagManager if present (already includes CBD logic),
+                                        # otherwise fall back to canonical/current/Lineage values.
+                                        ui_lineage = (
+                                            tag.get('displayLineage')
+                                            or tag.get('canonical_lineage')
+                                            or tag.get('currentLineage')
+                                            or tag.get('Lineage')
+                                            or tag.get('lineage')
+                                        )
                                         if product_name and ui_lineage:
-                                            ui_lineage_map[str(product_name).strip()] = str(ui_lineage).strip().upper()
+                                            key = str(product_name).strip()
+                                            ui_lineage_normalized = str(ui_lineage).strip().upper()
+                                            # Normalize CBD -> CBD_BLEND for color mapping consistency
+                                            if ui_lineage_normalized == 'CBD':
+                                                ui_lineage_normalized = 'CBD_BLEND'
+                                            ui_lineage_map[key] = ui_lineage_normalized
+                                            ui_lineage_map[key.lower()] = ui_lineage_normalized
                                         # Price from UI - same source as "Selected Tags" display (incl. best_match)
                                         ui_price = (
                                             tag.get('Price') or tag.get('Price*') or tag.get('Price* (Tier Name for Bulk)') or tag.get('Med Price') or
@@ -9281,6 +9396,9 @@ def generate_labels():
                                     # PERFORMANCE: Minimal logging (only first few mismatches)
                                     if ui_lineage_for_this:
                                         docx_lineage = ui_lineage_for_this
+                                        # CRITICAL: Add displayLineage to record so compute_display_lineage_like_ui can use it
+                                        processed_record['displayLineage'] = ui_lineage_for_this
+                                        processed_record['display_lineage'] = ui_lineage_for_this
                                     elif db_lineage_from_method and str(db_lineage_from_method).strip() not in ['', 'None', 'nan']:
                                         docx_lineage = str(db_lineage_from_method).strip().upper()
                                         # Log if lineage differs from what's in db_record (first 5 only)
@@ -9385,6 +9503,9 @@ def generate_labels():
                                         'Vendor/Supplier*': vendor_value,  # Also set Vendor/Supplier* for template processor compatibility
                                         'Product Strain': processed_record.get('Product Strain', ''),  # Correct field name
                                         'ProductStrain': processed_record.get('Product Strain', ''),  # Add ProductStrain for template processor compatibility
+                                        # CRITICAL: Include displayLineage from UI so compute_display_lineage_like_ui can use it
+                                        'displayLineage': processed_record.get('displayLineage') or processed_record.get('display_lineage') or (ui_lineage_for_this if ui_lineage_for_this else None),
+                                        'display_lineage': processed_record.get('displayLineage') or processed_record.get('display_lineage') or (ui_lineage_for_this if ui_lineage_for_this else None),
                                         'Price': formatted_price,  # Use extracted and formatted price
                                         'Price*': formatted_price,  # Also set Price* for generation compatibility
                                         'Price* (Tier Name for Bulk)': formatted_price,  # Set all price field variations
@@ -9956,7 +10077,10 @@ def generate_labels():
         fast_mode = len(records) >= fast_mode_threshold
         if fast_mode:
             logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)
-        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor, fast_mode=fast_mode)
+        user_template_path = get_user_template_path(template_type) if template_group == 'user' else None
+        if template_group == 'user' and not user_template_path:
+            logging.warning(f"User template group selected but no user design for '{template_type}' — falling back to classic")
+        processor = TemplateProcessor(template_type, font_scheme, saved_scale_factor, excel_processor, fast_mode=fast_mode, user_template_path=user_template_path)
         
         # No need to pass preroll_session_id anymore - QR code uses static URL
         
@@ -19213,6 +19337,14 @@ def upload_product_database():
             elapsed_time = time.time() - start_time
             logging.info(f"Database import completed in {elapsed_time:.2f} seconds: {storage_result.get('stored', 0)} stored, {storage_result.get('updated', 0)} updated")
             
+            # CRITICAL: Batch fix CBD products after import to ensure all CBD indicators are properly set
+            logging.info("Running batch CBD fix to update Product Strain and Lineage for CBD products...")
+            cbd_fix_result = product_db.batch_fix_cbd_products()
+            if cbd_fix_result.get('success'):
+                logging.info(f"✅ Batch CBD fix completed: {cbd_fix_result.get('updated_count', 0)} products updated")
+            else:
+                logging.warning(f"⚠️ Batch CBD fix failed: {cbd_fix_result.get('message', 'Unknown error')}")
+            
             # Get final database statistics
             try:
                 conn = product_db._get_connection()
@@ -19235,7 +19367,8 @@ def upload_product_database():
                 'strains_stored': final_strains,
                 'total_products': final_products,
                 'total_strains': final_strains,
-                'processing_time': f"{elapsed_time:.2f}s"
+                'processing_time': f"{elapsed_time:.2f}s",
+                'cbd_fixed': cbd_fix_result.get('updated_count', 0) if cbd_fix_result.get('success') else 0
             })
         except Exception as db_error:
             logging.error(f"Error updating product database: {db_error}")
@@ -19245,6 +19378,61 @@ def upload_product_database():
         
     except Exception as e:
         logging.error(f"Error uploading product database: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/product-db/fix-cbd', methods=['POST'])
+def batch_fix_cbd_products():
+    """Manually trigger batch fix for CBD products in database."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        logging.info("Running manual batch CBD fix...")
+        result = product_db.batch_fix_cbd_products()
+        
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'message': result.get('message', 'CBD products fixed successfully'),
+                'updated_count': result.get('updated_count', 0)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Unknown error'),
+                'message': result.get('message', 'Failed to fix CBD products')
+            }), 500
+            
+    except Exception as e:
+        logging.error(f"Error in batch CBD fix endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/product-db/fix-nonclassic-grams', methods=['POST'])
+def batch_fix_nonclassic_grams():
+    """Manually trigger batch fix for non-classic products with gram weights by converting to ounces."""
+    try:
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+        
+        logging.info("Running manual batch fix for non-classic products with gram weights...")
+        result = product_db.batch_fix_nonclassic_gram_weights()
+        
+        if result.get('success'):
+            return jsonify({
+                'success': True,
+                'message': result.get('message', 'Non-classic products with gram weights fixed successfully'),
+                'updated_count': result.get('updated_count', 0),
+                'skipped_count': result.get('skipped_count', 0)
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.get('error', 'Unknown error'),
+                'message': result.get('message', 'Failed to fix non-classic gram weights')
+            }), 500
+            
+    except Exception as e:
+        logging.error(f"Error in batch fix non-classic gram weights endpoint: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/product-db/file-info', methods=['GET'])
@@ -20131,40 +20319,264 @@ def json_match_detailed():
         enhanced_matches = json_matcher.fetch_and_match(url)
         logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
         
-        # NOTE: Do NOT reorder `enhanced_matches` here — they are expected to align
-        # with the incoming `json_items` order so each JSON item maps to its
-        # corresponding enhanced match by index. Sorting here caused misaligned
-        # detailed match displays (matches appearing next to different JSON rows).
+        # Build a lookup map of enhanced matches by JSON product name for reliable matching
+        # This handles cases where order doesn't align or some items don't have matches
+        enhanced_match_map = {}
+        for match in (enhanced_matches or []):
+            # Try to find the original JSON name from various fields
+            json_name_key = None
+            # Check if match has original JSON item stored
+            if '__json_item__' in match:
+                json_item = match.get('__json_item__')
+                if isinstance(json_item, dict):
+                    json_name_key = str(json_item.get('product_name', '')).strip()
+            # Check for original JSON name in metadata fields
+            if not json_name_key:
+                json_name_key = match.get('Original JSON Product Name', '')
+            if not json_name_key:
+                json_name_key = match.get('_original_json_name', '')
+            if not json_name_key:
+                # Check for matched JSON item
+                matched_json_item = match.get('_matched_json_item')
+                if isinstance(matched_json_item, dict):
+                    json_name_key = str(matched_json_item.get('product_name', '')).strip()
+            if not json_name_key:
+                # Fallback: use the product name itself (may have been transformed)
+                json_name_key = str(match.get('Product Name*', match.get('ProductName', ''))).strip()
+            
+            if json_name_key:
+                # Normalize for matching
+                json_name_normalized = json_name_key.lower().strip()
+                if json_name_normalized not in enhanced_match_map:
+                    enhanced_match_map[json_name_normalized] = match
+                # Also store by product name for fallback matching
+                product_name = str(match.get('Product Name*', match.get('ProductName', ''))).strip()
+                if product_name:
+                    product_name_normalized = product_name.lower().strip()
+                    if product_name_normalized not in enhanced_match_map:
+                        enhanced_match_map[product_name_normalized] = match
         
         detailed_matches = []
         high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
         
+        # Build a reverse map: JSON items by their normalized product names
+        json_items_map = {}
+        for json_item in json_items:
+            json_item_name = (
+                str(json_item.get('product_name', '')).strip() or
+                str(json_item.get('inventory_name', '')).strip() or
+                str(json_item.get('name', '')).strip() or
+                ''
+            )
+            if json_item_name:
+                json_items_map[json_item_name.lower().strip()] = json_item
+        
+        logging.info(f"Building detailed matches: {len(json_items)} JSON items, {len(enhanced_matches) if enhanced_matches else 0} enhanced matches")
+        
         for i, json_item in enumerate(json_items):
-            json_name = str(json_item.get('product_name', ''))
-            if not json_name.strip():
-                continue
-                
-            # Find corresponding enhanced match
+            # Try multiple fields for product name
+            json_name = (
+                str(json_item.get('product_name', '')).strip() or
+                str(json_item.get('inventory_name', '')).strip() or
+                str(json_item.get('name', '')).strip() or
+                ''
+            )
+            # Don't skip items - create a fallback name if needed
+            if not json_name:
+                # Try to build a name from other fields
+                brand = str(json_item.get('brand', '')).strip()
+                inventory_type = str(json_item.get('inventory_type', '')).strip()
+                strain = str(json_item.get('strain_name', '')).strip()
+                if brand and strain:
+                    json_name = f"{strain} by {brand}"
+                elif brand:
+                    json_name = brand
+                elif inventory_type:
+                    json_name = inventory_type
+                else:
+                    json_name = f"JSON Product {i + 1}"
+                logging.info(f"⚠️ Created fallback JSON name: '{json_name}' for item {i}")
+            
+            # Find corresponding enhanced match by name (more reliable than index)
             enhanced_match = None
-            if i < len(enhanced_matches):
-                enhanced_match = enhanced_matches[i]
+            json_name_normalized = json_name.lower().strip()
+            match_method = None
+            
+            # Extract key terms from JSON name for better matching
+            json_key_terms = set([term for term in json_name_normalized.split() if len(term) > 2])
+            
+            # Try exact match first
+            if json_name_normalized in enhanced_match_map:
+                enhanced_match = enhanced_match_map[json_name_normalized]
+                match_method = 'exact'
+            else:
+                # Try fuzzy matching by comparing normalized names and key terms
+                best_fuzzy_match = None
+                best_fuzzy_score = 0
+                for normalized_key, match in enhanced_match_map.items():
+                    # Calculate similarity score
+                    if json_name_normalized == normalized_key:
+                        best_fuzzy_match = match
+                        best_fuzzy_score = 1.0
+                        break
+                    # Check if JSON name contains the key or vice versa (partial match)
+                    elif json_name_normalized in normalized_key or normalized_key in json_name_normalized:
+                        # Calculate a simple similarity score based on overlap
+                        overlap = min(len(json_name_normalized), len(normalized_key)) / max(len(json_name_normalized), len(normalized_key)) if max(len(json_name_normalized), len(normalized_key)) > 0 else 0
+                        if overlap > best_fuzzy_score:
+                            best_fuzzy_match = match
+                            best_fuzzy_score = overlap
+                    else:
+                        # Try keyword matching - check if key terms from JSON name appear in match's product name
+                        match_product_name = str(match.get('Product Name*', match.get('ProductName', ''))).lower().strip()
+                        if match_product_name:
+                            match_key_terms = set([term for term in match_product_name.split() if len(term) > 2])
+                            # Calculate overlap of key terms
+                            if json_key_terms and match_key_terms:
+                                term_overlap = len(json_key_terms & match_key_terms) / len(json_key_terms | match_key_terms) if (json_key_terms | match_key_terms) else 0
+                                if term_overlap > best_fuzzy_score:
+                                    best_fuzzy_match = match
+                                    best_fuzzy_score = term_overlap
+                                # Also check if JSON name keywords appear in product name
+                                elif any(term in match_product_name for term in json_key_terms if len(term) > 3):
+                                    keyword_match_score = len([t for t in json_key_terms if t in match_product_name]) / len(json_key_terms) if json_key_terms else 0
+                                    if keyword_match_score > best_fuzzy_score:
+                                        best_fuzzy_match = match
+                                        best_fuzzy_score = keyword_match_score
+                
+                if best_fuzzy_match and best_fuzzy_score > 0.3:  # Lower threshold to 30% for better matching
+                    enhanced_match = best_fuzzy_match
+                    match_method = f'fuzzy_{best_fuzzy_score:.2f}'
+                
+                # Fallback: try index-based matching if name matching fails
+                if not enhanced_match and i < len(enhanced_matches):
+                    enhanced_match = enhanced_matches[i]
+                    match_method = 'index'
+            
+            # If we found a match but it doesn't have JSON data, try to find the JSON item by the match's product name
+            if enhanced_match and json_item.get('product_name', '').strip() != json_name:
+                # The match might be for a different JSON item - try to find the right one
+                match_product_name = str(enhanced_match.get('Product Name*', enhanced_match.get('ProductName', ''))).strip()
+                if match_product_name:
+                    # Extract key terms from match product name
+                    match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
+                    # Try to find a JSON item that matches better
+                    for json_item_name, candidate_json_item in json_items_map.items():
+                        json_item_key_terms = set([term for term in json_item_name.split() if len(term) > 2])
+                        if match_key_terms and json_item_key_terms:
+                            overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
+                            if overlap > 0.5:  # Good match
+                                json_item = candidate_json_item
+                                json_name = json_item_name
+                                logging.info(f"🔄 Found better JSON item match: '{json_name}' for product '{match_product_name}'")
+                                break
+            
+            # Log matching results for debugging
+            if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
+                logging.info(f"🔍 Presidential Kush match: JSON='{json_name}', Match={enhanced_match.get('Product Name*', 'None') if enhanced_match else 'None'}, Method={match_method}")
+                logging.info(f"🔍 Presidential Kush JSON data keys: {list(json_item.keys())}")
+                logging.info(f"🔍 Presidential Kush JSON data: brand={json_item.get('brand')}, vendor={json_item.get('vendor')}, type={json_item.get('inventory_type')}")
             
             # Create detailed match info using database-priority data
+            # CRITICAL: Always include json_name and json_data, even if no match found
+            # Use the actual Match_Confidence provided by the enhanced matcher when available
+            enhanced_conf_str = enhanced_match.get('Match_Confidence') if enhanced_match else None
+            try:
+                enhanced_conf = float(enhanced_conf_str) if enhanced_conf_str is not None else 0.0
+            except Exception:
+                enhanced_conf = 0.0
+
             match_info = {
                 'json_name': json_name,
-                'json_data': json_item,
-                'best_score': 0.95 if enhanced_match else 0.0,  # High confidence for database matches
+                'json_data': json_item,  # Always include full JSON item data
+                'best_score': enhanced_conf if enhanced_match else 0.0,
                 'best_match': enhanced_match,
-                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}] if enhanced_match else [],
+                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': enhanced_conf, 'excel_data': enhanced_match}] if enhanced_match else [],
                 'is_match': enhanced_match is not None,
                 'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
                 'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
                 'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
-                'match_confidence': enhanced_match.get('Match_Confidence', '0.95') if enhanced_match else '0.0'
+                'match_confidence': f"{enhanced_conf:.3f}" if enhanced_match else '0.0'
             }
             
-            detailed_matches.append(match_info)
+            # Debug: Verify JSON data is included
+            if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
+                logging.info(f"🔍 Presidential Kush match_info keys: {list(match_info.keys())}")
+                logging.info(f"🔍 Presidential Kush match_info json_name: '{match_info.get('json_name')}'")
+                logging.info(f"🔍 Presidential Kush match_info json_data present: {match_info.get('json_data') is not None}")
+                if match_info.get('json_data'):
+                    logging.info(f"🔍 Presidential Kush match_info json_data keys: {list(match_info.get('json_data', {}).keys())}")
             
+            detailed_matches.append(match_info)
+        
+        # CRITICAL FIX: Also create detailed matches for enhanced matches that weren't matched to any JSON item
+        # This ensures products like Presidential Kush that were matched but whose JSON item wasn't found still show JSON data
+        matched_enhanced_indices = set()
+        for match_info in detailed_matches:
+            if match_info.get('best_match'):
+                # Find the index of this enhanced match
+                for idx, em in enumerate(enhanced_matches):
+                    if em == match_info['best_match'] or (
+                        em.get('Product Name*') == match_info['best_match'].get('Product Name*') and
+                        em.get('Product Name*')
+                    ):
+                        matched_enhanced_indices.add(idx)
+                        break
+        
+        # For any unmatched enhanced matches, try to find their JSON item and create a detailed match
+        for idx, enhanced_match in enumerate(enhanced_matches):
+            if idx not in matched_enhanced_indices:
+                # Try to find JSON item by product name
+                match_product_name = str(enhanced_match.get('Product Name*', enhanced_match.get('ProductName', ''))).strip()
+                if match_product_name:
+                    # Look for JSON item with matching name
+                    found_json_item = None
+                    found_json_name = None
+                    for json_item_name, json_item in json_items_map.items():
+                        json_item_key_terms = set([term for term in json_item_name.split() if len(term) > 2])
+                        match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
+                        if match_key_terms and json_item_key_terms:
+                            overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
+                            if overlap > 0.4:  # Reasonable match
+                                found_json_item = json_item
+                                found_json_name = json_item_name
+                                break
+                    
+                    # Also check original JSON items list
+                    if not found_json_item:
+                        for json_item in json_items:
+                            json_item_name = (
+                                str(json_item.get('product_name', '')).strip() or
+                                str(json_item.get('inventory_name', '')).strip() or
+                                ''
+                            )
+                            if json_item_name:
+                                json_item_key_terms = set([term for term in json_item_name.lower().split() if len(term) > 2])
+                                match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
+                                if match_key_terms and json_item_key_terms:
+                                    overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
+                                    if overlap > 0.4:
+                                        found_json_item = json_item
+                                        found_json_name = json_item_name
+                                        break
+                    
+                    if found_json_item:
+                        match_info = {
+                            'json_name': found_json_name or match_product_name,
+                            'json_data': found_json_item,
+                            'best_score': 0.95,
+                            'best_match': enhanced_match,
+                            'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}],
+                            'is_match': True,
+                            'match_reason': 'Database Priority (100% DB data)',
+                            'source': enhanced_match.get('Source', 'Database Priority (100% DB)'),
+                            'data_source': enhanced_match.get('Data_Source', 'Database'),
+                            'match_confidence': enhanced_match.get('Match_Confidence', '0.95')
+                        }
+                        detailed_matches.append(match_info)
+                        if 'presidential' in match_product_name.lower() or 'kush' in match_product_name.lower():
+                            logging.info(f"✅ Added Presidential Kush detailed match from unmatched enhanced match: '{match_product_name}'")
+        
         logging.info(f"DATABASE PRIORITY: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} high-confidence database-enhanced products")
         
         return jsonify({

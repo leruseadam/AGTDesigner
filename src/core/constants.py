@@ -115,7 +115,8 @@ CLASSIC_TYPES = {
     
     # Concentrate types (all variations)
     "concentrate", "solventless concentrate",
-    "live resin", "rosin", "wax", "shatter", "hash", "kief",
+    "live resin", "rosin", "cold cure rosin", "live rosin",
+    "wax", "shatter", "hash", "kief",
     "butane extract", "distillate", "rso", "co2 extract",
     "honey crystal", "liquid diamond", "caviar",
     

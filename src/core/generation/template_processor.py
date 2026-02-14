@@ -48,12 +48,14 @@ if not hasattr(_docx_props, 'pkg_resources'):
 from src.core.utils.common import safe_get
 from src.core.generation.docx_formatting import (
     apply_lineage_colors,
+    _set_lineage_run_white,
     enforce_fixed_cell_dimensions,
     prevent_table_expansion_enhanced,
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
 )
+from src.core.generation._ui_lineage_port import compute_display_lineage_like_ui
 from src.core.generation.unified_font_sizing import (
     get_font_size,
     get_font_size_by_marker,
@@ -135,7 +137,15 @@ class TemplateProcessor:
         resolved_path = str(template_path.resolve()) if template_path.exists() else str(template_path)
         self.logger.error(f"Template not found: {resolved_path}")
         raise FileNotFoundError(f"Template not found: {resolved_path}")
-    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None, fast_mode: bool = False):
+    def __init__(
+        self,
+        template_type,
+        font_scheme,
+        scale_factor: float = 1.0,
+        excel_processor=None,
+        fast_mode: bool = False,
+        user_template_path: Optional[str] = None,
+    ):
         self.template_type = template_type
         self.font_scheme = font_scheme
         self.logger = logging.getLogger(__name__)  # Initialize logger first
@@ -151,7 +161,27 @@ class TemplateProcessor:
         # fast_mode parameter kept for backwards compatibility but no longer skips any processing
         # All features (font sizing, lineage colors, markers) are now applied regardless of batch size
         self.fast_mode = bool(fast_mode)
-        self._template_path = self._get_template_path()
+
+        # Allow overriding the DOCX path with a user-uploaded design (User template group)
+        self.user_template_path = user_template_path
+        if user_template_path:
+            try:
+                if os.path.isfile(user_template_path):
+                    self._template_path = user_template_path
+                    self.logger.info(f"🎨 Using user template for '{self.template_type}': {user_template_path}")
+                else:
+                    self.logger.warning(
+                        f"User template path provided but not found on disk: {user_template_path} – falling back to classic template"
+                    )
+                    self._template_path = self._get_template_path()
+            except Exception as e:
+                self.logger.warning(
+                    f"Error while validating user_template_path '{user_template_path}': {e} – falling back to classic template"
+                )
+                self._template_path = self._get_template_path()
+        else:
+            # Classic template group (built-in DOCX)
+            self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
         self._dynamic_template_created = False  # Track if dynamic template was created
         self._last_dynamic_count = None  # Track last product count used to build dynamic buffer
@@ -891,12 +921,17 @@ class TemplateProcessor:
             spacing.set(qn('w:type'), 'dxa')
             tblPr2.append(spacing)
             
-            # Insert page break after each table except the last
-            if page < pages - 1:
-                page_break_para = doc.add_paragraph()
+            # Page break at start of each table after the first (avoids blank page between tables)
+            if page > 0:
+                first_cell = tbl.cell(0, 0)
+                page_break_para = first_cell.add_paragraph()
+                first_cell._tc.insert(0, page_break_para._element)
                 page_break_run = page_break_para.add_run()
                 page_break_run.add_break(WD_BREAK.PAGE)
-                self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break after table {page + 1} of {pages}")
+                page_break_para.paragraph_format.space_before = Pt(0)
+                page_break_para.paragraph_format.space_after = Pt(0)
+                page_break_para.paragraph_format.line_spacing = Pt(1)
+                self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break at start of table {page + 1} of {pages}")
         
         buf = BytesIO()
         doc.save(buf)
@@ -1073,13 +1108,19 @@ class TemplateProcessor:
             spacing.set(qn('w:type'), 'dxa')
             tblPr2.append(spacing)
             
-            # Insert page break after each table except the last
-            if page < pages - 1:
-                # Add a page break paragraph to force Word to create a new page
-                page_break_para = doc.add_paragraph()
+            # Insert page break at START of each table after the first (avoids blank page between tables).
+            # A standalone paragraph with only a break was rendering as a blank page.
+            if page > 0:
+                first_cell = tbl.cell(0, 0)
+                page_break_para = first_cell.add_paragraph()
+                # Insert at beginning of cell so break comes before existing content
+                first_cell._tc.insert(0, page_break_para._element)
                 page_break_run = page_break_para.add_run()
                 page_break_run.add_break(WD_BREAK.PAGE)
-                self.logger.info(f"🔍 PAGE BREAK: Added page break after page {page + 1} of {pages}")
+                page_break_para.paragraph_format.space_before = Pt(0)
+                page_break_para.paragraph_format.space_after = Pt(0)
+                page_break_para.paragraph_format.line_spacing = Pt(1)
+                self.logger.info(f"🔍 PAGE BREAK: Added page break at start of page {page + 1} of {pages}")
 
         from src.core.generation.docx_formatting import remove_all_headers_and_footers
         doc = remove_all_headers_and_footers(doc)
@@ -1264,7 +1305,6 @@ class TemplateProcessor:
                                     self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
                             except Exception as e:
                                 self.logger.error(f"Error processing chunk {idx + 1}: {e}")
-                                import traceback
                                 self.logger.error(f"Chunk {idx + 1} error traceback: {traceback.format_exc()}")
                                 chunk_docs[idx] = None
                     
@@ -1671,6 +1711,8 @@ class TemplateProcessor:
                 buffer.seek(0)
                 rendered_doc = Document(buffer)
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))
+                # Remove completely empty pages (tables with no content)
+                self._remove_empty_pages(rendered_doc)
                 
             except Exception as render_error:
                 self.logger.error(f"DocxTemplate render failed: {render_error}")
@@ -1682,18 +1724,19 @@ class TemplateProcessor:
             # CRITICAL FIX: Ensure all tables have proper tblGrid elements before processing
             self._ensure_table_grids_exist(rendered_doc)
             
-            # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
+            # Apply lineage colors FIRST (in own try/except so one failure doesn't skip post-process).
+            # Must run before _post_process because post-process strips __LINEAGE_HINT_*__ from cell text.
             try:
-                # Post-process the document to apply dynamic font sizing first
-                # NOTE: fast_mode no longer skips post-processing - all features are applied
+                apply_lineage_colors(rendered_doc, self.template_type)
+            except Exception as color_err:
+                self.logger.warning(f"Lineage color application failed (post-process will still run): {color_err}")
+                import traceback
+                self.logger.debug(traceback.format_exc())
+
+            # CRITICAL FIX: Wrap post-processing in comprehensive error handling
+            try:
                 self._post_process_and_replace_content(rendered_doc)
-
-                # Apply lineage colors last to ensure they are not overwritten
-                apply_lineage_colors(rendered_doc)
-
-                # Apply final marker cleanup for all templates
                 self._final_marker_cleanup(rendered_doc)
-
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
                 # Continue processing without post-processing features
@@ -2430,6 +2473,31 @@ class TemplateProcessor:
                     actual_weight = weight_text[start_idx:end_idx].strip()
                     label_context['WeightUnits'] = actual_weight
                     self.logger.info(f"🔧 WEIGHT MARKERS REMOVED: '{weight_text}' -> '{actual_weight}' for '{record.get('ProductName', 'N/A')}'")
+            
+            # CRITICAL FIX: Convert grams to ounces for nonclassic types
+            from src.core.constants import CLASSIC_TYPES
+            product_type_for_conversion = (label_context.get('Product Type*', '') or 
+                                         label_context.get('ProductType', '') or 
+                                         record.get('Product Type*', '') or 
+                                         record.get('ProductType', '')).lower().strip()
+            is_classic = product_type_for_conversion in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_for_conversion for ct in CLASSIC_TYPES)
+            
+            if not is_classic and label_context.get('WeightUnits'):
+                weight_str = str(label_context['WeightUnits']).strip()
+                # Check if weight is in grams (g, gram, grams)
+                gram_match = re.match(r'^([\d.]+)\s*(g|gram|grams)\s*$', weight_str, re.IGNORECASE)
+                if gram_match:
+                    grams_val = float(gram_match.group(1))
+                    oz_val = round(grams_val / 28.3495, 2)
+                    # Format as "X.XXoz" (no space, lowercase)
+                    converted_weight = f"{oz_val}oz"
+                    self.logger.info(f"🔄 GRAM→OZ CONVERSION: Nonclassic type '{product_type_for_conversion}' - '{weight_str}' -> '{converted_weight}' for '{record.get('ProductName', 'N/A')}'")
+                    label_context['WeightUnits'] = converted_weight
+                    # Also update Weight* and Units fields if they exist
+                    if 'Weight*' in label_context:
+                        label_context['Weight*'] = str(oz_val)
+                    if 'Units' in label_context:
+                        label_context['Units'] = 'oz'
 
         # Define product type sets for use throughout the method
         from src.core.constants import CLASSIC_TYPES
@@ -2496,10 +2564,32 @@ class TemplateProcessor:
             # CRITICAL FIX: For pre-rolls, always reconstruct DescAndWeight using JointRatio
             # Don't use existing DescAndWeight from record - it might have total weight instead of joint ratio
             if 'DescAndWeight' in label_context and label_context['DescAndWeight'] and product_type not in ['pre-roll', 'infused pre-roll']:
-                # DescAndWeight is already set correctly in the record, use it as-is (only for non-pre-roll products)
+                # DescAndWeight is already set correctly in the record, but check if we need to convert grams to ounces
                 desc_and_weight = label_context['DescAndWeight']
+                
+                # CRITICAL FIX: Convert grams to ounces in existing DescAndWeight for nonclassic types
+                from src.core.constants import CLASSIC_TYPES
+                product_type_check = (label_context.get('Product Type*', '') or 
+                                    label_context.get('ProductType', '') or 
+                                    record.get('Product Type*', '') or 
+                                    record.get('ProductType', '')).lower().strip()
+                is_classic_for_existing = product_type_check in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_check for ct in CLASSIC_TYPES)
+                
+                if not is_classic_for_existing:
+                    # Check if DescAndWeight contains grams (e.g., "Pink Lemonade Hash Gummies - 32g")
+                    gram_pattern = r'([\d.]+)\s*(g|gram|grams)\b'
+                    gram_match = re.search(gram_pattern, desc_and_weight, re.IGNORECASE)
+                    if gram_match:
+                        grams_val = float(gram_match.group(1))
+                        oz_val = round(grams_val / 28.3495, 2)
+                        # Replace grams with ounces in the DescAndWeight string
+                        desc_and_weight = re.sub(gram_pattern, f"{oz_val}oz", desc_and_weight, flags=re.IGNORECASE)
+                        self.logger.info(f"🔄 EXISTING DESCANDWEIGHT GRAM→OZ: Nonclassic type '{product_type_check}' - converted '{gram_match.group(0)}' -> '{oz_val}oz' in '{desc_and_weight}'")
+                
                 if not is_already_wrapped(desc_and_weight, 'DESC'):
                     label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+                else:
+                    label_context['DescAndWeight'] = desc_and_weight
                 # Skip the rest of DescAndWeight processing since it's already set
                 self.logger.info(f"🔍 Using existing DescAndWeight from record: '{desc_and_weight}' (product_type: {product_type})")
             else:
@@ -2532,6 +2622,26 @@ class TemplateProcessor:
                         self.logger.info(f"🔍 PRE-ROLL DescAndWeight: Using JointRatio/WeightUnits '{weight}' for product '{record.get('ProductName', 'N/A')}'")
                 else:
                     weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
+                
+                # CRITICAL FIX: Convert grams to ounces in weight string for nonclassic types
+                # Check if this is a nonclassic type
+                from src.core.constants import CLASSIC_TYPES
+                product_type_check = (label_context.get('Product Type*', '') or 
+                                    label_context.get('ProductType', '') or 
+                                    record.get('Product Type*', '') or 
+                                    record.get('ProductType', '')).lower().strip()
+                is_classic_for_desc = product_type_check in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_check for ct in CLASSIC_TYPES)
+                
+                if not is_classic_for_desc and weight:
+                    # Check if weight contains grams (e.g., "32g", "1g", "1.12g")
+                    gram_pattern = r'([\d.]+)\s*(g|gram|grams)\b'
+                    gram_match = re.search(gram_pattern, weight, re.IGNORECASE)
+                    if gram_match:
+                        grams_val = float(gram_match.group(1))
+                        oz_val = round(grams_val / 28.3495, 2)
+                        # Replace grams with ounces in the weight string
+                        weight = re.sub(gram_pattern, f"{oz_val}oz", weight, flags=re.IGNORECASE)
+                        self.logger.info(f"🔄 DESCANDWEIGHT GRAM→OZ: Nonclassic type '{product_type_check}' - converted weight in DescAndWeight: '{gram_match.group(0)}' -> '{oz_val}oz'")
                 
                 # DEBUG: Log the values being processed
                 self.logger.info(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}', ProductType: '{product_type}'")
@@ -3194,10 +3304,13 @@ class TemplateProcessor:
                                 final_brand_text,
                                 flags=re.IGNORECASE,
                             )
+                            # Whole-token only so e.g. "S" in "MARY'S" is not removed
+                            _tok_before = r"(?:^|[\s\-–\/\(\)\[\]\{\}])"
+                            _tok_after = r"(?:[\s\-–\/\(\)\[\]\{\}]|$)"
                             for component in list(strain_components):
                                 if component:
                                     final_brand_text = re.sub(
-                                        rf"[\s\(\[\{{\-–\/]*{re.escape(component)}[\s\)\]\}}\-–\/]*",
+                                        rf"{_tok_before}{re.escape(component)}{_tok_after}",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
@@ -3206,7 +3319,7 @@ class TemplateProcessor:
                             for lineage_token in lineage_tokens:
                                 if lineage_token:
                                     final_brand_text = re.sub(
-                                        rf"[\s\(\[\{{\-–\/]*{re.escape(lineage_token)}[\s\)\]\}}\-–\/]*",
+                                        rf"{_tok_before}{re.escape(lineage_token)}{_tok_after}",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
@@ -3235,12 +3348,33 @@ class TemplateProcessor:
                     self.logger.info(f"🔍 VERTICAL BRAND DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
 
                     # CRITICAL FIX: For vertical template, match horizontal template behavior
-                    # Set Lineage to brand (for display), color comes from ProductStrain via is_product_strain_cbd
-                    label_context['Lineage'] = final_brand_text
+                    # Use the exact same lineage/color logic as the UI for vertical banners
+                    # This ensures DOCX banner colors match the on-screen tag colors exactly.
+                    # Use label_context which may have displayLineage set from app.py
+                    lineage_for_color = compute_display_lineage_like_ui(label_context)
+                    # Normalize CBD -> CBD_BLEND for color mapping consistency
+                    if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
+                        lineage_for_color = 'CBD_BLEND'
+                    # CRITICAL FIX: Handle case where value might be _BLEND or BLEND instead of CBD_BLEND
+                    if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
+                        lineage_for_color = 'CBD_BLEND'
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                    
+                    product_name_debug = label_context.get('Product Name*') or label_context.get('ProductName', 'Unknown')
+                    display_lineage_debug = label_context.get('displayLineage', 'NOT_SET')
+                    self.logger.info(
+                        f"🎨 VERTICAL LINEAGE COLOR: Product '{product_name_debug}' -> "
+                        f"displayLineage='{display_lineage_debug}' -> "
+                        f"computed='{lineage_for_color}' -> hint='{lineage_hint_token}'"
+                    )
+                    
+                    # CRITICAL FIX: Wrap brand text with PRODUCTBRAND_CENTER markers so font sizing uses 'brand' field type, not 'lineage'
+                    # This ensures vertical template brands use brand font sizing (10-16pt) instead of lineage font sizing (14-18pt)
+                    label_context['Lineage'] = f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = ""
-
-                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' (color from ProductStrain)")
+                    label_context['ProductBrand_Center'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    # Store per-cell color so apply_lineage_colors can use it even if hint is stripped
+                    label_context['_lineage_color'] = lineage_for_color
                 elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
@@ -3307,21 +3441,25 @@ class TemplateProcessor:
                                 final_brand_text,
                                 flags=re.IGNORECASE,
                             )
-                            # Remove strain tokens anywhere within the brand text
+                            # Remove strain tokens anywhere within the brand text.
+                            # CRITICAL: Only remove when component is a whole token (not e.g. "S" inside "MARY'S").
+                            # Use token boundaries so apostrophes in brand names are preserved.
+                            _tok_before = r"(?:^|[\s\-–\/\(\)\[\]\{\}])"
+                            _tok_after = r"(?:[\s\-–\/\(\)\[\]\{\}]|$)"
                             for component in list(strain_components):
                                 if component:
                                     final_brand_text = re.sub(
-                                        rf"[\s\(\[\{{\-–\/]*{re.escape(component)}[\s\)\]\}}\-–\/]*",
+                                        rf"{_tok_before}{re.escape(component)}{_tok_after}",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
                                     )
-                            # Remove lineage tokens accidentally attached to brand text
+                            # Remove lineage tokens accidentally attached to brand text (whole-token only).
                             lineage_tokens = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
                             for lineage_token in lineage_tokens:
                                 if lineage_token:
                                     final_brand_text = re.sub(
-                                        rf"[\s\(\[\{{\-–\/]*{re.escape(lineage_token)}[\s\)\]\}}\-–\/]*",
+                                        rf"{_tok_before}{re.escape(lineage_token)}{_tok_after}",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
@@ -3348,31 +3486,32 @@ class TemplateProcessor:
                                     f"🎯 DOUBLE TEMPLATE STRAIN SPLIT: Removed strain/lineage token from brand -> '{final_brand_text}'"
                                 )
                     if not final_brand_text:
-                        final_brand_text = clean_brand_text or str(brand_center_text).strip().upper()
+                        final_brand_text = str(brand_center_text).strip().upper()
                     # CRITICAL FIX: Remove store ID suffixes from final_brand_text
                     final_brand_text = re.sub(r'\s*-\s*\d{3,}.*$', '', final_brand_text).strip()
                     
                     # CRITICAL FIX: Add debugging to see final brand text
                     self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
                     
-                    # Preserve the original lineage value (if any) so we can drive color assignment later
-                    lineage_for_color_source = (
-                        label_context.get('Lineage') or
-                        record.get('Lineage') or
-                        ''
-                    )
-                    if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
-                        lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
-                    lineage_for_color = str(lineage_for_color_source).strip().upper()
-
-                    # CRITICAL FIX: Validate that lineage_for_color is a valid lineage, not a brand name
-                    # For non-classic types, the Lineage field may contain brand info, not actual lineage
-                    valid_lineages = {'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD BLEND', 'CBD_BLEND', 'MIXED'}
-                    if not lineage_for_color or lineage_for_color not in valid_lineages:
-                        # Fall back to CBD lineage when we have CBD signal, otherwise treat as MIXED (blue)
-                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
-
+                    # CRITICAL: Use the exact same lineage/color logic as the UI for double template banners
+                    # This ensures DOCX banner colors match the on-screen tag colors exactly.
+                    # Use label_context which may have displayLineage set from app.py
+                    lineage_for_color = compute_display_lineage_like_ui(label_context)
+                    # Normalize CBD -> CBD_BLEND for color mapping consistency
+                    if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
+                        lineage_for_color = 'CBD_BLEND'
+                    # CRITICAL FIX: Handle case where value might be _BLEND or BLEND instead of CBD_BLEND
+                    if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
+                        lineage_for_color = 'CBD_BLEND'
                     lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                    
+                    product_name_debug = label_context.get('Product Name*') or label_context.get('ProductName', 'Unknown')
+                    display_lineage_debug = label_context.get('displayLineage', 'NOT_SET')
+                    self.logger.info(
+                        f"🎨 DOUBLE LINEAGE COLOR: Product '{product_name_debug}' -> "
+                        f"displayLineage='{display_lineage_debug}' -> "
+                        f"computed='{lineage_for_color}' -> hint='{lineage_hint_token}'"
+                    )
                     lineage_content = (
                         f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
@@ -3382,6 +3521,8 @@ class TemplateProcessor:
                     label_context['ProductBrand_Center'] = (
                         f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
+                    # Store per-cell color so apply_lineage_colors can use it even if hint is stripped
+                    label_context['_lineage_color'] = lineage_for_color
                     self.logger.debug(
                         f"DOUBLE TEMPLATE LINEAGE COLOR: Brand '{final_brand_text}' -> lineage '{lineage_for_color}' "
                         f"(product_type='{product_type}')"
@@ -3407,11 +3548,31 @@ class TemplateProcessor:
 
                     clean_brand_text = clean_brand_text.strip()
 
+                    # CRITICAL: Use the exact same lineage/color logic as the UI for horizontal/vertical banners
+                    # This ensures DOCX banner colors match the on-screen tag colors exactly.
+                    # Use label_context which may have displayLineage set from app.py
+                    lineage_for_color = compute_display_lineage_like_ui(label_context)
+                    # Normalize CBD -> CBD_BLEND for color mapping consistency
+                    if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
+                        lineage_for_color = 'CBD_BLEND'
+                    # CRITICAL FIX: Handle case where value might be _BLEND or BLEND instead of CBD_BLEND
+                    if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
+                        lineage_for_color = 'CBD_BLEND'
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                    
+                    product_name_debug = label_context.get('Product Name*') or label_context.get('ProductName', 'Unknown')
+                    display_lineage_debug = label_context.get('displayLineage', 'NOT_SET')
+                    self.logger.info(
+                        f"🎨 HORIZONTAL/VERTICAL LINEAGE COLOR: Product '{product_name_debug}' -> "
+                        f"displayLineage='{display_lineage_debug}' -> "
+                        f"computed='{lineage_for_color}' -> hint='{lineage_hint_token}'"
+                    )
+
                     if clean_brand_text:
-                        lineage_value = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
+                        lineage_value = f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
                     else:
                         # Fallback to original brand text if cleaning removed everything
-                        lineage_value = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                        lineage_value = f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
 
                     # Set Lineage and also populate ProductBrand_Center so downstream
                     # docx formatting consistently recognizes the centered brand field.
@@ -3421,6 +3582,8 @@ class TemplateProcessor:
                     # so templates that render brand from a dedicated cell will center it.
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = lineage_value
+                    # Store per-cell color so apply_lineage_colors can use it even if hint is stripped
+                    label_context['_lineage_color'] = lineage_for_color
                 
                 # Product Strain gets its own field with small font size
                 # CRITICAL FIX: For vertical template, allow ProductStrain but use proper font sizing
@@ -3444,11 +3607,19 @@ class TemplateProcessor:
                 self.logger.debug(f"Set Lineage/ProductBrand to '{product_brand}' and ProductStrain to '{product_strain}' for non-classic type '{product_type}'")
             else:
                 # No brand available for non-classic type
-                # Color will be determined by ProductStrain content (CBD/Mixed) in apply_lineage_colors
-                label_context['Lineage'] = ""
+                # CRITICAL FIX: Still compute lineage color using same UI logic as with-brand path
+                # so CBD products get yellow instead of falling through to MIXED (blue)
+                lineage_for_color = compute_display_lineage_like_ui(label_context)
+                if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
+                    lineage_for_color = 'CBD_BLEND'
+                if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
+                    lineage_for_color = 'CBD_BLEND'
+                lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+                label_context['Lineage'] = lineage_hint_token
                 label_context['ProductBrand'] = ""
                 label_context['ProductBrand_Center'] = ""
-                self.logger.debug(f"No brand for non-classic type '{product_type}' - color from ProductStrain")
+                label_context['_lineage_color'] = lineage_for_color
+                self.logger.debug(f"No brand for non-classic type '{product_type}' - computed lineage color '{lineage_for_color}' via hint token")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
             # CRITICAL FIX: For vertical template, use marker-based formatting for proper font sizing
@@ -4205,6 +4376,10 @@ class TemplateProcessor:
         # Fast font sizing (with timeout protection)
         try:
             self._post_process_template_specific(doc)
+            
+            # CRITICAL: Final pass to ensure white text on colored lineage/brand cells
+            # This catches any runs that were created or modified after apply_lineage_colors
+            self._ensure_white_text_on_colored_cells(doc)
         except Exception as e:
             self.logger.warning(f"Font sizing failed: {e}")
 
@@ -4398,6 +4573,36 @@ class TemplateProcessor:
         for paragraph in doc.paragraphs:
             for run in paragraph.runs:
                 process_run(run)
+        
+        # CRITICAL: Final pass to ensure white text on colored lineage/brand cells
+        # This catches any runs that were created or modified after apply_lineage_colors
+        self._ensure_white_text_on_colored_cells(doc)
+    
+    def _ensure_white_text_on_colored_cells(self, doc):
+        """Final pass to ensure all runs in cells with colored backgrounds have white text."""
+        try:
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        # Check if cell has colored background
+                        tc = cell._tc
+                        tcPr = tc.get_or_add_tcPr()
+                        shd = tcPr.find(qn('w:shd'))
+                        has_color = False
+                        if shd is not None:
+                            fill = shd.get(qn('w:fill'))
+                            if fill and fill.upper() not in ('FFFFFF', 'AUTO', 'NONE', ''):
+                                has_color = True
+                        
+                        # If cell has colored background, ensure all runs are white
+                        if has_color:
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    # Only set white if run has actual text content
+                                    if run.text and run.text.strip():
+                                        _set_lineage_run_white(run)
+        except Exception as e:
+            self.logger.warning(f"Error ensuring white text on colored cells: {e}")
 
     def _ensure_doh_image_centering(self, doc):
         """
@@ -5079,8 +5284,9 @@ class TemplateProcessor:
         Uses the original font-sizing functions based on template type.
         """
         # Define marker processing for all template types (including double)
+        # CRITICAL: Process PRODUCTBRAND_CENTER FIRST to ensure brand font sizing is applied correctly
         markers = [
-            'DESC', 'PRODUCTBRAND', 'PRODUCTBRAND_CENTER', 'PRICE', 'LINEAGE', 
+            'DESC', 'PRODUCTBRAND_CENTER', 'PRODUCTBRAND', 'PRICE', 'LINEAGE', 
             'THC_CBD', 'THC_CBD_LABEL', 'RATIO', 'WEIGHTUNITS', 'PRODUCTSTRAIN', 'DOH', 'PRODUCTVENDOR'
         ]
         
@@ -5091,7 +5297,8 @@ class TemplateProcessor:
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
             
-        # Apply unified font sizing to all text in vertical and double templates (not just markers)
+        # Apply unified font sizing to all text in vertical and double templates only (not just markers).
+        # Horizontal uses marker processing + apply_lineage_colors for sizing; do not run this pass for horizontal.
         if self.template_type in ['vertical', 'double']:
             self._apply_unified_font_sizing_to_all_text(doc)
 
@@ -5119,11 +5326,21 @@ class TemplateProcessor:
                                 self._process_paragraph_for_markers_template_specific(paragraph, ['PRODUCTSTRAIN'])
                                 continue
                             
+                            # CRITICAL FIX: Check for PRODUCTBRAND_CENTER markers - these should use brand font sizing
+                            # Skip processing if markers are present (they've already been processed by marker system)
+                            if 'PRODUCTBRAND_CENTER_START' in full_text and 'PRODUCTBRAND_CENTER_END' in full_text:
+                                # Process PRODUCTBRAND_CENTER markers using the marker processing system
+                                self._process_paragraph_for_markers_template_specific(paragraph, ['PRODUCTBRAND_CENTER'])
+                                continue
+                            
                             # Process other text normally
                             for run in paragraph.runs:
                                 run_text = run.text or ''
                                 if not run_text.strip():
                                     continue
+                                
+                                # Determine field type FIRST so we can use it in skip logic
+                                field_type = self._determine_field_type_for_template(run_text, paragraph, cell)
                                 
                                 existing_size = getattr(run.font, "size", None)
                                 if existing_size is not None:
@@ -5131,11 +5348,22 @@ class TemplateProcessor:
                                         if existing_size.pt <= 1.1:
                                             # Preserve already-minimized runs (e.g., ProductStrain at 1pt)
                                             continue
+                                        # CRITICAL FIX: Skip runs that already have brand font sizing (10-16pt for vertical)
+                                        # These were processed by PRODUCTBRAND_CENTER marker processing
+                                        if 10 <= existing_size.pt <= 16:
+                                            self.logger.debug(f"Skipping run with existing brand font size: {existing_size.pt}pt for '{run_text[:30]}...'")
+                                            continue
+                                        # CRITICAL: On horizontal, always resize description AND brand/lineage (bar text)
+                                        # so descriptions get variable sizing and bar text gets correct size (not stuck at 9pt)
+                                        if existing_size.pt > 1.1:
+                                            if self.template_type == 'horizontal' and field_type in ('description', 'brand', 'lineage'):
+                                                # Always resize - descriptions by length, brand/lineage per config
+                                                pass
+                                            else:
+                                                self.logger.debug(f"Skipping run with existing font size: {existing_size.pt}pt for '{run_text[:30]}...' (already sized)")
+                                                continue
                                     except AttributeError:
                                         pass
-                                
-                                # Determine field type based on text content and position
-                                field_type = self._determine_field_type_for_template(run_text, paragraph, cell)
                                 
                                 # Apply unified font sizing
                                 font_size = get_font_size(run_text, field_type, template_orientation, self.scale_factor)
@@ -5248,7 +5476,51 @@ class TemplateProcessor:
     def _determine_field_type_for_template(self, text, paragraph, cell):
         if self.template_type == 'double':
             return self._determine_field_type_for_double_template(text, paragraph, cell)
+        if self.template_type == 'horizontal':
+            return self._determine_field_type_for_horizontal_template(text, paragraph, cell)
         return self._determine_field_type_for_vertical_template(text, paragraph, cell)
+
+    def _determine_field_type_for_horizontal_template(self, text, paragraph, cell):
+        """
+        Determine field type for horizontal template. Critical: product names (description)
+        must be 'description' so they get large sizing; do NOT classify as 'ratio' just
+        because they contain "g" or "x" (e.g. "0.5g x 2 Pack").
+        """
+        text_lower = text.lower().strip()
+        text_stripped = text.strip()
+        words = text_stripped.split()
+
+        # Markers
+        if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
+            return 'brand'
+
+        # Price
+        if '$' in text:
+            return 'price'
+
+        # THC/CBD
+        if '%' in text or any(kw in text_lower for kw in ['thc:', 'cbd:', 'total thc', 'total cbd']):
+            return 'thc_cbd'
+
+        # Classic lineage bar: short, exact lineage or ALL CAPS short brand
+        classic_lineages = ['hybrid/sativa', 'hybrid/indica', 'sativa', 'indica', 'hybrid', 'cbd', 'mixed']
+        if text_stripped.upper() in [l.upper() for l in classic_lineages]:
+            return 'lineage'
+        if text_stripped.isupper() and len(words) <= 3 and len(text_stripped) <= 25 and all(c.isalpha() or c.isspace() or c in '/-' for c in text_stripped):
+            return 'brand'
+
+        # Ratio: only short ratio-like strings (e.g. "1:1", "2:1", "0.5g"), not full product names
+        if len(text_stripped) <= 12 and (':' in text or re.search(r'\d+g\b', text_lower)):
+            if not any(prod in text_lower for prod in ['pre-roll', 'roll', 'shot', 'pack', 'moonshot', 'infused', 'oz']):
+                return 'ratio'
+
+        # Description: product names (multi-word, contain product-type words or weights)
+        product_indicators = ['pre-roll', 'roll', 'shot', 'moonshot', 'pack', 'infused', 'edible', 'concentrate', 'cartridge', 'tincture', 'gummy', 'oz']
+        if len(words) >= 2 and any(ind in text_lower for ind in product_indicators):
+            return 'description'
+
+        # Default: treat as visible content
+        return 'default'
 
     def _determine_field_type_for_vertical_template(self, text, paragraph, cell):
         """
@@ -5260,10 +5532,26 @@ class TemplateProcessor:
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
         is_short_wordy = all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped)
 
-        # Marker-based overrides
+        # Marker-based overrides - check FIRST before any other logic
         if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
-            self.logger.debug(f"🎯 BRAND MARKER DETECTED: '{text_stripped}' classified as brand (marker-based)")
+            self.logger.debug(f"🎯 BRAND MARKER DETECTED: '{text_stripped[:50]}...' classified as brand (marker-based)")
             return 'brand'
+
+        # CRITICAL FIX: Check if this paragraph/cell already has brand font sizing applied
+        # This handles cases where PRODUCTBRAND_CENTER markers were processed and removed
+        # but the text should still be treated as brand content
+        if paragraph:
+            for run in paragraph.runs:
+                existing_size = getattr(run.font, "size", None)
+                if existing_size is not None:
+                    try:
+                        existing_pt = existing_size.pt if hasattr(existing_size, 'pt') else float(existing_size)
+                        # If font size is in brand range (10-16pt for vertical), treat as brand
+                        if 10 <= existing_pt <= 16:
+                            self.logger.debug(f"🎯 BRAND FONT SIZE DETECTED: '{text_stripped[:50]}...' has brand font size {existing_pt}pt, classified as brand")
+                            return 'brand'
+                    except (AttributeError, ValueError, TypeError):
+                        pass
 
         if '__LINEAGE_HINT_' in text:
             self.logger.debug(f"🎯 LINEAGE HINT DETECTED: '{text_stripped}' classified as lineage (marker-based)")
@@ -5378,45 +5666,160 @@ class TemplateProcessor:
 
     def _optimize_vertical_template_spacing(self, doc):
         """
-        Apply minimal spacing optimizations specifically for vertical and double templates
-        to ensure all labels fit on one page.
+        Apply spacing optimizations for vertical and double templates.
+        Vertical: 0pt before / 0pt after for non-classic; classic type (lineage cells) = Auto.
+        Double: 2pt before / 2pt after.
         """
         try:
             from docx.shared import Pt
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            from src.core.constants import VALID_CLASSIC_LINEAGES
             
-            def optimize_paragraph_spacing(paragraph):
-                """Set minimal spacing for all paragraphs in vertical and double templates."""
-                # Set absolute minimum spacing
-                paragraph.paragraph_format.space_before = Pt(0)
-                paragraph.paragraph_format.space_after = Pt(0)
+            def cell_text_is_classic_lineage(cell):
+                """True if cell text is a classic lineage value (INDICA, SATIVA, HYBRID, etc.)."""
+                if cell is None:
+                    return False
+                text = (''.join(p.text for p in cell.paragraphs)).strip().upper()
+                if not text:
+                    return False
+                # Exact match or single token that matches
+                return text in VALID_CLASSIC_LINEAGES or any(
+                    text == v or text.startswith(v + '/') or text.endswith('/' + v)
+                    for v in VALID_CLASSIC_LINEAGES
+                )
+            
+            def set_auto_spacing(paragraph):
+                """Set paragraph spacing to Auto (clear before/after)."""
+                paragraph.paragraph_format.space_before = None
+                paragraph.paragraph_format.space_after = None
+                pPr = paragraph._element.get_or_add_pPr()
+                spacing = pPr.find(qn('w:spacing'))
+                if spacing is None:
+                    spacing = OxmlElement('w:spacing')
+                    pPr.append(spacing)
+                if qn('w:before') in spacing.attrib:
+                    del spacing.attrib[qn('w:before')]
+                if qn('w:after') in spacing.attrib:
+                    del spacing.attrib[qn('w:after')]
+                spacing.set(qn('w:lineRule'), 'auto')
+            
+            def optimize_paragraph_spacing(paragraph, cell=None):
+                """Set spacing for all paragraphs in vertical and double templates.
+                Skip lineage/brand banner paragraphs (cells with colored background) so their spacing is preserved.
+                Classic type vertical: lineage cells use Auto spacing.
+                """
+                # If this paragraph is in a cell with a colored background (lineage/brand banner), keep existing spacing
+                if cell is not None:
+                    tc = cell._tc
+                    tcPr = tc.find(qn('w:tcPr'))
+                    if tcPr is not None:
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            fill = shd.get(qn('w:fill'))
+                            if fill and fill != 'FFFFFF' and fill != 'auto':
+                                ttype = getattr(self, "template_type", None)
+                                if ttype == "vertical":
+                                    # Classic type vertical: lineage cells (INDICA, SATIVA, HYBRID, etc.) = Auto
+                                    if cell_text_is_classic_lineage(cell):
+                                        set_auto_spacing(paragraph)
+                                    else:
+                                        # Non-classic vertical: 0pt before/after
+                                        paragraph.paragraph_format.space_before = Pt(0)
+                                        paragraph.paragraph_format.space_after = Pt(0)
+                                        pPr = paragraph._element.get_or_add_pPr()
+                                        spacing = pPr.find(qn('w:spacing'))
+                                        if spacing is None:
+                                            spacing = OxmlElement('w:spacing')
+                                            pPr.append(spacing)
+                                        spacing.set(qn('w:before'), '0')  # 0pt = 0 twips
+                                        spacing.set(qn('w:after'), '0')    # 0pt = 0 twips
+                                        spacing.set(qn('w:lineRule'), 'auto')
+                                else:
+                                    paragraph.paragraph_format.space_before = Pt(6)
+                                    paragraph.paragraph_format.space_after = Pt(6)
+                                    pPr = paragraph._element.get_or_add_pPr()
+                                    spacing = pPr.find(qn('w:spacing'))
+                                    if spacing is None:
+                                        spacing = OxmlElement('w:spacing')
+                                        pPr.append(spacing)
+                                    spacing.set(qn('w:before'), '40')
+                                    spacing.set(qn('w:after'), '20')
+                                if ttype != "vertical" or not cell_text_is_classic_lineage(cell):
+                                    pPr = paragraph._element.get_or_add_pPr()
+                                    spacing = pPr.find(qn('w:spacing'))
+                                    if spacing is not None:
+                                        spacing.set(qn('w:lineRule'), 'auto')
+                                return
+                # Set template-specific paragraph spacing
+                # Vertical: 0pt before, 0pt after for non-classic; classic type (lineage cell) = Auto. Double: 2pt/2pt. Other: auto.
+                ttype = getattr(self, "template_type", None)
+                if ttype == "vertical":
+                    # Classic type vertical: any cell that shows lineage text gets Auto
+                    if cell is not None and cell_text_is_classic_lineage(cell):
+                        set_auto_spacing(paragraph)
+                    else:
+                        # Non-classic vertical: 0pt before/after
+                        before_pt, after_pt = 0, 0
+                        paragraph.paragraph_format.space_before = Pt(before_pt)
+                        paragraph.paragraph_format.space_after = Pt(after_pt)
+                        pPr = paragraph._element.get_or_add_pPr()
+                        spacing = pPr.find(qn('w:spacing'))
+                        if spacing is None:
+                            spacing = OxmlElement('w:spacing')
+                            pPr.append(spacing)
+                        spacing.set(qn('w:before'), str(int(before_pt * 20)))
+                        spacing.set(qn('w:after'), str(int(after_pt * 20)))
+                elif ttype == "double":
+                    before_pt, after_pt = 2, 2
+                    paragraph.paragraph_format.space_before = Pt(before_pt)
+                    paragraph.paragraph_format.space_after = Pt(after_pt)
+                    pPr = paragraph._element.get_or_add_pPr()
+                    spacing = pPr.find(qn('w:spacing'))
+                    if spacing is None:
+                        spacing = OxmlElement('w:spacing')
+                        pPr.append(spacing)
+                    spacing.set(qn('w:before'), str(int(before_pt * 20)))
+                    spacing.set(qn('w:after'), str(int(after_pt * 20)))
+                else:
+                    paragraph.paragraph_format.space_before = None
+                    paragraph.paragraph_format.space_after = None
+                    pPr = paragraph._element.get_or_add_pPr()
+                    spacing = pPr.find(qn('w:spacing'))
+                    if spacing is not None:
+                        if qn('w:before') in spacing.attrib:
+                            del spacing.attrib[qn('w:before')]
+                        if qn('w:after') in spacing.attrib:
+                            del spacing.attrib[qn('w:after')]
+                    else:
+                        spacing = OxmlElement('w:spacing')
+                        pPr.append(spacing)
                 
                 # All content now uses standard spacing
                 
                 # Default spacing for non-THC_CBD content
                 paragraph.paragraph_format.line_spacing = 1.0
                 
-                # Set at XML level for maximum compatibility
+                # Ensure line spacing is set at XML level
                 pPr = paragraph._element.get_or_add_pPr()
                 spacing = pPr.find(qn('w:spacing'))
                 if spacing is None:
                     spacing = OxmlElement('w:spacing')
                     pPr.append(spacing)
                 
-                spacing.set(qn('w:before'), '0')
-                spacing.set(qn('w:after'), '0')
                 spacing.set(qn('w:line'), '240')  # 1.0 line spacing
                 spacing.set(qn('w:lineRule'), 'auto')
             
-            # Process all tables
+            # Process all tables (pass cell so lineage/brand banners keep their spacing)
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            optimize_paragraph_spacing(paragraph)
+                            optimize_paragraph_spacing(paragraph, cell=cell)
             
-            # Process all paragraphs outside tables
+            # Process all paragraphs outside tables (no cell)
             for paragraph in doc.paragraphs:
-                optimize_paragraph_spacing(paragraph)
+                optimize_paragraph_spacing(paragraph, cell=None)
             
             self.logger.debug("Applied vertical/double template spacing optimizations")
             
@@ -5495,12 +5898,17 @@ class TemplateProcessor:
                     marker_end = final_content.find(end_marker)
                     content = final_content[marker_start:marker_end]
                     
-                    # Get font size for this marker
+                    # Get font size for this marker using unified system
                     font_size = self._get_template_specific_font_size(content, marker_name)
+                    font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
+                    
+                    # CRITICAL DEBUG: Log font sizing for horizontal template
+                    if self.template_type == 'horizontal' and marker_name in ('DESC', 'DESCRIPTION'):
+                        self.logger.info(f"🔍 HORIZONTAL DESC SIZE: '{content[:50]}...' -> {font_size_pt}pt (marker: {marker_name}, template: {self.template_type})")
                     
                     # CRITICAL DEBUG: Log ProductStrain font sizing
                     if marker_name == 'PRODUCTSTRAIN':
-                        self.logger.info(f"✅ PRODUCTSTRAIN FONT SIZING: Content='{content}', FontSize={font_size.pt if hasattr(font_size, 'pt') else font_size}pt, Template={self.template_type}")
+                        self.logger.info(f"✅ PRODUCTSTRAIN FONT SIZING: Content='{content}', FontSize={font_size_pt}pt, Template={self.template_type}")
                     
                     processed_content[marker_name] = {
                         'content': content,
@@ -5550,10 +5958,16 @@ class TemplateProcessor:
                 
                 run.font.size = marker_data['font_size']
                 set_run_font_size(run, marker_data['font_size'])
+                applied_size_pt = marker_data['font_size'].pt if hasattr(marker_data['font_size'], 'pt') else float(marker_data['font_size'])
+                
+                # CRITICAL DEBUG: Log font sizing for horizontal template descriptions
+                if self.template_type == 'horizontal' and marker_name in ('DESC', 'DESCRIPTION'):
+                    self.logger.info(f"✅ HORIZONTAL DESC APPLIED: '{display_content[:50]}...' -> {applied_size_pt}pt")
+                
                 # CRITICAL DEBUG: Log ProductStrain processing
                 if marker_name == 'PRODUCTSTRAIN':
-                    self.logger.info(f"✅ PRODUCTSTRAIN PROCESSED: Added ProductStrain run with content='{display_content}', font_size={marker_data['font_size'].pt if hasattr(marker_data['font_size'], 'pt') else marker_data['font_size']}pt")
-                self.logger.debug(f"Added marker '{marker_name}': '{display_content}' -> {marker_data['font_size'].pt}pt")
+                    self.logger.info(f"✅ PRODUCTSTRAIN PROCESSED: Added ProductStrain run with content='{display_content}', font_size={applied_size_pt}pt")
+                self.logger.debug(f"Added marker '{marker_name}': '{display_content}' -> {applied_size_pt}pt")
                 
                 lines = display_content.splitlines()
                 for i, line in enumerate(lines):
@@ -5588,9 +6002,19 @@ class TemplateProcessor:
 
             # Apply special formatting for specific markers
             for marker_name, marker_data in processed_content.items():
-                # Always center ProductBrand markers for ALL templates
+                # Always center ProductBrand markers for ALL templates; match lineage paragraph spacing
                 if ('PRODUCTBRAND' in marker_name):
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    paragraph.paragraph_format.space_before = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
+                    pPr = paragraph._element.get_or_add_pPr()
+                    sp = pPr.find(qn('w:spacing'))
+                    if sp is None:
+                        sp = OxmlElement('w:spacing')
+                        pPr.append(sp)
+                    sp.set(qn('w:before'), '40')
+                    sp.set(qn('w:after'), '20')
+                    sp.set(qn('w:lineRule'), 'auto')
                     self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
                     for idx, run in enumerate(paragraph.runs):
                         # Get product type for font sizing
@@ -5684,23 +6108,36 @@ class TemplateProcessor:
                     if is_classic_lineage_value:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         paragraph.paragraph_format.left_indent = Inches(0)
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        # Vertical template: Equal spacing above and below for lineage
+                        if self.template_type == 'vertical':
+                            paragraph.paragraph_format.space_before = Pt(6)
+                            paragraph.paragraph_format.space_after = Pt(6)
+                        else:
+                            paragraph.paragraph_format.space_before = Pt(2)
+                            paragraph.paragraph_format.space_after = Pt(1)
                         self.logger.debug(f"LINEAGE ALIGNMENT: Forced LEFT alignment for classic lineage value: '{clean_content}'")
                     elif is_classic_product:
                         # Classic product types should have LEFT alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         # NO LEFT INDENT - this was causing lineage indentation
                         paragraph.paragraph_format.left_indent = Inches(0)
-                        # Ensure consistent spacing above lineage section for equal margins
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        # Vertical template: Equal spacing above and below for lineage
+                        if self.template_type == 'vertical':
+                            paragraph.paragraph_format.space_before = Pt(6)
+                            paragraph.paragraph_format.space_after = Pt(6)
+                        else:
+                            paragraph.paragraph_format.space_before = Pt(2)
+                            paragraph.paragraph_format.space_after = Pt(1)
                     else:
                         # Non-classic product types should have CENTER alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Ensure consistent spacing above lineage section for equal margins
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                        # Vertical template: Equal spacing above and below for lineage
+                        if self.template_type == 'vertical':
+                            paragraph.paragraph_format.space_before = Pt(6)
+                            paragraph.paragraph_format.space_after = Pt(6)
+                        else:
+                            paragraph.paragraph_format.space_before = Pt(2)
+                            paragraph.paragraph_format.space_after = Pt(1)
                     
                     # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage
                     if product_type and 'vape' in product_type.lower():
@@ -5712,9 +6149,13 @@ class TemplateProcessor:
                 # Always center ProductBrand and ProductBrand_Center markers
                 if marker_name in ('PRODUCTBRAND', 'PRODUCTBRAND_CENTER') or 'PRODUCTBRAND' in marker_name:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    # Ensure consistent spacing above product brand section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    # Vertical template: 6pt before/after; others: 2pt/1pt
+                    if self.template_type == 'vertical':
+                        paragraph.paragraph_format.space_before = Pt(6)
+                        paragraph.paragraph_format.space_after = Pt(6)
+                    else:
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
                     for run in paragraph.runs:
                         # Get product type for font sizing
                         product_type = None
@@ -5846,6 +6287,10 @@ class TemplateProcessor:
                 end_idx = full_text.find(end_marker)
                 content = full_text[start_idx:end_idx]
                 
+                # CRITICAL DEBUG: Log when processing LINEAGE markers to track font sizing
+                if marker_name == 'LINEAGE':
+                    self.logger.info(f"🔍 PROCESSING LINEAGE MARKER: content='{content[:100]}', has PRODUCTBRAND_CENTER markers: {'PRODUCTBRAND_CENTER_START' in content and 'PRODUCTBRAND_CENTER_END' in content}")
+                
                 # For THC_CBD markers, calculate font size before any splitting to ensure consistency
                 if marker_name in ['THC_CBD', 'RATIO', 'THC_CBD_LABEL'] and ('\n' in content or '|BR|' in content):
                     # Calculate font size based on the original unsplit content to ensure consistency
@@ -5870,10 +6315,44 @@ class TemplateProcessor:
                     # Convert line breaks to actual line breaks, passing the font size
                     self._convert_br_markers_to_line_breaks(paragraph, font_size)
                 else:
-                    # Use template-type-specific font sizing based on original functions
-                    font_size = self._get_template_specific_font_size(content, marker_name)
+                    # CRITICAL FIX: Check if LINEAGE marker contains PRODUCTBRAND_CENTER markers BEFORE calculating font size
+                    # This ensures brand content uses 'brand' font sizing, not 'lineage' font sizing
+                    actual_marker_name = marker_name
+                    final_content = content
+                    brand_content = None
+                    
+                    # Check for PRODUCTBRAND_CENTER markers in LINEAGE content (case-insensitive check)
+                    # Also check the original full_text to catch markers that might be in the paragraph but not in extracted content
+                    content_upper = content.upper()
+                    full_text_upper = full_text.upper()
+                    has_brand_markers = ('PRODUCTBRAND_CENTER_START' in content_upper and 'PRODUCTBRAND_CENTER_END' in content_upper) or \
+                                       ('PRODUCTBRAND_CENTER_START' in full_text_upper and 'PRODUCTBRAND_CENTER_END' in full_text_upper)
+                    
+                    if marker_name == 'LINEAGE' and has_brand_markers:
+                        # Extract brand content to calculate proper font size
+                        # Find markers case-insensitively but preserve original case
+                        import re
+                        brand_match = re.search(r'PRODUCTBRAND_CENTER_START(.+?)PRODUCTBRAND_CENTER_END', content, re.IGNORECASE)
+                        if brand_match:
+                            brand_content = brand_match.group(1)
+                            # Use PRODUCTBRAND_CENTER marker type to get brand font sizing
+                            actual_marker_name = 'PRODUCTBRAND_CENTER'
+                            # Use brand content for font size calculation
+                            font_size = self._get_template_specific_font_size(brand_content, actual_marker_name)
+                            # Use brand_content (without markers) as the final content
+                            final_content = brand_content
+                            font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
+                            self.logger.info(f"✅ LINEAGE contains PRODUCTBRAND_CENTER: Using 'brand' font sizing for '{brand_content}' -> {font_size_pt}pt (template: {self.template_type})")
+                        else:
+                            # Markers found but extraction failed - fall back to regular processing
+                            self.logger.warning(f"⚠️ Found PRODUCTBRAND_CENTER markers in LINEAGE but extraction failed, using lineage sizing")
+                            font_size = self._get_template_specific_font_size(content, marker_name)
+                    else:
+                        # Use template-type-specific font sizing based on original functions
+                        font_size = self._get_template_specific_font_size(content, marker_name)
                     import logging
-                    logging.debug(f"[FONT_DEBUG] Processing marker '{marker_name}' with content '{content}' -> font_size: {font_size}")
+                    font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
+                    logging.debug(f"[FONT_DEBUG] Processing marker '{marker_name}' (actual: {actual_marker_name}) with content '{content[:50]}...' -> font_size: {font_size_pt}pt")
                     
                     # Clear paragraph and re-add content with template-optimized formatting
                     paragraph.clear()
@@ -5886,11 +6365,36 @@ class TemplateProcessor:
                     # Apply template-specific font size setting
                     set_run_font_size(run, font_size)
                     
-                    # Add the content to the run
-                    run.text = content  # Use assignment instead of add_text to avoid duplication
+                    # Add the final content to the run (brand_content if PRODUCTBRAND_CENTER was detected, otherwise original content)
+                    run.text = final_content  # Use assignment instead of add_text to avoid duplication
                     
                     # Convert |BR| markers to actual line breaks for other markers
                     self._convert_br_markers_to_line_breaks(paragraph, font_size)
+                    
+                    # CRITICAL: If we detected PRODUCTBRAND_CENTER markers in LINEAGE, handle it as brand and return early
+                    # This prevents the later LINEAGE processing from overriding the brand font sizing
+                    if actual_marker_name == 'PRODUCTBRAND_CENTER' and marker_name == 'LINEAGE':
+                        # PRODUCTBRAND_CENTER content is always on colored background bars; keep all runs white
+                        # Set white AFTER set_run_font_size and _convert_br_markers_to_line_breaks to ensure it's not overwritten
+                        for r in paragraph.runs:
+                            _set_lineage_run_white(r)
+                        # Handle special formatting for brand content
+                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        # Also ensure all runs in this paragraph are properly sized with brand font size
+                        for run in paragraph.runs:
+                            # Force brand font size - don't let anything override it
+                            run.font.size = font_size
+                            set_run_font_size(run, font_size)
+                        # Center the cell vertically so brand text sits mid-cell (e.g., CONSTELLATION CANNABIS)
+                        self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
+                        font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
+                        self.logger.info(f"✅ PROCESSED LINEAGE as PRODUCTBRAND_CENTER: '{final_content}' with brand font size {font_size_pt}pt (template: {self.template_type})")
+                        # Verify font size was actually set
+                        actual_font_size = run.font.size
+                        actual_font_pt = actual_font_size.pt if hasattr(actual_font_size, 'pt') else float(actual_font_size) if actual_font_size else None
+                        if actual_font_pt and abs(actual_font_pt - font_size_pt) > 0.1:
+                            self.logger.warning(f"⚠️ Font size mismatch! Expected {font_size_pt}pt but got {actual_font_pt}pt")
+                        return  # Exit early to prevent LINEAGE processing from overriding
                 
                 # Handle special formatting for specific markers
                 if marker_name in ['PRODUCTBRAND', 'PRODUCTBRAND_CENTER']:
@@ -5980,6 +6484,7 @@ class TemplateProcessor:
                         self.logger.warning(f"Cleaned corrupted lineage content: '{original_content}' -> '{content}'")
                     
                     # CRITICAL FIX: If Lineage contains PRODUCTBRAND_CENTER markers, process it as PRODUCTBRAND_CENTER
+                    # Note: Font size was already calculated above using 'brand' field type if markers were detected
                     if 'PRODUCTBRAND_CENTER_START' in content and 'PRODUCTBRAND_CENTER_END' in content:
                         self.logger.debug(f"Lineage contains PRODUCTBRAND_CENTER markers, processing as PRODUCTBRAND_CENTER")
                         # Extract the brand content from the PRODUCTBRAND_CENTER markers
@@ -5987,9 +6492,12 @@ class TemplateProcessor:
                         brand_end = content.find('PRODUCTBRAND_CENTER_END')
                         brand_content = content[brand_start:brand_end]
                         
-                        # Calculate proper font size for brand content using 'brand' field type
+                        # Font size was already calculated above using 'brand' field type, but recalculate to be safe
+                        # Use unified font sizing system directly
                         from src.core.generation.unified_font_sizing import get_font_size
                         font_size = get_font_size(brand_content, 'brand', self.template_type, self.scale_factor)
+                        font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
+                        self.logger.info(f"🔍 HORIZONTAL BRAND SIZE: '{brand_content}' -> {font_size_pt}pt (template: {self.template_type}, field: brand)")
                         
                         # Clear paragraph and recreate with brand content
                         paragraph.clear()
@@ -5999,10 +6507,28 @@ class TemplateProcessor:
                         run.font.size = font_size
                         set_run_font_size(run, font_size)
                         run.text = brand_content  # Use assignment instead of add_text to avoid duplication
+                        # CRITICAL: PRODUCTBRAND_CENTER content is always on colored background bars; keep text white
+                        # Set white AFTER set_run_font_size to ensure it's not overwritten
+                        _set_lineage_run_white(run)
                         
                         # Center the paragraph for nonclassic types (ProductBrand content)
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        self.logger.debug(f"Centered Lineage (ProductBrand) content: '{brand_content}'")
+                        # Match lineage paragraph spacing so brand looks like lineage (generous vertical padding)
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
+                        # Set at XML level for maximum compatibility
+                        pPr = paragraph._element.get_or_add_pPr()
+                        spacing = pPr.find(qn('w:spacing'))
+                        if spacing is None:
+                            spacing = OxmlElement('w:spacing')
+                            pPr.append(spacing)
+                        spacing.set(qn('w:before'), '40')   # 2pt = 40 twips
+                        spacing.set(qn('w:after'), '20')    # 1pt = 20 twips
+                        spacing.set(qn('w:lineRule'), 'auto')
+                        # CRITICAL: Ensure all runs are white (PRODUCTBRAND_CENTER is always on colored background)
+                        for r in paragraph.runs:
+                            _set_lineage_run_white(r)
+                        self.logger.debug(f"Centered Lineage (ProductBrand) content: '{brand_content}' with brand font size: {font_size}pt, lineage-matching spacing (white text)")
                         return  # Exit early since we've handled this as PRODUCTBRAND_CENTER
                     
                     # Extract product type information from the content
@@ -6040,14 +6566,24 @@ class TemplateProcessor:
                                 if is_classic or is_classic_lineage_value:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                     paragraph.paragraph_format.left_indent = Inches(0)
-                                    paragraph.paragraph_format.space_before = Pt(2)
-                                    paragraph.paragraph_format.space_after = Pt(1)
+                                    # Vertical template: 6pt before/after; others: 2pt/1pt
+                                    if self.template_type == 'vertical':
+                                        paragraph.paragraph_format.space_before = Pt(6)
+                                        paragraph.paragraph_format.space_after = Pt(6)
+                                    else:
+                                        paragraph.paragraph_format.space_before = Pt(2)
+                                        paragraph.paragraph_format.space_after = Pt(1)
                                     if is_classic_lineage_value:
                                         self.logger.debug(f"Left-aligned lineage for classic lineage value: '{clean_lineage}'")
                                 else:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    paragraph.paragraph_format.space_before = Pt(2)
-                                    paragraph.paragraph_format.space_after = Pt(1)
+                                    # Vertical template: 6pt before/after; others: 2pt/1pt
+                                    if self.template_type == 'vertical':
+                                        paragraph.paragraph_format.space_before = Pt(6)
+                                        paragraph.paragraph_format.space_after = Pt(6)
+                                    else:
+                                        paragraph.paragraph_format.space_before = Pt(2)
+                                        paragraph.paragraph_format.space_after = Pt(1)
                                 
                                 # Update the content to only show the actual lineage (remove any markers)
                                 if actual_lineage.startswith('LINEAGE_START'):
@@ -6097,21 +6633,36 @@ class TemplateProcessor:
                             # For Classic Lineage Values, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                            # Vertical template: Equal spacing above and below for lineage
+                            if self.template_type == 'vertical':
+                                paragraph.paragraph_format.space_before = Pt(6)
+                                paragraph.paragraph_format.space_after = Pt(6)
+                            else:
+                                paragraph.paragraph_format.space_before = Pt(2)
+                                paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Left-justified lineage for classic lineage value: '{clean_content}' (content: '{content}')")
                         elif is_classic_product:
                             # For Classic Types, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             paragraph.paragraph_format.left_indent = Inches(0)
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                            # Vertical template: Equal spacing above and below for lineage
+                            if self.template_type == 'vertical':
+                                paragraph.paragraph_format.space_before = Pt(6)
+                                paragraph.paragraph_format.space_after = Pt(6)
+                            else:
+                                paragraph.paragraph_format.space_before = Pt(2)
+                                paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
                         else:
                             # For non-classic types, center the ProductBrand content in Lineage field
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                            # Vertical template: 6pt before/after; others: 2pt/1pt
+                            if self.template_type == 'vertical':
+                                paragraph.paragraph_format.space_before = Pt(6)
+                                paragraph.paragraph_format.space_after = Pt(6)
+                            else:
+                                paragraph.paragraph_format.space_before = Pt(2)
+                                paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
                         
                         # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
@@ -6262,18 +6813,29 @@ class TemplateProcessor:
                 # Check if this paragraph contains lineage or vendor content
                 text = paragraph.text.lower()
                 if any(keyword in text for keyword in ['indica', 'sativa', 'hybrid', 'cbd', 'alpha crux', 'constellation']):
-                    # Set consistent spacing for lineage/brand sections
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
-                    
-                    # Also set at XML level for maximum compatibility
-                    pPr = paragraph._element.get_or_add_pPr()
-                    spacing = pPr.find(qn('w:spacing'))
-                    if spacing is None:
-                        spacing = OxmlElement('w:spacing')
-                        pPr.append(spacing)
-                    spacing.set(qn('w:before'), '40')  # 2pt = 40 twips
-                    spacing.set(qn('w:after'), '20')   # 1pt = 20 twips
+                    # Vertical template: 6pt before/after; others: 2pt/1pt
+                    if self.template_type == 'vertical':
+                        paragraph.paragraph_format.space_before = Pt(6)
+                        paragraph.paragraph_format.space_after = Pt(6)
+                        # Also set at XML level for maximum compatibility
+                        pPr = paragraph._element.get_or_add_pPr()
+                        spacing = pPr.find(qn('w:spacing'))
+                        if spacing is None:
+                            spacing = OxmlElement('w:spacing')
+                            pPr.append(spacing)
+                        spacing.set(qn('w:before'), '120')  # 6pt = 120 twips
+                        spacing.set(qn('w:after'), '120')   # 6pt = 120 twips
+                    else:
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
+                        # Also set at XML level for maximum compatibility
+                        pPr = paragraph._element.get_or_add_pPr()
+                        spacing = pPr.find(qn('w:spacing'))
+                        if spacing is None:
+                            spacing = OxmlElement('w:spacing')
+                            pPr.append(spacing)
+                        spacing.set(qn('w:before'), '40')  # 2pt = 40 twips
+                        spacing.set(qn('w:after'), '20')   # 1pt = 20 twips
                     spacing.set(qn('w:lineRule'), 'auto')
             
             # Process all tables
@@ -6699,6 +7261,92 @@ class TemplateProcessor:
                             
         except Exception as e:
             self.logger.warning(f"Error removing unmerged placeholders: {e}")
+
+    def _remove_empty_pages(self, doc):
+        """Remove completely empty pages (tables) from the document."""
+        try:
+            from docx.enum.text import WD_BREAK
+            
+            tables = doc.tables
+            if not tables:
+                return
+            
+            # Check each table to see if it has any meaningful content
+            empty_table_indices = []
+            for table_idx, table in enumerate(tables):
+                has_content = False
+                try:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            cell_text = cell.text.strip()
+                            # Check if cell has meaningful content
+                            # Empty if: whitespace only, empty placeholders, or unfilled template placeholders
+                            if not cell_text:
+                                continue
+                            
+                            # Check if it contains unfilled placeholders (these indicate rendering failed)
+                            if '{{Label' in cell_text and '}}' in cell_text:
+                                # Check if it's ONLY placeholders (not filled with actual content)
+                                import re
+                                # Pattern matches complete placeholder like {{Label1.ProductName}}
+                                placeholder_only_pattern = r'^(\{\{Label\d+\.\w+\}\}\s*)+$'
+                                if re.match(placeholder_only_pattern, cell_text):
+                                    # This is an unfilled placeholder, skip it
+                                    continue
+                                else:
+                                    # Has content beyond placeholders
+                                    has_content = True
+                                    break
+                            else:
+                                # Has actual content (not a placeholder)
+                                has_content = True
+                                break
+                        if has_content:
+                            break
+                except Exception as e:
+                    self.logger.warning(f"Error checking table {table_idx} for content: {e}")
+                    # If we can't check, assume it has content to be safe
+                    has_content = True
+                
+                if not has_content:
+                    empty_table_indices.append(table_idx)
+                    self.logger.info(f"🔍 BLANK PAGE DETECTION: Found empty table at index {table_idx}, will remove")
+            
+            # Remove empty tables in reverse order to maintain indices
+            for table_idx in reversed(empty_table_indices):
+                try:
+                    table = tables[table_idx]
+                    # Find and remove page breaks before this table
+                    table_element = table._element
+                    parent = table_element.getparent()
+                    table_index = parent.index(table_element)
+                    
+                    # Check the paragraph before the table for page breaks
+                    if table_index > 0:
+                        prev_element = parent[table_index - 1]
+                        if prev_element.tag.endswith('p'):  # It's a paragraph
+                            # Check if this paragraph contains a page break
+                            for run in prev_element.xpath('.//w:r', namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
+                                br = run.find('.//w:br', namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+                                if br is not None:
+                                    br_type = br.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type')
+                                    if br_type == 'page':
+                                        # Remove the page break paragraph
+                                        parent.remove(prev_element)
+                                        self.logger.info(f"🔍 BLANK PAGE REMOVAL: Removed page break before empty table {table_idx}")
+                    
+                    # Remove the empty table
+                    parent.remove(table_element)
+                    self.logger.info(f"🔍 BLANK PAGE REMOVAL: Removed empty table at index {table_idx}")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error removing empty table {table_idx}: {e}")
+            
+            if empty_table_indices:
+                self.logger.info(f"🔍 BLANK PAGE REMOVAL: Removed {len(empty_table_indices)} empty page(s)")
+                
+        except Exception as e:
+            self.logger.warning(f"Error removing empty pages: {e}")
 
     def _ensure_table_grids_exist(self, doc):
         """Ensure all tables have proper tblGrid elements."""

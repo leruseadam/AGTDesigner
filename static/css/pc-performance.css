@@ -132,7 +132,7 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     will-change: auto !important;
 }
 
-/* Template dropdown - Match filter dropdown styling on PC */
+/* Template dropdown - Match control-column width on PC */
 #templateSelect,
 #templateSelectModal {
     /* Remove native styling */
@@ -140,14 +140,14 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     -moz-appearance: none !important;
     appearance: none !important;
     
-    /* Layout and sizing - match filter dropdowns */
+    /* Layout and sizing - match control buttons */
     display: block !important;
     box-sizing: border-box !important;
     width: 100% !important;
-    min-width: 280px !important;
-    max-width: none !important;
-    min-height: 60px !important;
-    height: 60px !important;
+    min-width: 220px !important;
+    max-width: 280px !important;
+    min-height: 72px !important;
+    height: 72px !important;
     margin: 0 auto !important; /* Center horizontally */
     
     /* Text alignment - left like other filters */
@@ -161,8 +161,8 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     /* Padding - match filter dropdowns */
     padding: 1rem 48px 1rem 1.25rem !important;
     
-    /* Font styling - match filter dropdowns */
-    font-size: 18px !important;
+    /* Font styling - larger text for template name */
+    font-size: 22px !important;
     font-weight: 700 !important;
     color: #00d4aa !important; /* Cyan text to match filters */
     line-height: 1.5 !important;
@@ -221,26 +221,29 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     outline: none !important;
 }
 
-/* PC-specific: Ensure template dropdown is properly centered */
+/* PC-specific: Keep template dropdowns centered; other sections full width */
 @media (min-width: 992px) {
-    /* Center the control-section container */
-        /* Remove forced centering for control-section and control-panel on large screens */
-        .control-section {
-            align-items: flex-start !important;
-            display: block !important;
-            width: 100% !important;
-        }
-        .control-panel {
-            align-items: flex-start !important;
-            display: block !important;
-            width: 100% !important;
-        }
-        .control-section #templateSelect,
-        .control-section #templateSelectModal {
-            margin-left: 0 !important;
-            margin-right: 0 !important;
-            display: block !important;
-        }
+    .control-section:not(.control-section-template) {
+        align-items: flex-start !important;
+        display: block !important;
+        width: 100% !important;
+    }
+    /* Template section stays centered */
+    .control-section-template {
+        align-items: center !important;
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+    }
+    .template-dropdowns-center {
+        justify-content: center !important;
+    }
+    .control-panel {
+        align-items: center !important;
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+    }
 }
 
 /* Disable all transitions globally for smooth performance on PC */

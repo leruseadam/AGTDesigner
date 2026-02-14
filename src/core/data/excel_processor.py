@@ -464,8 +464,43 @@ def optimized_lineage_persistence(processor, df):
                         if updated_count > 0:
                             processor.logger.debug(f"Updated {updated_count} products with strain '{strain_name}' to lineage '{db_lineage}' from database")
         
+        # --- Nonclassic CBD detection: set Lineage to CBD_BLEND when CBD indicators are present ---
+        nonclassic_mask = ~df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
+        if nonclassic_mask.any():
+            import re as _re
+            cbd_tokens = ['CBD', 'CBG', 'CBN', 'CBC']
+            ratio_pat = _re.compile(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)*\b')
+
+            for idx in df[nonclassic_mask].index:
+                name = str(df.at[idx, 'Product Name*'] if 'Product Name*' in df.columns else '').upper()
+                strain = str(df.at[idx, 'Product Strain'] if 'Product Strain' in df.columns else '').upper()
+                desc = str(df.at[idx, 'Description'] if 'Description' in df.columns else '').upper()
+                ptype = str(df.at[idx, 'Product Type*'] if 'Product Type*' in df.columns else '').upper()
+                ratio_val = ''
+                for rcol in ['Ratio', 'Ratio_or_THC_CBD']:
+                    if rcol in df.columns:
+                        ratio_val = str(df.at[idx, rcol] or '').upper()
+                        if ratio_val and ratio_val != 'NAN':
+                            break
+
+                has_cbd = any(t in s for t in cbd_tokens for s in [name, strain, desc, ratio_val, ptype] if s)
+                has_ratio = bool(ratio_pat.search(name) or ratio_pat.search(ratio_val) or ratio_pat.search(desc))
+
+                if has_cbd or has_ratio:
+                    df.at[idx, 'Lineage'] = 'CBD_BLEND'
+                    if 'Product Strain' in df.columns:
+                        current_strain = str(df.at[idx, 'Product Strain'] or '').strip()
+                        if not current_strain or current_strain.upper() in ('NAN', 'NONE', '', 'MIXED'):
+                            df.at[idx, 'Product Strain'] = 'CBD Blend'
+                else:
+                    current_lineage = str(df.at[idx, 'Lineage'] if 'Lineage' in df.columns else '').strip().upper()
+                    if not current_lineage or current_lineage in ('NAN', 'NONE', ''):
+                        df.at[idx, 'Lineage'] = 'MIXED'
+
+            processor.logger.info(f"Processed {nonclassic_mask.sum()} nonclassic products for CBD/MIXED lineage assignment")
+
         return df
-        
+
     except Exception as e:
         processor.logger.error(f"Error in optimized lineage persistence: {e}")
         return df
@@ -515,7 +550,20 @@ def batch_lineage_database_update(processor, df):
                         product_db.add_or_update_strain(strain_name, lineage_to_save, sovereign=False)
                     else:
                         processor.logger.warning(f"Invalid lineage '{lineage_to_save}' for classic strain '{strain_name}', skipping database save")
-        
+
+        # Save nonclassic lineage (CBD_BLEND / MIXED) to database
+        nonclassic_mask = ~df["Product Type*"].str.strip().str.lower().isin(CLASSIC_TYPES)
+        nonclassic_df = df[nonclassic_mask]
+        if not nonclassic_df.empty and 'Lineage' in nonclassic_df.columns:
+            for idx, row in nonclassic_df.iterrows():
+                lineage_val = str(row.get('Lineage') or '').strip().upper()
+                product_name = str(row.get('Product Name*') or '').strip()
+                if lineage_val in ('CBD_BLEND', 'MIXED', 'PARAPHERNALIA') and product_name:
+                    try:
+                        product_db.update_product_lineage(product_name, lineage_val)
+                    except Exception:
+                        pass  # product may not exist in DB yet
+
     except Exception as e:
         processor.logger.error(f"Error in batch lineage database update: {e}")
 
@@ -3868,15 +3916,58 @@ class ExcelProcessor:
                 db_record = db_lookup.get(normalized_name)
                 
                 if db_record:
-                    # Update tag with database values (database takes precedence)
-                    # Only update fields that are commonly changed in database (lineage, DOH, etc.)
-                    if db_record.get('Lineage'):
+                    # CBD detection: Check product name/description for ratios/CBD tokens
+                    # Override database values if CBD indicators are found (for nonclassic types)
+                    import re
+                    from src.core.constants import CLASSIC_TYPES
+                    product_type_for_cbd = (tag.get('Product Type*') or db_record.get('Product Type*') or '').strip().lower()
+                    is_classic_type = product_type_for_cbd in CLASSIC_TYPES or any(ct in product_type_for_cbd for ct in CLASSIC_TYPES)
+                    
+                    product_name_upper = (product_name or '').upper()
+                    description_upper = (tag.get('Description') or db_record.get('Description') or '').upper()
+                    has_ratio = bool(re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', product_name_upper) or re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', description_upper))
+                    has_cbd_token = any(token in product_name_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']) or any(token in description_upper for token in ['CBD', 'CBG', 'CBN', 'CBC'])
+                    
+                    # For nonclassic types with CBD indicators: override database values
+                    if not is_classic_type and (has_ratio or has_cbd_token):
+                        tag['Product Strain'] = 'CBD Blend'
+                        tag['Product Strain*'] = 'CBD Blend'
+                        tag['Lineage'] = 'CBD'
+                        tag['lineage'] = 'CBD'
+                        tag['canonical_lineage'] = 'CBD'
+                        tag['currentLineage'] = 'CBD'
+                        # Also update database immediately
+                        try:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                                UPDATE products 
+                                SET "Product Strain" = ?,
+                                    "Lineage" = ?,
+                                    sovereign_lineage = ?,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE "Product Name*" = ? OR ProductName = ?
+                            ''', ('CBD Blend', 'CBD', 'CBD', product_name, product_name))
+                            conn.commit()
+                            logger.info(f"✅ ENRICHMENT CBD FIX: Updated database for '{product_name}' -> Product Strain='CBD Blend', Lineage='CBD'")
+                        except Exception as db_err:
+                            logger.warning(f"Failed to update database during enrichment for '{product_name}': {db_err}")
+                        enriched_count += 1
+                    elif db_record.get('Lineage'):
+                        # Update tag with database values (database takes precedence)
+                        # Only update fields that are commonly changed in database (lineage, DOH, etc.)
                         db_lineage = str(db_record.get('Lineage', '')).strip().upper()
                         tag['Lineage'] = db_lineage
                         tag['lineage'] = db_lineage
                         tag['canonical_lineage'] = db_lineage
                         tag['currentLineage'] = db_lineage
                         enriched_count += 1
+                    
+                    # Update Product Strain from database if not already set by CBD detection
+                    if 'Product Strain' not in tag or not tag.get('Product Strain'):
+                        if db_record.get('Product Strain'):
+                            tag['Product Strain'] = db_record.get('Product Strain')
+                            tag['Product Strain*'] = db_record.get('Product Strain')
                     
                     if db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)'):
                         db_doh = db_record.get('DOH') or db_record.get('DOH Compliant (Yes/No)', '')

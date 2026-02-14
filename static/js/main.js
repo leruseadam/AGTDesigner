@@ -7722,6 +7722,11 @@ const TagManager = {
             if (tokens.some(token => sources.some(text => text && text.includes(token)))) {
                 return true;
             }
+            // Ratio patterns (1:1, 2:1, 1:1:1, etc.) in name or ratio mean CBD
+            const ratioSources = [nameStr, ratioStr, descStr];
+            if (ratioSources.some(s => s && /\b\d+\s*:\s*\d+(?:\s*:\s*\d+)*\b/.test(s))) {
+                return true;
+            }
             // Also check product type for CBD family indicators
             const cbdFamilyInProductType = ['high cbd', 'cbd', 'high cbg', 'cbg', 'high cbn', 'cbn', 'high cbc', 'cbc'];
             if (cbdFamilyInProductType.some(indicator => lowerProductType.includes(indicator))) {
@@ -7851,6 +7856,11 @@ const TagManager = {
         }
         
         if (displayLineage) {
+          // Expose the final UI lineage on the tag object so the backend
+          // can use EXACTLY the same value for DOCX coloring.
+          // This is what /api/generate sees in selected_tags.
+          tag.displayLineage = displayLineage.toUpperCase();
+
           // CRITICAL: Only set currentLineage if database lineage is missing
           // This ensures database lineage (canonical_lineage/currentLineage) is never overwritten
           if (!tag.canonical_lineage && !tag.currentLineage) {
@@ -15297,8 +15307,9 @@ const TagManager = {
                 return;
             }
 
-            // Get template, scale, and format info
+            // Get template, scale, format, and design set info
             const templateType = document.getElementById('templateSelect')?.value || 'horizontal';
+            const templateGroup = document.querySelector('input[name="templateGroup"]:checked')?.value || 'classic';
             const scaleFactor = parseFloat(document.getElementById('scaleInput')?.value) || 1.0;
 
             // Show enhanced generation splash
@@ -15316,6 +15327,7 @@ const TagManager = {
                 body: JSON.stringify({
                     selected_tags: checkedTags,
                     template_type: templateType,
+                    template_group: templateGroup,
                     scale_factor: scaleFactor
                 })
             });
@@ -15441,26 +15453,27 @@ const TagManager = {
             // Check if this is the right tag element by comparing the product name
             const tagNameElement = tagElement.querySelector('.tag-name, .product-name');
             if (tagNameElement && tagNameElement.textContent.trim() === productName) {
-                // Update the data-lineage attribute which triggers CSS color changes
-                const lineage = tag.Lineage || tag.lineage;
-                if (lineage) {
-                    tagElement.dataset.lineage = lineage.toUpperCase();
+                // Update the data-lineage attribute which triggers CSS color changes (programmatically with or without actual lineage)
+                const lineage = tag.Lineage || tag.lineage || tag.currentLineage || tag.canonical_lineage;
+                const lineageForColor = lineage ? lineage.toString().trim().toUpperCase() : this.determineLineageFromBackendRules(tag);
+                if (lineageForColor) {
+                    tagElement.dataset.lineage = lineageForColor;
                 }
-                
                 // Also update the color in the tag object
                 tag.color = color;
             }
         });
     },
 
-    // Ensure visible tag elements reflect the lineage stored in state.tags
+    // Ensure visible tag elements reflect the lineage stored in state.tags (programmatically with or without actual lineage value)
     alignDisplayedLineagesWithTags() {
         const tagMap = new Map();
         (this.state.tags || []).forEach(t => {
             const name = t['Product Name*'] || t.ProductName || t.displayName;
             if (!name) return;
-            const lineage = (t.Lineage || t.lineage || '').toString().trim().toUpperCase();
-            if (lineage) tagMap.set(name, lineage);
+            const lineage = (t.Lineage || t.lineage || t.currentLineage || t.canonical_lineage || '').toString().trim().toUpperCase();
+            const lineageForColor = lineage || this.determineLineageFromBackendRules(t) || 'MIXED';
+            tagMap.set(name, lineageForColor);
         });
 
         if (tagMap.size === 0) return;
@@ -15473,7 +15486,7 @@ const TagManager = {
             if (!name) return;
             const lineage = tagMap.get(name);
             if (!lineage) return;
-            // Update dataset lineage to drive CSS
+            // Update dataset lineage to drive CSS (color occurs programmatically with or without actual lineage value)
             el.dataset.lineage = lineage;
         });
     },
@@ -21805,4 +21818,74 @@ document.addEventListener('DOMContentLoaded', function() {
             safeReload(200);
         });
     }
+});
+
+// User templates modal: add, replace, view custom designs
+document.addEventListener('DOMContentLoaded', function() {
+    const TEMPLATE_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical', mini: 'Mini', double: 'Double', preroll: 'Preroll', inventory: 'Inventory' };
+    const manageBtn = document.getElementById('manageTemplatesBtn');
+    const modalEl = document.getElementById('userTemplatesModal');
+    const listEl = document.getElementById('userTemplatesList');
+    if (!manageBtn || !modalEl || !listEl) return;
+
+    function renderUserTemplatesList(hasUser) {
+        const types = Object.keys(TEMPLATE_LABELS);
+        listEl.innerHTML = types.map(type => {
+            const has = hasUser[type];
+            const label = TEMPLATE_LABELS[type];
+            const rowId = 'userTemplateRow_' + type;
+            const inputId = 'userTemplateFile_' + type;
+            return `
+              <div class="list-group-item d-flex align-items-center justify-content-between flex-wrap gap-2 py-2 bg-transparent border-secondary" id="${rowId}" data-type="${type}">
+                <span class="text-white fw-medium">${label}</span>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <label class="btn btn-sm btn-outline-primary mb-0">
+                    ${has ? 'Replace' : 'Add'} .docx
+                    <input type="file" accept=".docx" class="d-none" id="${inputId}" data-type="${type}">
+                  </label>
+                  ${has ? `<a href="/api/user-templates/${type}/download" class="btn btn-sm btn-outline-info" target="_blank" rel="noopener">View</a>` : ''}
+                  ${has ? `<button type="button" class="btn btn-sm btn-outline-danger user-template-remove" data-type="${type}">Remove</button>` : ''}
+                </div>
+              </div>`;
+        }).join('');
+        types.forEach(type => {
+            const input = document.getElementById('userTemplateFile_' + type);
+            if (input) input.addEventListener('change', function() {
+                const file = this.files && this.files[0];
+                if (!file) return;
+                const form = new FormData();
+                form.append('type', type);
+                form.append('file', file);
+                fetch('/api/user-templates', { method: 'POST', body: form })
+                    .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j)))
+                    .then(() => { this.value = ''; refreshUserTemplatesList(); })
+                    .catch(err => alert(err.error || err.message || 'Upload failed'));
+            });
+        });
+        listEl.querySelectorAll('.user-template-remove').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const t = this.getAttribute('data-type');
+                if (!confirm('Remove your custom design for ' + TEMPLATE_LABELS[t] + '?')) return;
+                fetch('/api/user-templates/' + t, { method: 'DELETE' })
+                    .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j)))
+                    .then(() => refreshUserTemplatesList())
+                    .catch(err => alert(err.error || err.message || 'Remove failed'));
+            });
+        });
+    }
+
+    function refreshUserTemplatesList() {
+        fetch('/api/user-templates')
+            .then(r => r.json())
+            .then(renderUserTemplatesList)
+            .catch(() => listEl.innerHTML = '<div class="text-danger">Could not load list.</div>');
+    }
+
+    manageBtn.addEventListener('click', function() {
+        if (typeof bootstrap !== 'undefined' && modalEl) {
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+        }
+    });
+    modalEl.addEventListener('shown.bs.modal', refreshUserTemplatesList);
 });

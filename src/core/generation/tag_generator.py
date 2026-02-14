@@ -733,8 +733,7 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
                         for t in cell.xpath('.//w:t'):
                             if t.text and 'Label1' in t.text:
                                 t.text = t.text.replace('Label1', f'Label{cnt}')
-                        for el in src_tc.xpath('./*'):
-                            cell._tc.append(deepcopy(el))
+                        # REMOVED: Duplicate append that was causing content duplication
                     else:
                         # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
                         cell = tbl.cell(r, c)
