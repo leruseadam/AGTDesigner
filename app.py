@@ -8034,6 +8034,119 @@ def _enforce_nonclassic_lineage_rules(tags):
     return tags
 
 
+def _quick_align_tags_lineage(tags, store_name):
+    """Fast DB-first lineage alignment for cache-hit paths."""
+    try:
+        if not tags or not store_name:
+            return tags
+
+        product_db = get_product_database(store_name)
+        if not product_db:
+            return tags
+
+        aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
+        product_names = []
+        for tag in aligned_tags:
+            if isinstance(tag, dict):
+                name = tag.get('Product Name*') or tag.get('ProductName')
+                if name:
+                    product_names.append(str(name).strip())
+
+        if not product_names:
+            return aligned_tags
+
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA table_info(products)")
+        product_columns = {row[1] for row in cursor.fetchall()}
+        cursor.execute("PRAGMA table_info(strains)")
+        strain_columns = {row[1] for row in cursor.fetchall()}
+
+        has_normalized_product_strain = 'normalized_product_strain' in product_columns and 'normalized_name' in strain_columns
+        strain_name_ref = None
+        if 'strain_name' in strain_columns:
+            strain_name_ref = 'strain_name'
+        elif 'Strain Name' in strain_columns:
+            strain_name_ref = '"Strain Name"'
+
+        join_parts = ['LEFT JOIN strains s1 ON p.strain_id = s1.id']
+        coalesce_parts = ['p.sovereign_lineage', 's1.sovereign_lineage']
+
+        if has_normalized_product_strain:
+            join_parts.append('LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name')
+            coalesce_parts.append('s2.sovereign_lineage')
+
+        if strain_name_ref:
+            join_parts.append(f'LEFT JOIN strains s3 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.{strain_name_ref}))')
+            coalesce_parts.append('s3.sovereign_lineage')
+
+        coalesce_parts.extend(['s1.canonical_lineage'])
+        if has_normalized_product_strain:
+            coalesce_parts.append('s2.canonical_lineage')
+        if strain_name_ref:
+            coalesce_parts.append('s3.canonical_lineage')
+        coalesce_parts.append('p."Lineage"')
+
+        lineage_map = {}
+        chunk_size = 400
+        for start in range(0, len(product_names), chunk_size):
+            chunk = product_names[start:start + chunk_size]
+            chunk_lower = [str(n).strip().lower() for n in chunk]
+            chunk_norm = []
+            for n in chunk:
+                try:
+                    chunk_norm.append(product_db._normalize_product_name(n))
+                except Exception:
+                    chunk_norm.append(str(n).strip().lower())
+
+            placeholders = ','.join(['?'] * len(chunk_lower))
+            query = f'''
+                SELECT p."Product Name*", p.normalized_name, COALESCE({", ".join(coalesce_parts)}) AS lineage
+                FROM products p
+                {" ".join(join_parts)}
+                WHERE LOWER(TRIM(p."Product Name*")) IN ({placeholders})
+                   OR p.normalized_name IN ({placeholders})
+            '''
+            cursor.execute(query, chunk_lower + chunk_norm)
+            for db_name, db_norm, db_lineage in cursor.fetchall():
+                if not db_lineage:
+                    continue
+                clean = str(db_lineage).strip().upper()
+                if not clean:
+                    continue
+                if db_name:
+                    lineage_map[str(db_name).strip()] = clean
+                    lineage_map[str(db_name).strip().lower()] = clean
+                if db_norm:
+                    lineage_map[str(db_norm).strip()] = clean
+
+        for tag in aligned_tags:
+            if not isinstance(tag, dict):
+                continue
+            name = tag.get('Product Name*') or tag.get('ProductName')
+            if not name:
+                continue
+            lookup_name = str(name).strip()
+            db_lineage = lineage_map.get(lookup_name) or lineage_map.get(lookup_name.lower())
+            if not db_lineage:
+                try:
+                    db_lineage = lineage_map.get(product_db._normalize_product_name(lookup_name))
+                except Exception:
+                    db_lineage = None
+            if db_lineage:
+                tag['currentLineage'] = db_lineage
+                tag['canonical_lineage'] = db_lineage
+                tag['Lineage'] = db_lineage
+                tag['Lineage*'] = db_lineage
+                tag['lineage'] = db_lineage.lower()
+
+        return aligned_tags
+    except Exception as e:
+        logging.debug(f"Quick lineage alignment skipped: {e}")
+        return tags
+
+
 def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False, force_overwrite: bool = True):
     """
     Ensure tags shown in the UI use the latest lineage from the database.
@@ -10966,11 +11079,20 @@ def get_session_cache_key(base_key):
     except:
         sid = 'background'  # Fallback for any session access issues
 
-    # OPTIMIZATION: Get file path from global _excel_processor if it exists, without loading
-    global _excel_processor
+    # Use request session file path first for stable keys across requests/workers.
+    # Fallback to global processor only when session path is unavailable.
     file_path = ''
-    if _excel_processor is not None:
-        file_path = getattr(_excel_processor, '_last_loaded_file', '')
+    try:
+        from flask import has_request_context
+        if has_request_context():
+            file_path = session.get('file_path', '') or session.get('uploaded_file_path', '') or ''
+    except Exception:
+        file_path = ''
+
+    if not file_path:
+        global _excel_processor
+        if _excel_processor is not None:
+            file_path = getattr(_excel_processor, '_last_loaded_file', '') or ''
 
     # CRITICAL: Include current store in cache key to prevent cross-store pollution
     try:
@@ -11368,7 +11490,12 @@ def get_available_tags():
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
-        fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
+        fast_load_arg = request.args.get('fast_load')
+        # Default to fast mode for UI responsiveness unless explicitly disabled.
+        if fast_load_arg is None:
+            fast_load = True
+        else:
+            fast_load = fast_load_arg in ('1', 'true', 'True')
         
         # CRITICAL: When explicitly asking for fresh data, clear caches up front
         # Do not clear cache on every prefer_db request; this caused repeated full rebuilds.
@@ -13094,16 +13221,18 @@ def get_available_tags():
             # Full lineage alignment will still be done later by non-fast-load or
             # prefer_db/refresh calls, but simple page refreshes stay instant.
             if fast_load and not prefer_db:
-                # Keep this path truly fast: only force DB alignment after recent lineage edits.
+                # Fast DB-first lineage refresh for cached tags (cheap batch query, no heavy full alignment).
+                aligned_cached_tags = _quick_align_tags_lineage(cached_tags, store_name)
+                # Only run expensive full alignment if lineage was recently edited.
                 if has_lineage_updates:
-                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    safe_all_tags = make_json_safe(aligned_cached_tags)
-                else:
-                    safe_all_tags = make_json_safe(cached_tags)
+                    aligned_cached_tags = _align_tags_with_db_lineage(
+                        aligned_cached_tags, store_name, skip_if_aligned=False, force_overwrite=True
+                    )
+                safe_all_tags = make_json_safe(aligned_cached_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(
                     f"⚡ SUPER-FAST: Returning {len(safe_all_tags)} cached tags for fast_load request "
-                    f"({elapsed:.1f}ms, source='cache-ultrafast')"
+                    f"({elapsed:.1f}ms, source='cache-ultrafast', quick-db-lineage-applied)"
                 )
                 resp = jsonify({
                     'tags': safe_all_tags,
