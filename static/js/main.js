@@ -17509,7 +17509,23 @@ const TagManager = {
             // Upload complete, no need for separate processing step
             const processData = uploadData;
             
-            verboseLog(`✅ Lightning upload completed! Upload: ${uploadData.upload_time?.toFixed(3)}s, Process: ${processData.process_time?.toFixed(3)}s`);
+            // Robustly handle upload_time/process_time which may be number or formatted string
+            function parseSeconds(val) {
+                if (typeof val === 'number') return val;
+                if (!val) return NaN;
+                if (typeof val === 'string') {
+                    // Extract leading numeric portion
+                    const m = val.match(/([0-9]+\.?[0-9]*)/);
+                    if (m) return parseFloat(m[1]);
+                }
+                const n = Number(val);
+                return Number.isFinite(n) ? n : NaN;
+            }
+            const uploadSeconds = parseSeconds(uploadData.upload_time) ;
+            const processSeconds = parseSeconds(processData.process_time);
+            const uploadDisplay = Number.isFinite(uploadSeconds) ? `${uploadSeconds.toFixed(3)}s` : (uploadData.upload_time_str || uploadData.upload_time || 'N/A');
+            const processDisplay = Number.isFinite(processSeconds) ? `${processSeconds.toFixed(3)}s` : (processData.process_time_str || processData.process_time || 'N/A');
+            verboseLog(`✅ Lightning upload completed! Upload: ${uploadDisplay}, Process: ${processDisplay}`);
             
             // ⚡ AUTO CACHE CLEARING: Clear cache after file upload (data has changed)
             console.log('🔄 File uploaded - auto-clearing cache for fresh data');

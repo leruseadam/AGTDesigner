@@ -2752,10 +2752,12 @@ def get_session_json_matcher():
             logging.error(f"Failed to initialize basic JSON matcher: {e2}")
             return None
 
-def refresh_json_match_runtime_state(reason: str = "json_match_request") -> None:
+def refresh_json_match_runtime_state(reason: str = "json_match_request", force_rebuild: bool = False) -> None:
     """
     Force-refresh JSON matching runtime caches/state to prevent stale matches.
     Safe to call at the start of JSON matching endpoints.
+    Performance note: default behavior is lightweight (no full cache rebuild).
+    Use force_rebuild=True only for explicit cache maintenance actions.
     """
     try:
         # Clear session-level JSON match pointers/counts that can hold stale state.
@@ -2774,24 +2776,27 @@ def refresh_json_match_runtime_state(reason: str = "json_match_request") -> None
             except Exception:
                 pass
 
-        # Reset matcher in-memory state and rebuild caches from current DB/session context.
+        # Reset matcher in-memory state. Full cache rebuild is optional and expensive.
         json_matcher = get_session_json_matcher()
         if json_matcher:
             try:
                 json_matcher.clear_matches()
             except Exception:
                 pass
-            try:
-                if hasattr(json_matcher, 'rebuild_sheet_cache'):
-                    json_matcher.rebuild_sheet_cache()
-            except Exception as rebuild_err:
-                logging.warning(f"JSON matcher sheet cache rebuild failed during refresh ({reason}): {rebuild_err}")
-            try:
-                if hasattr(json_matcher, 'rebuild_strain_cache'):
-                    json_matcher.rebuild_strain_cache()
-            except Exception:
-                pass
-        logging.info(f"JSON match runtime cache refreshed ({reason})")
+            if force_rebuild:
+                try:
+                    if hasattr(json_matcher, 'rebuild_sheet_cache'):
+                        json_matcher.rebuild_sheet_cache()
+                except Exception as rebuild_err:
+                    logging.warning(f"JSON matcher sheet cache rebuild failed during refresh ({reason}): {rebuild_err}")
+                try:
+                    if hasattr(json_matcher, 'rebuild_strain_cache'):
+                        json_matcher.rebuild_strain_cache()
+                except Exception:
+                    pass
+                logging.info(f"JSON match runtime cache refreshed with rebuild ({reason})")
+            else:
+                logging.info(f"JSON match runtime cache refreshed (lightweight) ({reason})")
     except Exception as e:
         logging.warning(f"Failed to refresh JSON match runtime state ({reason}): {e}")
 
@@ -4649,7 +4654,9 @@ def upload_file_simple():
         return jsonify({
             'message': 'File uploaded, processing in background', 
             'filename': file.filename,
-            'upload_time': f"{upload_response_time:.3f}s",
+            # Provide numeric seconds for frontend math and a human-friendly string
+            'upload_time': upload_response_time,
+            'upload_time_str': f"{upload_response_time:.3f}s",
             'processing_status': 'background',
             'performance': 'ultra_fast'
         })
@@ -21229,6 +21236,108 @@ def json_match_detailed():
             except Exception as diag_err:
                 logging.debug(f"[JSON_DIAG] diagnostics logging failed: {diag_err}")
 
+        def _extract_vendor_from_json_item(current_json_item, current_json_name):
+            """Best-effort vendor extraction for DB fallback lookup."""
+            try:
+                vendor = str((current_json_item or {}).get('vendor', '')).strip()
+                if vendor:
+                    return vendor
+                # Common format: "Honey Tree - ...", "Pure - ...", "Original - ..."
+                first_segment = str(current_json_name or '').split(' - ')[0].strip()
+                if first_segment and first_segment.lower() not in {'pure', 'original'}:
+                    return first_segment
+            except Exception:
+                pass
+            return ''
+
+        def _lookup_db_by_vendor_and_strain(current_json_item, current_json_name, product_db):
+            """Direct DB fallback for cases where fuzzy threshold misses an existing product."""
+            try:
+                if not product_db or not hasattr(product_db, '_get_connection'):
+                    return None
+
+                json_name_norm = _normalize_for_match(current_json_name)
+                vendor = _extract_vendor_from_json_item(current_json_item, current_json_name)
+                strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
+                strain_tokens = [t for t in _normalize_for_match(strain).split() if len(t) >= 3]
+                if not strain_tokens:
+                    return None
+
+                # Hardware intent from JSON name
+                json_is_disposable = (
+                    ' aio ' in f" {json_name_norm} " or
+                    ' disposable ' in f" {json_name_norm} " or
+                    ' all in one ' in f" {json_name_norm} "
+                )
+                json_is_510 = (' 510 ' in f" {json_name_norm} " or 'cartridge' in json_name_norm)
+
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+
+                where_clauses = []
+                params = []
+                if vendor:
+                    where_clauses.append('LOWER("Vendor/Supplier*") LIKE ?')
+                    params.append(f"%{vendor.lower()}%")
+
+                for tok in strain_tokens:
+                    where_clauses.append('LOWER("Product Name*") LIKE ?')
+                    params.append(f"%{tok}%")
+
+                if not where_clauses:
+                    return None
+
+                sql = f'''
+                    SELECT * FROM products
+                    WHERE {' AND '.join(where_clauses)}
+                    LIMIT 200
+                '''
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+                if not rows:
+                    return None
+
+                columns = [c[0] for c in cursor.description]
+                best = None
+                best_score = -1
+                json_terms = set(_normalize_for_match(current_json_name).split())
+
+                for row in rows:
+                    candidate = dict(zip(columns, row))
+                    db_name = str(candidate.get('Product Name*', '') or '')
+                    db_type = str(candidate.get('Product Type*', '') or '')
+                    db_text = _normalize_for_match(f"{db_name} {db_type}")
+
+                    # Respect hardware intent
+                    db_is_disposable = (
+                        ' disposable ' in f" {db_text} " or
+                        ' aio ' in f" {db_text} " or
+                        ' all in one ' in f" {db_text} "
+                    )
+                    if json_is_disposable and not db_is_disposable:
+                        continue
+                    if json_is_510 and db_is_disposable:
+                        continue
+
+                    if is_aio_disposable_conflict(current_json_item, candidate):
+                        continue
+                    if _is_obviously_incompatible_match(current_json_item, current_json_name, candidate):
+                        continue
+
+                    db_terms = set(_normalize_for_match(db_name).split())
+                    overlap = len(json_terms & db_terms)
+                    strain_hits = sum(1 for t in strain_tokens if t in _normalize_for_match(db_name))
+                    score = (strain_hits * 10) + overlap
+
+                    if score > best_score:
+                        best_score = score
+                        best = candidate
+
+                return best
+            except Exception as e:
+                logging.debug(f"[JSON_DIAG] vendor+strain fallback failed for '{current_json_name}': {e}")
+                return None
+
         for i, json_item in enumerate(json_items):
             # Try multiple fields for product name
             json_name = (
@@ -21257,12 +21366,35 @@ def json_match_detailed():
             enhanced_match = None
             json_name_normalized = json_name.lower().strip()
             match_method = None
+
+            # HIGHEST PRIORITY: exact source/SKU matching via DB/Excel JSON column.
+            try:
+                if hasattr(json_matcher, '_extract_json_column_match_candidates') and hasattr(json_matcher, '_find_json_column_match'):
+                    json_column_candidates = json_matcher._extract_json_column_match_candidates(json_item)
+                    if not json_column_candidates and json_name:
+                        json_column_candidates = [json_name]
+                    for candidate in (json_column_candidates or []):
+                        json_col_match = json_matcher._find_json_column_match(candidate)
+                        if json_col_match:
+                            # Honor hard hardware/type safety checks only.
+                            if is_aio_disposable_conflict(json_item, json_col_match):
+                                _log_match_diagnostics('candidate_rejected_aio_conflict', 'json_column_exact', json_item, json_name, json_col_match)
+                                continue
+                            if _is_obviously_incompatible_match(json_item, json_name, json_col_match):
+                                _log_match_diagnostics('candidate_rejected_incompatible', 'json_column_exact', json_item, json_name, json_col_match)
+                                continue
+                            enhanced_match = json_col_match
+                            match_method = 'json_column_exact'
+                            _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match, 1.0)
+                            break
+            except Exception as json_col_err:
+                logging.debug(f"[JSON_DIAG] json-column priority lookup failed for '{json_name}': {json_col_err}")
             
             # Extract key terms from JSON name for better matching
             json_key_terms = set([term for term in json_name_normalized.split() if len(term) > 2])
             
-            # Try exact match first
-            if json_name_normalized in enhanced_match_map:
+            # Try exact map match first (only if JSON-column match didn't already resolve)
+            if not enhanced_match and json_name_normalized in enhanced_match_map:
                 enhanced_match = enhanced_match_map[json_name_normalized]
                 match_method = 'exact'
                 _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
@@ -21274,7 +21406,7 @@ def json_match_detailed():
                     _log_match_diagnostics('candidate_rejected_incompatible', match_method, json_item, json_name, enhanced_match)
                     enhanced_match = None
                     match_method = None
-            else:
+            elif not enhanced_match:
                 # Try fuzzy matching by comparing normalized names and key terms
                 best_fuzzy_match = None
                 best_fuzzy_score = 0
@@ -21350,6 +21482,37 @@ def json_match_detailed():
                                 logging.info(f"🔄 Found better JSON item match: '{json_name}' for product '{match_product_name}'")
                                 _log_match_diagnostics('json_item_rebound', match_method, json_item, json_name, enhanced_match)
                                 break
+
+            # Fallback: if no mapped enhanced match, do a direct DB lookup for this JSON row.
+            if not enhanced_match:
+                try:
+                    product_db = json_matcher._get_product_database() if hasattr(json_matcher, '_get_product_database') else None
+                    if product_db and hasattr(json_matcher, '_find_best_database_match'):
+                        fallback_vendor = _extract_vendor_from_json_item(json_item, json_name)
+                        fallback_strain = (
+                            str(json_item.get('strain_name', '')).strip() or
+                            _extract_json_strain_for_debug(json_item, json_name)
+                        )
+                        fallback_weight = str(
+                            json_item.get('unit_weight', json_item.get('weight', ''))
+                        ).strip()
+
+                        db_fallback = json_matcher._find_best_database_match(
+                            product_name=json_name,
+                            vendor=fallback_vendor,
+                            weight=fallback_weight,
+                            strain=fallback_strain,
+                            product_db=product_db
+                        )
+                        if not db_fallback:
+                            db_fallback = _lookup_db_by_vendor_and_strain(json_item, json_name, product_db)
+                        if db_fallback and not is_aio_disposable_conflict(json_item, db_fallback) and \
+                           not _is_obviously_incompatible_match(json_item, json_name, db_fallback):
+                            enhanced_match = db_fallback
+                            match_method = 'direct_db_fallback'
+                            _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
+                except Exception as fallback_err:
+                    logging.debug(f"[JSON_DIAG] direct DB fallback failed for '{json_name}': {fallback_err}")
             
             # Log matching results for debugging
             if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
@@ -24617,9 +24780,10 @@ def upload_file_optimized():
         logging.info(f"[ULTRA-FAST] Ultra-fast upload completed in {upload_response_time:.3f}s")
         
         return jsonify({
-            'message': 'File uploaded, processing in background', 
+            'message': 'File uploaded, processing in background',
             'filename': sanitized_filename,
-            'upload_time': f"{upload_response_time:.3f}s",
+            'upload_time': upload_response_time,
+            'upload_time_str': f"{upload_response_time:.3f}s",
             'processing_status': 'background',
             'performance': 'ultra_fast'
         })
@@ -24727,7 +24891,8 @@ def upload_file_fast():
             'message': 'File uploaded and processed successfully',
             'filename': filename,
             'status': 'success',
-            'upload_time': f"{upload_time:.3f}s",
+            'upload_time': upload_time,
+            'upload_time_str': f"{upload_time:.3f}s",
             'processing_status': 'completed'
         })
         
