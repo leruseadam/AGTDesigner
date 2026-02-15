@@ -8931,6 +8931,28 @@ def clear_generation_cache():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+def _coerce_selected_tags(selected_tags):
+    """Normalize selected_tags payload to a list for consistent processing."""
+    if selected_tags is None:
+        return []
+    if isinstance(selected_tags, list):
+        return selected_tags
+    if isinstance(selected_tags, (tuple, set)):
+        return list(selected_tags)
+    return [selected_tags]
+
+
+def _merge_template_settings_from_request(request_data):
+    """Merge persisted session template settings with request overrides."""
+    request_template_settings = {}
+    if isinstance(request_data, dict):
+        candidate = request_data.get('templateSettings') or {}
+        if isinstance(candidate, dict):
+            request_template_settings = candidate
+    return {**session.get('template_settings', {}), **request_template_settings}
+
+
 @app.route('/api/generate', methods=['POST'])
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
@@ -8958,7 +8980,8 @@ def generate_labels():
         
         # Add request deduplication using request fingerprint
         import hashlib
-        request_data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
+        request_data = data
         request_fingerprint = hashlib.md5(
             json.dumps(request_data, sort_keys=True).encode()
         ).hexdigest()
@@ -8975,19 +8998,21 @@ def generate_labels():
         # Mark this request as being processed
         generate_labels._processing_requests.add(request_fingerprint)
         
-        data = request.get_json()
         template_type = data.get('template_type', 'vertical')
         template_group = data.get('template_group', 'classic')  # 'classic' | 'user'
         scale_factor = float(data.get('scale_factor', 1.0))
-        selected_tags_from_request = data.get('selected_tags', [])
+        selected_tags_from_request = _coerce_selected_tags(data.get('selected_tags', []))
+        selected_tags_count = len(selected_tags_from_request)
+        has_request_selected_tags = selected_tags_count > 0
+        direct_request_mode = has_request_selected_tags and all(isinstance(tag, dict) for tag in selected_tags_from_request)
         file_path = data.get('file_path') or session.get('file_path')  # Use session file_path if not provided
         filters = data.get('filters', None)
 
-        logging.info(f"🎯 Generation: {len(selected_tags_from_request) if selected_tags_from_request else 0} tags, template={template_type}, scale={scale_factor}")
+        logging.info(f"🎯 Generation: {selected_tags_count} tags, template={template_type}, scale={scale_factor}")
         
         # CRITICAL PERFORMANCE FIX: Set bypass flag BEFORE get_excel_processor to skip file loading
-        if selected_tags_from_request and len(selected_tags_from_request) > 0:
-            logging.info(f"⚡ PERFORMANCE: {len(selected_tags_from_request)} tags in request - setting bypass flag")
+        if has_request_selected_tags:
+            logging.info(f"⚡ PERFORMANCE: {selected_tags_count} tags in request - setting bypass flag")
             session['_skip_file_load_for_generation'] = True
         else:
             session['_skip_file_load_for_generation'] = False
@@ -9013,14 +9038,14 @@ def generate_labels():
         needs_restoration = False  # Track if we need to restore after generation
         
         # CRITICAL PERFORMANCE FIX: If tags provided, set them directly (skip ALL file loading)
-        if selected_tags_from_request and len(selected_tags_from_request) > 0:
+        if has_request_selected_tags:
             # Store original data BEFORE replacing for instant restoration later
             if excel_processor.df is not None and not excel_processor.df.empty:
                 original_file_path = excel_processor._last_loaded_file
                 original_df = excel_processor.df.copy()  # Store copy for instant restoration
                 needs_restoration = True
             
-            logging.info(f"⚡ PERFORMANCE: Loading {len(selected_tags_from_request)} tags directly - SKIPPING ALL FILE I/O")
+            logging.info(f"⚡ PERFORMANCE: Loading {selected_tags_count} tags directly - SKIPPING ALL FILE I/O")
             import pandas as pd
             excel_processor.df = pd.DataFrame(selected_tags_from_request)
             # CRITICAL: Ensure Price is populated for DOCX (web sends full tag objects; UI may have Price* only)
@@ -9323,108 +9348,62 @@ def generate_labels():
             # Try to validate tags against database first, then fall back to Excel data
             valid_selected_tags = []
             invalid_selected_tags = []
-            
-            # Always try database validation, but use fuzzy matching for JSON sessions
-            try:
-                # Get current store selection or default to Bothell for backward compatibility
-                store_name = get_current_store_name() or 'AGT_Bothell'
-                product_db = get_product_database(store_name)
-                if product_db:
-                    logging.info("Attempting to validate selected tags against database...")
-                    
-                    # VALIDATION DEBUG: Track what happens to JSON matches
-                    logging.debug(f"🔍 VALIDATION DEBUG: About to validate {len(normalized_tags)} normalized tags")
-                    logging.debug(f"🔍 VALIDATION DEBUG: First 10 tags: {normalized_tags[:10]}")
-                    
-                    # PERFORMANCE: Use batched queries for better performance
-                    from src.core.generation.fast_generation import BatchedDatabaseQuerier
-                    batched_querier = BatchedDatabaseQuerier(product_db)
-                    
-                    # PERFORMANCE OPTIMIZATION: Try exact matching first (much faster), then fuzzy only for unmatched
-                    if is_json_matched_session:
-                        # PERFORMANCE: Only log for small batches
-                        if len(normalized_tags) <= 20:
-                            logging.debug(f"🔍 JSON SESSION: Using optimized matching (exact first, then fuzzy)")
-                        # PERFORMANCE: First try exact matching (fast)
+
+            # Fast path: request already contains full selected tag objects from UI.
+            # Skip expensive DB validation; we'll generate directly from request payload.
+            if direct_request_mode:
+                valid_selected_tags = normalized_tags
+                invalid_selected_tags = []
+                logging.info(f"⚡ FAST PATH: Skipping DB validation for {len(valid_selected_tags)} request tag objects")
+            else:
+                # Always try database validation, but use fuzzy matching for JSON sessions
+                try:
+                    store_name = get_current_store_name() or 'AGT_Bothell'
+                    product_db = get_product_database(store_name)
+                    if product_db:
+                        logging.info("Attempting to validate selected tags against database...")
+                        from src.core.generation.fast_generation import BatchedDatabaseQuerier
+                        batched_querier = BatchedDatabaseQuerier(product_db)
                         db_records = batched_querier.get_products_batch(normalized_tags, batch_size=200)
-                        matched_names = {r.get('Product Name*', r.get('ProductName', '')) for r in db_records if r.get('id')}
-                        unmatched_tags = [tag for tag in normalized_tags if tag not in matched_names]
-                        
-                        # PERFORMANCE: Only do fuzzy matching for unmatched items (much smaller set)
-                        if unmatched_tags and len(unmatched_tags) <= 100:  # Limit fuzzy matching to prevent slowdown
-                            if len(unmatched_tags) > 50:
-                                # Batch fuzzy matching
-                                fuzzy_records = []
-                                batch_size = 50
-                                for i in range(0, len(unmatched_tags), batch_size):
-                                    batch = unmatched_tags[i:i + batch_size]
-                                    batch_fuzzy = product_db.get_products_by_names_with_fuzzy(batch)
-                                    fuzzy_records.extend(batch_fuzzy)
-                                db_records.extend(fuzzy_records)
-                            else:
-                                fuzzy_records = product_db.get_products_by_names_with_fuzzy(unmatched_tags)
-                                db_records.extend(fuzzy_records)
-                        elif len(unmatched_tags) > 100:
-                            logging.warning(f"⚠️ PERFORMANCE: Skipping fuzzy matching for {len(unmatched_tags)} unmatched tags (too many, would be slow)")
-                    else:
-                        # PERFORMANCE: Use larger batch size for better performance
-                        db_records = batched_querier.get_products_batch(normalized_tags, batch_size=200)
-                    
-                    # PERFORMANCE: Reduced logging - only log summary
-                    valid_count = sum(1 for r in db_records if r.get('id') is not None)
-                    placeholder_count = len(db_records) - valid_count
-                    if len(normalized_tags) <= 20:  # Only detailed logging for small batches
-                        logging.debug(f"🔍 VALIDATION DEBUG: Database lookup returned {len(db_records)} records ({valid_count} valid, {placeholder_count} placeholders)")
-                    
-                    if db_records:
-                        # Some or all tags were found in database
-                        found_names = []
-                        matched_original_tags = []
-                        matched_pairs = []
-                        for i, record in enumerate(db_records):
-                            if isinstance(record, dict):
-                                name = record.get('Product Name*', record.get('ProductName', ''))
-                                if name and record.get('id') is not None:  # Only count valid records
-                                    found_names.append(name)
-                                    if i < len(normalized_tags):
-                                        matched_original_tags.append(normalized_tags[i])
-                                        matched_pairs.append((normalized_tags[i], name))
-                        # Use the found names as valid tags
-                        valid_selected_tags = found_names
-                        invalid_selected_tags = [tag for tag in normalized_tags if tag not in matched_original_tags]
-                        
-                        # CRITICAL FIX: If any tags are missing from database, validate them against Excel
+
+                        found_names = [
+                            r.get('Product Name*', r.get('ProductName', ''))
+                            for r in db_records
+                            if isinstance(r, dict) and r.get('id') is not None and (r.get('Product Name*') or r.get('ProductName'))
+                        ]
+                        found_set = {str(n).strip().lower() for n in found_names if n}
+
+                        valid_selected_tags = [tag for tag in normalized_tags if str(tag).strip().lower() in found_set]
+                        invalid_selected_tags = [tag for tag in normalized_tags if str(tag).strip().lower() not in found_set]
+
+                        # Small fuzzy pass only for JSON sessions with few misses.
+                        if is_json_matched_session and invalid_selected_tags and len(invalid_selected_tags) <= 25:
+                            fuzzy_records = product_db.get_products_by_names_with_fuzzy(invalid_selected_tags)
+                            fuzzy_names = [
+                                r.get('Product Name*', r.get('ProductName', ''))
+                                for r in fuzzy_records
+                                if isinstance(r, dict) and r.get('id') is not None and (r.get('Product Name*') or r.get('ProductName'))
+                            ]
+                            fuzzy_set = {str(n).strip().lower() for n in fuzzy_names if n}
+                            recovered = [tag for tag in invalid_selected_tags if str(tag).strip().lower() in fuzzy_set]
+                            if recovered:
+                                valid_selected_tags.extend(recovered)
+                                invalid_selected_tags = [tag for tag in invalid_selected_tags if tag not in recovered]
+
                         if invalid_selected_tags:
-                            logging.info(f"⚠️ {len(invalid_selected_tags)} tags not found in database, checking Excel data...")
                             excel_valid, excel_invalid = _validate_tags_against_excel(excel_processor, invalid_selected_tags)
                             if excel_valid:
                                 valid_selected_tags.extend(excel_valid)
-                                logging.info(f"✅ Added {len(excel_valid)} tags from Excel data")
                                 invalid_selected_tags = excel_invalid
-                        
-                        # CRITICAL FIX: If database is completely empty, accept all tags as valid
-                        if len(valid_selected_tags) == 0 and len(normalized_tags) > 0:
-                            logging.warning("⚠️ DATABASE APPEARS EMPTY - Accepting all tags as valid")
+
+                        if not valid_selected_tags and normalized_tags:
+                            # If DB cannot validate anything, keep request selection.
                             valid_selected_tags = normalized_tags
                             invalid_selected_tags = []
-                        
-                        logging.debug(f"🔍 VALIDATION SUCCESS: Found {len(valid_selected_tags)} valid products in database")
-                        logging.debug(f"🔍 VALIDATION INFO: {len(invalid_selected_tags)} original tags had no valid database match")
-                        if matched_pairs[:3]:
-                            logging.debug(f"🔍 VALIDATION INFO: Sample abbreviation→product matches: {matched_pairs[:3]}")
-                        if invalid_selected_tags[:3]:  # Show first 3 unmatched
-                            logging.debug(f"🔍 VALIDATION INFO: Sample unmatched tags: {invalid_selected_tags[:3]}")
-                        if found_names[:3]:  # Show first 3 matches
-                            logging.debug(f"🔍 VALIDATION INFO: Sample matched products: {[name[:50] + '...' if len(name) > 50 else name for name in found_names[:3]]}")
                     else:
-                        logging.warning("No database records found for selected tags, falling back to Excel validation")
-                        # Fall back to Excel validation
+                        logging.warning("Product database not available, using Excel validation")
                         valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
-                else:
-                    logging.warning("Product database not available, using Excel validation")
-                    # Fall back to Excel validation
-                    valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
-            except Exception as e:
+                except Exception as e:
                     logging.warning(f"Database validation failed, falling back to Excel validation: {e}")
                     # Fall back to Excel validation
                     valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
@@ -9479,12 +9458,45 @@ def generate_labels():
             logging.info(f"📊 Validation summary: {len(valid_selected_tags)} valid, {len(invalid_selected_tags)} invalid out of {len(normalized_tags)} total")
             if invalid_selected_tags:
                 logging.warning(f"⚠️ These tags will NOT be generated: {invalid_selected_tags[:10]}")
+
+            # Fast path: build records directly from request payload to avoid
+            # redundant DB fetch when selected tags already contain full row data.
+            direct_request_records = []
+            if direct_request_mode:
+                for tag in selected_tags_from_request:
+                    if not isinstance(tag, dict):
+                        continue
+                    rec = dict(tag)
+                    product_name = (
+                        rec.get('Product Name*') or
+                        rec.get('ProductName') or
+                        rec.get('displayName') or
+                        rec.get('Description') or
+                        ''
+                    )
+                    if not product_name:
+                        continue
+                    rec['Product Name*'] = str(product_name).strip()
+                    rec['ProductName'] = rec['Product Name*']
+                    rec['Description'] = rec.get('Description') or rec['Product Name*']
+                    rec['DescAndWeight'] = rec.get('DescAndWeight') or rec['Description']
+                    # Keep price populated across known variants
+                    if not rec.get('Price'):
+                        rec['Price'] = rec.get('Price*') or rec.get('Price* (Tier Name for Bulk)') or ''
+                    rec['Price*'] = rec.get('Price*') or rec.get('Price') or ''
+                    rec['Price* (Tier Name for Bulk)'] = rec.get('Price* (Tier Name for Bulk)') or rec.get('Price*') or rec.get('Price') or ''
+                    rec = _normalize_weight_fields(rec)
+                    direct_request_records.append(rec)
+                logging.info(f"⚡ FAST PATH: Built {len(direct_request_records)} records directly from request")
         else:
             logging.warning("No selected_tags provided in request body or session")
             return jsonify({'error': 'No tags selected. Please select at least one tag before generating labels.'}), 400
         
         # PRIORITY: Use database data when available, fall back to Excel data
         records = []
+        if direct_request_mode and direct_request_records:
+            records = direct_request_records
+            has_database = False  # Force skip of expensive DB record fetch path
 
         # JSON matched products are now in the Excel DataFrame, so no special handling needed
         # All products (including JSON matched) are processed through the normal database/Excel flow
@@ -10400,14 +10412,8 @@ def generate_labels():
             else:
                 logging.info(f"Mini template: {len(records)} records selected, all 20 labels will be filled")
 
-        # Get saved template settings from session
-        # Merge request-provided template settings with session, request takes precedence
-        try:
-            data = request.get_json(silent=True) or {}
-        except Exception:
-            data = {}
-        request_template_settings = (data.get('templateSettings') or {}) if isinstance(data, dict) else {}
-        template_settings = {**session.get('template_settings', {}), **request_template_settings}
+        # Get saved template settings from session and merge request overrides
+        template_settings = _merge_template_settings_from_request(data)
         
         # Use saved settings if available, otherwise use defaults
         saved_scale_factor = template_settings.get('scale', scale_factor)
@@ -10671,7 +10677,7 @@ def generate_labels():
         
         # PERFORMANCE: Only enrich if records came from Excel (not database)
         # Database records are already enriched, so skip this expensive step
-        if records and not has_database:
+        if records and not has_database and not direct_request_mode:
             _enrichment_needed = True
             try:
                 store_name = session.get('current_store')
@@ -10780,6 +10786,8 @@ def generate_labels():
         else:
             if has_database:
                 logging.info(f"⚡ PERFORMANCE: Skipping lineage enrichment - records already from database (already enriched)")
+            elif direct_request_mode:
+                logging.info("⚡ FAST PATH: Skipping post-fetch enrichment (records came directly from request payload)")
             else:
                 logging.info(f"⚡ PERFORMANCE: Skipping lineage enrichment - no database available")
 

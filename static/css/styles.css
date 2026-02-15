@@ -5539,8 +5539,8 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Help button styling */
   .btn-help-modern {
-    width: 56px;
-    height: 56px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
     backdrop-filter: blur(10px);
@@ -5554,13 +5554,14 @@ body.modal-open #mainContent.store-selection-disabled,
     cursor: pointer;
     position: relative;
     z-index: 2;
-    padding: 12px;
+    padding: 8px;
     box-shadow: 0 4px 12px rgba(30, 58, 138, 0.3);
+    box-sizing: border-box;
   }
 
   .btn-help-modern svg {
-    width: 28px;
-    height: 28px;
+    width: 20px;
+    height: 20px;
     display: block;
     margin: auto;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
@@ -8789,12 +8790,12 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Compact group headers (Vendor, Brand, etc.) */
   .tag-list .group-header, .tag-list .category-header, .tag-list .tag-group-label {
-    font-size: 0.95em !important;
-    font-weight: 600 !important;
-    margin: 1px 0 1px 0 !important;
-    padding: 1px 0 1px 6px !important;
-    letter-spacing: 0.01em;
-    color: #bdbdfc !important;
+    font-size: 1.05em !important;
+    font-weight: 700 !important;
+    margin: 2px 0 2px 0 !important;
+    padding: 2px 0 2px 8px !important;
+    letter-spacing: 0.02em;
+    color: #ffffff !important;
   }
 
   /* Reduce vertical space for nested groups */

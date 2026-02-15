@@ -17,7 +17,18 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust if cache_bust else '1.0' }}">
-    
+        <!-- Inline override to force updated tag header visibility (cache-bust safe) -->
+        <style>
+            /* Immediate/inline override for tag list headers to ensure visible changes appear despite cached CSS */
+            .tag-list .group-header,
+            .tag-list .category-header,
+            .tag-list .tag-group-label {
+                font-size: 1.05em !important;
+                font-weight: 700 !important;
+                color: #ffffff !important;
+                padding-left: 8px !important;
+            }
+        </style>
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
     
