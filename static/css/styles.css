@@ -11643,6 +11643,34 @@ html, body {
   z-index: 1000 !important;
 }
 
+/* Ensure template select remains centered on large desktop screens
+   Some layout rules above constrain widths or change flex behavior
+   which can cause the select to shift left on wide monitors. This
+   enforces centering for typical desktop breakpoints. */
+@media (min-width: 1200px) {
+  .template-dropdowns-center {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  /* Center the select itself and constrain its visual width so it
+     doesn't appear offset inside wider center-column wrappers. */
+  .template-dropdowns-center #templateSelect,
+  .template-dropdowns-center #templateGroupSelect,
+  .template-dropdowns-center .template-select-centered {
+    margin-left: auto !important;
+    margin-right: auto !important;
+    display: inline-flex !important;
+    justify-content: center !important;
+    max-width: 360px !important;
+    width: 100% !important;
+  }
+}
+
 /* Filter Bar Row Structure */
 .filter-row {
   width: 100%;

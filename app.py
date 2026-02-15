@@ -12891,6 +12891,12 @@ def get_available_tags():
                                     conn = product_db._get_connection()
                                     cursor = conn.cursor()
                                     excel_lower_map = {name.lower().strip(): name for name in product_names}
+                                    normalized_names = []
+                                    for _n in product_names:
+                                        try:
+                                            normalized_names.append(product_db._normalize_product_name(_n))
+                                        except Exception:
+                                            normalized_names.append(str(_n).strip().lower())
                                     
                                     # Batch query in chunks for performance
                                     chunk_size = 400
@@ -12898,19 +12904,27 @@ def get_available_tags():
                                     for chunk_start in range(0, len(product_names), chunk_size):
                                         chunk = product_names[chunk_start:chunk_start + chunk_size]
                                         chunk_lower = [name.lower() for name in chunk]
+                                        chunk_norm = []
+                                        for _name in chunk:
+                                            try:
+                                                chunk_norm.append(product_db._normalize_product_name(_name))
+                                            except Exception:
+                                                chunk_norm.append(str(_name).strip().lower())
                                         placeholders = ','.join(['?' for _ in chunk_lower])
                                         # CRITICAL: Prioritize manual lineage (sovereign) over Excel lineage
                                         cursor.execute(f'''
                                             SELECT p."Product Name*",
+                                                   p.normalized_name,
                                                    COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
                                                    p.sovereign_lineage as product_sovereign
                                             FROM products p
                                             LEFT JOIN strains s ON p.strain_id = s.id
                                             WHERE LOWER(p."Product Name*") IN ({placeholders})
-                                        ''', chunk_lower)
+                                               OR p.normalized_name IN ({placeholders})
+                                        ''', chunk_lower + chunk_norm)
                                         
                                         for row in cursor.fetchall():
-                                            db_name, effective_lineage, product_sovereign = row
+                                            db_name, db_norm_name, effective_lineage, product_sovereign = row
                                             if effective_lineage:
                                                 clean_lineage = str(effective_lineage).strip().upper()
                                                 clean_sovereign = str(product_sovereign).strip().upper() if product_sovereign and str(product_sovereign).strip().upper() not in ['', 'NONE', 'NULL'] else None
@@ -12918,12 +12932,23 @@ def get_available_tags():
                                                 excel_key = db_name.lower().strip()
                                                 if excel_key in excel_lower_map:
                                                     lineage_map[excel_lower_map[excel_key]] = {'lineage': clean_lineage, 'sovereign': clean_sovereign}
+                                                if db_norm_name:
+                                                    lineage_map[db_norm_name] = {'lineage': clean_lineage, 'sovereign': clean_sovereign}
                                     
                                     # Apply lineage to tags
                                     for tag in excel_tags:
                                         product_name = tag.get('Product Name*')
-                                        if product_name and product_name in lineage_map:
-                                            lineage_data = lineage_map[product_name]
+                                        lineage_data = None
+                                        if product_name:
+                                            lineage_data = lineage_map.get(product_name)
+                                            if not lineage_data:
+                                                lineage_data = lineage_map.get(str(product_name).lower().strip())
+                                            if not lineage_data:
+                                                try:
+                                                    lineage_data = lineage_map.get(product_db._normalize_product_name(product_name))
+                                                except Exception:
+                                                    lineage_data = None
+                                        if lineage_data:
                                             tag['currentLineage'] = lineage_data['lineage']
                                             tag['canonical_lineage'] = lineage_data['lineage']
                                             tag['Lineage'] = lineage_data['lineage']
@@ -13049,31 +13074,26 @@ def get_available_tags():
         # Note: Synchronous loading already handled above (line 8510-8528) for instant tags
         # This ensures tags appear immediately without waiting for background processing
 
-        # CRITICAL: NEVER use cached tags when Excel data exists - ALWAYS load fresh
-        # This prevents ANY possibility of serving stale cached data
-        if has_excel_data and cached_tags:
-            logging.warning(f"⚠️ CACHE BYPASS: Excel data exists - clearing cached_tags to force fresh load")
-            cached_tags = None
-
         # PERFORMANCE: Even when nocache=1, allow fast_load requests to reuse
         # per-file cached tags. The cache key already includes the uploaded file
         # path, so using it here will not leak tags from a previous upload.
         # This makes repeated fast_load retries after upload much cheaper.
-        if cached_tags and (not nocache or fast_load):
+        if cached_tags and not nocache:
             # SUPER FAST PATH: If this is a fast-load request and we have cached tags,
             # return them immediately without any additional database work.
             # Full lineage alignment will still be done later by non-fast-load or
             # prefer_db/refresh calls, but simple page refreshes stay instant.
             if fast_load and not prefer_db:
-                # CRITICAL FIX: Always align cached tags with database lineage before returning
-                # This ensures UI shows current database lineage, not stale cached lineage
-                # Use force_overwrite=True to ensure database lineage always wins over Excel lineage
-                aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                safe_all_tags = make_json_safe(aligned_cached_tags)
+                # Keep this path truly fast: only force DB alignment after recent lineage edits.
+                if has_lineage_updates:
+                    aligned_cached_tags = _align_tags_with_db_lineage(cached_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                    safe_all_tags = make_json_safe(aligned_cached_tags)
+                else:
+                    safe_all_tags = make_json_safe(cached_tags)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(
                     f"⚡ SUPER-FAST: Returning {len(safe_all_tags)} cached tags for fast_load request "
-                    f"({elapsed:.1f}ms, source='cache-ultrafast', aligned with DB)"
+                    f"({elapsed:.1f}ms, source='cache-ultrafast')"
                 )
                 resp = jsonify({
                     'tags': safe_all_tags,
