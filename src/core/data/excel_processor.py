@@ -33,6 +33,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Shared cache version token for tag/lineage payload invalidation.
+# Keep this aligned with app.py cache version usage so stale lineage payloads
+# are consistently bypassed across UI load and generation flows.
+TAGS_CACHE_VERSION = "v3_no_excel_lineage_classic_fix"
+
 # Cache resolved default file paths to avoid repeated filesystem scans
 # Limited to 50 entries with TTL of 1 hour to prevent unbounded growth
 DEFAULT_FILE_CACHE: Dict[str, Dict[str, Any]] = {}  # {key: {'path': str, 'timestamp': float}}
@@ -5664,7 +5669,8 @@ class ExcelProcessor:
                     self.logger.error(f"Error updating lineage for strain '{strain_name}': {e}")
             
             self.logger.info(f"Batch lineage update complete: {success_count}/{total_count} successful")
-            return success_count == total_count
+            # Return the number of successful strain updates so callers can reason about partial updates.
+            return success_count
             
         except Exception as e:
             self.logger.error(f"Error in batch lineage update: {e}")

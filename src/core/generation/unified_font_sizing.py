@@ -58,7 +58,7 @@ def _load_font_sizing_config():
                     'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 },  
                 'vertical': {
-                    'description': [(10, 36), (15, 34), (20, 32), (25, 31), (30, 28), (35, 26), (40, 25), (50, 24), (60, 22), (80, 20), (100, 18), (120, 16), (float('inf'), 14)],
+                    'description': [(10, 36), (20, 34), (25, 31), (30, 28), (35, 26), (40, 25), (50, 24), (60, 22), (80, 20), (100, 18), (120, 16), (float('inf'), 14)],
                     'brand': [(10, 16), (20, 14), (30, 12), (60, 11), (float('inf'), 10)],
                     'price': [(2, 36), (3, 30), (float('inf'), 26)],  # $1/$11 = 36pt, $111+ = 30pt
                     'lineage': [(100, 18), (float('inf'), 14)],  # Max 18pt for lineage to prevent 20pt sizing
@@ -86,19 +86,19 @@ def _load_font_sizing_config():
                     'default': [(20, 18), (40, 16), (60, 14), (float('inf'), 12)]
                 },
                 'preroll': {
-                    # Preroll template: Copy all settings from mini template (identical font sizing)
-                    'description': [(5, 18), (15, 17), (20, 16), (30, 15), (40, 14), (50, 13), (60, 12), (80, 10), (120, 9), (float('inf'), 8)],
-                    'brand': [(5, 9), (20, 8), (25, 6.5), (float('inf'), 6)],
-                    'price': [(5, 20), (float('inf'), 15)],
-                    'lineage': [(5, 12), (10, 11), (15, 10), (20, 9), (float('inf'), 8)],
-                    'ratio': [(3, 12), (6, 11), (9, 10), (12, 9), (float('inf'), 8)],
-                    'thc_cbd': [(5, 10), (10, 9), (15, 8), (20, 7), (float('inf'), 6)],
+                    # Canonical double-template unified font sizing configuration
+                    'description': [(5, 32), (10, 30), (15, 28), (20, 26), (25, 25), (30, 24), (35, 23), (40, 22), (45, 20), (50, 19), (60, 18), (80, 17), (100, 16), (120, 14), (float('inf'), 14)],
+                    'brand': [(10, 12), (20, 10), (40, 9), (60, 8), (80, 7), (float('inf'), 6.5)],
+                    'price': [(10, 30), (15, 26), (float('inf'), 14)],
+                    'lineage': [(15, 12), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
+                    'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
+                    'thc_cbd': [(20, 7),(float('inf'), 6.5)],
                     'strain': [(10, 1), (20, 1), (30, 1), (float('inf'), 1)],
-                    'weight': [(5, 12), (10, 10), (15, 8), (float('inf'), 6)],
-                    'doh': [(5, 12), (10, 11), (float('inf'), 10)],
-                    'vendor': [(10, 5), (float('inf'), 5)],
-                    'qr': [(float('inf'), 35)],  # QR codes: Small size for preroll template (same as mini)
-                    'default': [(10, 12), (20, 11), (float('inf'), 10)]
+                    'weight': [(15, 14), (25, 12), (35, 10), (float('inf'), 7)],
+                    'doh': [(15, 20), (25, 16), (float('inf'), 13)],
+                    'vendor': [(10, 6), (float('inf'), 5)],
+                    'qr': [(float('inf'), 40)],  # QR codes: Medium size for double template
+                    'default': [(20, 16), (40, 14), (60, 12), (float('inf'), 10)]
                 }
             }
         }

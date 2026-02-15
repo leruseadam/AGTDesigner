@@ -19,37 +19,12 @@ import traceback
 import threading
 import signal  # Add signal import for timeout handling
 import pandas as pd  # Add this import
-import time
-import re
-import json
-from decimal import Decimal
+
 try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
-except Exception:
-    np = None
-    NUMPY_AVAILABLE = False
-try:
-    import requests  # Optional dependency for internal HTTP calls
-    REQUESTS_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    requests = None
-    REQUESTS_AVAILABLE = False
-from src.core.generation.fast_generation import (
-    FastGenerationEngine,
-    optimize_records_for_generation,
-    update_generation_stats
-)
-# CRITICAL FIX: Make preroll imports optional to prevent startup errors if files don't exist
-try:
-    from src.core.generation.preroll_tag_generator import generate_preroll_tags, identify_preroll_product_group
-except ImportError as preroll_import_error:
-    logging.warning(f"Could not import preroll_tag_generator: {preroll_import_error}")
-    # Define fallback functions
-    def generate_preroll_tags(records, cache):
-        logging.warning("generate_preroll_tags called but module not available - returning records unchanged")
-        return records
-    
+    from src.core.generation.preroll_tag_generator import identify_preroll_product_group
+except ImportError as preroll_group_error:
+    logging.warning(f"Could not import identify_preroll_product_group: {preroll_group_error}")
+
     def identify_preroll_product_group(description: str, product_name: str = '') -> dict:
         logging.warning("identify_preroll_product_group called but module not available - returning default group")
         return {'group_id': 'default', 'display_name': 'Preroll Items', 'category': 'Prerolls'}
@@ -519,9 +494,10 @@ from docx.enum.table import WD_ROW_HEIGHT_RULE
 from typing import List, Optional, Tuple
 from src.core.generation.template_processor import get_font_scheme, TemplateProcessor
 from src.core.generation.tag_generator import get_template_path
+from src.core.generation.fast_generation import FastGenerationEngine, update_generation_stats
 import time
 # Removed unused mini font sizing imports
-from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
+from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file, TAGS_CACHE_VERSION
 from src.core.data.json_matcher import map_inventory_type_to_product_type
 import random
 # Optional import for flask_caching
@@ -2772,6 +2748,107 @@ def generate_product_name_variants(raw_name):
     # Deduplicate while preserving order
     return variants
 
+
+def _get_lineage_name_match_variants(tag_name: str, product_db=None):
+    """Build normalized name variants used for DataFrame and DB lineage matching."""
+    import re
+
+    variants = generate_product_name_variants(tag_name)
+    if not variants and tag_name:
+        variants = [str(tag_name).strip()]
+
+    lower_variants = []
+    normalized_variants = []
+    seen_lower = set()
+    seen_norm = set()
+
+    for variant in variants:
+        clean = str(variant or '').replace('\u2011', '-').strip()
+        clean = re.sub(r'\s+', ' ', clean)
+        if not clean:
+            continue
+
+        lowered = clean.lower()
+        if lowered not in seen_lower:
+            lower_variants.append(lowered)
+            seen_lower.add(lowered)
+
+        if product_db and hasattr(product_db, '_normalize_product_name'):
+            try:
+                normalized = str(product_db._normalize_product_name(clean) or '').strip()
+                if normalized and normalized not in seen_norm:
+                    normalized_variants.append(normalized)
+                    seen_norm.add(normalized)
+            except Exception:
+                pass
+
+    return lower_variants, normalized_variants
+
+
+def _find_product_mask_in_df(df, tag_name: str, product_db=None):
+    """Find matching DataFrame rows for a product using robust name variants."""
+    if df is None or getattr(df, 'empty', True) or not tag_name:
+        return None
+
+    lower_variants, normalized_variants = _get_lineage_name_match_variants(tag_name, product_db=product_db)
+    if not lower_variants and not normalized_variants:
+        return None
+
+    mask = None
+    name_columns = ['ProductName', 'Product Name*', 'Description', 'displayName']
+    for column in name_columns:
+        if column in df.columns:
+            series = (
+                df[column]
+                .fillna('')
+                .astype(str)
+                .str.replace('\u2011', '-', regex=False)
+                .str.strip()
+                .str.lower()
+            )
+            col_mask = series.isin(lower_variants)
+            mask = col_mask if mask is None else (mask | col_mask)
+
+    if normalized_variants and 'normalized_name' in df.columns:
+        norm_series = df['normalized_name'].fillna('').astype(str).str.strip()
+        norm_mask = norm_series.isin(normalized_variants)
+        mask = norm_mask if mask is None else (mask | norm_mask)
+
+    return mask
+
+
+def _update_product_lineage_by_variants(cursor, product_db, tag_name: str, new_lineage: str) -> int:
+    """Update product lineage by matching product names and normalized_name variants."""
+    lower_variants, normalized_variants = _get_lineage_name_match_variants(tag_name, product_db=product_db)
+    if not lower_variants and not normalized_variants:
+        return 0
+
+    where_clauses = []
+    params = [new_lineage, new_lineage]
+
+    if lower_variants:
+        placeholders = ','.join(['?'] * len(lower_variants))
+        where_clauses.append(f'LOWER(TRIM("Product Name*")) IN ({placeholders})')
+        params.extend(lower_variants)
+        where_clauses.append(f'LOWER(TRIM("ProductName")) IN ({placeholders})')
+        params.extend(lower_variants)
+
+    if normalized_variants:
+        placeholders = ','.join(['?'] * len(normalized_variants))
+        where_clauses.append(f'normalized_name IN ({placeholders})')
+        params.extend(normalized_variants)
+
+    if not where_clauses:
+        return 0
+
+    query = f'''
+        UPDATE products
+        SET "Lineage" = ?, sovereign_lineage = ?
+        WHERE {" OR ".join(where_clauses)}
+    '''
+    cursor.execute(query, params)
+    return int(cursor.rowcount or 0)
+
 def _enhance_json_with_excel_data(json_tag, excel_product):
     """
     Enhance JSON tag data with Excel data while preserving the best information from both sources.
@@ -3432,7 +3509,7 @@ def upload_file():
                                 # CRITICAL FIX: Use file-path-only cache key with version to bust old caches
                                 # Background thread doesn't have same session context as frontend request
                                 import hashlib
-                                cache_version = "v3_no_excel_lineage_classic_fix"  # Bump version to invalidate stale lineage caches
+                                cache_version = TAGS_CACHE_VERSION  # Bump version to invalidate stale lineage caches
                                 cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                                 
                                 # Clear any old cache keys (without version)
@@ -3689,7 +3766,7 @@ def upload_file():
                                 # CRITICAL FIX: Use file-path-only cache key so frontend can access it
                                 # Background thread doesn't have same session context as frontend request
                                 import hashlib
-                                cache_version = "v3_no_excel_lineage_classic_fix"
+                                cache_version = TAGS_CACHE_VERSION
                                 cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                                 cache.set(cache_key, safe_tags, timeout=300)
 
@@ -7852,9 +7929,9 @@ def _normalize_weight_fields(record):
 
 def _enforce_nonclassic_lineage_rules(tags):
     """
-    CRITICAL: Enforce that non-classic types can ONLY have MIXED or CBD lineage.
-    This prevents non-classic products from showing incorrect lineages like SATIVA, INDICA, etc.
-    Non-classic types are determined from Product Strain: CBD if Product Strain contains CBD terms, otherwise MIXED.
+    Enforce non-classic lineage normalization rules.
+    Non-classic types default to CBD/MIXED when lineage is missing/invalid, but preserve
+    explicit HYBRID family values when provided by DB or user updates.
     """
     from src.core.constants import CLASSIC_TYPES
     
@@ -7897,9 +7974,17 @@ def _enforce_nonclassic_lineage_rules(tags):
         current_lineage = tag.get('Lineage') or tag.get('currentLineage') or tag.get('canonical_lineage') or ''
         current_lineage_upper = str(current_lineage).strip().upper()
         
-        # Only fix if current lineage is not MIXED or CBD
-        # HYBRID is a classic-lineage value and must NOT be accepted for non-classic products
-        valid_nonclassic_lineages = ['MIXED', 'CBD', 'CBD_BLEND', 'THC']  # THC is treated as MIXED
+        # Preserve explicit HYBRID-family values for non-classic products.
+        # We still normalize THC->MIXED and CBD_BLEND->CBD below.
+        valid_nonclassic_lineages = [
+            'MIXED',
+            'CBD',
+            'CBD_BLEND',
+            'THC',
+            'HYBRID',
+            'HYBRID/SATIVA',
+            'HYBRID/INDICA',
+        ]
         if current_lineage_upper not in valid_nonclassic_lineages:
             # Before forcing, check database — if DB has lineage for this product, DO NOT overwrite
             product_name_for_check = tag.get('Product Name*') or tag.get('ProductName')
@@ -7944,7 +8029,7 @@ def _enforce_nonclassic_lineage_rules(tags):
             fixed_count += 1
     
     if fixed_count > 0:
-        logging.info(f"✅ NON-CLASSIC LINEAGE ENFORCEMENT: Fixed {fixed_count} non-classic products to have only MIXED or CBD lineage")
+        logging.info(f"✅ NON-CLASSIC LINEAGE ENFORCEMENT: Fixed {fixed_count} non-classic products with normalized lineage values")
     
     return tags
 
@@ -10149,8 +10234,8 @@ def generate_labels():
         # from src.core.generation.fast_generation import FastGenerationEngine, optimize_records_for_generation
         # fast_engine = FastGenerationEngine(processor)
         
-        # CRITICAL: For mini and double templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
-        if hasattr(processor, '_expand_template_if_needed') and processor.template_type not in ['mini', 'double']:
+        # CRITICAL: For mini, double, and preroll templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
+        if hasattr(processor, '_expand_template_if_needed') and processor.template_type not in ['mini', 'double', 'preroll']:
             # CRITICAL FIX: Don't force re-expansion for horizontal/vertical templates as it bypasses dynamic template creation
             if processor.template_type in ['horizontal', 'vertical']:
                 logging.info(f"{processor.template_type.title()} template detected - skipping forced re-expansion to allow dynamic template creation")
@@ -10162,9 +10247,9 @@ def generate_labels():
         elif processor.template_type == 'mini':
             # Mini templates have fixed capacity - log this for debugging
             logging.info(f"Mini template detected - skipping forced re-expansion to maintain fixed 20-label capacity")
-        elif processor.template_type == 'double':
+        elif processor.template_type in ['double', 'preroll']:
             # Double templates have exact dimensions set by user - never expand them
-            logging.info(f"Double template detected - skipping forced re-expansion to preserve exact table dimensions")
+            logging.info(f"{processor.template_type.title()} template detected - skipping forced re-expansion to preserve exact table dimensions")
         # Apply custom template settings if they exist
         if template_settings:
             # Apply custom font sizes if in fixed mode
@@ -10219,19 +10304,49 @@ def generate_labels():
                         
                         if product_names:
                             placeholders = ','.join(['?'] * len(product_names))
-                            # CRITICAL FIX: Join by BOTH strain_id AND Product Strain name (most products don't have strain_id set)
-                            # PERFORMANCE: Query only products in current batch (already limited)
-                            cur.execute(f'''
+                            # Schema-aware lineage lookup (some DBs do not have p.normalized_product_strain).
+                            cur.execute("PRAGMA table_info(products)")
+                            product_columns = {row[1] for row in cur.fetchall()}
+                            cur.execute("PRAGMA table_info(strains)")
+                            strain_columns = {row[1] for row in cur.fetchall()}
+
+                            has_normalized_product_strain = 'normalized_product_strain' in product_columns
+                            strain_name_ref = None
+                            if 'strain_name' in strain_columns:
+                                strain_name_ref = 'strain_name'
+                            elif 'Strain Name' in strain_columns:
+                                strain_name_ref = '"Strain Name"'
+
+                            join_parts = ['LEFT JOIN strains s1 ON p.strain_id = s1.id']
+                            coalesce_parts = ['p.sovereign_lineage', 's1.sovereign_lineage']
+
+                            if has_normalized_product_strain and 'normalized_name' in strain_columns:
+                                join_parts.append('LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name')
+                                coalesce_parts.append('s2.sovereign_lineage')
+
+                            if strain_name_ref:
+                                join_parts.append(
+                                    f'LEFT JOIN strains s3 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.{strain_name_ref}))'
+                                )
+                                coalesce_parts.append('s3.sovereign_lineage')
+
+                            coalesce_parts.extend(['s1.canonical_lineage'])
+                            if has_normalized_product_strain and 'normalized_name' in strain_columns:
+                                coalesce_parts.append('s2.canonical_lineage')
+                            if strain_name_ref:
+                                coalesce_parts.append('s3.canonical_lineage')
+                            coalesce_parts.append('p."Lineage"')
+
+                            lineage_query = f'''
                                 SELECT
                                     p."Product Name*",
                                     p.normalized_name,
-                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                                    COALESCE({", ".join(coalesce_parts)}) AS lineage
                                 FROM products p
-                            LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE p."Product Name*" IN ({placeholders})
-                            ''', product_names)
+                                {" ".join(join_parts)}
+                                WHERE p."Product Name*" IN ({placeholders})
+                            '''
+                            cur.execute(lineage_query, product_names)
                             for row in cur.fetchall():
                                 pname, norm_name, lineage = row[0], row[1], row[2]
                                 if pname and lineage:
@@ -10275,8 +10390,8 @@ def generate_labels():
         except Exception as force_err:
             logging.warning(f"Force DB lineage failed: {force_err}")
 
-        # For horizontal/vertical/double templates, ensure all records are processed (no chunking)
-        if template_type in ['horizontal', 'vertical', 'double']:
+        # For horizontal/vertical/double/preroll templates, ensure all records are processed (no chunking)
+        if template_type in ['horizontal', 'vertical', 'double', 'preroll']:
             if hasattr(processor, 'CHUNK_SIZE_LIMIT'):
                 processor.CHUNK_SIZE_LIMIT = max(len(records), 1000)  # Remove chunking limit
             if hasattr(processor, 'chunk_size'):
@@ -10772,6 +10887,21 @@ def download_transformed_excel():
         excel_processor = get_excel_processor()
         if excel_processor.df is None:
             return jsonify({'error': 'No data loaded'}), 400
+
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name) if store_name else None
+        direct_db_conn = None
+        direct_db_cursor = None
+        if product_db:
+            try:
+                direct_db_conn = product_db._get_connection()
+                direct_db_cursor = direct_db_conn.cursor()
+            except Exception:
+                direct_db_conn = None
+                direct_db_cursor = None
+
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name) if store_name else None
             
         selected_tags = list(data.get('selected_tags', []))
         if not selected_tags:
@@ -10922,7 +11052,7 @@ def clear_available_tags_cache(reason=None):
             session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
             if session_file_path:
                 # Known cache version used by background pre-cache
-                for ver in ("v3_no_excel_lineage_classic_fix", "v2_no_excel_lineage", "v1"):
+                for ver in (TAGS_CACHE_VERSION, "v2_no_excel_lineage", "v1"):
                     tkey = f"tags_file_{ver}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
                     _clear_key(tkey)
                     # Also attempt deleting without version suffix (legacy)
@@ -11272,9 +11402,14 @@ def get_available_tags():
                     'warning': 'Memory usage high, serving cached data',
                     'force_frontend_cache_clear': force_frontend_cache_clear
                 })
-            # Only return 503 if we have no cached data
-            logging.error("Memory usage too high and no cached data available")
-            return jsonify({'error': 'Memory usage too high, please try again later'}), 503
+            # Only return a friendly empty response if we have no cached data
+            logging.error("Memory usage too high and no cached data available - returning safe empty payload")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'memory-pressure',
+                'warning': 'Memory usage high; please try again shortly'
+            }), 200
         
         # Rate limiting: prevent rapid successive requests
         client_ip = request.remote_addr
@@ -11461,11 +11596,31 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        # CRITICAL: Tags ONLY come from Excel files - never from database alone
-        # If no Excel file, return empty tags with message to upload Excel file
-        # CHECK THIS FIRST before attempting to load from cache
+        # Prefer Excel uploads for tag lists, but if none is present and a store
+        # is selected, attempt a lightweight DB fallback so the UI can still
+        # generate labels (useful for quick previews or after server restarts).
         if not has_excel_data:
-            logging.info("📦 No Excel file - returning empty tags (tags only come from Excel files)")
+            logging.info("📦 No Excel file - attempting DB fallback for available-tags")
+            try:
+                if store_name:
+                    pdb = get_product_database(store_name)
+                    if pdb:
+                        db_tags = pdb.get_available_tags_fast()
+                        # Enforce non-classic lineage rules and make JSON safe
+                        db_tags = _enforce_nonclassic_lineage_rules(db_tags)
+                        safe_db_tags = make_json_safe(db_tags)
+                        logging.info(f"📦 Returning {len(safe_db_tags)} DB-fallback tags for store={store_name}")
+                        return jsonify({
+                            'tags': safe_db_tags,
+                            'total_count': len(safe_db_tags),
+                            'source': 'db-fallback',
+                            'message': 'No Excel file uploaded; showing products from the database for this store.'
+                        }), 200
+            except Exception as db_fallback_err:
+                logging.warning(f"DB fallback for available-tags failed: {db_fallback_err}")
+
+            # If DB fallback not possible, return explicit empty message instructing upload
+            logging.info("📦 No Excel file and DB fallback unavailable - returning empty tags")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
@@ -11551,7 +11706,7 @@ def get_available_tags():
         # Respect nocache fully: only use file cache when nocache is not requested
         if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
             import hashlib
-            cache_version = "v3_no_excel_lineage_classic_fix"
+            cache_version = TAGS_CACHE_VERSION
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
             file_cached_tags = cache.get(file_cache_key)
             if file_cached_tags:
@@ -12862,7 +13017,7 @@ def get_available_tags():
                     file_path = session.get('file_path')
                     if file_path:
                         import hashlib
-                        cache_version = "v3_no_excel_lineage_classic_fix"
+                        cache_version = TAGS_CACHE_VERSION
                         cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                         try:
                             cache.delete(cache_key)
@@ -14170,6 +14325,17 @@ def get_available_tags():
                 'force_frontend_cache_clear': force_frontend_cache_clear
             })
         
+        # Avoid hard 500s for prefer_db refresh calls; return a safe empty payload so UI can retry.
+        prefer_db_on_error = request.args.get('prefer_db') in ('1', 'true', 'True')
+        if prefer_db_on_error:
+            logging.warning("Returning safe empty available-tags payload for prefer_db error path")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'prefer-db-error-fallback',
+                'error': 'Database refresh temporarily unavailable. Retry in a moment.'
+            }), 200
+
         # EMERGENCY FALLBACK DISABLED: Never load database tags
         logging.warning("⚠️ EMERGENCY FALLBACK DISABLED: Not loading database tags")
         return jsonify({
@@ -14716,32 +14882,44 @@ def update_lineage():
         conn = product_db._get_connection()
         cursor = conn.cursor()
         
-        # Step 1: Update product lineage using ProductDatabase method
+        # Step 1: Update product lineage using robust variant matching
         products_updated = 0
         try:
-            # Use the ProductDatabase method which handles normalization
+            # First pass through ProductDatabase helper
             success = product_db.update_product_lineage(tag_name, new_lineage)
             if success:
-                # Get the actual count of updated rows
-                cursor.execute("""
-                    SELECT COUNT(*) FROM products 
-                    WHERE "Product Name*" = ? OR ProductName = ?
-                """, (tag_name, tag_name))
-                products_updated = cursor.fetchone()[0]
-                logging.info(f"✅ Updated {products_updated} product(s) with lineage '{new_lineage}'")
+                products_updated += 1
+
+            # Second pass: variant-based direct SQL update for names with formatting differences
+            variant_updated = _update_product_lineage_by_variants(cursor, product_db, tag_name, new_lineage)
+            products_updated += max(0, variant_updated)
+
+            # If still not found, seed from current Excel data and retry once
+            if products_updated == 0:
+                excel_processor = get_session_excel_processor()
+                df = getattr(excel_processor, 'df', None) if excel_processor is not None else None
+                product_mask = _find_product_mask_in_df(df, tag_name, product_db=product_db)
+                if product_mask is not None and product_mask.any():
+                    try:
+                        row_dict = df.loc[product_mask].iloc[0].to_dict()
+                        product_db.add_or_update_product(row_dict)
+                        seeded_updated = _update_product_lineage_by_variants(cursor, product_db, tag_name, new_lineage)
+                        products_updated += max(0, seeded_updated)
+                        if seeded_updated > 0:
+                            logging.info(f"✅ Seeded DB from Excel then updated lineage for '{tag_name}' ({seeded_updated} row(s))")
+                    except Exception as seed_err:
+                        logging.warning(f"Could not seed product from Excel before lineage update for '{tag_name}': {seed_err}")
+
+            if products_updated > 0:
+                logging.info(f"✅ Updated lineage for {products_updated} product row(s) with lineage '{new_lineage}'")
             else:
-                logging.warning(f"⚠️ ProductDatabase.update_product_lineage returned False for '{tag_name}'")
+                logging.warning(f"⚠️ Could not find product rows to update lineage for '{tag_name}'")
         except Exception as e:
             logging.error(f"Error updating product lineage: {e}")
         
         # Step 2: CRITICAL - Update products.sovereign_lineage for ALL matching products
         # This ensures lineage changes persist for ALL products, whether or not they have strains
-        cursor.execute("""
-            UPDATE products
-            SET sovereign_lineage = ?
-            WHERE \"Product Name*\" = ? OR ProductName = ?
-        """, (new_lineage, tag_name, tag_name))
-        products_sovereign_updated = cursor.rowcount
+        products_sovereign_updated = _update_product_lineage_by_variants(cursor, product_db, tag_name, new_lineage)
         if products_sovereign_updated > 0:
             logging.info(f"✅ Updated sovereign_lineage for {products_sovereign_updated} product(s)")
             # CRITICAL: Clear ALL caches to ensure UI shows fresh sovereign lineage
@@ -14784,39 +14962,45 @@ def update_lineage():
                 # Query with the correct column name - try multiple approaches
                 try:
                     # First try with strain_name (most common)
-                    cursor.execute("""
+                    lower_variants, normalized_variants = _get_lineage_name_match_variants(tag_name, product_db=product_db)
+                    where_bits = []
+                    params = []
+                    if lower_variants:
+                        placeholders = ','.join(['?'] * len(lower_variants))
+                        where_bits.append(f'LOWER(TRIM(p."Product Name*")) IN ({placeholders})')
+                        params.extend(lower_variants)
+                        where_bits.append(f'LOWER(TRIM(p."ProductName")) IN ({placeholders})')
+                        params.extend(lower_variants)
+                    if normalized_variants:
+                        placeholders = ','.join(['?'] * len(normalized_variants))
+                        where_bits.append(f'p.normalized_name IN ({placeholders})')
+                        params.extend(normalized_variants)
+
+                    if not where_bits:
+                        where_bits = ['1=0']
+
+                    strain_query = f"""
                         SELECT DISTINCT s.id, s.strain_name
                         FROM products p
                         JOIN strains s ON p.strain_id = s.id
-                        WHERE (p."Product Name*" = ? OR p.ProductName = ?)
+                        WHERE ({' OR '.join(where_bits)})
                         AND p.strain_id IS NOT NULL
-                    """, (tag_name, tag_name))
+                    """
+                    cursor.execute(strain_query, params)
                     strain_rows = cursor.fetchall()
                     logging.debug(f"Successfully queried with strain_name, got {len(strain_rows)} rows")
                 except Exception as e1:
                     logging.debug(f"Query with strain_name failed: {e1}, trying 'Strain Name'")
                     try:
                         # Try with "Strain Name" (quoted, with space)
-                        cursor.execute("""
-                            SELECT DISTINCT s.id, s."Strain Name"
-                            FROM products p
-                            JOIN strains s ON p.strain_id = s.id
-                            WHERE (p."Product Name*" = ? OR p.ProductName = ?)
-                            AND p.strain_id IS NOT NULL
-                        """, (tag_name, tag_name))
+                        cursor.execute(strain_query.replace('s.strain_name', 's."Strain Name"'), params)
                         strain_rows = cursor.fetchall()
                         logging.debug(f"Successfully queried with 'Strain Name', got {len(strain_rows)} rows")
                     except Exception as e2:
                         logging.warning(f"Both strain_name queries failed. strain_name: {e1}, 'Strain Name': {e2}")
                         # Fallback: just get strain IDs if column name issue
                         try:
-                            cursor.execute("""
-                                SELECT DISTINCT s.id
-                                FROM products p
-                                JOIN strains s ON p.strain_id = s.id
-                                WHERE (p."Product Name*" = ? OR p.ProductName = ?)
-                                AND p.strain_id IS NOT NULL
-                            """, (tag_name, tag_name))
+                            cursor.execute(strain_query.replace('SELECT DISTINCT s.id, s.strain_name', 'SELECT DISTINCT s.id'), params)
                             strain_rows = [(row[0], 'Unknown') for row in cursor.fetchall()]
                             logging.debug(f"Fallback query succeeded, got {len(strain_rows)} rows")
                         except Exception as fallback_error:
@@ -14993,29 +15177,16 @@ def update_lineage():
                     excel_processor._update_dataframe_lineage_from_database()
                     logging.info("✅ CRITICAL: DataFrame lineage updated immediately")
                 
-                # CRITICAL: Also directly update the specific product in DataFrame to ensure it's updated
-                if 'Product Name*' in excel_processor.df.columns and 'Lineage' in excel_processor.df.columns:
-                    # Try multiple matching strategies
-                    product_mask = excel_processor.df['Product Name*'] == tag_name
-                    if not product_mask.any():
-                        # Try case-insensitive match
-                        product_mask = excel_processor.df['Product Name*'].str.upper().str.strip() == tag_name.upper().strip()
-                    if not product_mask.any():
-                        # Try with normalized names
-                        try:
-                            normalized_name = product_db._normalize_product_name(tag_name)
-                            if 'normalized_name' in excel_processor.df.columns:
-                                product_mask = excel_processor.df['normalized_name'] == normalized_name
-                        except Exception:
-                            pass
-                    
-                    if product_mask.any():
+                # CRITICAL: Also directly update matching rows in DataFrame to ensure immediate UI consistency
+                if 'Lineage' in excel_processor.df.columns:
+                    product_mask = _find_product_mask_in_df(excel_processor.df, tag_name, product_db=product_db)
+                    if product_mask is not None and product_mask.any():
                         excel_processor.df.loc[product_mask, 'Lineage'] = new_lineage
-                        updated_count = product_mask.sum()
+                        updated_count = int(product_mask.sum())
                         logging.info(f"✅ CRITICAL: Directly updated DataFrame lineage for '{tag_name}' to '{new_lineage}' ({updated_count} row(s))")
                         excel_processor._invalidate_caches()  # Invalidate cache since DataFrame changed
                     else:
-                        logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update (tried exact, case-insensitive, and normalized matches)")
+                        logging.warning(f"⚠️ Product '{tag_name}' not found in DataFrame for direct update (variant matching)")
         except Exception as df_update_err:
             logging.error(f"❌ CRITICAL FAILURE: Could not update DataFrame lineage immediately: {df_update_err}")
             import traceback
@@ -15169,6 +15340,7 @@ def batch_update_lineage():
         # Track changes for logging and database updates
         changes_made = []
         lineage_updates_for_db = {}  # strain_name -> new_lineage for batch database update
+        direct_db_updates = 0
         
         # Process all updates in memory first
         for update in lineage_updates:
@@ -15178,12 +15350,10 @@ def batch_update_lineage():
             if not tag_name or not new_lineage:
                 continue
                 
-            # Find the tag in the DataFrame
-            mask = excel_processor.df['ProductName'] == tag_name
-            if not mask.any():
-                mask = excel_processor.df['Product Name*'] == tag_name
+            # Find the tag in the DataFrame using robust matching
+            mask = _find_product_mask_in_df(excel_processor.df, tag_name)
                 
-            if mask.any():
+            if mask is not None and mask.any():
                 try:
                     original_lineage = excel_processor.df.loc[mask, 'Lineage'].iloc[0]
                     
@@ -15215,16 +15385,50 @@ def batch_update_lineage():
                         
                 except (IndexError, KeyError):
                     continue
+            else:
+                # Fallback: update directly in DB even if this exact row is not in current DataFrame
+                try:
+                    if product_db and direct_db_cursor is not None:
+                        updated_rows = _update_product_lineage_by_variants(
+                            direct_db_cursor,
+                            product_db,
+                            tag_name,
+                            new_lineage,
+                        )
+                        if updated_rows > 0:
+                            direct_db_updates += updated_rows
+                            changes_made.append({
+                                'tag_name': tag_name,
+                                'original': '',
+                                'new': new_lineage
+                            })
+                except Exception:
+                    pass
+
+        if direct_db_conn is not None and direct_db_updates > 0:
+            try:
+                direct_db_conn.commit()
+            except Exception:
+                pass
         
         # Update lineages in database for persistence (ALWAYS ENABLED)
+        batch_persisted_count = 0
+        batch_persisted_success = False
         if lineage_updates_for_db:
             try:
-                success = excel_processor.batch_update_lineages(lineage_updates_for_db)
-                if success:
-                    logging.info(f"Successfully persisted {len(lineage_updates_for_db)} lineage changes to database")
+                persisted = excel_processor.batch_update_lineages(lineage_updates_for_db)
+                try:
+                    batch_persisted_count = int(persisted)
+                except Exception:
+                    batch_persisted_count = 0
+                batch_persisted_success = batch_persisted_count > 0
+                if batch_persisted_success:
+                    logging.info(f"Successfully persisted {batch_persisted_count} lineage changes to database")
                 else:
-                    logging.warning(f"Some lineage changes failed to persist to database")
+                    logging.warning(f"No lineage changes were persisted to database")
             except Exception as db_error:
+                batch_persisted_count = 0
+                batch_persisted_success = False
                 logging.error(f"Error persisting batch lineage changes to database: {db_error}")
 
         # NEW: Vendor+strain-wide DB updates per change (covers all weights/types for that strain & vendor)
@@ -15246,10 +15450,8 @@ def batch_update_lineage():
                     vendor_val = None
                     strain_val = None
                     try:
-                        # Prefer Excel DF for speed
-                        mask = excel_processor.df['ProductName'] == tag_name if 'ProductName' in excel_processor.df.columns else None
-                        if mask is None or not mask.any():
-                            mask = excel_processor.df['Product Name*'] == tag_name if 'Product Name*' in excel_processor.df.columns else None
+                        # Prefer Excel DF for speed (robust name matching)
+                        mask = _find_product_mask_in_df(excel_processor.df, tag_name, product_db=product_db)
                         if mask is not None and mask.any():
                             if 'Vendor/Supplier*' in excel_processor.df.columns:
                                 vendor_val = str(excel_processor.df.loc[mask, 'Vendor/Supplier*'].iloc[0] or '').strip()
@@ -15356,9 +15558,7 @@ def batch_update_lineage():
                         strain_mask = None
                         if 'Vendor/Supplier*' in excel_processor.df.columns:
                             # Determine vendor for this tag
-                            m = excel_processor.df['ProductName'] == tag_name if 'ProductName' in excel_processor.df.columns else None
-                            if m is None or not m.any():
-                                m = excel_processor.df['Product Name*'] == tag_name if 'Product Name*' in excel_processor.df.columns else None
+                            m = _find_product_mask_in_df(excel_processor.df, tag_name, product_db=product_db)
                             vendor_val = None
                             strain_val = None
                             if m is not None and m.any():
@@ -15385,6 +15585,7 @@ def batch_update_lineage():
                         # Non-fatal; continue updating others
                         pass
                 logging.info(f"Updated lineage in Excel processor DataFrame for {updated_count}/{len(changes_made)} items")
+                excel_updates_count = updated_count
         except Exception as e_df:
             logging.warning(f"Could not update Excel DataFrame after batch lineage update: {e_df}")
         # Clear caches to ensure refreshed data after batch lineage updates
@@ -15419,12 +15620,39 @@ def batch_update_lineage():
         session.modified = True
         logging.info(f"✅ Set lineage_update_timestamp in session to force fresh lineage alignment after batch update")
         
+        # Aggregate counts to detect no-op updates and return clearer error
+        total_effective_updates = 0
+        try:
+            total_effective_updates += int(total_vendor_updates)
+        except Exception:
+            pass
+        try:
+            total_effective_updates += int(excel_updates_count) if 'excel_updates_count' in locals() else 0
+        except Exception:
+            pass
+        try:
+            # If batch persisted changes succeeded, count those as updates
+            total_effective_updates += int(len(lineage_updates_for_db)) if batch_persisted_success else 0
+        except Exception:
+            pass
+        try:
+            total_effective_updates += int(direct_db_updates)
+        except Exception:
+            pass
+
+        if total_effective_updates == 0:
+            logging.warning(f"No products were updated during batch lineage update. vendor_updates={total_vendor_updates}, excel_updates={locals().get('excel_updates_count',0)}, persisted={batch_persisted_success}")
+            return jsonify({'error': 'No products were updated'}), 400
+
         return jsonify({
             'success': True,
             'message': f'Updated {len(changes_made)} lineages in database',
             'changes': changes_made,
             'saved': False,  # No longer saving to Excel file
-            'database_updated': True
+            'database_updated': True,
+            'vendor_updates': total_vendor_updates,
+            'excel_updates': locals().get('excel_updates_count', 0),
+            'batch_persisted': batch_persisted_success
         })
         
     except Exception as e:
@@ -15752,7 +15980,7 @@ def get_web_available_tags():
         try:
             if session_file_path and not has_recent_lineage_update:
                 import hashlib
-                cache_version = "v3_no_excel_lineage_classic_fix"
+                cache_version = TAGS_CACHE_VERSION
                 file_hash = hashlib.sha256(session_file_path.encode()).hexdigest()
                 bg_cache_key = f"tags_file_{cache_version}_{file_hash}"
                 bg_tags = cache.get(bg_cache_key)
@@ -15950,7 +16178,7 @@ def get_web_filter_options():
             session_file_path = session.get('file_path', '')
             if session_file_path:
                 import hashlib
-                cache_version = "v3_no_excel_lineage_classic_fix"
+                cache_version = TAGS_CACHE_VERSION
                 dd_cache_key = f"dropdowns_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
                 bg_dropdowns = cache.get(dd_cache_key)
                 if bg_dropdowns:
@@ -16312,7 +16540,7 @@ def get_filter_options():
             session_file_path = session.get('file_path', '')
             if session_file_path:
                 import hashlib
-                cache_version = "v3_no_excel_lineage_classic_fix"
+                cache_version = TAGS_CACHE_VERSION
                 file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
                 cached_tags = cache.get(file_cache_key)
                 if cached_tags and len(cached_tags) > 0:
@@ -20290,8 +20518,8 @@ def json_inventory():
             logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)
         processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor, fast_mode=fast_mode)
         
-        # CRITICAL: For mini and double templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
-        if hasattr(processor, '_expand_template_if_needed') and processor.template_type not in ['mini', 'double']:
+        # CRITICAL: For mini, double, and preroll templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
+        if hasattr(processor, '_expand_template_if_needed') and processor.template_type not in ['mini', 'double', 'preroll']:
             # Force re-expansion (but not for mini/double templates)
             processor._expanded_template_buffer = processor._expand_template_if_needed(
                 force_expand=True
@@ -20299,9 +20527,9 @@ def json_inventory():
         elif processor.template_type == 'mini':
             # Mini templates have fixed capacity - log this for debugging
             logging.info(f"Mini template detected - skipping forced re-expansion to maintain fixed 20-label capacity")
-        elif processor.template_type == 'double':
+        elif processor.template_type in ['double', 'preroll']:
             # Double templates have exact dimensions set by user - never expand them
-            logging.info(f"Double template detected - skipping forced re-expansion to preserve exact table dimensions")
+            logging.info(f"{processor.template_type.title()} template detected - skipping forced re-expansion to preserve exact table dimensions")
         
         # Debug the template dimensions
         from docx import Document
@@ -24808,7 +25036,18 @@ def json_match_mixed():
             if "timeout" in str(match_error).lower():
                 return jsonify({'error': 'JSON matching timed out. The dataset may be too large or the URL may be slow to respond.'}), 408
             elif "connection" in str(match_error).lower():
-                return jsonify({'error': 'Failed to connect to the JSON URL. Please check the URL and try again.'}), 503
+                # Return a safe empty payload (200) instead of 503 so the frontend
+                # can gracefully handle transient network issues without treating
+                # the service as unavailable.
+                return jsonify({
+                    'success': True,
+                    'matched_count': 0,
+                    'matched_names': [],
+                    'available_tags': [],
+                    'selected_tags': [],
+                    'json_matched_tags': [],
+                    'message': 'Failed to connect to the JSON URL. Could not fetch remote data; showing available local tags instead.'
+                }), 200
             else:
                 return jsonify({'error': f'JSON matching failed: {str(match_error)}'}), 500
         
@@ -26451,11 +26690,11 @@ def display_preroll_items(group_id):
                 }
                 group_display_name = group_display_name_map.get(group_id, 'Preroll Items')
         
-        # CRITICAL FIX: Filter items by vendor if vendor parameter is provided
-        # This ensures QR codes show only the specific vendor's products
+        # CRITICAL FIX: Filter items by vendor/brand key if vendor parameter is provided.
+        # QR links may carry a normalized brand key in `vendor` (legacy param name).
         if vendor_filter and preroll_items:
             original_count = len(preroll_items)
-            # Filter items to only include those from the specified vendor
+            # Filter items to only include those matching vendor or brand key.
             filtered_items = []
             vendor_filter_lower = vendor_filter.lower().strip()
             
@@ -26463,7 +26702,10 @@ def display_preroll_items(group_id):
                 item_vendor = str(item.get('vendor', '')).strip()
                 item_vendor_lower = item_vendor.lower().strip()
                 
-                # Case-insensitive vendor matching with normalization
+                item_brand = str(item.get('brand', '')).strip()
+                item_brand_lower = item_brand.lower().strip()
+
+                # Case-insensitive vendor/brand matching with normalization
                 # Handle common variations: apostrophes, spaces, special characters
                 def normalize_vendor(v):
                     """Normalize vendor name for comparison."""
@@ -26472,17 +26714,30 @@ def display_preroll_items(group_id):
                     v = v.replace("'", "").replace("'", "").replace("`", "")
                     v = v.replace("  ", " ")  # Multiple spaces to single space
                     return v
+
+                def compact_key(v):
+                    """Compact key used by preroll group_key normalization."""
+                    import re
+                    return re.sub(r'[^a-z0-9]+', '', str(v).lower().strip())
                 
                 vendor_normalized = normalize_vendor(vendor_filter)
                 item_vendor_normalized = normalize_vendor(item_vendor)
+                item_brand_normalized = normalize_vendor(item_brand)
+                vendor_compact = compact_key(vendor_filter)
+                item_vendor_compact = compact_key(item_vendor)
+                item_brand_compact = compact_key(item_brand)
                 
-                # Exact match (case-insensitive) or normalized match
+                # Match by vendor text OR brand text OR compact key
                 if (item_vendor_lower == vendor_filter_lower or 
-                    item_vendor_normalized == vendor_normalized):
+                    item_brand_lower == vendor_filter_lower or
+                    item_vendor_normalized == vendor_normalized or
+                    item_brand_normalized == vendor_normalized or
+                    item_vendor_compact == vendor_compact or
+                    item_brand_compact == vendor_compact):
                     filtered_items.append(item)
             
             preroll_items = filtered_items
-            logging.info(f"PREROLL ROUTE: Filtered {original_count} items to {len(preroll_items)} items for vendor '{vendor_filter}'")
+            logging.info(f"PREROLL ROUTE: Filtered {original_count} items to {len(preroll_items)} items for vendor/brand key '{vendor_filter}'")
             
             # Update group display name to include vendor
             if preroll_items:

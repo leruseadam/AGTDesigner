@@ -33,6 +33,14 @@
   --tag-list-scroll-padding: 1rem;
 }
 
+/* On wide screens make the tag lists slightly taller than the center column
+   so they visually extend beyond the center card without changing aspect ratio. */
+@media (min-width: 1000px) {
+  :root {
+    --tag-list-height: calc(var(--center-panel-height) + 2rem);
+  }
+}
+
 /* Ensure Template selects show a bright turquoise border in all contexts */
 .center-column-wrapper #templateSelect,
 .center-column-wrapper #templateGroupSelect,
@@ -869,11 +877,11 @@ body.modal-open #mainContent.store-selection-disabled,
 /* Short-viewport optimizations (e.g., when console is open) */
 @media (max-height: 700px) {
   :root {
-    --tag-list-height: max(var(--tag-list-min-height), 72vh);
+    --tag-list-height: max(var(--tag-list-min-height), 74vh);
     --center-panel-height: 57rem;
   }
   @supports (height: 100dvh) {
-  :root { --tag-list-height: max(var(--tag-list-min-height), 72dvh); --center-panel-height: 64rem; }
+  :root { --tag-list-height: max(var(--tag-list-min-height), 74dvh); --center-panel-height: 64rem; }
   }
   .control-panel,
   .center-panel,
@@ -3322,9 +3330,16 @@ body.modal-open #mainContent.store-selection-disabled,
     -moz-text-align-last: center !important;
     text-align-last: center !important;
     font-size: 1em !important;
-    padding: 16px 54px 18px 42px !important;  /* Increased vertical padding for taller appearance */
+    padding: 12px 54px 12px 42px !important;  /* Balanced vertical padding for centered text */
     min-height: 60px !important;  /* Increased height */
     height: 60px !important;  /* Increased height */
+    line-height: 36px !important; /* vertical centering for selected text */
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    -webkit-text-align-last: center !important;
+    -moz-text-align-last: center !important;
+    text-align-last: center !important;
     border: 1px solid #ffffff !important;
     box-shadow: 0 0 20px rgba(0, 212, 170, 0.847) !important;
     color: #f7f8ff !important;
@@ -3339,6 +3354,12 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 1em !important;
     padding: 8px 14px !important;
     color: #f7f8ff !important;
+  }
+
+  /* Ensure Windows/Edge/IE native expand arrow doesn't interfere */
+  .control-panel #templateSelect.form-select-modern::-ms-expand,
+  .control-panel #templateSelectModal.form-select-modern::-ms-expand {
+    display: none !important;
   }
   
   /* Generate button - Professional and Prominent */
@@ -12760,3 +12781,16 @@ html, body {
   }
 }
 
+/* Keep side tag lists very slightly taller than center column on desktop */
+@media (min-width: 992px) {
+  :root {
+    --tag-list-extra-height: 0.4rem;
+  }
+
+  #availableTags.tag-list-container,
+  #selectedTags.tag-list-container {
+    height: calc(var(--tag-list-height) + var(--tag-list-extra-height)) !important;
+    min-height: calc(var(--tag-list-height) + var(--tag-list-extra-height)) !important;
+    max-height: calc(var(--tag-list-height) + var(--tag-list-extra-height)) !important;
+  }
+}

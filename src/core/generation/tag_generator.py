@@ -883,8 +883,8 @@ def process_chunk(args):
         logger.debug(f"🔧 MINI TEMPLATE EXPANSION: Using standard template expansion")
     elif orientation == "preroll":
         local_template_buffer = base_template
-        num_labels = 20  # Use standard 4x5 grid (same as mini)
-        logger.debug(f"🔧 PREROLL TEMPLATE EXPANSION: Using standard 4x5 expansion (same as mini)")
+        num_labels = 12  # Use standard 4x3 grid (same as double)
+        logger.debug(f"🔧 PREROLL TEMPLATE EXPANSION: Using standard 4x3 expansion (same as double)")
     elif orientation == "double":
         local_template_buffer = base_template
         num_labels = 12  # Use standard 4x3 grid
@@ -906,18 +906,12 @@ def process_chunk(args):
         # Fallback to direct load
         tpl = DocxTemplate(local_template_buffer)
     context = {}
-    image_width = Mm(10) if orientation == "preroll" else (Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12))
+    image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")
     
-    # CRITICAL FIX: For preroll, use ALL records in chunk (template expands to fit)
-    # For other templates, limit to num_labels to avoid empty slots
-    if orientation == "preroll":
-        actual_num_labels = len(chunk)  # Use all records - template will expand to 4x5 grid per chunk
-        # Preroll uses all records - no logging needed
-    else:
-        actual_num_labels = min(len(chunk), num_labels)
+    actual_num_labels = min(len(chunk), num_labels)
     
     # OPTIMIZATION: Pre-load all lineage and strain data in batch to avoid N+1 queries
     # This reduces 200+ queries for 100 products to just 2-3 queries total
@@ -1257,8 +1251,15 @@ def process_chunk(args):
                 
             # Final hardening: normalize lineage text so LabelX.Lineage never carries extra/hidden spaces.
             lineage_val = _clean_lineage_text(lineage_val).upper()
-            if not lineage_val:
-                lineage_val = "HYBRID" if is_classic_type else "MIXED"
+            # If classic type: enforce canonical classic lineages; anything unrecognized or empty => HYBRID
+            if is_classic_type:
+                allowed_classic = {"SATIVA", "HYBRID/SATIVA", "HYBRID", "HYBRID/INDICA", "INDICA"}
+                if not lineage_val or lineage_val not in allowed_classic:
+                    lineage_val = "HYBRID"
+            else:
+                if not lineage_val:
+                    lineage_val = "MIXED"
+
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
             
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
@@ -1711,5 +1712,4 @@ def create_safe_document():
     except Exception as e:
         logger.error(f"Error creating safe document: {e}")
         raise
-
 

@@ -5,8 +5,9 @@ Quick test to verify lineage extraction from database is working correctly.
 import sys
 import os
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add project root to path (one level above tests/)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 from src.core.data.product_database import get_product_database
 from src.core.data.excel_processor import ExcelProcessor

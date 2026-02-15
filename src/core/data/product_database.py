@@ -5325,38 +5325,96 @@ class ProductDatabase:
             normalized_name = self._normalize_product_name(product_name)
             conn = self._get_connection()
             cursor = conn.cursor()
-            current_date = datetime.now().isoformat()
+            import re
+
+            def _name_variants(raw_name: str):
+                variants = []
+                if not raw_name:
+                    return variants
+                name = str(raw_name).replace('\u2011', '-').strip()
+                if not name:
+                    return variants
+                variants.append(name)
+                vendor_removed = re.sub(r'\s+by\s+[^-]+(?=(\s*-\s*\d|\s*$))', '', name, flags=re.IGNORECASE)
+                vendor_removed = re.sub(r'\s+by\s+[^-]+$', '', vendor_removed, flags=re.IGNORECASE)
+                variants.append(vendor_removed.strip())
+                weight_removed = re.sub(
+                    r'\s*-\s*\d+(?:\.\d+)?\s*(?:g|gram|grams|gm|oz|ounce|ounces|ml|mg|ct|pack|pk|pcs|pc)?$',
+                    '',
+                    vendor_removed,
+                    flags=re.IGNORECASE
+                ).strip()
+                variants.append(weight_removed)
+                deduped = []
+                seen = set()
+                for v in variants:
+                    c = re.sub(r'\s+', ' ', str(v or '').strip())
+                    if c and c.lower() not in seen:
+                        deduped.append(c)
+                        seen.add(c.lower())
+                return deduped
+
+            variants = _name_variants(product_name)
+            lower_variants = [v.lower() for v in variants]
+            normalized_variants = []
+            for v in variants:
+                nv = self._normalize_product_name(v)
+                if nv and nv not in normalized_variants:
+                    normalized_variants.append(nv)
+            if normalized_name and normalized_name not in normalized_variants:
+                normalized_variants.append(normalized_name)
 
             # CRITICAL FIX: Use normalized name and try both column names
             # This ensures updates work even with formatting differences
             # CRITICAL: Set BOTH Lineage and sovereign_lineage for manual updates
             if vendor and brand:
-                cursor.execute('''
+                where_parts = []
+                params = [new_lineage, new_lineage]
+                if lower_variants:
+                    placeholders = ','.join(['?'] * len(lower_variants))
+                    where_parts.append(f'LOWER(TRIM("Product Name*")) IN ({placeholders})')
+                    params.extend(lower_variants)
+                    where_parts.append(f'LOWER(TRIM("ProductName")) IN ({placeholders})')
+                    params.extend(lower_variants)
+                if normalized_variants:
+                    placeholders = ','.join(['?'] * len(normalized_variants))
+                    where_parts.append(f'normalized_name IN ({placeholders})')
+                    params.extend(normalized_variants)
+                if not where_parts:
+                    where_parts.append('"Product Name*" = ?')
+                    params.append(product_name)
+
+                params.extend([vendor, brand])
+                cursor.execute(f'''
                     UPDATE products
                     SET "Lineage" = ?, sovereign_lineage = ?
-                    WHERE ("Product Name*" = ? OR "ProductName" = ?)
+                    WHERE ({" OR ".join(where_parts)})
                     AND "Vendor/Supplier*" = ? AND "Product Brand" = ?
-                ''', (new_lineage, new_lineage, product_name, product_name, vendor, brand))
+                ''', params)
                 logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' (vendor={vendor}, brand={brand}) to '{new_lineage}'")
             else:
-                # Try exact match first
-                cursor.execute('''
+                where_parts = []
+                params = [new_lineage, new_lineage]
+                if lower_variants:
+                    placeholders = ','.join(['?'] * len(lower_variants))
+                    where_parts.append(f'LOWER(TRIM("Product Name*")) IN ({placeholders})')
+                    params.extend(lower_variants)
+                    where_parts.append(f'LOWER(TRIM("ProductName")) IN ({placeholders})')
+                    params.extend(lower_variants)
+                if normalized_variants:
+                    placeholders = ','.join(['?'] * len(normalized_variants))
+                    where_parts.append(f'normalized_name IN ({placeholders})')
+                    params.extend(normalized_variants)
+                if not where_parts:
+                    where_parts.append('"Product Name*" = ?')
+                    params.append(product_name)
+
+                cursor.execute(f'''
                     UPDATE products
                     SET "Lineage" = ?, sovereign_lineage = ?
-                    WHERE "Product Name*" = ? OR "ProductName" = ?
-                ''', (new_lineage, new_lineage, product_name, product_name))
-
-                # If no rows updated with exact match, try case-insensitive match
-                if cursor.rowcount == 0:
-                    cursor.execute('''
-                        UPDATE products
-                        SET "Lineage" = ?, sovereign_lineage = ?
-                        WHERE LOWER(TRIM("Product Name*")) = LOWER(TRIM(?))
-                        OR LOWER(TRIM("ProductName")) = LOWER(TRIM(?))
-                    ''', (new_lineage, new_lineage, product_name, product_name))
-                    logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' using case-insensitive match to '{new_lineage}'")
-                else:
-                    logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' to '{new_lineage}'")
+                    WHERE {" OR ".join(where_parts)}
+                ''', params)
+                logger.info(f"Updated lineage (and sovereign_lineage) for product '{product_name}' to '{new_lineage}' using variant matching")
 
             conn.commit()
             rows_updated = cursor.rowcount

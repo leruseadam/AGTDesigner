@@ -87,7 +87,7 @@ def get_font_scheme(template_type, base_size=12):
         'horizontal': {"base_size": base_size + 1, "min_size": 7, "max_length": 20},
         'double': {"base_size": base_size - 1, "min_size": 8, "max_length": 30},
         'inventory': {"base_size": base_size, "min_size": 8, "max_length": 40},  # Inventory slips can handle longer text
-        'preroll': {"base_size": base_size - 2, "min_size": 6, "max_length": 15}  # Preroll template uses mini font scheme
+        'preroll': {"base_size": base_size - 1, "min_size": 8, "max_length": 30}  # Preroll now uses double font scheme
     }
     return {
         field: {**schemes.get(template_type, schemes['default'])}
@@ -224,7 +224,7 @@ class TemplateProcessor:
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
         elif self.template_type == 'preroll':
-            self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page (same as mini)
+            self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page (same as double)
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for preroll template")
         elif self.template_type == 'double':
@@ -278,7 +278,7 @@ class TemplateProcessor:
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
             elif self.template_type == 'preroll':
-                required_labels = 20  # 4x5 grid (same as mini)
+                required_labels = 12  # 4x3 grid (same as double)
             else:
                 required_labels = 9   # 3x3 grid
             
@@ -297,9 +297,9 @@ class TemplateProcessor:
                     self.logger.info("Calling 4x3 expansion method")
                     return self._expand_template_to_4x3_fixed_double()
                 elif self.template_type == 'preroll':
-                    # Preroll uses 4x5 grid like mini template
-                    self.logger.info("Calling 4x5 expansion method for preroll template")
-                    return self._expand_template_to_4x5_fixed_scaled()
+                    # Preroll now uses 4x3 grid like double template
+                    self.logger.info("Calling 4x3 expansion method for preroll template")
+                    return self._expand_template_to_4x3_fixed_double()
                 else:
                     # horizontal and vertical templates expand to 3x3 grid
                     self.logger.info(f"Calling 3x3 expansion method for template type: '{self.template_type}'")
@@ -872,6 +872,10 @@ class TemplateProcessor:
         
         product_idx = 0
         for page in range(pages):
+            # Insert a real page break between tables so each 4x3 sheet starts on a new page.
+            if page > 0:
+                doc.add_page_break()
+
             tbl = doc.add_table(rows=num_rows, cols=num_cols)
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
@@ -949,17 +953,8 @@ class TemplateProcessor:
             spacing.set(qn('w:type'), 'dxa')
             tblPr2.append(spacing)
             
-            # Page break at start of each table after the first (avoids blank page between tables)
             if page > 0:
-                first_cell = tbl.cell(0, 0)
-                page_break_para = first_cell.add_paragraph()
-                first_cell._tc.insert(0, page_break_para._element)
-                page_break_run = page_break_para.add_run()
-                page_break_run.add_break(WD_BREAK.PAGE)
-                page_break_para.paragraph_format.space_before = Pt(0)
-                page_break_para.paragraph_format.space_after = Pt(0)
-                page_break_para.paragraph_format.line_spacing = Pt(1)
-                self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break at start of table {page + 1} of {pages}")
+                self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break before table {page + 1} of {pages}")
         
         buf = BytesIO()
         doc.save(buf)
@@ -1417,9 +1412,10 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
                 elif self.template_type == 'double':
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                elif self.template_type in ['mini', 'preroll']:
-                    # Preroll uses same 4x5 grid as mini - expand to fit all records in chunk
+                elif self.template_type == 'mini':
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
+                elif self.template_type == 'preroll':
+                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
                 
                 # Cache the expansion (create a copy since BytesIO is consumed)
                 if hasattr(self._expanded_template_buffer, 'getvalue'):
@@ -1759,7 +1755,6 @@ class TemplateProcessor:
                 apply_lineage_colors(rendered_doc, self.template_type)
             except Exception as color_err:
                 self.logger.warning(f"Lineage color application failed (post-process will still run): {color_err}")
-                import traceback
                 self.logger.debug(traceback.format_exc())
 
             # CRITICAL FIX: Wrap post-processing in comprehensive error handling
@@ -2952,6 +2947,35 @@ class TemplateProcessor:
         # Now we trust the brand value that was set by preroll_tag_generator.
         if self.template_type in ('preroll', 'mini'):
             self.logger.debug(f"PREROLL/MINI BRAND: Preserving brand '{product_brand}' for '{product_name}' (not clearing same-as-vendor)")
+
+        # PREROLL FIX: If "brand" appears to be just the strain value, prefer vendor fallback.
+        # This avoids banners showing strain names (e.g., "KHALIFA KUSH") in the brand slot.
+        if self.template_type == 'preroll':
+            strain_candidate = (
+                label_context.get('ProductStrain')
+                or label_context.get('Product Strain')
+                or record.get('ProductStrain')
+                or record.get('Product Strain')
+                or ''
+            )
+            brand_clean = _trim_invisible_edges(product_brand).upper()
+            strain_clean = _trim_invisible_edges(strain_candidate).upper()
+            if brand_clean and strain_clean and brand_clean == strain_clean:
+                vendor_candidate = (
+                    label_context.get('_vendor_from_record')
+                    or record.get('Vendor/Supplier*')
+                    or record.get('Vendor')
+                    or record.get('ProductVendor')
+                    or ''
+                )
+                vendor_clean = _trim_invisible_edges(vendor_candidate)
+                if vendor_clean:
+                    self.logger.info(
+                        f"PREROLL BRAND FIX: Replacing strain-like brand '{product_brand}' with vendor '{vendor_clean}' for '{product_name}'"
+                    )
+                    product_brand = vendor_clean
+                    label_context['Product Brand'] = vendor_clean
+                    label_context['ProductBrand'] = vendor_clean
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
@@ -4129,8 +4153,26 @@ class TemplateProcessor:
                 # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels
                 # unless explicitly allowed by QR_ALLOW_LOCAL environment variable (dev only)
                 allow_local = os.environ.get('QR_ALLOW_LOCAL', '') in ['1', 'true', 'True']
+                # Auto-allow local links when running locally and no explicit public QR base is configured.
+                if not allow_local:
+                    host_is_local = ('localhost' in base_url.lower() or '127.0.0.1' in base_url)
+                    has_explicit_public_base = bool(
+                        os.environ.get('QR_BASE_URL', '').strip()
+                        or os.environ.get('AGT_DESIGNER_URL', '').strip()
+                    )
+                    if host_is_local and not has_explicit_public_base:
+                        allow_local = True
                 if ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url) and not allow_local:
-                    raise RuntimeError(f"QR URL generation attempted to use a localhost base: {qr_url}. Set QR_BASE_URL to a production domain.")
+                    fallback_base = (
+                        os.environ.get('QR_BASE_URL', '').strip()
+                        or os.environ.get('AGT_DESIGNER_URL', '').strip()
+                        or 'https://www.agtpricetags.com'
+                    ).rstrip('/')
+                    self.logger.warning(
+                        f"PREROLL QR: Localhost base detected ({qr_url}); "
+                        f"falling back to production base '{fallback_base}'"
+                    )
+                    qr_url = f"{fallback_base}/preroll-items/{group_id}?vendor={vendor_encoded}"
 
                 self.logger.info(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor param '{vendor_param}': {qr_url}")
                 qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
