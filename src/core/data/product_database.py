@@ -1229,7 +1229,20 @@ class ProductDatabase:
         cursor.execute('SELECT id, strain_name, canonical_lineage FROM strains')
         strains = cursor.fetchall()
         updated = 0
+        # Generic/non-strain buckets must never be overwritten by product-mode lineage.
+        protected_generic = {'mixed', 'mix', 'unknown', 'none', 'nan'}
         for strain_id, strain_name, canonical_lineage in strains:
+            normalized_strain = self._normalize_strain_name(strain_name or '')
+            if normalized_strain in protected_generic:
+                target_lineage = 'MIXED'
+                if (canonical_lineage or '').strip().upper() != target_lineage:
+                    cursor.execute('''
+                        UPDATE strains SET canonical_lineage = ?, updated_at = ? WHERE id = ?
+                    ''', (target_lineage, datetime.now().isoformat(), strain_id))
+                    logger.info(f"Protected generic strain '{strain_name}': set canonical_lineage to '{target_lineage}' (was '{canonical_lineage}')")
+                    updated += 1
+                continue
+
             mode_lineage = self.get_mode_lineage(strain_id)
             if mode_lineage and mode_lineage != canonical_lineage:
                 cursor.execute('''
@@ -1247,6 +1260,9 @@ class ProductDatabase:
         try:
             self.init_database()  # Ensure DB is initialized
             normalized_name = self._normalize_strain_name(strain_name)
+            # Guard generic buckets from receiving classic lineages.
+            if normalized_name in {'mixed', 'mix', 'unknown', 'none', 'nan'}:
+                lineage = 'MIXED'
             current_date = datetime.now().isoformat()
             # Serialize write operations
             with self._write_lock:
@@ -1334,7 +1350,7 @@ class ProductDatabase:
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
                 self._rejected_blank_names += 1
-                logger.warning(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
+                logger.debug(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
                 return None
             
             # Check for invalid values
@@ -1719,8 +1735,14 @@ class ProductDatabase:
 
                     # CRITICAL FIX: Include ALL remaining fields from product_data that aren't already in column_data_map
                     # This ensures all Excel columns are included, not just the hardcoded ones
+                    # CRITICAL: Block canonical_lineage from Excel - it must ONLY come from strains table
+                    BLOCKED_EXCEL_COLUMNS = ['canonical_lineage', 'currentLineage']  # Never allow Excel to set these
                     for col_name, col_value in product_data.items():
                         if col_name not in column_data_map:
+                            # CRITICAL: Block canonical_lineage from being set via Excel uploads
+                            if col_name in BLOCKED_EXCEL_COLUMNS:
+                                logger.info(f"✅ BLOCKED Excel column '{col_name}' from being written to database (must come from strains table only)")
+                                continue
                             # Only add if the column exists in the database
                             # Also validate column name to prevent SQL injection
                             if col_name in available_columns and isinstance(col_name, str):
@@ -4485,10 +4507,12 @@ class ProductDatabase:
             
             # Add all other fields from product_data that exist in the database
             # Skip fields that are already handled above or are internal/metadata fields
+            # CRITICAL: Block canonical_lineage from Excel - it must ONLY come from strains table
             skip_fields = {
                 'Product Type*', 'Lineage', 'DOH', 'Price', 'last_seen_date', 'updated_at',
                 'first_seen_date', 'created_at', 'total_occurrences', 'normalized_name',
-                'id', 'strain_id'  # These are handled separately or shouldn't be updated
+                'id', 'strain_id',  # These are handled separately or shouldn't be updated
+                'canonical_lineage', 'currentLineage'  # CRITICAL: Never allow Excel to overwrite these
             }
             
             # Fields that should NOT be overwritten by blank/empty Excel values
@@ -5476,10 +5500,10 @@ class ProductDatabase:
                 return None
             
             # Try exact match first (fastest) - also get strain for sativa hybrid check
-            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
+            # Strains-sheet lineage path: never fall back to products."Lineage" here.
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -5518,10 +5542,10 @@ class ProductDatabase:
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
-            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
+            # Strains-sheet lineage path: never fall back to products."Lineage" here.
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -5552,10 +5576,10 @@ class ProductDatabase:
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
-            # CRITICAL FIX: Join with strains table and prioritize sovereign_lineage (manual edits)
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage > product.Lineage
+            # Strains-sheet lineage path: never fall back to products."Lineage" here.
+            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id

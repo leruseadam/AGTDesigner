@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Shared cache version token for tag/lineage payload invalidation.
 # Keep this aligned with app.py cache version usage so stale lineage payloads
 # are consistently bypassed across UI load and generation flows.
-TAGS_CACHE_VERSION = "v3_no_excel_lineage_classic_fix"
+TAGS_CACHE_VERSION = "v4_db_strains_lineage_hotfix"
 
 # Cache resolved default file paths to avoid repeated filesystem scans
 # Limited to 50 entries with TTL of 1 hour to prevent unbounded growth
@@ -3963,7 +3963,8 @@ class ExcelProcessor:
                         tag['Product Strain*'] = 'CBD Blend'
                         tag['Lineage'] = 'CBD'
                         tag['lineage'] = 'CBD'
-                        tag['canonical_lineage'] = 'CBD'
+                        # CRITICAL: Do NOT set canonical_lineage here - it must come from strains table only
+                        # tag['canonical_lineage'] = 'CBD'  # REMOVED
                         tag['currentLineage'] = 'CBD'
                         # Also update database immediately
                         try:
@@ -3982,15 +3983,26 @@ class ExcelProcessor:
                         except Exception as db_err:
                             logger.warning(f"Failed to update database during enrichment for '{product_name}': {db_err}")
                         enriched_count += 1
-                    elif db_record.get('Lineage'):
-                        # Update tag with database values (database takes precedence)
-                        # Only update fields that are commonly changed in database (lineage, DOH, etc.)
+                    elif db_record.get('canonical_lineage'):
+                        # CRITICAL FIX: Only use canonical_lineage from database (strains table), never products.Lineage
+                        db_canonical = str(db_record.get('canonical_lineage', '')).strip().upper()
+                        if db_canonical and db_canonical not in ['', 'NONE', 'NULL', 'NAN']:
+                            tag['canonical_lineage'] = db_canonical
+                            tag['currentLineage'] = db_canonical
+                            # Also set display fields from canonical
+                            tag['Lineage'] = db_canonical
+                            tag['lineage'] = db_canonical.lower()
+                            enriched_count += 1
+                    else:
+                        # FALLBACK: If no canonical_lineage in database, use products.Lineage for display only
+                        # This prevents tags from being left without lineage fields (which breaks the frontend)
                         db_lineage = str(db_record.get('Lineage', '')).strip().upper()
-                        tag['Lineage'] = db_lineage
-                        tag['lineage'] = db_lineage
-                        tag['canonical_lineage'] = db_lineage
-                        tag['currentLineage'] = db_lineage
-                        enriched_count += 1
+                        if db_lineage and db_lineage not in ['', 'NONE', 'NULL', 'NAN']:
+                            # Set display fields only - do NOT set canonical_lineage
+                            tag['Lineage'] = db_lineage
+                            tag['lineage'] = db_lineage.lower()
+                            tag['currentLineage'] = db_lineage
+                            enriched_count += 1
                     
                     # Update Product Strain from database if not already set by CBD detection
                     if 'Product Strain' not in tag or not tag.get('Product Strain'):

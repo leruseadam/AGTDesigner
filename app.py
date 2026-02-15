@@ -18,7 +18,18 @@ import logging
 import traceback
 import threading
 import signal  # Add signal import for timeout handling
+from decimal import Decimal
 import pandas as pd  # Add this import
+
+# Optional NumPy dependency: try to import and expose a flag so code
+# checks like `if NUMPY_AVAILABLE and np is not None:` are safe.
+NUMPY_AVAILABLE = False
+np = None
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except Exception:
+    pass
 
 try:
     from src.core.generation.preroll_tag_generator import identify_preroll_product_group
@@ -37,6 +48,15 @@ except ImportError as preroll_list_error:
     def generate_preroll_product_list(records, cache):
         logging.warning("generate_preroll_product_list called but module not available - returning None")
         return None
+
+try:
+    from src.core.generation.preroll_tag_generator import generate_preroll_tags
+except ImportError as preroll_tags_error:
+    logging.warning(f"Could not import generate_preroll_tags: {preroll_tags_error}")
+    # Define fallback function - matches actual signature: (records, cache) -> List[Dict[str, Any]]
+    def generate_preroll_tags(records, cache):
+        logging.warning("generate_preroll_tags called but module not available - returning input records")
+        return records
 
 # Performance optimizations - Import response caching utilities
 # These decorators provide response caching, compression, and cache invalidation
@@ -6644,7 +6664,7 @@ def load_saved_tag_list(list_id):
                     placeholders = ','.join(['?' for _ in chunk])
                     cursor.execute(f'''
                         SELECT p."Product Name*",
-                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
                                p.sovereign_lineage as product_sovereign,
                                s.sovereign_lineage as strain_sovereign,
                                s.canonical_lineage as strain_canonical,
@@ -7258,7 +7278,7 @@ def debug_product_lineage():
         for product_name in product_names:
             # Get product from products table
             cursor.execute('''
-                SELECT p.id, p."Product Name*", p."Lineage" as products_lineage,
+                SELECT p.id, p."Product Name*" as products_lineage,
                        p."Product Strain", p.strain_id,
                        s.sovereign_lineage, s.canonical_lineage, s.strain_name
                 FROM products p
@@ -8086,7 +8106,6 @@ def _quick_align_tags_lineage(tags, store_name):
             coalesce_parts.append('s2.canonical_lineage')
         if strain_name_ref:
             coalesce_parts.append('s3.canonical_lineage')
-        coalesce_parts.append('p."Lineage"')
 
         lineage_map = {}
         chunk_size = 400
@@ -8234,7 +8253,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             placeholders = ','.join(['?' for _ in chunk])
             cursor.execute(f'''
                 SELECT p."Product Name*", 
-                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as lineage,
+                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p.sovereign_lineage as product_sovereign,
                        s.sovereign_lineage as strain_sovereign,
                        s.canonical_lineage as strain_canonical,
@@ -8361,6 +8380,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 continue
             # Check if this tag needs strain lookup (missing or incomplete lineage_info)
             lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
+
+            # DEBUG: log a small sample of lineage lookups to help trace pipeline
+            try:
+                if not hasattr(_align_tags_with_db_lineage, '_debug_lookup_count'):
+                    _align_tags_with_db_lineage._debug_lookup_count = 0
+                if _align_tags_with_db_lineage._debug_lookup_count < 12:
+                    logging.debug("ALIGN-LOOKUP: name=%s is_classic=%s lineage_info=%s excel_preview=%s", name, is_classic, lineage_info, tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage'))
+                    _align_tags_with_db_lineage._debug_lookup_count += 1
+            except Exception:
+                pass
             if not lineage_info or (isinstance(lineage_info, dict) and not lineage_info.get('strain_canonical')):
                 product_strain = (tag.get('Product Strain', '') or tag.get('ProductStrain', '') or tag.get('Product Strain*', '')).strip()
                 if product_strain:
@@ -8484,6 +8513,16 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     'db_lineage': default_lineage
                 }
                 logging.info(f"🔧 DB-FIRST DEFAULT LINEAGE: '{name}' -> '{default_lineage}' (DB missing)")
+
+            # DEBUG: show final lineage assignment for initial tags
+            try:
+                if not hasattr(_align_tags_with_db_lineage, '_debug_assigned_count'):
+                    _align_tags_with_db_lineage._debug_assigned_count = 0
+                if _align_tags_with_db_lineage._debug_assigned_count < 12 and isinstance(lineage_info, dict):
+                    logging.debug("ALIGN-ASSIGN: product=%s assigned=%s excel_preview=%s", name, lineage_info, tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage'))
+                    _align_tags_with_db_lineage._debug_assigned_count += 1
+            except Exception:
+                pass
             
             # Helper function to validate lineage for classic types
             def _validate_lineage_for_classic(lineage_val, field_name):
@@ -8521,7 +8560,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
                 # CRITICAL: Use EXACT same priority as DOCX generation:
-                # COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                # COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage)
                 # This matches template_processor.py line 7267
                 db_lineage = lineage_info.get('db_lineage') or lineage_info['lineage']  # This is already COALESCEd (sovereign > canonical > Lineage)
                 
@@ -8546,7 +8585,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 # DO NOT set sovereign_lineage to None - omit the key entirely if not present
                 
                 # CRITICAL FIX: Set canonical_lineage to match DOCX generation logic
-                # DOCX uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                # DOCX uses: COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage)
                 # BUT canonical_lineage field should ONLY come from strains table, NEVER from p."Lineage"
                 # p."Lineage" is Excel data which can be MIXED - canonical_lineage is the canonical value from strains
                 # CRITICAL: canonical_lineage should ONLY use strain_canonical (from strains table), never db_lineage (which includes p."Lineage")
@@ -9531,7 +9570,7 @@ def generate_labels():
                                         # Batch query with both strain joins (same logic as get_product_lineage)
                                         cur.execute(f'''
                                             SELECT p."Product Name*",
-                                                   COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") as lineage
+                                                   COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) as lineage
                                             FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
@@ -12482,7 +12521,7 @@ def get_available_tags():
                                         # CRITICAL: Include sovereign_lineage to respect manual user edits
                                         cursor.execute(f'''
                                             SELECT p."Product Name*",
-                                                   COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
+                                                   COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as effective_lineage,
                                                    p.sovereign_lineage as product_sovereign
                                             FROM products p
                                             LEFT JOIN strains s ON p.strain_id = s.id
@@ -13060,7 +13099,7 @@ def get_available_tags():
                                         cursor.execute(f'''
                                             SELECT p."Product Name*",
                                                    p.normalized_name,
-                                                   COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
+                                                   COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as effective_lineage,
                                                    p.sovereign_lineage as product_sovereign
                                             FROM products p
                                             LEFT JOIN strains s ON p.strain_id = s.id
@@ -13307,7 +13346,7 @@ def get_available_tags():
                         # Also handle case where normalized_product_strain is NULL - fall back to name-based join
                         lineage_query_join_by_name = '''
                             SELECT 
-                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
+                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS current_lineage,
                                 COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain
                             FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
@@ -13377,7 +13416,7 @@ def get_available_tags():
                                             # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                             chunk_query = f'''
                                                 SELECT DISTINCT
-                                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
+                                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS current_lineage,
                                                     COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain,
                                                     p."Product Name*" AS product_name,
                                                     p.normalized_name AS normalized_name
@@ -13402,7 +13441,7 @@ def get_available_tags():
                                     # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                     batch_query = f'''
                                         SELECT DISTINCT
-                                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS current_lineage,
+                                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS current_lineage,
                                             COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain,
                                             p."Product Name*" AS product_name,
                                             p.normalized_name AS normalized_name
@@ -14137,13 +14176,13 @@ def get_available_tags():
                                 SELECT
                                     p."Product Name*" AS product_name,
                                     p.normalized_name AS normalized_name,
-                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
                                 FROM products p
                                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                                 LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                                 LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
-                                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
+                                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
+                                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
                             '''
                             cur.execute(lineage_query)
                             rows = cur.fetchall()
@@ -14240,7 +14279,7 @@ def get_available_tags():
                                 break
             
                 # CRITICAL: Use get_product_lineage() for EXACT same lineage as output generation
-                # This ensures UI lineages match output - uses COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
+                # This ensures UI lineages match output - uses COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage)
                 db_lineage_from_method = None
                 if product_db:
                     try:
@@ -16464,13 +16503,13 @@ def get_web_filter_options():
                         cursor = conn.cursor()
                         # Query unique lineage values directly using COALESCE logic (same as _get_filter_options_from_database)
                         cursor.execute('''
-                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
                             FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
-                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
+                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
                         ''')
                         db_lineages = [str(row[0]).strip().upper() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
                         if db_lineages:
@@ -16540,13 +16579,13 @@ def _get_filter_options_from_database(store_name=None):
             conn = product_db._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                 LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                 LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
-                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
+                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
+                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
             ''')
             db_lineages = [str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
             lineages = set(db_lineages)
@@ -16958,13 +16997,13 @@ def get_filter_options():
                         cursor = conn.cursor()
                         # Query unique lineage values directly using COALESCE logic (same as _get_filter_options_from_database)
                         cursor.execute('''
-                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
                             FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
                             LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
                             LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") IS NOT NULL
-                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") != ''
+                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
                         ''')
                         db_lineages = [str(row[0]).strip().upper() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
                         if db_lineages:
@@ -17827,7 +17866,7 @@ def database_view():
                 SELECT p."Product Name*" as product_name, p."Product Type*" as product_type, 
                        p."Vendor/Supplier*" as vendor, p."Product Brand" as brand, 
                        p."Lineage" as products_table_lineage,
-                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage") as effective_lineage,
+                       COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as effective_lineage,
                        s.sovereign_lineage, s.canonical_lineage,
                        p."Product Strain" as strain_name, 
                        1 as total_occurrences, 'N/A' as first_seen_date, 'N/A' as last_seen_date
@@ -19409,7 +19448,7 @@ def trend_analysis():
         with db_connection(product_db.db_path) as conn:
             # Get product trends over time
             trends_df = pd.read_sql_query('''
-                SELECT p."Product Name*" as product_name, p."Lineage" as canonical_lineage,
+                SELECT p."Product Name*" as product_name as canonical_lineage,
                        COUNT(*) as occurrence_count,
                        'Recent' as date
                 FROM products p

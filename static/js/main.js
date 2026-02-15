@@ -7701,9 +7701,8 @@ const TagManager = {
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
         const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
-        const hasAuthoritativeDbLineage = !!(tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage);
         const isParaphernaliaType = (productTypeCheck || '').toString().toLowerCase() === 'paraphernalia';
-        if (!hasAuthoritativeDbLineage && isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+        if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
             lineage = 'HYBRID';
         }
         
@@ -7767,13 +7766,9 @@ const TagManager = {
         const validDatabaseLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA', 'PARAPHERNALIA'];
         const hasValidDatabaseLineage = validDatabaseLineages.includes(lineage);
         
-        // If database already gave us lineage fields, trust them and skip heuristic overrides.
-        if (hasAuthoritativeDbLineage && hasValidDatabaseLineage) {
-            displayLineage = lineage;
-            verboseLog(`🎯 Using authoritative DB lineage: "${displayName}" → ${displayLineage}`);
-        } else if (lowerProductType === 'paraphernalia') {
-            // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
-            // Check if product type is "paraphernalia" - this overrides everything else
+        // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
+        // Check if product type is "paraphernalia" - this overrides everything else
+        if (lowerProductType === 'paraphernalia') {
             displayLineage = 'PARAPHERNALIA';
             verboseLog(`🎯 Paraphernalia product detected: "${displayName}" (${lowerProductType}) → PARAPHERNALIA (pink)`);
             // Set the lineage data attributes
