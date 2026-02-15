@@ -1800,13 +1800,14 @@ const TagManager = {
     async _refreshLineageFromDatabase(tags) {
         const timestamp = Date.now();
         try {
-            // CRITICAL FIX: ALWAYS use fast_load=0 to get database lineage
-            // The whole point of this background refresh is to update colors with database lineage
-            // Using fast_load=1 skips lineage enrichment, leaving us with Excel lineage only
-            const fastLoad = 0;
-            verboseLog('🔄 Background refresh: forcing database lineage enrichment (fast_load=0)');
-            
-            const lineageResponse = await fetch(`/api/available-tags?t=${timestamp}&fast_load=${fastLoad}`, {
+            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                window.location.hostname.includes('agtpricetags.com') ||
+                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            const fastLoad = isWebClient ? 1 : 0;
+            const lineageEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+            verboseLog(`🔄 Background lineage refresh: endpoint=${lineageEndpoint}, fast_load=${fastLoad}`);
+
+            const lineageResponse = await fetch(`${lineageEndpoint}?t=${timestamp}&nocache=1&fast_load=${fastLoad}`, {
                 signal: AbortSignal.timeout(15000) // 15 second timeout (increased from 5s to reduce timeout errors)
             });
             if (lineageResponse.ok) {
@@ -3865,10 +3866,14 @@ const TagManager = {
             const bgTimeout = 1500; // 1.5s max - keep it short so UI stays responsive
             const timeoutId = setTimeout(() => controller.abort(), bgTimeout);
 
-            // CRITICAL FIX: Use main endpoint with full lineage alignment instead of web fast-path.
-            // Web fast-path used fast_load=1 which could return Excel/stale lineage.
+            // Use fast aligned endpoint for web; desktop can still use full lineage path.
             const ts = Date.now();
-            fetch(`/api/available-tags?t=${ts}&fast_load=0&nocache=1`, {
+            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                window.location.hostname.includes('agtpricetags.com') ||
+                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            const bgEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+            const bgFastLoad = isWebClient ? 1 : 0;
+            fetch(`${bgEndpoint}?t=${ts}&fast_load=${bgFastLoad}&nocache=1`, {
                 signal: controller.signal,
                 cache: 'no-store',
                 headers: {
@@ -12068,15 +12073,12 @@ const TagManager = {
             const timestamp = Date.now();
             
             // PERFORMANCE vs CORRECTNESS:
-            // - On true "first load" (no existing tags and no cache), we MUST load with full database lineage
-            //   to avoid showing Excel/stale lineage that then "flips" a moment later.
-            // - On subsequent loads (or when cache exists), we can safely use fast_load=1 for speed.
-            //
-            // So:
-            // - First load (no tags, no cache) → fast_load=0  (no flash, correct lineage from the start)
-            // - All other cases               → fast_load=1  (fast, backend does lightweight alignment)
+            // - Web clients should stay on fast_load=1 and rely on backend DB alignment for canonical lineage.
+            // - Desktop/localhost can still use a one-time full load when needed.
             const isFirstTrueLoad = !hasExistingTags && !hasCache && !this._hasLoadedOnce;
-            const fastLoadParam = isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1';
+            const fastLoadParam = isWebClient
+                ? '&fast_load=1'
+                : (isFirstTrueLoad ? '&fast_load=0' : '&fast_load=1');
             
             // Add retry logic for failed requests
             // CRITICAL FIX: Handle 202 (processing) separately with more retries
@@ -12926,13 +12928,14 @@ const TagManager = {
                 this.updateTagCount('available', tags.length);
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
-                // CRITICAL: Trigger background fetch with fast_load=0 to get DATABASE LINEAGE
-                // This ensures lineage ALWAYS comes from database, not Excel
-                // Non-blocking - runs in background after UI is already responsive
+                // Background lineage refresh: keep web clients on the fast aligned endpoint.
+                // Desktop/localhost can still do a full-lineage refresh.
                 setTimeout(() => {
-                    console.log('🔄 Background: Fetching database lineage (fast_load=0)...');
+                    const bgEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+                    const bgFastLoad = isWebClient ? 1 : 0;
+                    console.log(`🔄 Background: Fetching lineage refresh (${bgEndpoint}, fast_load=${bgFastLoad})...`);
                     const timestamp = Date.now();
-                    fetch(`/api/available-tags?t=${timestamp}&fast_load=0&nocache=1`)
+                    fetch(`${bgEndpoint}?t=${timestamp}&fast_load=${bgFastLoad}&nocache=1`)
                         .then(res => {
                             if (!res.ok) {
                                 throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -14801,11 +14804,12 @@ const TagManager = {
         }, 60000); // 60 second safety net - increased for large files
 
         try {
-            // CRITICAL FIX: Load WITH lineage enrichment to ensure dropdowns show correct values
-            // Previously used fast_load=1 which skipped lineage, causing empty dropdowns when filtering by product type
-            // Explicitly pass fast_load=0 to ensure all tags have database lineage from the start
+            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                window.location.hostname.includes('agtpricetags.com') ||
+                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            const initialDataFastLoad = isWebClient ? 1 : 0;
             const response = await Promise.race([
-                fetch('/api/initial-data?fast_load=0'),
+                fetch(`/api/initial-data?fast_load=${initialDataFastLoad}`),
                 timeoutPromise
             ]).catch(err => {
                 // If fetch fails or times out, complete initialization anyway
@@ -17573,6 +17577,11 @@ const TagManager = {
             const maxRetries = 2;  // Keep one retry for transient failures
             const fastLoadTimeoutMs = 90000; // Allow slower backend without multiple timeouts
             let standardFetchStarted = false;
+            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                window.location.hostname.includes('agtpricetags.com') ||
+                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            const uploadTagsEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+            const uploadFastLoad = isWebClient ? 1 : 0;
 
             const startStandardTagFetch = async () => {
                 if (tagsLoaded || standardFetchStarted) return;
@@ -17616,12 +17625,10 @@ const TagManager = {
                         }
                     }, fastLoadTimeoutMs);
 
-                    // CRITICAL FIX: Use fast_load=0 after file upload to ensure correct database lineage
-                    // File upload creates new tags that need proper lineage alignment from the start
-                    // Using fast_load=1 would skip alignment and show Excel lineage, causing the "flash" issue
+                    // Use fast aligned endpoint for web uploads; desktop can still use full lineage mode.
                     let tagsResponse;
                     try {
-                        tagsResponse = await fetch(`/api/available-tags?t=${Date.now()}&nocache=1&fast_load=0`, {
+                        tagsResponse = await fetch(`${uploadTagsEndpoint}?t=${Date.now()}&nocache=1&fast_load=${uploadFastLoad}`, {
                             signal: tagsController.signal
                         });
                     } catch (fetchError) {

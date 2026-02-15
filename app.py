@@ -8106,9 +8106,10 @@ def _quick_align_tags_lineage(tags, store_name):
                 FROM products p
                 {" ".join(join_parts)}
                 WHERE LOWER(TRIM(p."Product Name*")) IN ({placeholders})
+                   OR LOWER(TRIM(p."ProductName")) IN ({placeholders})
                    OR p.normalized_name IN ({placeholders})
             '''
-            cursor.execute(query, chunk_lower + chunk_norm)
+            cursor.execute(query, chunk_lower + chunk_lower + chunk_norm)
             for db_name, db_norm, db_lineage in cursor.fetchall():
                 if not db_lineage:
                     continue
@@ -14638,12 +14639,14 @@ def get_selected_tags():
                             excel_lineage = None
                         if excel_lineage:
                             excel_lineage_clean = str(excel_lineage).strip().upper()
-                            tag['canonical_lineage'] = excel_lineage_clean
-                            tag['currentLineage'] = excel_lineage_clean
+                            # Preserve Excel-provided lineage for UI/display, but DO NOT assign it
+                            # to canonical_lineage/currentLineage. Canonical lineage must come
+                            # only from the strains/database layer.
+                            tag['excel_lineage'] = excel_lineage_clean
                             tag['Lineage*'] = excel_lineage_clean  # CRITICAL: Set Excel column name for UI
                             tag['Lineage'] = excel_lineage_clean
                             tag['lineage'] = excel_lineage_clean.lower()
-                            logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage_clean}' for '{tag_name}' (no DB lineage)")
+                            logging.debug(f"⚠️ UI LINEAGE: Preserved Excel lineage '{excel_lineage_clean}' for '{tag_name}' (did NOT set canonical_lineage)")
                 # Return the full dictionary object
                 selected_tag_objects.append(tag)
             elif isinstance(tag, str):
@@ -14713,12 +14716,12 @@ def get_selected_tags():
                                 excel_lineage = None
                             if excel_lineage:
                                 excel_lineage_clean = str(excel_lineage).strip().upper()
-                                available_tag['canonical_lineage'] = excel_lineage_clean
-                                available_tag['currentLineage'] = excel_lineage_clean
+                                # Preserve Excel-provided lineage for UI/display only
+                                available_tag['excel_lineage'] = excel_lineage_clean
                                 available_tag['Lineage*'] = excel_lineage_clean  # CRITICAL: Set Excel column name for UI
                                 available_tag['Lineage'] = excel_lineage_clean
                                 available_tag['lineage'] = excel_lineage_clean.lower()
-                                logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage_clean}' for '{tag}' (no DB lineage)")
+                                logging.debug(f"⚠️ UI LINEAGE: Preserved Excel lineage '{excel_lineage_clean}' for '{tag}' (did NOT set canonical_lineage)")
                         selected_tag_objects.append(available_tag)
                         break
                 else:
@@ -14748,12 +14751,12 @@ def get_selected_tags():
                             excel_lineage = None
                         if excel_lineage:
                             excel_lineage_clean = str(excel_lineage).strip().upper()
-                            tag_dict['canonical_lineage'] = excel_lineage_clean
-                            tag_dict['currentLineage'] = excel_lineage_clean
+                            # Preserve Excel lineage for display only; do NOT set canonical_lineage/currentLineage
+                            tag_dict['excel_lineage'] = excel_lineage_clean
                             tag_dict['Lineage*'] = excel_lineage_clean  # CRITICAL: Set Excel column name for UI
                             tag_dict['Lineage'] = excel_lineage_clean
                             tag_dict['lineage'] = excel_lineage_clean.lower()
-                            logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage_clean}' for '{tag}' (no DB lineage)")
+                            logging.debug(f"⚠️ UI LINEAGE: Preserved Excel lineage '{excel_lineage_clean}' for '{tag}' (did NOT set canonical_lineage)")
                     selected_tag_objects.append(tag_dict)
             else:
                 # Convert to string and create simple dict with database lineage
@@ -14783,12 +14786,12 @@ def get_selected_tags():
                         excel_lineage = None
                     if excel_lineage:
                         excel_lineage_clean = str(excel_lineage).strip().upper()
-                        tag_dict['canonical_lineage'] = excel_lineage_clean
-                        tag_dict['currentLineage'] = excel_lineage_clean
+                        # Preserve Excel lineage for display only; do NOT set canonical_lineage/currentLineage
+                        tag_dict['excel_lineage'] = excel_lineage_clean
                         tag_dict['Lineage*'] = excel_lineage_clean  # CRITICAL: Set Excel column name for UI
                         tag_dict['Lineage'] = excel_lineage_clean
                         tag_dict['lineage'] = excel_lineage_clean.lower()
-                        logging.debug(f"⚠️ UI LINEAGE: Using Excel lineage '{excel_lineage_clean}' for '{tag_name}' (no DB lineage)")
+                        logging.debug(f"⚠️ UI LINEAGE: Preserved Excel lineage '{excel_lineage_clean}' for '{tag_name}' (did NOT set canonical_lineage)")
                 selected_tag_objects.append(tag_dict)
         
         logging.info(f"Returning {len(selected_tag_objects)} selected tag objects")
@@ -16140,11 +16143,14 @@ def get_web_available_tags():
         lineage_update_ts = session.get('lineage_update_timestamp')
         has_recent_lineage_update = lineage_update_ts and (time.time() - lineage_update_ts) < 600  # 10 minutes
         
-        # Use same cache key as regular endpoint
+        # Use same freshness model as regular endpoint (lineage timestamp + cache bust).
         session_file_path = session.get('file_path', '')
         upload_timestamp = session.get('upload_timestamp', '')
+        lineage_update_timestamp = session.get('lineage_update_timestamp', '')
+        effective_timestamp = lineage_update_timestamp if lineage_update_timestamp else upload_timestamp
+        cache_bust = _get_available_tags_cache_bust()
         if session_file_path:
-            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{upload_timestamp}')
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}_b{cache_bust}')
         else:
             cache_key = get_session_cache_key('available_tags')
 
@@ -16158,6 +16164,10 @@ def get_web_available_tags():
                 bg_cache_key = f"tags_file_{cache_version}_{file_hash}"
                 bg_tags = cache.get(bg_cache_key)
                 if bg_tags:
+                    # Keep lineage DB-first even for background-cached tags.
+                    store_name_bg = get_current_store_name(allow_fallback=False)
+                    if store_name_bg:
+                        bg_tags = _quick_align_tags_lineage(bg_tags, store_name_bg)
                     elapsed = (time.time() - start_time) * 1000
                     logging.info(f"✅ WEB FAST-PATH: Using background-cached tags ({len(bg_tags)} items) ({elapsed:.1f}ms)")
                     # PERFORMANCE: Skip alignment on cache hits - tags were already aligned when cached
@@ -16227,6 +16237,9 @@ def get_web_available_tags():
         if not nocache and not has_recent_lineage_update:
             cached_tags = cache.get(cache_key)
             if cached_tags:
+                store_name_cache = get_current_store_name(allow_fallback=False)
+                if store_name_cache:
+                    cached_tags = _quick_align_tags_lineage(cached_tags, store_name_cache)
                 elapsed = (time.time() - start_time) * 1000
                 logging.info(f"✅ WEB: Using {len(cached_tags)} cached tags ({elapsed:.1f}ms)")
                 # PERFORMANCE: Skip alignment on cache hits - tags were already aligned when cached
