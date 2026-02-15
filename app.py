@@ -127,8 +127,12 @@ def get_memory_usage():
     except ImportError:
         try:
             import resource
-            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-        except:
+            usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            # Linux reports KB, macOS reports bytes; normalize both to MB.
+            if sys.platform == 'darwin':
+                return usage / (1024 * 1024)
+            return usage / 1024
+        except Exception:
             return 0
 
 def cleanup_memory():
@@ -154,6 +158,38 @@ def check_memory_limit():
         cleanup_memory()
         return False
     return True
+
+
+def normalize_product_name_columns(df):
+    """Normalize common product name columns so downstream code sees consistent names.
+
+    - Map 'Product Name' -> 'Product Name*' when present
+    - Ensure 'ProductName' exists for legacy code
+    - Strip whitespace from name fields
+    - Drop rows where all common name fields are empty
+    """
+    try:
+        if df is None:
+            return df
+        # Map common alternatives
+        if 'Product Name' in df.columns and 'Product Name*' not in df.columns:
+            df['Product Name*'] = df['Product Name']
+        if 'ProductName' not in df.columns and 'Product Name*' in df.columns:
+            df['ProductName'] = df['Product Name*']
+
+        # Strip whitespace where available
+        for col in ('Product Name*', 'ProductName', 'Product Name'):
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip()
+
+        # Drop rows where all name fields are empty
+        subset = [c for c in ('Product Name*', 'ProductName', 'Product Name') if c in df.columns]
+        if subset:
+            df = df.dropna(subset=subset, how='all')
+        return df
+    except Exception as e:
+        logging.warning(f"normalize_product_name_columns failed: {e}")
+        return df
 
 def timeout_handler(signum, frame):
     raise TimeoutError("File operation timed out")
@@ -392,6 +428,7 @@ def db_connection(db_path, timeout=30.0, check_same_thread=False):
 # Performance optimizations
 IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production' or IS_PYTHONANYWHERE
+GENERATION_VERBOSE_LOGS = os.environ.get('GENERATION_VERBOSE_LOGS', '').strip().lower() in ('1', 'true', 'yes')
 
 # OPTIMIZATION: Disable startup file loading for faster app startup
 # Honour environment override so PythonAnywhere can skip the heavy Excel scan
@@ -1599,9 +1636,14 @@ def create_app():
     # ENABLED: Allow easy restart by enabling development mode by default
     app.config['DEVELOPMENT_MODE'] = os.environ.get('DEVELOPMENT_MODE', 'true').lower() == 'true'
     
-    # Enable detailed logging for development
-    logging.getLogger().setLevel(logging.DEBUG)
-    logging.getLogger('werkzeug').setLevel(logging.DEBUG)
+    # Keep logging conservative in production; allow deep generation logs via env flag.
+    app.config['GENERATION_VERBOSE_LOGS'] = GENERATION_VERBOSE_LOGS
+    if IS_PRODUCTION:
+        logging.getLogger().setLevel(logging.WARNING)
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    else:
+        logging.getLogger().setLevel(logging.INFO)
+        logging.getLogger('werkzeug').setLevel(logging.INFO)
     
     # Performance optimizations
     app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
@@ -3195,7 +3237,14 @@ def generation_splash():
 @app.route('/test_upload.html')
 def test_upload():
     """Test upload page"""
-    return open('test_upload.html').read()
+    for candidate in (
+        os.path.join(BASE_DIR, 'test_upload.html'),
+        os.path.join(BASE_DIR, 'templates', 'upload_test.html'),
+    ):
+        if os.path.exists(candidate):
+            with open(candidate, 'r', encoding='utf-8') as f:
+                return f.read()
+    return "test_upload page not found", 404
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Optimized file upload - saves file quickly then processes in background"""
@@ -4285,7 +4334,7 @@ def upload_file_simple_pythonanywhere():
                             logging.debug("[WINDOWS-OPT] Applied Windows-specific Excel reading optimizations")
                         df = pd.read_excel(temp_path, **read_excel_kwargs)
                         if not df.empty:
-                            processor.df = df
+                            processor.df = normalize_product_name_columns(df)
                             success = True
                     except Exception as e:
                         logging.warning(f"Optimized pandas load failed: {e}")
@@ -4644,7 +4693,7 @@ def process_excel_sync(filename, temp_path):
                 # Try to load with row limit first
                 df = pd.read_excel(temp_path, nrows=5000, engine='openpyxl')
                 if not df.empty:
-                    processor.df = df
+                    processor.df = normalize_product_name_columns(df)
                     success = True
                     if ENHANCED_LOGGING_AVAILABLE:
                         enhanced_logger.log_success(f"Loaded rows (limited to 5000)", 
@@ -5537,7 +5586,7 @@ def get_current_file():
                 # Look for the most recent file that matches the filename pattern
                 if uploaded_filename:
                     try:
-                        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+                        uploads_dir = UPLOADS_DIR
                         if os.path.exists(uploads_dir):
                             # Find files matching the uploaded filename pattern
                             import glob
@@ -5731,8 +5780,8 @@ def process_lightning():
             try:
                 # OPTIMIZATION: Load more rows for better data coverage
                 df = pd.read_excel(file_path, nrows=50000, engine='openpyxl', dtype=str, na_filter=False)
-                processor.df = df
-                logging.info(f"[LIGHTNING] Loaded {len(df)} rows (optimized for speed)")
+                processor.df = normalize_product_name_columns(df)
+                logging.info(f"[LIGHTNING] Loaded {len(processor.df)} rows (optimized for speed)")
             except Exception as e:
                 logging.warning(f"[LIGHTNING] Quick load failed, trying full load: {e}")
                 success = processor.load_file(file_path)
@@ -8889,11 +8938,13 @@ def generate_labels():
         import re  # CRITICAL FIX: Import re locally to avoid scoping issues
         import time
         _start_time = time.time()
+        verbose_generation_logs = app.config.get('GENERATION_VERBOSE_LOGS', False)
         logging.info("=== GENERATE LABELS ACTION START ===")
         logging.info(f"Generate labels request at {datetime.now().strftime('%H:%M:%S')}")
-        logging.info(f"Request method: {request.method}")
-        logging.info(f"Request URL: {request.url}")
-        logging.info(f"Request headers: {dict(request.headers)}")
+        logging.debug(f"Request method: {request.method}")
+        logging.debug(f"Request URL: {request.url}")
+        if verbose_generation_logs:
+            logging.debug(f"Request headers: {dict(request.headers)}")
         
         # TRACE: Check current store at start of generation
         current_store_at_start = get_current_store_name()
@@ -9143,19 +9194,23 @@ def generate_labels():
             except Exception as e:
                 logging.warning(f"Could not load default Excel file: {e}")
         
-        # Check if database is available
+        # Check if database is available.
+        # Avoid COUNT(*) on every generation when Excel data is already present.
+        db_product_count = None
         try:
-            # Store context removed - using single database
             store_name = get_current_store_name()
             product_db = get_product_database(store_name)
             if product_db:
-                # Test if database has data
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM products")
-                count = cursor.fetchone()[0]
-                has_database = count > 0
-                logging.info(f"Database has {count} products")
+                if has_excel_data:
+                    # We already have request/Excel data to generate from.
+                    has_database = True
+                else:
+                    conn = product_db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM products")
+                    db_product_count = cursor.fetchone()[0]
+                    has_database = db_product_count > 0
+                    logging.info(f"Database has {db_product_count} products")
         except Exception as e:
             logging.warning(f"Could not check database: {e}")
         if not has_excel_data and not has_database:
@@ -9375,7 +9430,9 @@ def generate_labels():
                     valid_selected_tags, invalid_selected_tags = _validate_tags_against_excel(excel_processor, normalized_tags)
             
             if invalid_selected_tags:
-                logging.warning(f"⚠️ REMOVED {len(invalid_selected_tags)} INVALID TAGS: {invalid_selected_tags}")
+                logging.warning(f"⚠️ REMOVED {len(invalid_selected_tags)} INVALID TAGS")
+                if verbose_generation_logs:
+                    logging.debug(f"Invalid tags (full): {invalid_selected_tags}")
                 logging.warning(f"✅ KEPT {len(valid_selected_tags)} VALID TAGS")
                 
                 # CRITICAL FIX: If we're in a JSON matched session and have invalid tags, try to restore from cache
@@ -9405,7 +9462,8 @@ def generate_labels():
                 
                 if not valid_selected_tags:
                     logging.error(f"❌ NO VALID TAGS: All {len(normalized_tags)} tags were filtered out")
-                    logging.error(f"❌ INVALID TAGS: {invalid_selected_tags}")
+                    if verbose_generation_logs:
+                        logging.error(f"❌ INVALID TAGS: {invalid_selected_tags}")
                     return jsonify({
                         'error': f'No valid tags selected. All selected tags ({len(invalid_selected_tags)}) do not exist in the loaded data. Please ensure you have selected tags that exist in the current Excel file or database.',
                         'invalid_tags': invalid_selected_tags,
@@ -9443,10 +9501,12 @@ def generate_labels():
                     # PERFORMANCE: Skip DOH check logging to improve speed
                     # Check if database is empty
                     try:
-                        conn = product_db._get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT COUNT(*) FROM products")
-                        db_count = cursor.fetchone()[0]
+                        db_count = db_product_count
+                        if db_count is None:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute("SELECT COUNT(*) FROM products")
+                            db_count = cursor.fetchone()[0]
                         logging.info(f"Database has {db_count} products")
                         
                         # CRITICAL FIX: If database is nearly empty, bypass it and use Excel data
@@ -9462,24 +9522,26 @@ def generate_labels():
                     db_records = []  # Initialize to ensure it's always defined
                     if has_database:
                         # ENHANCED: Replace JSON matched tags with database data
-                        logging.info(f"Original valid_selected_tags: {valid_selected_tags}")
+                        if verbose_generation_logs:
+                            logging.debug(f"Original valid_selected_tags: {valid_selected_tags}")
                         enhanced_tags = _replace_json_tags_with_database_data(valid_selected_tags, product_db)
                         logging.info(f"Enhanced {len(valid_selected_tags)} tags with database data, result: {len(enhanced_tags)} tags")
                         
                         # Get products from database using the enhanced tags
-                        logging.info(f"Looking up products for enhanced tags: {enhanced_tags}")
-                        logging.info(f"Database path: {getattr(product_db, 'db_path', 'Unknown')}")
-                        logging.info(f"Store name: {store_name}")
+                        if verbose_generation_logs:
+                            logging.debug(f"Looking up products for enhanced tags: {enhanced_tags}")
+                            logging.debug(f"Database path: {getattr(product_db, 'db_path', 'Unknown')}")
+                            logging.debug(f"Store name: {store_name}")
                         
                         try:
                             db_records = product_db.get_products_by_names(enhanced_tags)
                             logging.info(f"Found {len(db_records) if db_records else 0} database records")
                             
-                            # Log sample of what was found
-                            if db_records and len(db_records) > 0:
+                            # Log sample of what was found (debug-only to avoid production log I/O)
+                            if verbose_generation_logs and db_records and len(db_records) > 0:
                                 sample_record = db_records[0]
-                                logging.info(f"Sample database record keys: {list(sample_record.keys())[:10]}")
-                                logging.info(f"Sample record - Product Name: '{sample_record.get('Product Name*', 'MISSING')}', Lineage: '{sample_record.get('Lineage', 'MISSING')}', Price: '{sample_record.get('Price', 'MISSING')}'")
+                                logging.debug(f"Sample database record keys: {list(sample_record.keys())[:10]}")
+                                logging.debug(f"Sample record - Product Name: '{sample_record.get('Product Name*', 'MISSING')}', Lineage: '{sample_record.get('Lineage', 'MISSING')}', Price: '{sample_record.get('Price', 'MISSING')}'")
                             else:
                                 logging.warning(f"⚠️ Database lookup returned empty results for {len(enhanced_tags)} tags")
                                 logging.warning(f"⚠️ Enhanced tags were: {enhanced_tags[:5]}...")
@@ -10250,12 +10312,13 @@ def generate_labels():
         logging.info(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
         if records:
             logging.info(f"🔍 DEBUG: Sample record names: {[r.get('ProductName', r.get('Product Name*', 'NO_NAME')) for r in records[:5]]}")
-            # Log price information for each record to diagnose missing prices
-            for i, record in enumerate(records):
-                product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
-                price = record.get('Price', 'NOT_FOUND')
-                price_star = record.get('Price*', 'NOT_FOUND')
-                logging.info(f"🔍 PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
+            # Full price logging is expensive on hosted disks; keep it opt-in.
+            if verbose_generation_logs:
+                for i, record in enumerate(records):
+                    product_name = record.get('ProductName', record.get('Product Name*', 'Unknown'))
+                    price = record.get('Price', 'NOT_FOUND')
+                    price_star = record.get('Price*', 'NOT_FOUND')
+                    logging.debug(f"PRICE DEBUG Record {i+1}: '{product_name}' - Price={price}, Price*={price_star}")
         
         if not records:
             logging.error("No selected tags found in the data or failed to process records.")
@@ -23901,7 +23964,7 @@ def generate_matched_excel_file(matched_products, original_df, output_filename=N
                 output_filename = f"JSON_Matched_Products_{timestamp}.xlsx"
             
             # Ensure the uploads directory exists
-            uploads_dir = os.path.join(os.getcwd(), 'uploads')
+            uploads_dir = UPLOADS_DIR
             os.makedirs(uploads_dir, exist_ok=True)
             
             # Save the file
@@ -23943,7 +24006,7 @@ def generate_matched_excel_file(matched_products, original_df, output_filename=N
                 output_filename = f"JSON_Matched_Products_{timestamp}.xlsx"
             
             # Save the file
-            uploads_dir = os.path.join(os.getcwd(), 'uploads')
+            uploads_dir = UPLOADS_DIR
             os.makedirs(uploads_dir, exist_ok=True)
             file_path = os.path.join(uploads_dir, output_filename)
             new_df.to_excel(file_path, index=False)
@@ -24008,7 +24071,7 @@ def toggle_json_filter():
 def serve_test_products():
     """Serve the test products JSON file for testing."""
     try:
-        with open('test_products.json', 'r') as f:
+        with open(os.path.join(BASE_DIR, 'test_products.json'), 'r', encoding='utf-8') as f:
             data = json.load(f)
         return jsonify(data)
     except FileNotFoundError:
@@ -24498,7 +24561,7 @@ def test_direct_excel():
         import pandas as pd
         
         # Find the most recent Excel file
-        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        uploads_dir = UPLOADS_DIR
         if not os.path.exists(uploads_dir):
             return jsonify({'error': 'Uploads directory not found'})
         
@@ -24553,7 +24616,7 @@ def test_available_tags_debug():
         }
         
         # Step 1: Check uploads directory
-        uploads_dir = os.path.join(os.getcwd(), 'uploads')
+        uploads_dir = UPLOADS_DIR
         debug_info['steps'].append(f'Uploads dir exists: {os.path.exists(uploads_dir)}')
         debug_info['uploads_dir'] = uploads_dir
         
@@ -24889,11 +24952,9 @@ def diagnose_uploads():
         import os
         import glob
         
-        # Check current working directory
+        # Check current working directory and app uploads directory
         cwd = os.getcwd()
-        
-        # Check uploads directory
-        uploads_dir = os.path.join(cwd, 'uploads')
+        uploads_dir = UPLOADS_DIR
         uploads_exists = os.path.exists(uploads_dir)
         
         # List files in uploads directory
@@ -25456,8 +25517,11 @@ def performance_status():
                     # If psutil not available, use basic resource module
                     try:
                         import resource
-                        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Convert KB to MB
-                    except:
+                        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                        if sys.platform == 'darwin':
+                            return usage / (1024 * 1024)
+                        return usage / 1024  # KB -> MB on Linux
+                    except Exception:
                         return 0
             _memory_cache = {}
             _cache_timestamps = {}
@@ -25853,11 +25917,13 @@ def upload_database_chunk():
             conn.close()
             
             # Start new compressed database file
-            with open('database_reconstruction.gz', 'wb') as f:
+            reconstruction_path = os.path.join(UPLOADS_DIR, 'database_reconstruction.gz')
+            with open(reconstruction_path, 'wb') as f:
                 f.write(decoded_data)
         else:
             # Append to existing compressed database file
-            with open('database_reconstruction.gz', 'ab') as f:
+            reconstruction_path = os.path.join(UPLOADS_DIR, 'database_reconstruction.gz')
+            with open(reconstruction_path, 'ab') as f:
                 f.write(decoded_data)
         
         # If this is the last chunk, decompress and replace the database
@@ -25865,19 +25931,24 @@ def upload_database_chunk():
             print(f"Reconstructing database from {total_chunks} chunks...")
             
             # Decompress the reconstructed database
-            with gzip.open('database_reconstruction.gz', 'rb') as f_in:
-                with open('uploads/product_database_new.db', 'wb') as f_out:
+            reconstruction_path = os.path.join(UPLOADS_DIR, 'database_reconstruction.gz')
+            new_db_path = os.path.join(UPLOADS_DIR, 'product_database_new.db')
+            current_db_path = os.path.join(UPLOADS_DIR, 'product_database.db')
+            backup_db_path = os.path.join(UPLOADS_DIR, 'product_database_backup.db')
+
+            with gzip.open(reconstruction_path, 'rb') as f_in:
+                with open(new_db_path, 'wb') as f_out:
                     f_out.write(f_in.read())
             
             # Replace the existing database
             import shutil
-            if os.path.exists('uploads/product_database.db'):
-                shutil.move('uploads/product_database.db', 'uploads/product_database_backup.db')
+            if os.path.exists(current_db_path):
+                shutil.move(current_db_path, backup_db_path)
             
-            shutil.move('uploads/product_database_new.db', 'uploads/product_database.db')
+            shutil.move(new_db_path, current_db_path)
             
             # Cleanup
-            os.remove('database_reconstruction.gz')
+            os.remove(reconstruction_path)
             os.remove(temp_file.name)
             
             # Reinitialize the database

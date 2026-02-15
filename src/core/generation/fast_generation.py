@@ -241,7 +241,7 @@ class BatchedDatabaseQuerier:
             return []
         
         start_time = time.time()
-        logger.info(f"⚡ Batched query: Fetching {len(product_names)} products in batches of {batch_size}")
+        logger.debug(f"⚡ Batched query: Fetching {len(product_names)} products in batches of {batch_size}")
         
         all_records = []
         
@@ -260,8 +260,8 @@ class BatchedDatabaseQuerier:
         self.query_count += len(product_names)
         query_time = time.time() - start_time
         
-        logger.info(f"⚡ Batched query completed: {len(all_records)} records in {query_time:.2f}s")
-        logger.info(f"⚡ Query stats: {self.query_count} total products, {self.batch_count} batches")
+        logger.debug(f"⚡ Batched query completed: {len(all_records)} records in {query_time:.2f}s")
+        logger.debug(f"⚡ Query stats: {self.query_count} total products, {self.batch_count} batches")
         
         return all_records
 

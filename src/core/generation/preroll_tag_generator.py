@@ -148,6 +148,7 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
     desc_lower = str(description).lower()
     name_lower = str(product_name).lower()
     combined = f"{desc_lower} {name_lower}"
+    is_infused = 'infused' in combined
     
     # Check for flavored blunts
     if 'flavored blunt' in combined or 'flavoured blunt' in combined:
@@ -165,22 +166,25 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
         count = pack_match.group(2)
         # Normalize weight display (handle .5g -> 0.5g, preserve leading zero)
         weight_display = _normalize_weight_display(weight)
-        # Include the word "Pre-Roll" in the display name so grouped
-        # pack labels clearly indicate they are prerolls.
-        # Use normalized weight_display in group id to avoid duplicates like '0.6g' vs '6g'
+        # Keep infused assorted packs explicitly labeled as infused and
+        # grouped separately from non-infused assorted packs.
+        group_prefix = 'infused-' if is_infused else ''
+        display_prefix = 'Assorted Infused Pre-Roll' if is_infused else 'Assorted Pre-Roll'
         return {
-            'group_id': f'{weight_display}g-{count}pack',
-            'display_name': f'Assorted Pre-Roll - {weight_display}g x {count} Packs',
-            'category': f'{weight_display}g x {count} Packs'
+            'group_id': f'{group_prefix}{weight_display}g-{count}pack',
+            'display_name': f'{display_prefix} - {weight_display}g x {count} Packs',
+            'category': f'{display_prefix} - {weight_display}g x {count} Packs'
         }
     
     # Check specifically for 1g x 5 packs (more specific, should be caught by above but keeping for safety)
     if re.search(r'1g\s*x\s*5\s*pack', combined, re.IGNORECASE) or '1g x 5 pack' in combined.lower() or '1 g x 5 pack' in combined.lower():
-        # Ensure the specific 1g x 5 pack group also includes "Pre-Roll"
+        # Ensure infused 1g x 5 assorted packs stay explicitly infused.
+        group_prefix = 'infused-' if is_infused else ''
+        display_prefix = 'Assorted Infused Pre-Roll' if is_infused else 'Assorted Pre-Roll'
         return {
-            'group_id': '5packs',
-            'display_name': 'Assorted Pre-Roll - 1g x 5 Packs',
-            'category': '1g x 5 Packs'
+            'group_id': f'{group_prefix}5packs',
+            'display_name': f'{display_prefix} - 1g x 5 Packs',
+            'category': f'{display_prefix} - 1g x 5 Packs'
         }
     
     # Check for infused prerolls with weight
@@ -243,6 +247,13 @@ def identify_preroll_product_group(description: str, product_name: str = '') -> 
             }
     
     # Fallback
+    if is_infused:
+        return {
+            'group_id': 'infused-other',
+            'display_name': 'Assorted Infused Pre-Rolls',
+            'category': 'Infused Other'
+        }
+
     return {
         'group_id': 'other',
         'display_name': 'Assorted Pre-Rolls',

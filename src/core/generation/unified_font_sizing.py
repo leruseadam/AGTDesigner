@@ -89,7 +89,7 @@ def _load_font_sizing_config():
                     # Canonical double-template unified font sizing configuration
                     'description': [(5, 32), (10, 30), (15, 28), (20, 26), (25, 25), (30, 24), (35, 23), (40, 22), (45, 20), (50, 19), (60, 18), (80, 17), (100, 16), (120, 14), (float('inf'), 14)],
                     'brand': [(10, 12), (20, 10), (40, 9), (60, 8), (100, 7.5), (100, 7), (float('inf'), 6.5)],
-                    'price': [(10, 36), (10, 34), (15, 24), (float('inf'), 14)],
+                    'price': [(10, 34), (15, 24), (float('inf'), 14)],
                     'lineage': [(15, 12), (25, 12), (35, 10), (45, 9), (float('inf'), 9)],
                     'ratio': [(10, 9), (20, 8), (30, 7), (float('inf'), 6.5)],
                     'thc_cbd': [(20, 7),(float('inf'), 6.5)],

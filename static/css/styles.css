@@ -12379,6 +12379,20 @@ html, body {
   text-align: center !important;
 }
 
+/* Keep template controls on a clean, even vertical rhythm */
+.control-section-template .control-group-modern {
+  margin-bottom: 0 !important;
+}
+
+.control-section-template .control-group-modern + .control-group-modern {
+  margin-top: 0.9rem !important;
+}
+
+.control-section-template .control-label-modern {
+  margin-bottom: 0.35rem !important;
+  letter-spacing: 0.2px !important;
+}
+
 /* Modern Form Select */
 .form-select-modern {
   width: 100% !important;
@@ -12409,12 +12423,14 @@ html, body {
 /* Radio Group */
 .radio-group-modern {
   display: flex !important;
-  gap: 0.5rem !important;
+  gap: 0.65rem !important;
   justify-content: center !important;
+  width: 100% !important;
 }
 
 .radio-option-modern {
   position: relative !important;
+  flex: 1 1 0 !important;
 }
 
 .radio-option-modern input[type="radio"] {
@@ -12425,31 +12441,40 @@ html, body {
 }
 
 .radio-label-modern {
-  display: inline-block !important;
-  padding: 0.5rem 1rem !important;
-  background: rgba(60, 60, 90, 0.5) !important;
-  border: 1px solid rgba(160, 132, 232, 0.2) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  min-height: 44px !important;
+  padding: 0.6rem 1rem !important;
+  background: linear-gradient(180deg, rgba(66, 66, 102, 0.62), rgba(48, 48, 78, 0.72)) !important;
+  border: 2px solid rgba(170, 150, 235, 0.35) !important;
   border-radius: 8px !important;
-  color: rgba(255, 255, 255, 0.8) !important;
-  font-size: 0.85rem !important;
-  font-weight: 500 !important;
+  color: rgba(255, 255, 255, 0.95) !important;
+  font-size: 0.9rem !important;
+  font-weight: 700 !important;
   cursor: pointer !important;
-  transition: all 0.3s ease !important;
+  transition: all 0.22s ease !important;
   text-align: center !important;
-  min-width: 80px !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07), 0 4px 14px rgba(13, 13, 24, 0.35) !important;
 }
 
 .radio-option-modern input[type="radio"]:checked + .radio-label-modern {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(22, 163, 74, 0.4)) !important;
-  border-color: rgba(34, 197, 94, 0.6) !important;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.55), rgba(22, 163, 74, 0.7)) !important;
+  border-color: rgba(84, 244, 156, 0.95) !important;
   color: #ffffff !important;
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.3) !important;
+  box-shadow: 0 0 0 1px rgba(150, 255, 200, 0.45), 0 8px 20px rgba(20, 160, 90, 0.45) !important;
 }
 
 .radio-label-modern:hover {
-  background: rgba(80, 80, 110, 0.6) !important;
-  border-color: rgba(160, 132, 232, 0.4) !important;
+  background: linear-gradient(180deg, rgba(78, 78, 118, 0.72), rgba(54, 54, 88, 0.8)) !important;
+  border-color: rgba(190, 172, 245, 0.55) !important;
   color: #ffffff !important;
+}
+
+.radio-option-modern input[type="radio"]:focus-visible + .radio-label-modern {
+  outline: 2px solid rgba(255, 255, 255, 0.85) !important;
+  outline-offset: 2px !important;
 }
 
 /* Modern Buttons */
