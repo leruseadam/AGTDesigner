@@ -8345,49 +8345,31 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         }
                         logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' set to '{derived}' from Product Strain '{product_strain}' (DB missing)")
                     else:
-                        # No strain available and DB missing — prefer Excel-provided lineage if present
-                        excel_lineage = tag.get('excel_lineage') or tag.get('Excel Lineage') or tag.get('Lineage') or tag.get('Lineage*')
-                        if excel_lineage and str(excel_lineage).strip():
-                            lineage_info = {
-                                'lineage': excel_lineage,
-                                'has_sovereign': False,
-                                'product_sovereign': None,
-                                'strain_sovereign': None,
-                                'strain_canonical': None,
-                                'db_lineage': excel_lineage
-                            }
-                            logging.info(f"🔁 NON-CLASSIC LINEAGE: Using excel_lineage fallback for new product '{name}': '{excel_lineage}'")
-                        else:
-                            # Default to MIXED if no Excel lineage provided
-                            lineage_info = {
-                                'lineage': 'MIXED',
-                                'has_sovereign': False,
-                                'product_sovereign': None,
-                                'strain_sovereign': None,
-                                'strain_canonical': None,
-                                'db_lineage': 'MIXED'
-                            }
-                            logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' defaulted to 'MIXED' (no Product Strain and DB missing)")
+                        # No strain available and DB missing — NEVER fall back to Excel lineage.
+                        # Keep DB-first behavior with deterministic non-classic default.
+                        lineage_info = {
+                            'lineage': 'MIXED',
+                            'has_sovereign': False,
+                            'product_sovereign': None,
+                            'strain_sovereign': None,
+                            'strain_canonical': None,
+                            'db_lineage': 'MIXED'
+                        }
+                        logging.info(f"🔧 NON-CLASSIC LINEAGE DERIVED: '{name}' defaulted to 'MIXED' (DB missing, no Product Strain)")
             
-            # If no DB/strain lineage_info is available, allow Excel-provided lineage
-            # only as a fallback for NEW products (i.e., when DB has no record).
+            # If no DB/strain lineage_info is available, DO NOT use Excel lineage fallback.
+            # Default by product type so lineage path remains DB-first.
             if not lineage_info:
-                # Prefer explicit `excel_lineage` preserved by ExcelProcessor.
-                excel_lineage = tag.get('excel_lineage') or tag.get('Excel Lineage') or tag.get('Lineage') or tag.get('Lineage*')
-                if excel_lineage:
-                    # Build a minimal lineage_info structure from Excel lineage for fallback use
-                    lineage_info = {
-                        'lineage': excel_lineage,
-                        'has_sovereign': False,
-                        'product_sovereign': None,
-                        'strain_sovereign': None,
-                        'strain_canonical': None,
-                        'db_lineage': excel_lineage
-                    }
-                    logging.info(f"🔁 Using excel_lineage fallback for NEW product '{name}': '{excel_lineage}'")
-                else:
-                    # No DB info and no Excel fallback — skip enrichment
-                    continue
+                default_lineage = 'HYBRID' if is_classic else 'MIXED'
+                lineage_info = {
+                    'lineage': default_lineage,
+                    'has_sovereign': False,
+                    'product_sovereign': None,
+                    'strain_sovereign': None,
+                    'strain_canonical': None,
+                    'db_lineage': default_lineage
+                }
+                logging.info(f"🔧 DB-FIRST DEFAULT LINEAGE: '{name}' -> '{default_lineage}' (DB missing)")
             
             # Helper function to validate lineage for classic types
             def _validate_lineage_for_classic(lineage_val, field_name):
@@ -10999,6 +10981,26 @@ def get_session_cache_key(base_key):
     key_str = f"{base_key}:{sid}:{store_name}:{file_path}"
     return hashlib.sha256(key_str.encode()).hexdigest()
 
+
+def _get_available_tags_cache_bust() -> int:
+    """Return a monotonic per-session cache-buster for available-tags keys."""
+    try:
+        return int(session.get('available_tags_cache_bust', 0) or 0)
+    except Exception:
+        return 0
+
+
+def _bump_available_tags_cache_bust() -> int:
+    """Advance per-session available-tags cache-buster and return new value."""
+    try:
+        current = _get_available_tags_cache_bust()
+        next_val = current + 1
+        session['available_tags_cache_bust'] = next_val
+        session.modified = True
+        return next_val
+    except Exception:
+        return 0
+
 def clear_available_tags_cache(reason=None):
     """Clear cache entries related to available tags and dependent datasets."""
     try:
@@ -11013,6 +11015,7 @@ def clear_available_tags_cache(reason=None):
         
         # Base cache and file-specific cache
         _clear_key(get_session_cache_key('available_tags'))
+        _clear_key(get_session_cache_key('web_available_tags'))
         
         # Clear file-specific caches using both possible session keys
         session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
@@ -11027,11 +11030,12 @@ def clear_available_tags_cache(reason=None):
             if lineage_update_timestamp:
                 _clear_key(get_session_cache_key(f'available_tags_{session_file_path}_{lineage_update_timestamp}'))
         
-        # Also clear file-based cache on disk for current store
+        # Also clear file-based cache on disk for current store + global fallback
         try:
             store_name = get_current_store_name()
-            if store_name:
-                cache_path = get_available_tags_cache_path(store_name)
+            store_keys = {_normalize_store_key(store_name), 'global'}
+            for sk in store_keys:
+                cache_path = get_available_tags_cache_path(sk)
                 if os.path.exists(cache_path):
                     os.remove(cache_path)
                     logging.info(f"🗑️  Deleted disk cache file: {cache_path}")
@@ -11087,11 +11091,16 @@ def clear_available_tags_cache(reason=None):
         for base in related_bases:
             _clear_key(get_session_cache_key(base))
         
+        # Deterministic invalidation: bump cache-buster so subsequent requests use a new cache key.
+        bust_val = _bump_available_tags_cache_bust()
         session['excel_processor_updated'] = time.time()
-        session['lineage_update_timestamp'] = time.time()
+        # Only stamp lineage-update timestamp when this clear is lineage-related.
+        reason_l = str(reason or '').lower()
+        if 'lineage' in reason_l:
+            session['lineage_update_timestamp'] = time.time()
         session.modified = True
         
-        logging.info(f"🧹 Cleared {len(cleared_keys)} cache keys after lineage cache invalidation ({reason or 'no reason'})")
+        logging.info(f"🧹 Cleared {len(cleared_keys)} cache keys (bust={bust_val}) ({reason or 'no reason'})")
     except Exception as cache_error:
         logging.warning(f"Could not clear available tags caches ({reason or 'no reason'}): {cache_error}")
 
@@ -11580,8 +11589,9 @@ def get_available_tags():
         upload_timestamp = session.get('upload_timestamp', '')
         lineage_update_timestamp = session.get('lineage_update_timestamp', '')
         effective_timestamp = lineage_update_timestamp if lineage_update_timestamp else upload_timestamp
+        cache_bust = _get_available_tags_cache_bust()
         if has_excel_data and session_file_path:
-            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}')
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}_b{cache_bust}')
             if lineage_update_timestamp:
                 logging.info(f"📦 Cache key with lineage_update_timestamp: ..._{effective_timestamp}")
             else:

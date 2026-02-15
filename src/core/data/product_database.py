@@ -5423,14 +5423,13 @@ class ProductDatabase:
             else:
                 logger.info(f"Successfully updated {rows_updated} row(s) for product '{product_name}'")
 
-                # CRITICAL FIX: Clear lineage cache for this product to force fresh lookup
-                # Without this, get_product_lineage() will return the old cached value
+                # CRITICAL FIX: Clear full lineage cache after updates.
+                # Product lookups are done via multiple name variants (exact/lower/normalized),
+                # so clearing only one key can leave stale lineage in cache.
                 with _lineage_cache_lock:
-                    cache_key = product_name.strip().lower()
-                    if cache_key in _lineage_cache:
-                        del _lineage_cache[cache_key]
-                        del _lineage_cache_timestamps[cache_key]
-                        logger.info(f"✅ Cleared lineage cache for '{product_name}' after update")
+                    _lineage_cache.clear()
+                    _lineage_cache_timestamps.clear()
+                    logger.info(f"✅ Cleared entire lineage cache after update for '{product_name}'")
 
             return rows_updated > 0
         except Exception as e:
