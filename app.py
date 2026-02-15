@@ -17,6 +17,7 @@ import sys  # Add this import
 import logging
 import traceback
 import threading
+import math
 import signal  # Add signal import for timeout handling
 from decimal import Decimal
 import pandas as pd  # Add this import
@@ -2750,6 +2751,49 @@ def get_session_json_matcher():
         except Exception as e2:
             logging.error(f"Failed to initialize basic JSON matcher: {e2}")
             return None
+
+def refresh_json_match_runtime_state(reason: str = "json_match_request") -> None:
+    """
+    Force-refresh JSON matching runtime caches/state to prevent stale matches.
+    Safe to call at the start of JSON matching endpoints.
+    """
+    try:
+        # Clear session-level JSON match pointers/counts that can hold stale state.
+        for k in ('json_matched_cache_key', 'last_json_match_count', 'json_match_timestamp'):
+            if k in session:
+                session.pop(k, None)
+
+        # Clear known cache keys used by JSON matching views.
+        for base_key in ('available_tags', 'selected_tags', 'json_matched_tags', 'full_excel_tags'):
+            try:
+                cache.delete(get_session_cache_key(base_key))
+            except Exception:
+                pass
+            try:
+                cache.delete(base_key)
+            except Exception:
+                pass
+
+        # Reset matcher in-memory state and rebuild caches from current DB/session context.
+        json_matcher = get_session_json_matcher()
+        if json_matcher:
+            try:
+                json_matcher.clear_matches()
+            except Exception:
+                pass
+            try:
+                if hasattr(json_matcher, 'rebuild_sheet_cache'):
+                    json_matcher.rebuild_sheet_cache()
+            except Exception as rebuild_err:
+                logging.warning(f"JSON matcher sheet cache rebuild failed during refresh ({reason}): {rebuild_err}")
+            try:
+                if hasattr(json_matcher, 'rebuild_strain_cache'):
+                    json_matcher.rebuild_strain_cache()
+            except Exception:
+                pass
+        logging.info(f"JSON match runtime cache refreshed ({reason})")
+    except Exception as e:
+        logging.warning(f"Failed to refresh JSON match runtime state ({reason}): {e}")
 
 def get_session_product_database():
     """Get ProductDatabase instance for the current session using current store selection."""
@@ -20395,6 +20439,9 @@ def json_match():
             return jsonify({'error': 'URL is required'}), 400
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
+
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-match')
             
         logging.info(f"Processing URL: {url[:50]}...")
         
@@ -20743,6 +20790,9 @@ def json_process():
             
         if not url.lower().startswith('http'):
             return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
+
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-process')
             
         # Process JSON data directly
         json_matcher = get_session_json_matcher()
@@ -20787,6 +20837,9 @@ def json_inventory():
             
         if not url.lower().startswith('http'):
             return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
+
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-inventory')
             
         # Process JSON inventory data
         json_matcher = get_session_json_matcher()
@@ -20955,6 +21008,9 @@ def json_match_detailed():
             return jsonify({'error': 'URL is required'}), 400
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
+
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-match-detailed')
             
         json_matcher = get_session_json_matcher()
         if json_matcher is None:
@@ -21039,7 +21095,140 @@ def json_match_detailed():
                 json_items_map[json_item_name.lower().strip()] = json_item
         
         logging.info(f"Building detailed matches: {len(json_items)} JSON items, {len(enhanced_matches) if enhanced_matches else 0} enhanced matches")
-        
+
+        def is_aio_disposable_conflict(current_json_item, candidate_match):
+            """Prevent AIO/disposable JSON items from being paired to cartridge/510 DB matches in detailed view."""
+            if not candidate_match or not hasattr(json_matcher, '_has_disposable_cartridge_conflict'):
+                return False
+            try:
+                json_name_for_check = (
+                    str((current_json_item or {}).get('product_name', '')).strip() or
+                    str((current_json_item or {}).get('inventory_name', '')).strip() or
+                    str((current_json_item or {}).get('name', '')).strip()
+                )
+                json_type_for_check = str((current_json_item or {}).get('inventory_type', '')).strip()
+                db_name_for_check = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', ''))).strip()
+                db_type_for_check = str(
+                    candidate_match.get('Product Type*', '') or
+                    candidate_match.get('ProductType', '') or
+                    candidate_match.get('product_type', '')
+                ).strip()
+                return json_matcher._has_disposable_cartridge_conflict(
+                    json_name_for_check,
+                    json_type_for_check,
+                    db_name_for_check,
+                    db_type_for_check
+                )
+            except Exception:
+                return False
+
+        def _extract_json_strain_for_debug(current_json_item, current_json_name):
+            """Best-effort strain extraction for diagnostics."""
+            explicit = str((current_json_item or {}).get('strain_name', '')).strip().lower()
+            if explicit:
+                return explicit
+            parts = [p.strip().lower() for p in str(current_json_name or '').split(' - ') if p and p.strip()]
+            if len(parts) >= 3:
+                candidate = parts[-3]
+                if candidate not in {'sativa', 'indica', 'hybrid'}:
+                    return candidate
+            return ''
+
+        def _normalize_for_match(text):
+            return re.sub(r'[^a-z0-9\s]+', ' ', str(text or '').lower()).strip()
+
+        def _is_obviously_incompatible_match(current_json_item, current_json_name, candidate_match):
+            """
+            Reject clearly wrong pairings while keeping matching permissive enough.
+            Hard rules only:
+            1) JSON vape/concentrate-for-inhalation must not map to pre-roll DB types.
+            2) If JSON strain is present, require basic strain token presence in DB name.
+            """
+            try:
+                if not candidate_match:
+                    return True
+
+                json_name_raw = str(current_json_name or '')
+                json_name_norm = _normalize_for_match(json_name_raw)
+                json_type_norm = _normalize_for_match((current_json_item or {}).get('inventory_type', ''))
+                db_name_raw = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', '')) or '')
+                db_name_norm = _normalize_for_match(db_name_raw)
+                db_type_norm = _normalize_for_match(
+                    candidate_match.get('Product Type*', '') or
+                    candidate_match.get('ProductType', '') or
+                    candidate_match.get('product_type', '')
+                )
+
+                # Hard type gate: vape/concentrate JSON should not map to pre-roll DB rows.
+                json_is_vape_like = (
+                    'concentrate for inhalation' in json_type_norm or
+                    '510' in json_name_norm or
+                    'vape' in json_name_norm
+                )
+                db_is_preroll = ('pre roll' in db_type_norm or 'preroll' in db_type_norm)
+                if json_is_vape_like and db_is_preroll:
+                    return True
+
+                # HARD RULE: JSON 510/cartridge items must never map to disposable DB items.
+                json_is_510_like = (' 510 ' in f" {json_name_norm} " or 'cartridge' in json_name_norm)
+                db_is_disposable = (
+                    ' disposable ' in f" {db_name_norm} " or
+                    ' disposable ' in f" {db_type_norm} " or
+                    ' aio ' in f" {db_name_norm} " or
+                    ' all in one ' in f" {db_name_norm} "
+                )
+                if json_is_510_like and db_is_disposable:
+                    return True
+
+                # Hard strain gate: require at least 50% of meaningful strain tokens to appear.
+                expected_strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
+                strain_tokens = [
+                    t for t in _normalize_for_match(expected_strain).split()
+                    if len(t) >= 3 and t not in {'sativa', 'indica', 'hybrid'}
+                ]
+                if strain_tokens:
+                    matched_tokens = sum(1 for t in strain_tokens if t in db_name_norm)
+                    required = max(1, int(math.ceil(len(strain_tokens) * 0.5)))
+                    if matched_tokens < required:
+                        return True
+
+                return False
+            except Exception:
+                return False
+
+        def _log_match_diagnostics(stage, method, current_json_item, current_json_name, candidate_match, extra_score=None):
+            """Structured diagnostics for why a candidate was chosen/rejected."""
+            try:
+                if not candidate_match:
+                    logging.debug(f"[JSON_DIAG] stage={stage} method={method} json='{current_json_name}' candidate=None")
+                    return
+
+                json_name_lower = str(current_json_name or '').lower().strip()
+                db_name = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', ''))).strip()
+                db_name_lower = db_name.lower()
+                json_type = str((current_json_item or {}).get('inventory_type', '')).strip().lower()
+                db_type = str(
+                    candidate_match.get('Product Type*', '') or
+                    candidate_match.get('ProductType', '') or
+                    candidate_match.get('product_type', '')
+                ).strip().lower()
+
+                json_terms = set(re.findall(r"[a-z0-9]+", json_name_lower))
+                db_terms = set(re.findall(r"[a-z0-9]+", db_name_lower))
+                overlap = (len(json_terms & db_terms) / len(json_terms | db_terms)) if (json_terms | db_terms) else 0.0
+
+                expected_strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
+                strain_hit = bool(expected_strain and expected_strain in db_name_lower)
+
+                msg = (
+                    f"[JSON_DIAG] stage={stage} method={method} score={extra_score if extra_score is not None else 'n/a'} "
+                    f"json='{current_json_name}' db='{db_name}' overlap={overlap:.3f} "
+                    f"json_type='{json_type}' db_type='{db_type}' strain='{expected_strain or 'n/a'}' strain_hit={strain_hit}"
+                )
+                logging.info(msg)
+            except Exception as diag_err:
+                logging.debug(f"[JSON_DIAG] diagnostics logging failed: {diag_err}")
+
         for i, json_item in enumerate(json_items):
             # Try multiple fields for product name
             json_name = (
@@ -21076,11 +21265,24 @@ def json_match_detailed():
             if json_name_normalized in enhanced_match_map:
                 enhanced_match = enhanced_match_map[json_name_normalized]
                 match_method = 'exact'
+                _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
+                if is_aio_disposable_conflict(json_item, enhanced_match):
+                    _log_match_diagnostics('candidate_rejected_aio_conflict', match_method, json_item, json_name, enhanced_match)
+                    enhanced_match = None
+                    match_method = None
+                elif _is_obviously_incompatible_match(json_item, json_name, enhanced_match):
+                    _log_match_diagnostics('candidate_rejected_incompatible', match_method, json_item, json_name, enhanced_match)
+                    enhanced_match = None
+                    match_method = None
             else:
                 # Try fuzzy matching by comparing normalized names and key terms
                 best_fuzzy_match = None
                 best_fuzzy_score = 0
                 for normalized_key, match in enhanced_match_map.items():
+                    if is_aio_disposable_conflict(json_item, match):
+                        continue
+                    if _is_obviously_incompatible_match(json_item, json_name, match):
+                        continue
                     # Calculate similarity score
                     if json_name_normalized == normalized_key:
                         best_fuzzy_match = match
@@ -21114,11 +21316,21 @@ def json_match_detailed():
                 if best_fuzzy_match and best_fuzzy_score > 0.3:  # Lower threshold to 30% for better matching
                     enhanced_match = best_fuzzy_match
                     match_method = f'fuzzy_{best_fuzzy_score:.2f}'
+                    _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match, best_fuzzy_score)
                 
                 # Fallback: try index-based matching if name matching fails
                 if not enhanced_match and i < len(enhanced_matches):
                     enhanced_match = enhanced_matches[i]
                     match_method = 'index'
+                    _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
+                    if is_aio_disposable_conflict(json_item, enhanced_match):
+                        _log_match_diagnostics('candidate_rejected_aio_conflict', match_method, json_item, json_name, enhanced_match)
+                        enhanced_match = None
+                        match_method = None
+                    elif _is_obviously_incompatible_match(json_item, json_name, enhanced_match):
+                        _log_match_diagnostics('candidate_rejected_incompatible', match_method, json_item, json_name, enhanced_match)
+                        enhanced_match = None
+                        match_method = None
             
             # If we found a match but it doesn't have JSON data, try to find the JSON item by the match's product name
             if enhanced_match and json_item.get('product_name', '').strip() != json_name:
@@ -21136,6 +21348,7 @@ def json_match_detailed():
                                 json_item = candidate_json_item
                                 json_name = json_item_name
                                 logging.info(f"🔄 Found better JSON item match: '{json_name}' for product '{match_product_name}'")
+                                _log_match_diagnostics('json_item_rebound', match_method, json_item, json_name, enhanced_match)
                                 break
             
             # Log matching results for debugging
@@ -21165,6 +21378,11 @@ def json_match_detailed():
                 'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
                 'match_confidence': f"{enhanced_conf:.3f}" if enhanced_match else '0.0'
             }
+
+            if enhanced_match:
+                _log_match_diagnostics('final_match', match_method, json_item, json_name, enhanced_match, enhanced_conf)
+            else:
+                logging.info(f"[JSON_DIAG] stage=final_match method=none json='{json_name}' db=None")
             
             # Debug: Verify JSON data is included
             if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
@@ -21228,6 +21446,10 @@ def json_match_detailed():
                                         break
                     
                     if found_json_item:
+                        if is_aio_disposable_conflict(found_json_item, enhanced_match):
+                            continue
+                        if _is_obviously_incompatible_match(found_json_item, found_json_name or match_product_name, enhanced_match):
+                            continue
                         match_info = {
                             'json_name': found_json_name or match_product_name,
                             'json_data': found_json_item,
@@ -25303,6 +25525,9 @@ def json_match_mixed():
             return jsonify({'error': 'URL is required'}), 400
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
+
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-match/mixed')
             
         excel_processor = get_session_excel_processor()
         json_matcher = get_session_json_matcher()
@@ -26029,6 +26254,9 @@ def enhanced_json_match():
             return jsonify({'error': 'URL is required'}), 400
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
+
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-match/enhanced')
             
         logging.info(f"Processing URL with strategy '{strategy}': {url[:50]}...")
         
@@ -26216,6 +26444,9 @@ def ai_enhanced_json_match():
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
+
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-match/ai-enhanced')
             
         # Get enhanced AI matcher
         ai_matcher = get_enhanced_ai_matcher()

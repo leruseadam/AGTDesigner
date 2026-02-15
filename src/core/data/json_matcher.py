@@ -5643,6 +5643,17 @@ class JSONMatcher:
                                         if db_is_flower and json_is_non_flower:
                                             logging.info(f"🚫 REJECTED SKU Flower match for non-flower product: '{product_name}' (type: {json_type_lower or json_inv_type}) → '{result[0]}' (DB Type: {db_type_str})")
                                             print(f"🔍 DEBUG: REJECTED type-incompatible SKU match: {product_type} vs {db_type_str}")
+                                        elif self._has_disposable_cartridge_conflict(
+                                            product_name,
+                                            json_inv_type or json_type_lower,
+                                            str(db_info.get('Product Name*', '') or db_info.get('Description', '')),
+                                            db_type_str
+                                        ):
+                                            logging.info(
+                                                f"🚫 REJECTED SKU AIO/disposable mismatch: '{product_name}' "
+                                                f"(type: {json_type_lower or json_inv_type}) → '{result[0]}' (DB Type: {db_type_str})"
+                                            )
+                                            print(f"🔍 DEBUG: REJECTED AIO/disposable mismatch: {product_type} vs {db_type_str}")
                                         else:
                                             logging.info(f"✅ SKU search found valid database match: '{product_name}' → '{result[1]}'")
 
@@ -10311,7 +10322,7 @@ class JSONMatcher:
         return any(k in t for k in [' cartridge ', ' cart ', ' 510 ', ' vape cartridge ', ' vape pen ', ' pod '])
 
     def _has_disposable_cartridge_conflict(self, json_name: str, json_type: str, db_name: str, db_type: str) -> bool:
-        """True when one side is disposable/AIO and the other is cartridge/510."""
+        """True when disposable/cartridge constraints are violated."""
         json_text = f"{json_name or ''} {json_type or ''}"
         db_text = f"{db_name or ''} {db_type or ''}"
 
@@ -10320,9 +10331,14 @@ class JSONMatcher:
         db_is_disposable = self._is_disposable_indicator(db_text)
         db_is_cartridge = self._is_cartridge_indicator(db_text)
 
+        # HARD RULE: If JSON indicates AIO/disposable, DB candidate must also indicate disposable.
+        if json_is_disposable and not db_is_disposable:
+            return True
         if json_is_disposable and db_is_cartridge and not db_is_disposable:
             return True
-        if json_is_cartridge and db_is_disposable and not db_is_cartridge:
+        # HARD RULE: 510/cartridge JSON items must NEVER map to disposable DB items.
+        # Even if DB type text also contains "cartridge", disposable hardware is not allowed.
+        if json_is_cartridge and db_is_disposable:
             return True
         return False
 

@@ -17476,7 +17476,15 @@ const TagManager = {
             
             verboseLog('🚀 Sending lightning upload request...');
             
-            const uploadResponse = await fetch('/upload', {
+            // Choose optimized endpoint for web deployments to speed up uploads
+            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                window.location.hostname.includes('agtpricetags.com') ||
+                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+
+            const uploadEndpoint = isWebClient ? '/upload-optimized' : '/upload';
+            verboseLog('Using upload endpoint:', uploadEndpoint);
+
+            const uploadResponse = await fetch(uploadEndpoint, {
                 method: 'POST',
                 body: formData
             });
@@ -17578,9 +17586,7 @@ const TagManager = {
             const maxRetries = 2;  // Keep one retry for transient failures
             const fastLoadTimeoutMs = 90000; // Allow slower backend without multiple timeouts
             let standardFetchStarted = false;
-            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
-                window.location.hostname.includes('agtpricetags.com') ||
-                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            // Reuse isWebClient declared earlier in this upload flow.
             const uploadTagsEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
             const uploadFastLoad = isWebClient ? 1 : 0;
 

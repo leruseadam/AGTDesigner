@@ -61,5 +61,27 @@
     <div id="generationSplashModal" class="generation-splash-modal" style="display:none;">
         <div class="generation-splash-backdrop"></div>
     </div>
+        <!-- Force stronger tag header styles at end of body to override inline/page styles -->
+        <style>
+            /* Lower-level tag headers and check labels inside tag lists */
+            .tag-list .form-check-label {
+                font-size: 1rem !important;
+                font-weight: 700 !important;
+                color: #ffffff !important;
+                letter-spacing: 0.02em !important;
+            }
+
+            .tag-group-header {
+                font-size: 1.18em !important;
+                font-weight: 700 !important;
+            }
+
+            /* Slightly larger for the nested group headers (weights/price) */
+            .tag-list .group-header, .tag-list .category-header, .tag-list .tag-group-label {
+                font-size: 1.1em !important;
+                font-weight: 700 !important;
+                color: #ffffff !important;
+            }
+        </style>
 </body>
 </html>
