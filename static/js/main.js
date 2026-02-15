@@ -7677,11 +7677,12 @@ const TagManager = {
         }
         
         // Set data-lineage attribute for CSS coloring on both row and tagElement
-        // CRITICAL FIX: Prioritize manual edits (sovereign_lineage), then use DOCX output lineage
-        // Backend uses: COALESCE(s.canonical_lineage, p."Lineage")
-        // Use currentLineage, then canonical_lineage, then Excel Lineage
+        // DB-first lineage priority: preserve user saved lineage first.
+        // Priority: sovereign_lineage > currentLineage > canonical_lineage > Excel Lineage
         let lineage;
-        if (tag.currentLineage) {
+        if (tag.sovereign_lineage) {
+            lineage = tag.sovereign_lineage;
+        } else if (tag.currentLineage) {
             lineage = tag.currentLineage;
         } else if (tag.canonical_lineage) {
             lineage = tag.canonical_lineage;
@@ -7700,8 +7701,9 @@ const TagManager = {
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
         const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
+        const hasAuthoritativeDbLineage = !!(tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage);
         const isParaphernaliaType = (productTypeCheck || '').toString().toLowerCase() === 'paraphernalia';
-        if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+        if (!hasAuthoritativeDbLineage && isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
             lineage = 'HYBRID';
         }
         
@@ -7765,9 +7767,13 @@ const TagManager = {
         const validDatabaseLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA', 'PARAPHERNALIA'];
         const hasValidDatabaseLineage = validDatabaseLineages.includes(lineage);
         
-        // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
-        // Check if product type is "paraphernalia" - this overrides everything else
-        if (lowerProductType === 'paraphernalia') {
+        // If database already gave us lineage fields, trust them and skip heuristic overrides.
+        if (hasAuthoritativeDbLineage && hasValidDatabaseLineage) {
+            displayLineage = lineage;
+            verboseLog(`🎯 Using authoritative DB lineage: "${displayName}" → ${displayLineage}`);
+        } else if (lowerProductType === 'paraphernalia') {
+            // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
+            // Check if product type is "paraphernalia" - this overrides everything else
             displayLineage = 'PARAPHERNALIA';
             verboseLog(`🎯 Paraphernalia product detected: "${displayName}" (${lowerProductType}) → PARAPHERNALIA (pink)`);
             // Set the lineage data attributes

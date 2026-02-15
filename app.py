@@ -9999,8 +9999,15 @@ def generate_labels():
                     if not isinstance(tag, dict):
                         continue
                     product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
-                    # Use canonical_lineage or currentLineage (what UI displays) as source of truth
-                    ui_lineage = tag.get('canonical_lineage') or tag.get('currentLineage') or tag.get('Lineage') or tag.get('lineage')
+                    # Use saved lineage first so manual edits are never lost.
+                    # Priority: sovereign_lineage > currentLineage > canonical_lineage > Lineage
+                    ui_lineage = (
+                        tag.get('sovereign_lineage')
+                        or tag.get('currentLineage')
+                        or tag.get('canonical_lineage')
+                        or tag.get('Lineage')
+                        or tag.get('lineage')
+                    )
                     if not product_name or not ui_lineage:
                         continue
 
@@ -16282,12 +16289,12 @@ def get_web_available_tags():
             # Normalize all tags - CRITICAL: Preserve canonical_lineage from strains table
             simple_tags = []
             for tag in excel_tags:
-                # CRITICAL FIX: Prioritize canonical_lineage from strains table (the "strains sheet")
-                # Priority: canonical_lineage (from strains) > currentLineage > sovereign_lineage > Lineage
+                # CRITICAL FIX: Preserve user-saved lineage first.
+                # Priority: sovereign_lineage > currentLineage > canonical_lineage > Lineage
                 final_lineage = (
-                    tag.get('canonical_lineage') or  # From strains table - this is the "strains sheet" data
-                    tag.get('currentLineage') or 
                     tag.get('sovereign_lineage') or
+                    tag.get('currentLineage') or
+                    tag.get('canonical_lineage') or
                     tag.get('Lineage')
                 )
                 
