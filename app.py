@@ -11362,7 +11362,8 @@ def get_available_tags():
         fast_load = request.args.get('fast_load') in ('1', 'true', 'True')
         
         # CRITICAL: When explicitly asking for fresh data, clear caches up front
-        if nocache or prefer_db:
+        # Do not clear cache on every prefer_db request; this caused repeated full rebuilds.
+        if nocache:
             try:
                 clear_available_tags_cache(reason='explicit_nocache_or_prefer_db')
                 cache.delete(get_session_cache_key('selected_tags'))
@@ -11628,9 +11629,15 @@ def get_available_tags():
                 'message': 'No Excel file uploaded. Please upload an Excel file to see products in CURRENT INVENTORY.'
             }), 200
 
-        # CRITICAL: Check if lineage was updated BEFORE checking cache
-        # If lineage was updated, we must bypass cache to get fresh database lineage
-        has_lineage_updates = bool(session.get('lineage_update_timestamp'))
+        # CRITICAL: Check if lineage was updated recently BEFORE checking cache.
+        # If lineage was updated within a short window, bypass cache for fresh DB lineage.
+        has_lineage_updates = False
+        try:
+            lineage_ts = session.get('lineage_update_timestamp')
+            if lineage_ts:
+                has_lineage_updates = (time.time() - float(lineage_ts)) < 600  # 10 minutes
+        except Exception:
+            has_lineage_updates = False
 
         # If any lineage updates exist, force bypass of cache and attempt to reload the last uploaded file
         if has_lineage_updates:
@@ -14228,21 +14235,28 @@ def get_available_tags():
                 if final_lineage_check_count > 0:
                     logging.info(f"✅ FINAL CHECK: Set database lineage on {final_lineage_check_count} tags that were missing it")
         
-        # CRITICAL FIX: Always force-align tags with database lineage before returning to UI
-        # This ensures UI always shows database sovereign_lineage, not Excel lineage
+        # CRITICAL FIX: Align with DB lineage only when needed.
+        # Always forcing alignment on every request is expensive and slows tag loading.
         try:
+            should_force_final_alignment = bool(prefer_db or has_lineage_updates)
             store_name = get_current_store_name()
-            if store_name and all_tags:
+            if store_name and all_tags and should_force_final_alignment:
                 logging.info(f"🔄 FINAL ALIGNMENT: Force-aligning {len(all_tags)} tags with database lineage before returning to UI")
                 all_tags = _align_tags_with_db_lineage(all_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                logging.info(f"✅ FINAL ALIGNMENT: Completed force-alignment of tags with database lineage")
+                logging.info("✅ FINAL ALIGNMENT: Completed force-alignment of tags with database lineage")
+            elif all_tags:
+                logging.debug("⚡ FINAL ALIGNMENT: Skipped (no recent lineage update and prefer_db not set)")
         except Exception as final_align_err:
             logging.warning(f"Final lineage alignment failed: {final_align_err}")
     
         safe_all_tags = make_json_safe(all_tags)
-        # CRITICAL: NO CACHING - always return fresh data to prevent stale data issues
-        logging.info(f"🚫 CACHE DISABLED: Not caching tags to prevent stale data")
+        # Re-enable server-side caching for normal requests to keep UI responsive.
         try:
+            if not nocache and not has_lineage_updates:
+                cache.set(cache_key, safe_all_tags, timeout=300)  # 5 minutes
+                logging.info(f"✅ Cached available tags ({len(safe_all_tags)}) for fast reloads")
+            else:
+                logging.info("⏭️ Skipped caching available tags (nocache or recent lineage update)")
             final_store_for_cache = get_current_store_name(allow_fallback=False) or store_name or cache_store_name
             save_available_tags_cache(_normalize_store_key(final_store_for_cache), safe_all_tags)
         except Exception as cache_error:
