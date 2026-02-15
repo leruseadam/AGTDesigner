@@ -1804,6 +1804,39 @@ class ExcelProcessor:
                 
                 if rename_mapping:
                     df.rename(columns=rename_mapping, inplace=True)
+
+                # Ensure a canonical `ProductName` column exists for downstream code
+                # and populate missing names from sensible fallbacks (Description, product_name_alt)
+                try:
+                    if 'ProductName' not in df.columns:
+                        for alt in ['Product Name*', 'Product Name', 'ProductName']:
+                            if alt in df.columns:
+                                df['ProductName'] = df[alt].astype(str)
+                                break
+                    # Normalize and trim
+                    df['ProductName'] = df['ProductName'].fillna('').astype(str).str.replace(r"\s+", " ", regex=True).str.strip()
+
+                    # Fill empty product names from Description or alt name columns
+                    if 'Description' in df.columns:
+                        empty_mask = df['ProductName'].isnull() | (df['ProductName'].str.strip() == '')
+                        if empty_mask.any():
+                            df.loc[empty_mask, 'ProductName'] = df.loc[empty_mask, 'Description'].fillna('').astype(str).str.strip()
+
+                    # Additional fallback: product_name_alt or product_name columns
+                    for alt_col in ['product_name_alt', 'product_name', 'ProductNameAlt', 'Product_Name']:
+                        if alt_col in df.columns:
+                            empty_mask = df['ProductName'].isnull() | (df['ProductName'].str.strip() == '')
+                            if empty_mask.any():
+                                df.loc[empty_mask, 'ProductName'] = df.loc[empty_mask, alt_col].fillna('').astype(str).str.strip()
+
+                    # Count and log auto-filled names for diagnostics
+                    try:
+                        auto_filled_count = (df['ProductName'].astype(str).str.strip() != '').sum()
+                        self.logger.info(f"Auto-filled/normalized ProductName values; non-empty count: {auto_filled_count}")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    self.logger.warning(f"Failed to ensure/populate ProductName column: {e}")
                 
                 # 5. Basic lineage standardization (vectorized)
                 if "Lineage" in df.columns:

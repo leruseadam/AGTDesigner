@@ -1349,23 +1349,47 @@ class ProductDatabase:
             
             # CRITICAL VALIDATION: Prevent blank entries from being added to database
             if not product_name or str(product_name).strip() == '':
-                self._rejected_blank_names += 1
-                # Log a compact sample of the offending product_data periodically to aid diagnosis
-                try:
-                    sample_preview = {k: (str(product_data.get(k))[:120] if product_data.get(k) is not None else None)
-                                      for k in list(product_data.keys())[:8]}
-                except Exception:
-                    sample_preview = None
+                # Attempt to auto-fill Product Name from common fallback fields (Description, ProductName, alt names)
+                fallback_keys = ['Description', 'ProductName', 'product_name_alt', 'product_name', 'Description_Complexity']
+                filled = False
+                for fk in fallback_keys:
+                    try:
+                        cand = product_data.get(fk)
+                    except Exception:
+                        cand = None
+                    if cand and str(cand).strip() and str(cand).strip().lower() not in ['nan', 'none', 'null']:
+                        product_name = str(cand).strip()
+                        # Update both common keys so downstream code sees the name
+                        try:
+                            product_data['Product Name*'] = product_name
+                        except Exception:
+                            pass
+                        try:
+                            product_data['ProductName'] = product_name
+                        except Exception:
+                            pass
+                        logger.info(f"Auto-filled missing Product Name from '{fk}': '{product_name[:80]}'")
+                        filled = True
+                        break
 
-                if self._rejected_blank_names <= 5 or (self._rejected_blank_names % 500) == 0:
-                    logger.warning(
-                        f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names}). "
-                        f"Sample keys: {list(product_data.keys())[:8]} Sample preview: {sample_preview}"
-                    )
-                else:
-                    logger.debug(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
+                if not filled:
+                    self._rejected_blank_names += 1
+                    # Log a compact sample of the offending product_data periodically to aid diagnosis
+                    try:
+                        sample_preview = {k: (str(product_data.get(k))[:120] if product_data.get(k) is not None else None)
+                                          for k in list(product_data.keys())[:8]}
+                    except Exception:
+                        sample_preview = None
 
-                return None
+                    if self._rejected_blank_names <= 5 or (self._rejected_blank_names % 500) == 0:
+                        logger.warning(
+                            f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names}). "
+                            f"Sample keys: {list(product_data.keys())[:8]} Sample preview: {sample_preview}"
+                        )
+                    else:
+                        logger.debug(f"❌ REJECTED: Cannot add product with blank/empty product name (count: {self._rejected_blank_names})")
+
+                    return None
             
             # Check for invalid values
             if str(product_name).lower() in ['nan', 'none', 'null', '']:

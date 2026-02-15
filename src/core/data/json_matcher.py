@@ -5854,8 +5854,8 @@ class JSONMatcher:
                     all_tags.append(tag)
                     processed_count += 1
                     
-                    # Create new database entry for unmatched JSON tag
-                    if product_db:
+                    # Create new database entry for unmatched JSON tag (explicit opt-in only)
+                    if product_db and self._should_persist_unmatched_json():
                         try:
                             self._create_database_entry_for_unmatched_json(tag, product_db)
                             new_database_entries_count += 1
@@ -6322,8 +6322,8 @@ class JSONMatcher:
                     all_tags.append(tag)
                     processed_count += 1
                     
-                    # Create new database entry for unmatched JSON tag
-                    if product_db:
+                    # Create new database entry for unmatched JSON tag (explicit opt-in only)
+                    if product_db and self._should_persist_unmatched_json():
                         try:
                             self._create_database_entry_for_unmatched_json(tag, product_db)
                             new_database_entries_count += 1
@@ -10345,6 +10345,17 @@ class JSONMatcher:
         if json_is_cartridge and db_is_disposable:
             return True
         return False
+
+    def _should_persist_unmatched_json(self) -> bool:
+        """
+        Control whether unmatched/synthetic JSON tags are written into the database.
+        Default is OFF to prevent false UI data pollution from faux tags.
+        """
+        try:
+            val = os.environ.get('JSON_MATCH_PERSIST_UNMATCHED', '').strip().lower()
+            return val in ('1', 'true', 'yes', 'on')
+        except Exception:
+            return False
 
     def _create_tag_from_educated_guess(self, educated_guess: Dict[str, Any], vendor: str) -> Dict[str, Any]:
         """

@@ -20491,6 +20491,64 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     });
+
+    // Standard keyboard shortcuts:
+    // - Enter: accept active modal prompt (primary action)
+    // - Enter (outside typing fields): generate tags
+    // - Cmd/Ctrl+Enter: generate tags from anywhere sensible
+    document.addEventListener('keydown', (event) => {
+        const key = event.key || '';
+        if (key !== 'Enter') return;
+
+        const target = event.target;
+        const tagName = (target?.tagName || '').toLowerCase();
+        const isTypingField =
+            tagName === 'input' ||
+            tagName === 'textarea' ||
+            tagName === 'select' ||
+            Boolean(target?.isContentEditable);
+
+        // 1) If a modal/prompt is open, Enter should accept it via primary action.
+        const openModal = document.querySelector('.modal.show');
+        if (openModal) {
+            // Let textarea Enter keep newline behavior.
+            if (tagName === 'textarea' && !event.ctrlKey && !event.metaKey) return;
+
+            const primaryAction = openModal.querySelector(
+                '.btn-primary:not([disabled]):not(.disabled), ' +
+                '.btn-primary-modern:not([disabled]):not(.disabled), ' +
+                '.btn-modern2:not([disabled]):not(.disabled), ' +
+                '[data-default-action=\"true\"]:not([disabled]):not(.disabled)'
+            );
+            if (primaryAction) {
+                event.preventDefault();
+                event.stopPropagation();
+                primaryAction.click();
+                return;
+            }
+        }
+
+        // 2) Cmd/Ctrl+Enter should generate tags.
+        if (event.ctrlKey || event.metaKey) {
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn && !generateBtn.disabled) {
+                event.preventDefault();
+                event.stopPropagation();
+                generateBtn.click();
+            }
+            return;
+        }
+
+        // 3) Plain Enter (outside typing fields) generates tags.
+        if (!isTypingField) {
+            const generateBtn = document.getElementById('generateBtn');
+            if (generateBtn && !generateBtn.disabled) {
+                event.preventDefault();
+                event.stopPropagation();
+                generateBtn.click();
+            }
+        }
+    });
     
     // Ensure proper scrolling behavior (safe to call even if TagManager not fully initialized)
     if (window.TagManager && typeof TagManager.ensureProperScrolling === 'function') {

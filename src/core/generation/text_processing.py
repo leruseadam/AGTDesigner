@@ -224,9 +224,21 @@ def make_nonbreaking_hyphens(text):
 
     import re
 
-    # Replace " - " (space-hyphen-space) with " -<nbsp>" (space-hyphen-non-breaking-space)
-    # This allows breaks before the hyphen but prevents breaks after
+    # 1) Replace " - " (space-hyphen-space) with " -<nbsp>" (space-hyphen-non-breaking-space)
+    #    This allows breaks before the hyphen but prevents breaks after
     text = re.sub(r'\s+-\s+', ' -\u00A0', text)
+
+    # 2) Replace hyphens that occur between word characters (e.g., "Pre-Roll")
+    #    with a non-breaking hyphen (U+2011) so the hyphenated word will not be split across lines.
+    #    Use a lookbehind/lookahead to only replace hyphens between word chars.
+    try:
+        text = re.sub(r'(?<=\w)-( (?=\w))', '\u2011', text)
+    except re.error:
+        # Fallback for older Python regex engines: replace simple ASCII-letter hyphens
+        text = re.sub(r'([A-Za-z0-9])\-([A-Za-z0-9])', lambda m: m.group(1) + '\u2011' + m.group(2), text)
+
+    # Better approach: handle general word-character hyphens without space
+    text = re.sub(r'(?<=\w)-(?=\w)', '\u2011', text)
 
     return text
 

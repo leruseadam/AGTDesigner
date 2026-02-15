@@ -7929,6 +7929,88 @@ def _normalize_weight_string(weight_str):
     s = re.sub(r'(\d+)\.0+(?=\s*[a-zA-Z]|$)', r'\1', s)
     return s
 
+def _infer_default_units_for_record(record):
+    """
+    Infer a safe default unit when a record has numeric-only weight.
+    Keep this conservative: only force grams for inhalable product families.
+    """
+    if not isinstance(record, dict):
+        return ''
+
+    product_type = str(
+        record.get('Product Type*')
+        or record.get('ProductType')
+        or record.get('Product Type')
+        or record.get('Type')
+        or ''
+    ).strip().lower()
+    product_name = str(
+        record.get('Product Name*')
+        or record.get('ProductName')
+        or record.get('Product Name')
+        or record.get('Description')
+        or ''
+    ).strip().lower()
+
+    # Never infer units for pre-roll style products; they often use joint ratios.
+    if 'pre-roll' in product_type or 'preroll' in product_type:
+        return ''
+
+    inhalable_type_tokens = (
+        'vape cartridge',
+        'disposable',
+        'concentrate',
+        'flower',
+        'live resin',
+        'solventless concentrate',
+        'rso/co2 tankers',
+    )
+    inhalable_name_tokens = (
+        'cartridge',
+        'disposable',
+        'vape',
+        '510',
+        'aio',
+        'resin',
+        'rosin',
+        'concentrate',
+        'extract',
+        'wax',
+        'shatter',
+        'hash',
+        'flower',
+        'bud',
+    )
+
+    if any(tok in product_type for tok in inhalable_type_tokens):
+        return 'g'
+    if any(tok in product_name for tok in inhalable_name_tokens):
+        return 'g'
+    return ''
+
+def _ensure_weight_has_units(weight_value, record):
+    """
+    If weight is numeric-only (e.g., '1', '0.5'), append inferred units.
+    Leaves values with existing units/joint ratios unchanged.
+    """
+    normalized = _normalize_weight_string(weight_value)
+    if normalized is None:
+        return normalized
+    text = str(normalized).strip()
+    if not text:
+        return text
+
+    # Already contains unit letters or ratio/pack text.
+    if re.search(r'[a-zA-Z]', text) or ' x ' in text.lower():
+        return text
+
+    # Numeric-only: append conservative default if available.
+    if re.fullmatch(r'\d+(?:\.\d+)?', text):
+        inferred_units = _infer_default_units_for_record(record)
+        if inferred_units:
+            return f"{text}{inferred_units}"
+    return text
+
 def _is_classic_product_type(product_type_val):
     """Return True when a product type should be treated as classic lineage-bearing."""
     from src.core.constants import CLASSIC_TYPES
@@ -8020,12 +8102,25 @@ def _normalize_weight_fields(record):
         if weight_value:
             combined_weight = f"{_normalize_weight_string(weight_value)}{units_value}".strip()
             record['CombinedWeight'] = _normalize_weight_string(combined_weight)
-    
+
+    # Ensure CombinedWeight is not left as numeric-only for inhalable products.
+    if record.get('CombinedWeight'):
+        record['CombinedWeight'] = _ensure_weight_has_units(record.get('CombinedWeight'), record)
+
     # Keep alias fields aligned
     if record.get('CombinedWeight'):
-        record['WeightUnits'] = record.get('WeightUnits') or record['CombinedWeight']
-        record['WeightWithUnits'] = record.get('WeightWithUnits') or record['CombinedWeight']
-        record['weightWithUnits'] = record.get('weightWithUnits') or record['CombinedWeight']
+        record['WeightUnits'] = _ensure_weight_has_units(
+            record.get('WeightUnits') or record['CombinedWeight'],
+            record
+        )
+        record['WeightWithUnits'] = _ensure_weight_has_units(
+            record.get('WeightWithUnits') or record['CombinedWeight'],
+            record
+        )
+        record['weightWithUnits'] = _ensure_weight_has_units(
+            record.get('weightWithUnits') or record['CombinedWeight'],
+            record
+        )
     
     # Regenerate DescAndWeight with normalized weight if possible
     product_name = (
@@ -10960,14 +11055,16 @@ def generate_labels():
         
         # Count vendors and product types from processed records efficiently
         for record in records:
-            # Get vendor from ProductBrand field
-            vendor = str(record.get('ProductBrand', '')).strip()
-            if vendor and vendor != 'Unknown' and vendor != '':
+            # Vendor may be stored under several keys depending on processing ('ProductBrand', 'Product Brand', 'Vendor', 'Vendor/Supplier*')
+            vendor = (record.get('ProductBrand') or record.get('Product Brand') or record.get('Vendor') or record.get('Vendor/Supplier*') or '')
+            vendor = str(vendor).strip()
+            if vendor and vendor.lower() not in ('unknown', ''):
                 vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
-            
-            # Get product type from ProductType field
-            product_type = str(record.get('ProductType', '')).strip()
-            if product_type and product_type != 'Unknown' and product_type != '':
+
+            # Product type may be under 'ProductType', 'Product Type*', or 'Product Type'
+            product_type = (record.get('ProductType') or record.get('Product Type*') or record.get('Product Type') or '')
+            product_type = str(product_type).strip()
+            if product_type and product_type.lower() not in ('unknown', ''):
                 product_type_counts[product_type] = product_type_counts.get(product_type, 0) + 1
         
         # Get primary vendor and product type
@@ -11544,12 +11641,13 @@ def process_database_product_for_api(db_product):
             combined_weight = 'N/A'
 
     combined_weight = _normalize_weight_string(combined_weight)
+    combined_weight = _ensure_weight_has_units(combined_weight, processed_product)
     
     # CRITICAL FIX: Set all weight field variations for frontend compatibility
     processed_product['CombinedWeight'] = combined_weight
-    processed_product['WeightWithUnits'] = combined_weight
-    processed_product['WeightUnits'] = combined_weight
-    processed_product['weightWithUnits'] = combined_weight
+    processed_product['WeightWithUnits'] = _ensure_weight_has_units(combined_weight, processed_product)
+    processed_product['WeightUnits'] = _ensure_weight_has_units(combined_weight, processed_product)
+    processed_product['weightWithUnits'] = _ensure_weight_has_units(combined_weight, processed_product)
     
     # CRITICAL FIX: Ensure concentrate products have weight information
     product_type = str(processed_product.get('Product Type*', '')).lower()
@@ -16313,6 +16411,26 @@ def get_web_available_tags():
         
         # Use same freshness model as regular endpoint (lineage timestamp + cache bust).
         session_file_path = session.get('file_path', '')
+        # If session missing file_path (e.g., after refresh), try to recover from persistent last-upload file
+        if not session_file_path:
+            try:
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    import json
+                    with open(persistence_file, 'r') as pf:
+                        last = json.load(pf)
+                    # Ensure store matches (or allow fallback)
+                    last_store = last.get('store')
+                    current_store = store_name or get_current_store_name(allow_fallback=True)
+                    if last.get('file_path') and (not current_store or last_store == current_store):
+                        session['file_path'] = last.get('file_path')
+                        session['uploaded_filename'] = last.get('filename')
+                        session['upload_timestamp'] = last.get('timestamp')
+                        session.modified = True
+                        session_file_path = session.get('file_path', '')
+                        logging.info(f"🔁 Recovered session_file_path from persistence: {session_file_path}")
+            except Exception as persist_err:
+                logging.debug(f"Could not recover last upload from persistence: {persist_err}")
         upload_timestamp = session.get('upload_timestamp', '')
         lineage_update_timestamp = session.get('lineage_update_timestamp', '')
         effective_timestamp = lineage_update_timestamp if lineage_update_timestamp else upload_timestamp
@@ -20419,6 +20537,27 @@ def json_match():
                         'message': 'Please upload an Excel file with product data before using JSON matching.',
                         'store_name': store_name
                     }), 400
+
+                # CRITICAL CLEANUP: purge synthetic JSON rows persisted by prior matcher versions.
+                # These rows can poison UI grouping and future matches.
+                try:
+                    conn = product_db._get_connection() if hasattr(product_db, '_get_connection') else None
+                    if conn:
+                        cur = conn.cursor()
+                        cur.execute(
+                            '''
+                            DELETE FROM products
+                            WHERE LOWER(COALESCE("Source", '')) LIKE '%faux tag%'
+                               OR LOWER(COALESCE("Source", '')) LIKE '%educated guess%'
+                               OR LOWER(COALESCE("Source", '')) LIKE '%error fallback%'
+                            '''
+                        )
+                        deleted_rows = cur.rowcount or 0
+                        conn.commit()
+                        if deleted_rows:
+                            logging.warning(f"🧹 Removed {deleted_rows} synthetic rows from product DB before JSON match")
+                except Exception as cleanup_error:
+                    logging.warning(f"Could not purge synthetic JSON rows before matching: {cleanup_error}")
             except Exception as db_error:
                 logging.error(f"Error checking database: {db_error}")
                 return jsonify({
@@ -20469,18 +20608,18 @@ def json_match():
         if is_pythonanywhere or PYTHONANYWHERE_OPTIMIZATION:
             # Production: Use fast simplified matching (no database queries)
             logging.info("🚀 PythonAnywhere detected - using simplified matching for fast JSON match")
-            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
+            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=True)
             logging.info(f"JSON matching (simplified/fast) returned {len(matched_products) if matched_products else 0} products")
         else:
             # Local: Use full database-aware matching for better accuracy
             logging.info("💻 Local environment - using database-first matching for maximum accuracy")
-            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=False)
+            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=True)
             logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
 
             # If nothing matched (e.g., database unavailable), fall back to the legacy simplified flow.
             if not matched_products:
                 logging.warning("Primary database matching returned no products – falling back to simplified matcher")
-                matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=False)
+                matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=True)
                 logging.info(f"JSON matching (simplified fallback) returned {len(matched_products) if matched_products else 0} products")
         
         # Sort matched products alphabetically by product name
@@ -20501,6 +20640,30 @@ def json_match():
                 matched_products = json_matcher._upgrade_fallback_products(matched_products, None)
             except Exception as post_process_error:
                 logging.warning(f"Post-processing upgrade failed: {post_process_error}")
+
+        # CRITICAL SAFETY FILTER: prevent synthetic/faux/educated-guess rows from polluting UI.
+        def _is_synthetic_json_ui_row(product):
+            if not isinstance(product, dict):
+                return True
+            source = str(product.get('Source', '') or '').strip().lower()
+            # Reject known synthetic sources.
+            synthetic_markers = (
+                'faux tag',
+                'educated guess',
+                'error fallback',
+                'ai-generated',
+                'synthetic'
+            )
+            if any(marker in source for marker in synthetic_markers):
+                return True
+            return False
+
+        if matched_products:
+            before_filter_count = len(matched_products)
+            matched_products = [p for p in matched_products if not _is_synthetic_json_ui_row(p)]
+            removed_count = before_filter_count - len(matched_products)
+            if removed_count:
+                logging.warning(f"🚫 JSON UI filter removed {removed_count} synthetic match rows")
 
         # CRITICAL DEBUG: Log what we actually got back
         if matched_products:
@@ -20558,6 +20721,35 @@ def json_match():
             return products
         
         matched_products = _normalize_json_product_names(matched_products)
+
+        # Final defensive dedupe by stable product signature to prevent duplicate UI rows.
+        def _dedupe_json_products(products):
+            if not products:
+                return products
+            deduped = []
+            seen = set()
+            for p in products:
+                if not isinstance(p, dict):
+                    continue
+                name = str(p.get('Product Name*') or p.get('ProductName') or p.get('displayName') or p.get('Description') or '').strip().lower()
+                vendor = str(p.get('Vendor/Supplier*') or p.get('Vendor') or p.get('vendor') or '').strip().lower()
+                product_type = str(p.get('Product Type*') or p.get('Product Type') or p.get('ProductType') or '').strip().lower()
+                weight = str(p.get('CombinedWeight') or p.get('WeightUnits') or p.get('Weight*') or '').strip().lower()
+                price = str(p.get('Price') or p.get('Price*') or '').strip().lower()
+                sku = str(p.get('product_sku') or p.get('Product SKU') or p.get('inventory_id') or '').strip().lower()
+
+                # Prefer SKU/inventory id when available; otherwise use normalized display signature.
+                key = sku if sku else f"{name}|{vendor}|{product_type}|{weight}|{price}"
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(p)
+            removed = len(products) - len(deduped)
+            if removed:
+                logging.warning(f"🧹 JSON route dedupe removed {removed} duplicate matched rows")
+            return deduped
+
+        matched_products = _dedupe_json_products(matched_products)
 
         # Helper function to clean weight format (remove .0 decimals)
         def clean_weight(weight_str):
@@ -20633,6 +20825,14 @@ def json_match():
 
                 # Create DataFrame from matched products
                 json_df = pd.DataFrame(matched_products)
+                # Keep only one row per Product Name* inside the current JSON batch.
+                if not json_df.empty and 'Product Name*' in json_df.columns:
+                    json_df['_name_norm'] = json_df['Product Name*'].astype(str).str.strip().str.lower()
+                    before_json_batch = len(json_df)
+                    json_df = json_df.drop_duplicates(subset=['_name_norm'], keep='first').drop(columns=['_name_norm'])
+                    removed_in_batch = before_json_batch - len(json_df)
+                    if removed_in_batch:
+                        logging.warning(f"🧹 Removed {removed_in_batch} duplicate rows inside current JSON batch")
                 logging.info(f"Created DataFrame from {len(json_df)} JSON matched products")
                 logging.info(f"DataFrame columns: {list(json_df.columns)}")
                 logging.info(f"Sample product names: {json_df['Product Name*'].head(3).tolist() if 'Product Name*' in json_df.columns else 'NO PRODUCT NAME COLUMN'}")
@@ -20642,9 +20842,26 @@ def json_match():
                     logging.info("Excel processor is empty, using JSON matched products as the dataset")
                     excel_processor.df = json_df
                 else:
-                    # Append JSON matched products to existing Excel data
+                    # Append only products not already present in current dataset by normalized Product Name*.
+                    if 'Product Name*' in excel_processor.df.columns and 'Product Name*' in json_df.columns:
+                        existing_name_norm = set(
+                            excel_processor.df['Product Name*']
+                            .astype(str)
+                            .str.strip()
+                            .str.lower()
+                            .tolist()
+                        )
+                        json_df['_name_norm'] = json_df['Product Name*'].astype(str).str.strip().str.lower()
+                        before_existing_filter = len(json_df)
+                        json_df = json_df[~json_df['_name_norm'].isin(existing_name_norm)].drop(columns=['_name_norm'])
+                        removed_existing = before_existing_filter - len(json_df)
+                        if removed_existing:
+                            logging.warning(f"🧹 Skipped {removed_existing} JSON rows already present in dataset")
+
+                    # Append remaining rows (if any)
                     logging.info(f"Appending {len(json_df)} JSON matched products to existing Excel data ({len(excel_processor.df)} rows)")
-                    excel_processor.df = pd.concat([excel_processor.df, json_df], ignore_index=True)
+                    if not json_df.empty:
+                        excel_processor.df = pd.concat([excel_processor.df, json_df], ignore_index=True)
 
                 logging.info(f"✅ Successfully added JSON matched products to Excel DataFrame. Total rows: {len(excel_processor.df)}")
                 logging.info(f"DataFrame shape: {excel_processor.df.shape}")
