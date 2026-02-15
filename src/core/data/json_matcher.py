@@ -9293,6 +9293,10 @@ class JSONMatcher:
                     except (ValueError, TypeError):
                         pass
 
+            combined_weight_value = joint_ratio_value if joint_ratio_value else (self._format_weight_label(weight, units) if weight else '')
+            if not combined_weight_value:
+                combined_weight_value = f"{weight or '1'}{units or 'g'}"
+
             tag = {
                 # Core product information - follow existing tag format
                 'Product Name*': primary_product_name,
@@ -9355,13 +9359,13 @@ class JSONMatcher:
                 'Source': 'JSON Match - Database Priority (100% DB)',
                 'Quantity Received*': "1",
                 'Weight Unit* (grams/gm or ounces/oz)': units or "g",
-                'CombinedWeight': weight or "1",
+                'CombinedWeight': combined_weight_value,
                 'Description_Complexity': '1',
                 'Ratio_or_THC_CBD': self._calculate_ratio_for_json_product(product_type, json_item),
                 # Note: displayName already set correctly above at line 8232 - don't overwrite it here
-                'weightWithUnits': joint_ratio_value if joint_ratio_value else f"{str(round(float(weight or '1')))}{units or 'g'}",
-                'WeightWithUnits': joint_ratio_value if joint_ratio_value else f"{str(round(float(weight or '1')))}{units or 'g'}",
-                'WeightUnits': joint_ratio_value if joint_ratio_value else f"{str(round(float(weight or '1')))}{units or 'g'}",
+                'weightWithUnits': combined_weight_value,
+                'WeightWithUnits': combined_weight_value,
+                'WeightUnits': combined_weight_value,
                 
                 # Additional fields for consistency
                 'vendor': vendor,

@@ -4297,19 +4297,19 @@ class ExcelProcessor:
                                 if isinstance(product, dict):
                                     product_name = product.get('Product Name*', product.get('ProductName', ''))
                                     if product_name in selected_tag_names:
-                                        # DATABASE PRIORITY: Ensure all fields come from database with safe defaults
+                                        # DATABASE PRIORITY: Build a record but prefer the matched DataFrame row values
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
                                             'Description': product.get('Description', product_name),
-                                            'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
-                                            'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
+                                            'DescAndWeight': self._process_description_from_product_name(product_name),
+                                            'Product Type*': product.get('Product Type*', 'flower'),
                                             'Product Brand': product.get('Product Brand', ''),
                                             'Product Strain': product.get('Product Strain', ''),
-                                            'Lineage': product.get('Lineage', 'HYBRID'),  # Default to HYBRID
+                                            'Lineage': product.get('Lineage', 'HYBRID'),
                                             'Vendor': product.get('Vendor/Supplier*', product.get('Vendor', '')),
-                                            'Price': product.get('Price', ''),  # Database uses 'Price' field
-                                            'Price*': product.get('Price', ''),  # Also set Price* for compatibility
+                                            'Price': product.get('Price', ''),
+                                            'Price*': product.get('Price', ''),
                                             'Weight*': product.get('Weight*', ''),
                                             'Quantity*': product.get('Quantity*', '1'),
                                             'Units': product.get('Units', 'g'),
@@ -4319,6 +4319,47 @@ class ExcelProcessor:
                                             'DOH': product.get('DOH', ''),
                                             'Source': product.get('Source', 'JSON Cache')
                                         }
+
+                                        # Prefer values from the Excel DataFrame row when available
+                                        try:
+                                            if self.df is not None and product_name:
+                                                df_match = self.df[self.df[product_name_col] == product_name]
+                                                if not df_match.empty:
+                                                    row = df_match.iloc[0]
+                                                    # helper to safely fetch non-null values from the row
+                                                    def row_val(col, fallback=None):
+                                                        try:
+                                                            v = row.get(col, fallback)
+                                                        except Exception:
+                                                            return fallback
+                                                        if v is None:
+                                                            return fallback
+                                                        try:
+                                                            import pandas as _pd
+                                                            if isinstance(v, float) and _pd.isna(v):
+                                                                return fallback
+                                                        except Exception:
+                                                            pass
+                                                        s = str(v).strip()
+                                                        return s if s and s.lower() not in ('nan', 'none', 'null') else fallback
+
+                                                    record['Product Brand'] = row_val('Product Brand', record.get('Product Brand', ''))
+                                                    record['Product Strain'] = row_val('Product Strain', record.get('Product Strain', ''))
+                                                    record['Lineage'] = row_val('Lineage', record.get('Lineage', 'HYBRID'))
+                                                    record['Vendor'] = row_val('Vendor', row_val('Vendor/Supplier*', record.get('Vendor', '')))
+                                                    record['Price'] = row_val('Price', record.get('Price', ''))
+                                                    record['Price*'] = row_val('Price*', record.get('Price*', record.get('Price', '')))
+                                                    record['Weight*'] = row_val('Weight*', record.get('Weight*', ''))
+                                                    record['Quantity*'] = row_val('Quantity*', record.get('Quantity*', '1'))
+                                                    record['Units'] = row_val('Units', record.get('Units', 'g'))
+                                                    record['THC test result'] = row_val('THC test result', record.get('THC test result', ''))
+                                                    record['CBD test result'] = row_val('CBD test result', record.get('CBD test result', ''))
+                                                    record['DOH'] = row_val('DOH', record.get('DOH', ''))
+                                                    record['Description'] = row_val('Description', record.get('Description', product_name))
+                                                    record['Source'] = row_val('Source', record.get('Source', 'JSON Cache'))
+                                        except Exception as e:
+                                            logger.warning(f"Could not prefer DataFrame values for cached JSON product '{product_name}': {e}")
+
                                         records.append(record)
                                         logger.info(f"CRITICAL FIX: Created cache record for '{product_name}'")
                             
