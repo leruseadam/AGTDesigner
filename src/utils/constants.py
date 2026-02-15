@@ -12,7 +12,9 @@ LINEAGE_COLOR_MAP: Dict[str, str] = {
 }
 
 TYPE_OVERRIDES: Dict[str, str] = {
-    "all-in-one": "vape cartridge",
+    "all-in-one": "disposable vape",
+    "aio": "disposable vape",
+    "disposable": "disposable vape",
     "rosin": "concentrate",
     "mini buds": "flower",
     "bud": "flower",

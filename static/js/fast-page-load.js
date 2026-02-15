@@ -8,11 +8,20 @@
     'use strict';
     
     console.log('⚡ Fast page load optimization v2.1.0 enabled');
+
+    function hasValidCurrentFileContext() {
+        try {
+            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
+            if (!file) return false;
+            const normalized = String(file).trim().toLowerCase();
+            return normalized !== '' && normalized !== 'nofile' && normalized !== 'database';
+        } catch (_) {
+            return false;
+        }
+    }
     
-    // NOTE: Preserve cached tag lists even when no Excel file is present.
-    // Previous behavior cleared sessionStorage when no file was uploaded which
-    // caused the tag lists to disappear for users relying on cached data.
-    // Keep localStorage/sessionStorage intact so cached tags remain available.
+    // Deterministic startup: do not auto-hydrate tag cache unless there is a valid file context.
+    // This keeps first-load behavior consistent across machines.
     const fileInfoText = document.getElementById('fileInfoText');
     const hasUploadedFile = fileInfoText && !fileInfoText.textContent.includes('No file uploaded');
     if (!hasUploadedFile) {
@@ -106,73 +115,11 @@
                 console.log('Error checking for current file:', error);
             }
             
-            // If no file exists, prefer cached tags (if available) before showing upload prompt
+            // If no file exists, do NOT hydrate tag cache.
+            // Deterministic first-load behavior across machines: always show upload prompt.
             const availableTagsContainer = document.getElementById('availableTags');
             if (!hasFile && availableTagsContainer) {
-                console.log('📤 No file uploaded - checking cache before showing upload prompt');
-                const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
-                if (cachedTags && Array.isArray(cachedTags) && cachedTags.length > 0) {
-                    console.log(`⚡ INSTANT CACHE HIT (no file): ${cachedTags.length} tags available`);
-                    const savedSelectedTags = [...(this.state.persistentSelectedTags || [])];
-                    this.state.tags = [...cachedTags];
-                    this.state.originalTags = [...cachedTags];
-                    this.state.hydratedFromCache = true;
-
-                    requestAnimationFrame(() => {
-                        console.log('🎨 Rendering cached tags (no file)...');
-                        if (this._updateAvailableTags) {
-                            this._updateAvailableTags(cachedTags, null);
-                        }
-
-                        if (savedSelectedTags.length > 0) {
-                            this.state.persistentSelectedTags = [...savedSelectedTags];
-                            this.state.selectedTags = new Set(savedSelectedTags);
-                            requestAnimationFrame(() => {
-                                savedSelectedTags.forEach(tagName => {
-                                    const checkboxes = document.querySelectorAll(`input[type="checkbox"][value="${CSS.escape(tagName)}"]`);
-                                    checkboxes.forEach(cb => { if (!cb.checked) cb.checked = true; });
-                                });
-                                if (this.getSelectedTagObjects && this.updateSelectedTags) {
-                                    const selectedTagObjects = this.getSelectedTagObjects();
-                                    if (selectedTagObjects.length > 0) {
-                                        this.updateSelectedTags(selectedTagObjects);
-                                    }
-                                }
-                            });
-                        }
-
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                            AppLoadingSplash.stopAutoAdvance();
-                            AppLoadingSplash.complete();
-                        }
-                    });
-
-                    // Background: fetch selected tags and filters
-                    Promise.allSettled([
-                        this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
-                        this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
-                    ]).then(() => {
-                        console.log('✅ Background: Selected tags and filters loaded (no file cached)');
-                        if (savedSelectedTags.length > 0 && this.state.persistentSelectedTags.length === 0) {
-                            this.state.persistentSelectedTags = [...savedSelectedTags];
-                            this.state.selectedTags = new Set(savedSelectedTags);
-                            if (this.getSelectedTagObjects && this.updateSelectedTags) {
-                                const selectedTagObjects = this.getSelectedTagObjects();
-                                if (selectedTagObjects.length > 0) {
-                                    this.updateSelectedTags(selectedTagObjects);
-                                }
-                            }
-                        }
-                    }).catch(err => { console.warn('⚠️ Background load error (non-critical):', err); });
-
-                    return; // Exit early - rendered cached tags
-                }
-
-                // No cache available - show upload prompt
-                console.log('📤 No cache found - showing upload prompt');
+                console.log('📤 No file uploaded - showing upload prompt');
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -671,6 +618,10 @@
     // This allows instant tag display even before TagManager is fully initialized
     function earlyCacheCheck() {
         try {
+            if (!hasValidCurrentFileContext()) {
+                console.log('ℹ️ Early cache check skipped: no valid file context');
+                return;
+            }
             // Try to find any cached tags immediately
             const storageBackends = [];
             if (window.localStorage) storageBackends.push({ name: 'localStorage', storage: localStorage });
@@ -728,4 +679,3 @@
         optimizePageLoad();
     }
 })();
-

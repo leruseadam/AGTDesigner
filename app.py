@@ -3432,7 +3432,7 @@ def upload_file():
                                 # CRITICAL FIX: Use file-path-only cache key with version to bust old caches
                                 # Background thread doesn't have same session context as frontend request
                                 import hashlib
-                                cache_version = "v2_no_excel_lineage"  # Change this to bust all old caches
+                                cache_version = "v3_no_excel_lineage_classic_fix"  # Bump version to invalidate stale lineage caches
                                 cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                                 
                                 # Clear any old cache keys (without version)
@@ -3689,7 +3689,7 @@ def upload_file():
                                 # CRITICAL FIX: Use file-path-only cache key so frontend can access it
                                 # Background thread doesn't have same session context as frontend request
                                 import hashlib
-                                cache_version = "v2_no_excel_lineage"
+                                cache_version = "v3_no_excel_lineage_classic_fix"
                                 cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                                 cache.set(cache_key, safe_tags, timeout=300)
 
@@ -7732,6 +7732,43 @@ def _normalize_weight_string(weight_str):
     s = re.sub(r'(\d+)\.0+(?=\s*[a-zA-Z]|$)', r'\1', s)
     return s
 
+def _is_classic_product_type(product_type_val):
+    """Return True when a product type should be treated as classic lineage-bearing."""
+    from src.core.constants import CLASSIC_TYPES
+    pt = str(product_type_val or '').strip().lower()
+    if not pt:
+        return False
+    return pt in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in pt for ct in CLASSIC_TYPES)
+
+
+def _coerce_classic_lineage(tag, lineage_val, default_classic='HYBRID'):
+    """
+    For classic types, never allow MIXED lineage in UI payloads.
+    Prefer valid Excel lineage if present; otherwise use default_classic.
+    """
+    from src.core.constants import VALID_CLASSIC_LINEAGES
+    lineage_clean = str(lineage_val or '').strip().upper()
+    product_type = (
+        tag.get('Product Type*')
+        or tag.get('ProductType')
+        or tag.get('Product Type')
+        or tag.get('productType')
+        or tag.get('Type')
+    )
+    if _is_classic_product_type(product_type) and lineage_clean == 'MIXED':
+        excel_candidate = (
+            tag.get('excel_lineage')
+            or tag.get('Excel Lineage')
+            or tag.get('Lineage*')
+            or tag.get('Lineage')
+        )
+        excel_candidate_clean = str(excel_candidate).strip().upper() if excel_candidate else ''
+        if excel_candidate_clean in VALID_CLASSIC_LINEAGES:
+            return excel_candidate_clean
+        return default_classic
+    return lineage_clean
+
+
 def _create_desc_and_weight(product_name, weight_units):
     """Create DescAndWeight field with 'Product Name - Weight' format (matching Excel processor)."""
     # CRITICAL FIX: Import re module locally to avoid scoping issues
@@ -8269,12 +8306,34 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             
             # Helper function to validate lineage for classic types
             def _validate_lineage_for_classic(lineage_val, field_name):
-                """Convert MIXED to HYBRID for classic types."""
+                """
+                Ensure classic types never end up as MIXED.
+                Prefer a valid Excel lineage from the current tag when DB returns MIXED;
+                fall back to HYBRID only if no valid classic lineage is available.
+                """
                 if not lineage_val:
                     return lineage_val
                 lineage_str = str(lineage_val).strip().upper()
                 if is_classic and lineage_str == 'MIXED':
-                    logging.info(f"🔄 FIXING invalid MIXED {field_name} for classic type '{name}': MIXED → HYBRID")
+                    from src.core.constants import VALID_CLASSIC_LINEAGES
+                    excel_candidate = (
+                        tag.get('excel_lineage')
+                        or tag.get('Excel Lineage')
+                        or tag.get('Lineage*')
+                        or tag.get('Lineage')
+                    )
+                    excel_candidate_clean = str(excel_candidate).strip().upper() if excel_candidate else ''
+                    if excel_candidate_clean in VALID_CLASSIC_LINEAGES:
+                        logging.info(
+                            f"🔄 FIXING invalid MIXED {field_name} for classic type '{name}': "
+                            f"MIXED → {excel_candidate_clean} (from Excel)"
+                        )
+                        return excel_candidate_clean
+
+                    logging.info(
+                        f"🔄 FIXING invalid MIXED {field_name} for classic type '{name}': "
+                        "MIXED → HYBRID (fallback)"
+                    )
                     return 'HYBRID'
                 return lineage_str
             
@@ -10863,7 +10922,7 @@ def clear_available_tags_cache(reason=None):
             session_file_path = session.get('file_path', '') or session.get('uploaded_file_path', '')
             if session_file_path:
                 # Known cache version used by background pre-cache
-                for ver in ("v2_no_excel_lineage", "v1"):
+                for ver in ("v3_no_excel_lineage_classic_fix", "v2_no_excel_lineage", "v1"):
                     tkey = f"tags_file_{ver}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
                     _clear_key(tkey)
                     # Also attempt deleting without version suffix (legacy)
@@ -11492,7 +11551,7 @@ def get_available_tags():
         # Respect nocache fully: only use file cache when nocache is not requested
         if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
             import hashlib
-            cache_version = "v2_no_excel_lineage"
+            cache_version = "v3_no_excel_lineage_classic_fix"
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
             file_cached_tags = cache.get(file_cache_key)
             if file_cached_tags:
@@ -12803,7 +12862,7 @@ def get_available_tags():
                     file_path = session.get('file_path')
                     if file_path:
                         import hashlib
-                        cache_version = "v2_no_excel_lineage"
+                        cache_version = "v3_no_excel_lineage_classic_fix"
                         cache_key = f"tags_file_{cache_version}_{hashlib.sha256(file_path.encode()).hexdigest()}"
                         try:
                             cache.delete(cache_key)
@@ -13509,22 +13568,14 @@ def get_available_tags():
                                                 else:
                                                     # Even if no DB lineage found, ensure fields are consistent
                                                     # CRITICAL: Classic types should NOT default to MIXED
-                                                    product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
-                                                    from src.core.constants import CLASSIC_TYPES
-                                                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                                    is_classic_type = _is_classic_product_type(
+                                                        tag.get('Product Type*') or tag.get('ProductType') or tag.get('Product Type') or tag.get('productType') or tag.get('Type')
+                                                    )
                                                     default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                     current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
-                                                    
-                                                    # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
-                                                    # For classic types, convert both THC and MIXED to HYBRID
-                                                    # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                                    if is_classic_type:
-                                                        if current_lineage == 'THC' or current_lineage == 'MIXED':
-                                                            current_lineage = 'HYBRID'
-                                                    else:
-                                                        # For non-classic types, "THC" is an abbreviation for "MIXED"
-                                                        if current_lineage == 'THC':
-                                                            current_lineage = 'MIXED'
+                                                    if current_lineage == 'THC':
+                                                        current_lineage = 'MIXED'
+                                                    current_lineage = _coerce_classic_lineage(tag, current_lineage)
                                                     
                                                     # CRITICAL FIX: Always set currentLineage and canonical_lineage for UI consistency
                                                     # Even if one exists, ensure both are set to the same value
@@ -13538,22 +13589,14 @@ def get_available_tags():
                                                 logging.debug(f"Individual query failed for '{tag_name}': {individual_err}")
                                                 # Even if query fails, ensure fields are consistent
                                                 # CRITICAL: Classic types should NOT default to MIXED
-                                                product_type = str(tag.get('Product Type*', '') or tag.get('Type', '')).strip().lower()
-                                                from src.core.constants import CLASSIC_TYPES
-                                                is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                                                is_classic_type = _is_classic_product_type(
+                                                    tag.get('Product Type*') or tag.get('ProductType') or tag.get('Product Type') or tag.get('productType') or tag.get('Type')
+                                                )
                                                 default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                                                 current_lineage = str(tag.get('Lineage', '') or tag.get('currentLineage', '') or tag.get('canonical_lineage', '') or default_lineage).strip().upper()
-                                                
-                                                # CRITICAL: Classic types should NEVER have MIXED/THC - convert to HYBRID immediately
-                                                # For classic types, convert both THC and MIXED to HYBRID
-                                                # Non-classic types (edibles) CAN have MIXED/THC - it's valid for them
-                                                if is_classic_type:
-                                                    if current_lineage == 'THC' or current_lineage == 'MIXED':
-                                                        current_lineage = 'HYBRID'
-                                                else:
-                                                    # For non-classic types, "THC" is an abbreviation for "MIXED"
-                                                    if current_lineage == 'THC':
-                                                        current_lineage = 'MIXED'
+                                                if current_lineage == 'THC':
+                                                    current_lineage = 'MIXED'
+                                                current_lineage = _coerce_classic_lineage(tag, current_lineage)
                                                 if not tag.get('currentLineage') and not tag.get('canonical_lineage'):
                                                     if current_lineage:
                                                         tag['currentLineage'] = current_lineage
@@ -13704,15 +13747,13 @@ def get_available_tags():
                     logging.debug(f"Error processing database tag {db_tag.get('Product Name*', 'unknown')}: {process_error}")
                     # Still add the tag even if processing fails, but preserve lineage
                     # CRITICAL: Classic types should NOT default to MIXED
-                    product_type = str(db_tag.get('Product Type*', '') or db_tag.get('Type', '')).strip().lower()
-                    from src.core.constants import CLASSIC_TYPES
-                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
+                    is_classic_type = _is_classic_product_type(
+                        db_tag.get('Product Type*') or db_tag.get('ProductType') or db_tag.get('Product Type') or db_tag.get('productType') or db_tag.get('Type')
+                    )
                     default_lineage = 'HYBRID' if is_classic_type else 'MIXED'
                     if db_tag.get('currentLineage') or db_tag.get('canonical_lineage'):
                         fallback_lineage = db_tag.get('Lineage', default_lineage)
-                        # CRITICAL: Never allow MIXED for classic types
-                        if is_classic_type and fallback_lineage == 'MIXED':
-                            fallback_lineage = 'HYBRID'
+                        fallback_lineage = _coerce_classic_lineage(db_tag, fallback_lineage)
                         db_tag['currentLineage'] = db_tag.get('currentLineage') or fallback_lineage
                         db_tag['canonical_lineage'] = db_tag.get('canonical_lineage') or fallback_lineage
                     processed_tags[i] = db_tag
@@ -13885,12 +13926,7 @@ def get_available_tags():
                     old_lineage = str(excel_tag.get('Lineage', '') or excel_tag.get('currentLineage', '') or excel_tag.get('canonical_lineage', '')).strip().upper()
                 
                     # CRITICAL: Classic types should NEVER have MIXED lineage
-                    product_type = str(excel_tag.get('Product Type*', '') or excel_tag.get('Type', '')).strip().lower()
-                    from src.core.constants import CLASSIC_TYPES
-                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
-                    if is_classic_type and db_lineage_clean == 'MIXED':
-                        db_lineage_clean = 'HYBRID'
-                        logging.debug(f"🔄 CRITICAL: Changed MIXED to HYBRID for classic type '{product_name}' (type: '{product_type}')")
+                    db_lineage_clean = _coerce_classic_lineage(excel_tag, db_lineage_clean)
                 
                     # CRITICAL: Always update ALL lineage fields from database using get_product_lineage()
                     # This ensures frontend gets exact same values as output generation
@@ -13910,12 +13946,7 @@ def get_available_tags():
                     db_lineage_clean = str(db_lineage_data['Lineage']).strip().upper()
                 
                     # CRITICAL: Classic types should NEVER have MIXED lineage
-                    product_type = str(excel_tag.get('Product Type*', '') or excel_tag.get('Type', '')).strip().lower()
-                    from src.core.constants import CLASSIC_TYPES
-                    is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES] if product_type else False
-                    if is_classic_type and db_lineage_clean == 'MIXED':
-                        db_lineage_clean = 'HYBRID'
-                        logging.debug(f"🔄 CRITICAL: Changed MIXED to HYBRID for classic type '{product_name}' (type: '{product_type}')")
+                    db_lineage_clean = _coerce_classic_lineage(excel_tag, db_lineage_clean)
                 
                     # CRITICAL: Always update ALL lineage fields from database, even if they appear to match
                     # This ensures frontend gets fresh database values
@@ -14025,6 +14056,9 @@ def get_available_tags():
                             direct_db_lineage = product_db.get_product_lineage(tag_name, bypass_cache=True)
                             if direct_db_lineage:
                                 db_lineage_clean = str(direct_db_lineage).strip().upper()
+                                # Classic types must never remain MIXED.
+                                db_lineage_clean = _coerce_classic_lineage(tag, db_lineage_clean)
+
                                 # Set ALL lineage fields to database value
                                 tag['currentLineage'] = db_lineage_clean
                                 tag['canonical_lineage'] = db_lineage_clean
@@ -15718,7 +15752,7 @@ def get_web_available_tags():
         try:
             if session_file_path and not has_recent_lineage_update:
                 import hashlib
-                cache_version = "v2_no_excel_lineage"
+                cache_version = "v3_no_excel_lineage_classic_fix"
                 file_hash = hashlib.sha256(session_file_path.encode()).hexdigest()
                 bg_cache_key = f"tags_file_{cache_version}_{file_hash}"
                 bg_tags = cache.get(bg_cache_key)
@@ -15844,7 +15878,7 @@ def get_web_available_tags():
                 )
                 
                 if final_lineage and str(final_lineage).strip():
-                    lineage_clean = str(final_lineage).strip().upper()
+                    lineage_clean = _coerce_classic_lineage(tag, final_lineage)
                     # CRITICAL: Always preserve canonical_lineage from strains table if it exists
                     if tag.get('canonical_lineage'):
                         # Database lineage from strains table - preserve canonical_lineage
@@ -15916,7 +15950,7 @@ def get_web_filter_options():
             session_file_path = session.get('file_path', '')
             if session_file_path:
                 import hashlib
-                cache_version = "v2_no_excel_lineage"
+                cache_version = "v3_no_excel_lineage_classic_fix"
                 dd_cache_key = f"dropdowns_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
                 bg_dropdowns = cache.get(dd_cache_key)
                 if bg_dropdowns:
@@ -16278,7 +16312,7 @@ def get_filter_options():
             session_file_path = session.get('file_path', '')
             if session_file_path:
                 import hashlib
-                cache_version = "v2_no_excel_lineage"
+                cache_version = "v3_no_excel_lineage_classic_fix"
                 file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
                 cached_tags = cache.get(file_cache_key)
                 if cached_tags and len(cached_tags) > 0:
@@ -18346,6 +18380,106 @@ def create_database_product():
 
     except Exception as e:
         logging.error(f"[DB EDITOR] Error creating product: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# Temporary testing-only endpoint: allow unauthenticated creation when ALLOW_UNAUTH_TEST_API=1
+@app.route('/__test/create-database-product', methods=['POST'])
+def test_create_database_product():
+    """Testing helper: create a database product without browser session/auth when enabled.
+
+    This endpoint is intentionally gated by the environment variable
+    `ALLOW_UNAUTH_TEST_API`. Set it to '1' to enable; otherwise it returns 403.
+    Remove this route after verification.
+    """
+    # Allow if server env var is set OR request includes test header (for local testing)
+    allowed = os.environ.get('ALLOW_UNAUTH_TEST_API') == '1' or request.headers.get('X-ALLOW-UNAUTH-TEST') == '1' or request.args.get('allow') == '1'
+    if not allowed:
+        return jsonify({'error': 'testing endpoint disabled'}), 403
+
+    try:
+        data = request.get_json(silent=True) or {}
+        product_db = _get_editor_database()
+
+        import sqlite3
+        with db_connection(product_db.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('PRAGMA table_info(products)')
+            cols = {row['name'] for row in cursor.fetchall()}
+
+            excel_style = 'Product Name*' in cols or 'Product Brand' in cols
+
+            if excel_style:
+                column_mappings = {
+                    'Price': ['Price', 'Price* (Tier Name for Bulk)'],
+                }
+
+                def get_column_name(options):
+                    if isinstance(options, str):
+                        options = [options]
+                    for opt in options:
+                        if opt in cols:
+                            return opt
+                    return None
+
+                price_col = get_column_name(column_mappings['Price'])
+
+                logical_to_real = {
+                    'Product Name*': 'Product Name*',
+                    'Product Type*': 'Product Type*',
+                    'Product Brand': 'Product Brand',
+                    'Vendor/Supplier*': 'Vendor/Supplier*',
+                    'Lineage': 'Lineage',
+                    'Weight*': 'Weight*',
+                    'Description': 'Description',
+                }
+
+                columns = []
+                values = []
+
+                for logical_name, real_col in logical_to_real.items():
+                    if logical_name in data and real_col in cols:
+                        columns.append(f'"{real_col}"')
+                        values.append(data[logical_name])
+
+                if 'Price' in data and price_col:
+                    columns.append(f'"{price_col}"')
+                    values.append(data['Price'])
+            else:
+                mapping = {
+                    'Product Name*': 'product_name',
+                    'Product Type*': 'product_type',
+                    'Product Brand': 'brand',
+                    'Vendor/Supplier*': 'vendor',
+                    'Lineage': 'lineage',
+                    'Price': 'price',
+                    'Weight*': 'weight',
+                    'Description': 'description',
+                }
+
+                columns = []
+                values = []
+
+                for logical_name, real_col in mapping.items():
+                    if logical_name in data and real_col in cols:
+                        columns.append(real_col)
+                        values.append(data[logical_name])
+
+            if not columns:
+                return jsonify({'success': False, 'error': 'No valid fields provided for insert'}), 400
+
+            placeholders = ','.join(['?'] * len(columns))
+            cols_sql = ','.join(columns)
+            query = f'INSERT INTO products ({cols_sql}) VALUES ({placeholders})'
+            cursor.execute(query, values)
+            new_id = cursor.lastrowid
+            conn.commit()
+
+        return jsonify({'success': True, 'id': new_id})
+
+    except Exception as e:
+        logging.error(f"[DB EDITOR][TEST] Error creating product: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/force-database-storage', methods=['POST'])

@@ -339,6 +339,7 @@ class EnhancedStrainLineageEditor {
                                     <option value="HYBRID/SATIVA" class="text-success">🌿 HYBRID/SATIVA</option>
                                     <option value="HYBRID/INDICA" class="text-info">🍃 HYBRID/INDICA</option>
                                     <option value="CBD" class="text-primary">💚 CBD</option>
+                                    <option value="CBD (ed)" class="text-primary">💚 CBD (ed)</option>
                                     <option value="CBD_BLEND" class="text-primary">💚 CBD BLEND</option>
                                     <option value="MIXED" class="text-secondary">🔀 MIXED</option>
                                     <option value="PARA" class="text-dark">⚫ PARA</option>

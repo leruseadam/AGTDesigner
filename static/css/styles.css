@@ -33,6 +33,44 @@
   --tag-list-scroll-padding: 1rem;
 }
 
+/* Ensure Template selects show a bright turquoise border in all contexts */
+.center-column-wrapper #templateSelect,
+.center-column-wrapper #templateGroupSelect,
+#templateSelect,
+#templateGroupSelect {
+  border: 3px solid #00d4aa !important;
+  box-shadow: 0 0 24px rgba(0,212,170,0.55) !important;
+  background-color: rgba(44,34,58,0.9) !important;
+  color: #ffffff !important;
+}
+
+.center-column-wrapper #templateSelect:focus,
+.center-column-wrapper #templateGroupSelect:focus,
+#templateSelect:focus,
+#templateGroupSelect:focus {
+  outline: none !important;
+  box-shadow: 0 0 36px rgba(0,212,170,0.9) !important;
+  border-color: #00ffd6 !important;
+}
+
+/* Highly-specific override to force turquoise border on templateSelect even if browser applies native styling */
+.control-section-template .control-group-modern #templateSelect.form-select-modern,
+.control-section-template .control-group-modern #templateGroupSelect.form-select-modern,
+.center-column-wrapper .control-section-template #templateSelect.form-select-modern,
+.center-column-wrapper .control-section-template #templateGroupSelect.form-select-modern {
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  border: 3px solid #00d4aa !important;
+  box-shadow: 0 0 28px rgba(0,212,170,0.7) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='%23ffffff' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  background-size: 14px 14px !important;
+  padding-right: 2.2rem !important; /* leave space for custom arrow */
+  z-index: 5 !important;
+}
+
 /* Final override for help button spacing/position */
 .help-button-container {
   margin: 0.5rem 0 1rem 0 !important;
@@ -2784,6 +2822,136 @@ body.modal-open #mainContent.store-selection-disabled,
     gap: 0.5rem !important;
     padding: 0.5rem !important;
   }
+
+  /* Constrain inner center column content so buttons and panels fit the original column */
+  .center-column-wrapper {
+    width: 100% !important;
+    max-width: 220px !important; /* keep center content narrow inside the center column */
+    box-sizing: border-box !important;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    margin: 0 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important; /* push actions to align with tag lists */
+    gap: 1rem !important; /* increased vertical gaps for breathing room */
+    max-height: var(--tag-list-height) !important; /* match tag lists height */
+    min-height: var(--tag-list-height) !important; /* ensure it fills the same vertical space */
+    overflow-y: auto !important; /* allow scrolling if content exceeds height */
+  }
+
+  /* Give the center column a single cohesive glass backing */
+  .center-column-wrapper {
+    background: rgba(30, 30, 50, 0.98) !important;
+    backdrop-filter: blur(18px) saturate(1.05) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(1.05) !important;
+    border: 1px solid rgba(160,132,232,0.18) !important;
+    box-shadow: 0 18px 48px rgba(10,10,20,0.45) !important;
+    border-radius: 16px !important;
+    padding: 0.6rem !important; /* inner padding for the backing */
+    margin-bottom: 0 !important;
+  }
+
+  /* Make inner control sections transparent so the backing reads as one card */
+  .center-column-wrapper .control-section-modern,
+  .center-column-wrapper .control-section-database,
+  .center-column-wrapper .control-section-help {
+    background: transparent !important;
+    border: none !important;
+    padding: 0.35rem 0 !important;
+    margin: 0 !important;
+  }
+
+  .center-column-wrapper .section-header-modern {
+    margin-bottom: 0.25rem !important;
+    padding-bottom: 0 !important;
+  }
+
+  /* Make control panels inside the centered wrapper use the wrapper width */
+  .center-column-wrapper .control-panel,
+  .center-column-wrapper .control-panel-modern {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+
+  /* Ensure buttons inside the center column fit the wrapper neatly */
+  .center-column-wrapper #generateBtn,
+  .center-column-wrapper .btn-primary-modern,
+  .center-column-wrapper .btn-secondary-modern,
+  .center-column-wrapper .btn-control {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    padding-left: 0.4rem !important;
+    padding-right: 0.4rem !important;
+  }
+
+  /* Size adjustments specific to center column generate button */
+  .center-column-wrapper #generateBtn {
+    font-size: 1.05rem !important;
+    padding: 0.9rem 1.1rem !important;
+    min-height: 64px !important; /* increased height for prominence */
+    border-radius: 10px !important;
+  }
+
+  /* Stronger overrides to prevent buttons from becoming square/oversized */
+  .center-column-wrapper .control-section-modern,
+  .center-column-wrapper .control-section-template {
+    padding-top: 0.9rem !important;
+    padding-bottom: 0.9rem !important;
+  }
+
+  .center-column-wrapper .control-group-modern {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 0.6rem !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Reduce top wasted space inside center column and make template section more compact */
+  .center-column-wrapper .control-panel-modern {
+    gap: 1.2rem !important;
+    padding-top: 0.75rem !important;
+    padding-bottom: 0.9rem !important;
+  }
+
+  /* Hide the Template Type label (we removed it from the HTML but keep this as a safeguard) */
+  .control-section-template .control-label-modern {
+    display: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* Slightly tighten the section header spacing */
+  .control-section-template .section-header-modern {
+    margin-bottom: 0.65rem !important;
+    padding-bottom: 0.35rem !important;
+  }
+
+  .center-column-wrapper .control-group-modern > button,
+  .center-column-wrapper .control-group-modern button.btn-primary-modern,
+  .center-column-wrapper .control-group-modern button#generateBtn {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 48px !important; /* cap height so button stays rectangular */
+    padding: 0.45rem 0.65rem !important;
+    font-size: 0.95rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* If a button contains a pseudo-element that grows, cap it */
+  .center-column-wrapper .control-group-modern > button::before {
+    display: none !important;
+  }
   
   /* Ensure filter bar has reasonable height */
   .sticky-filter-bar {
@@ -3174,12 +3342,18 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   /* Generate button - Professional and Prominent */
+  /* Override btn-primary-modern width for generate button */
+  .control-panel #generateBtn.btn-primary-modern {
+    width: 45% !important; /* Further reduced for narrow center column */
+    max-width: 45% !important; /* Further reduced for narrow center column */
+  }
+
   .control-panel #generateBtn {
     margin: 1.5rem auto 0.2rem auto !important; /* Increased top margin for healthy gap from template select */
-    padding: 0.7rem 1.2rem !important;
-    font-size: 1.05rem !important;
-    width: 75% !important; /* Match control buttons width */
-    max-width: 75% !important; /* Match control buttons width */
+    padding: 0.5rem 0.8rem !important; /* Reduced padding */
+    font-size: 0.9rem !important; /* Reduced font size */
+    width: 45% !important; /* Further reduced from 55% to fit better in narrow column */
+    max-width: 45% !important; /* Further reduced from 55% to fit better in narrow column */
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -3187,7 +3361,7 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: 700 !important;
     box-shadow: 0 3px 12px rgba(139, 92, 246, 0.4), 0 6px 20px rgba(139, 92, 246, 0.25) !important;
     transition: all 0.2s ease-in-out !important;
-    min-height: 52px !important;
+    min-height: 42px !important; /* Reduced from 52px */
     height: auto !important;
     line-height: 1.2 !important;
     border-radius: 10px !important;
@@ -3216,11 +3390,11 @@ body.modal-open #mainContent.store-selection-disabled,
     -webkit-backdrop-filter: blur(20px) saturate(1.2) !important;
     border: 2px solid rgba(236, 72, 153, 0.8) !important;
     color: #fce7f3 !important;
-    padding: 1.15rem 1.5rem !important;
+    padding: 0.6rem 1.0rem !important; /* Reduced from 1.15rem 1.5rem */
     border-radius: 12px !important;
     font-weight: 600 !important;
-    font-size: 1.3rem !important;
-    min-height: 60px !important;
+    font-size: 0.95rem !important; /* Reduced from 1.3rem */
+    min-height: 44px !important; /* Reduced from 60px */
     transition: all 0.2s ease !important;
     box-shadow: 
       0 2px 8px rgba(0, 0, 0, 0.15),
@@ -3332,6 +3506,31 @@ body.modal-open #mainContent.store-selection-disabled,
     left: 100%;
   }
   
+  /* Direct styling for Manage Templates button (fallback if class not present) */
+  #manageTemplatesBtn {
+    background: linear-gradient(135deg, #56CCF2 0%, #2F80ED 100%) !important;
+    border: 1px solid rgba(47,128,237,0.9) !important;
+    color: #ffffff !important;
+    max-width: 80% !important;
+    box-shadow:
+      0 4px 10px rgba(47,128,237,0.22),
+      inset 0 1px 0 rgba(255,255,255,0.06) !important;
+    padding: 0.55rem 0.8rem !important;
+    min-height: 44px !important;
+    border-radius: 10px !important;
+    transition: transform 120ms ease, filter 120ms ease !important;
+  }
+
+  #manageTemplatesBtn svg {
+    stroke: rgba(255,255,255,0.95) !important;
+    fill: none !important;
+  }
+
+  #manageTemplatesBtn:hover {
+    filter: brightness(1.05) !important;
+    transform: translateY(-2px) !important;
+  }
+  
   /* JSON Tools section spacing */
   .control-panel .mb-3 {
     margin-bottom: 0.5rem !important;
@@ -3381,8 +3580,8 @@ body.modal-open #mainContent.store-selection-disabled,
     font-size: 0.85rem !important; /* Smaller font for compact buttons */
     font-weight: 650 !important;
     min-height: 42px !important; /* Compact height to match undo/redo */
-    width: 70% !important; /* Reduced from 85% for less width */
-    max-width: 70% !important;
+    width: 55% !important; /* Reduced from 70% to fit narrow center column */
+    max-width: 55% !important;
     margin: 0 auto !important; /* Keep centered if container narrower */
     border-radius: 12px !important;
     display: flex !important;
@@ -12061,22 +12260,503 @@ html, body {
     background: rgba(160, 132, 232, 0.6);
 }
 
-/* Responsive */
+/* ========================================
+   MODERN CENTER COLUMN REDESIGN
+   ======================================== */
+
+/* Modern Control Panel */
+.control-panel-modern {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: 100% !important;
+  gap: 1.5rem !important;
+  padding: 1rem 0 !important;
+}
+
+/* Modern Control Sections */
+.control-section-modern {
+  width: 100% !important;
+  max-width: 280px !important;
+  background: rgba(45, 34, 58, 0.8) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(160, 132, 232, 0.2) !important;
+  border-radius: 16px !important;
+  padding: 1.25rem !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
+  transition: all 0.3s ease !important;
+}
+
+.control-section-modern:hover {
+  border-color: rgba(160, 132, 232, 0.4) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4) !important;
+  transform: translateY(-2px) !important;
+}
+
+/* Section Headers */
+.section-header-modern {
+  text-align: center !important;
+  margin-bottom: 1rem !important;
+  padding-bottom: 0.75rem !important;
+  border-bottom: 1px solid rgba(160, 132, 232, 0.2) !important;
+}
+
+.section-title {
+  color: #ffffff !important;
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  margin: 0 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Control Groups */
+.control-group-modern {
+  margin-bottom: 1rem !important;
+}
+
+.control-group-modern:last-child {
+  margin-bottom: 0 !important;
+}
+
+.control-label-modern {
+  display: block !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  margin-bottom: 0.5rem !important;
+  text-align: center !important;
+}
+
+/* Modern Form Select */
+.form-select-modern {
+  width: 100% !important;
+  padding: 0.75rem 1rem !important;
+  background: rgba(60, 60, 90, 0.6) !important;
+  backdrop-filter: blur(10px) !important;
+  border: 1px solid rgba(160, 132, 232, 0.3) !important;
+  border-radius: 10px !important;
+  color: #ffffff !important;
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
+  transition: all 0.3s ease !important;
+  cursor: pointer !important;
+}
+
+.form-select-modern:focus {
+  outline: none !important;
+  border-color: rgba(160, 132, 232, 0.8) !important;
+  box-shadow: 0 0 0 3px rgba(160, 132, 232, 0.2) !important;
+  background: rgba(80, 80, 110, 0.7) !important;
+}
+
+.form-select-modern:hover {
+  border-color: rgba(160, 132, 232, 0.5) !important;
+  background: rgba(70, 70, 100, 0.7) !important;
+}
+
+/* Radio Group */
+.radio-group-modern {
+  display: flex !important;
+  gap: 0.5rem !important;
+  justify-content: center !important;
+}
+
+.radio-option-modern {
+  position: relative !important;
+}
+
+.radio-option-modern input[type="radio"] {
+  position: absolute !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.radio-label-modern {
+  display: inline-block !important;
+  padding: 0.5rem 1rem !important;
+  background: rgba(60, 60, 90, 0.5) !important;
+  border: 1px solid rgba(160, 132, 232, 0.2) !important;
+  border-radius: 8px !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  font-size: 0.85rem !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  text-align: center !important;
+  min-width: 80px !important;
+}
+
+.radio-option-modern input[type="radio"]:checked + .radio-label-modern {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(22, 163, 74, 0.4)) !important;
+  border-color: rgba(34, 197, 94, 0.6) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.3) !important;
+}
+
+.radio-label-modern:hover {
+  background: rgba(80, 80, 110, 0.6) !important;
+  border-color: rgba(160, 132, 232, 0.4) !important;
+  color: #ffffff !important;
+}
+
+/* Modern Buttons */
+.btn-primary-modern,
+.btn-secondary-modern {
+  width: 100% !important;
+  padding: 0.875rem 1.25rem !important;
+  border: none !important;
+  border-radius: 12px !important;
+  font-size: 0.9rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.5rem !important;
+  text-decoration: none !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.btn-primary-modern {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.6), rgba(22, 163, 74, 0.7)) !important;
+  color: #ffffff !important;
+  border: 2px solid rgba(34, 197, 94, 0.4) !important;
+}
+
+.btn-primary-modern:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.7), rgba(22, 163, 74, 0.8)) !important;
+  border-color: rgba(34, 197, 94, 0.8) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(34, 197, 94, 0.4) !important;
+}
+
+.btn-secondary-modern {
+  background: rgba(60, 60, 90, 0.6) !important;
+  backdrop-filter: blur(10px) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(160, 132, 232, 0.3) !important;
+}
+
+.btn-secondary-modern:hover {
+  background: rgba(80, 80, 110, 0.7) !important;
+  border-color: rgba(160, 132, 232, 0.5) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(160, 132, 232, 0.2) !important;
+}
+
+/* Button Grid */
+.button-grid-modern {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 0.75rem !important;
+}
+
+/* Action Buttons */
+.btn-action-modern {
+  padding: 0.75rem 0.5rem !important;
+  border: none !important;
+  border-radius: 10px !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.25rem !important;
+  text-decoration: none !important;
+  min-height: 70px !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.btn-action-modern svg {
+  width: 20px !important;
+  height: 20px !important;
+  transition: transform 0.3s ease !important;
+}
+
+.btn-action-modern:hover svg {
+  transform: scale(1.1) !important;
+}
+
+.btn-undo {
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.4), rgba(249, 115, 22, 0.5)) !important;
+  border: 1px solid rgba(251, 146, 60, 0.6) !important;
+  color: #fed7aa !important;
+  box-shadow: 0 2px 8px rgba(251, 146, 60, 0.3) !important;
+}
+
+.btn-undo:hover {
+  background: linear-gradient(135deg, rgba(251, 146, 60, 0.5), rgba(249, 115, 22, 0.6)) !important;
+  border-color: rgba(251, 146, 60, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(251, 146, 60, 0.4) !important;
+}
+
+.btn-redo {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5)) !important;
+  border: 1px solid rgba(59, 130, 246, 0.6) !important;
+  color: #dbeafe !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3) !important;
+}
+
+.btn-redo:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.6)) !important;
+  border-color: rgba(59, 130, 246, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4) !important;
+}
+
+.btn-clear {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.4), rgba(220, 38, 38, 0.5)) !important;
+  border: 1px solid rgba(239, 68, 68, 0.6) !important;
+  color: #fecaca !important;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3) !important;
+  grid-column: span 2 !important;
+}
+
+.btn-clear:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.5), rgba(220, 38, 38, 0.6)) !important;
+  border-color: rgba(239, 68, 68, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4) !important;
+}
+
+/* Tool Buttons */
+.btn-tool-modern {
+  padding: 0.75rem 0.5rem !important;
+  border: none !important;
+  border-radius: 10px !important;
+  font-size: 1rem !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.25rem !important;
+  text-decoration: none !important;
+  min-height: 76px !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.btn-tool-modern svg {
+  width: 20px !important;
+  height: 20px !important;
+  transition: transform 0.3s ease !important;
+}
+
+.btn-tool-modern span {
+  font-size: 1.05rem !important;
+  font-weight: 700 !important;
+  line-height: 1.1 !important;
+}
+
+.btn-tool-modern:hover svg {
+  transform: scale(1.1) !important;
+}
+
+.btn-export {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.4), rgba(22, 163, 74, 0.5)) !important;
+  border: 1px solid rgba(34, 197, 94, 0.6) !important;
+  color: #d1fae5 !important;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3) !important;
+}
+
+.btn-export:hover {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.5), rgba(22, 163, 74, 0.6)) !important;
+  border-color: rgba(34, 197, 94, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(34, 197, 94, 0.4) !important;
+}
+
+.btn-analytics {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5)) !important;
+  border: 1px solid rgba(59, 130, 246, 0.6) !important;
+  color: #dbeafe !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3) !important;
+}
+
+.btn-analytics:hover {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.5), rgba(37, 99, 235, 0.6)) !important;
+  border-color: rgba(59, 130, 246, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4) !important;
+}
+
+.btn-cache {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.4), rgba(217, 119, 6, 0.5)) !important;
+  border: 1px solid rgba(245, 158, 11, 0.6) !important;
+  color: #fef3c7 !important;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3) !important;
+}
+
+.btn-cache:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.5), rgba(217, 119, 6, 0.6)) !important;
+  border-color: rgba(245, 158, 11, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.4) !important;
+}
+
+/* Lineage Editor Tool Button */
+.btn-lineage {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.42), rgba(79, 70, 229, 0.5)) !important;
+  border: 1px solid rgba(99, 102, 241, 0.6) !important;
+  color: #e0e7ff !important;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.28) !important;
+}
+
+.btn-lineage:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.52), rgba(79, 70, 229, 0.6)) !important;
+  border-color: rgba(79, 70, 229, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.36) !important;
+}
+
+/* Help Button */
+.btn-help-modern {
+  width: 100% !important;
+  padding: 1rem 1.5rem !important;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(124, 58, 237, 0.5)) !important;
+  border: 2px solid rgba(139, 92, 246, 0.6) !important;
+  border-radius: 14px !important;
+  color: #e9d5ff !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.75rem !important;
+  text-decoration: none !important;
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3) !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.btn-help-modern:hover {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(124, 58, 237, 0.6)) !important;
+  border-color: rgba(139, 92, 246, 0.8) !important;
+  color: #ffffff !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.4) !important;
+}
+
+.help-icon {
+  width: 24px !important;
+  height: 24px !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 1.2rem !important;
+  font-weight: bold !important;
+  transition: all 0.3s ease !important;
+}
+
+.btn-help-modern:hover .help-icon {
+  background: rgba(255, 255, 255, 0.3) !important;
+  transform: scale(1.1) !important;
+}
+
+.help-text {
+  flex: 1 !important;
+  text-align: center !important;
+}
+
+/* Responsive Design */
 @media (max-width: 768px) {
-    #databaseModal .modal-body {
-        padding: 1.5rem;
-    }
-    
-    .analytics-card-value {
-        font-size: 2rem;
-    }
-    
-    .analytics-section-header {
-        padding: 1rem;
-    }
-    
-    .analytics-section-body {
-        padding: 1rem;
-    }
+  .control-panel-modern {
+    gap: 1rem !important;
+    padding: 0.5rem 0 !important;
+  }
+
+  .control-section-modern {
+    max-width: 100% !important;
+    padding: 1rem !important;
+  }
+
+  .button-grid-modern {
+    grid-template-columns: 1fr !important;
+    gap: 0.5rem !important;
+  }
+
+  .btn-action-modern,
+  .btn-tool-modern {
+    min-height: 60px !important;
+    padding: 0.625rem 0.5rem !important;
+    font-size: 0.75rem !important;
+  }
+
+  .btn-clear {
+    grid-column: span 1 !important;
+  }
+
+  .btn-primary-modern,
+  .btn-secondary-modern {
+    padding: 0.75rem 1rem !important;
+    font-size: 0.85rem !important;
+  }
+
+  .radio-group-modern {
+    flex-direction: column !important;
+    gap: 0.25rem !important;
+  }
+
+  .radio-label-modern {
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.8rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .control-section-modern {
+    padding: 0.875rem !important;
+  }
+
+  .section-title {
+    font-size: 0.8rem !important;
+  }
+
+  .control-label-modern {
+    font-size: 0.8rem !important;
+  }
+
+  .form-select-modern {
+    padding: 0.625rem 0.875rem !important;
+    font-size: 0.85rem !important;
+  }
+
+  .btn-help-modern {
+    padding: 0.875rem 1.25rem !important;
+    font-size: 0.9rem !important;
+  }
+
+  .help-icon {
+    width: 20px !important;
+    height: 20px !important;
+    font-size: 1rem !important;
+  }
 }
 

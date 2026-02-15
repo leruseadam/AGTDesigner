@@ -1747,7 +1747,13 @@ class ExcelProcessor:
                 
                 # 1. Basic column normalization (vectorized for speed)
                 if "Product Name*" in df.columns:
-                    df["Product Name*"] = df["Product Name*"].str.lstrip()
+                    df["Product Name*"] = (
+                        df["Product Name*"]
+                        .fillna("")
+                        .astype(str)
+                        .str.replace(r"\s+", " ", regex=True)
+                        .str.strip()
+                    )
                 
                 # 2. Ensure required columns exist
                 for col in ["Product Type*", "Lineage", "Product Brand"]:
@@ -2176,11 +2182,29 @@ class ExcelProcessor:
 
             # 2) Trim product names
             if "Product Name*" in self.df.columns:
-                self.df["Product Name*"] = self.df["Product Name*"].str.lstrip()
+                self.df["Product Name*"] = (
+                    self.df["Product Name*"]
+                    .fillna("")
+                    .astype(str)
+                    .str.replace(r"\s+", " ", regex=True)
+                    .str.strip()
+                )
             elif "Product Name" in self.df.columns:
-                self.df["Product Name*"] = self.df["Product Name"].str.lstrip()
+                self.df["Product Name*"] = (
+                    self.df["Product Name"]
+                    .fillna("")
+                    .astype(str)
+                    .str.replace(r"\s+", " ", regex=True)
+                    .str.strip()
+                )
             elif "ProductName" in self.df.columns:
-                self.df["Product Name*"] = self.df["ProductName"].str.lstrip()
+                self.df["Product Name*"] = (
+                    self.df["ProductName"]
+                    .fillna("")
+                    .astype(str)
+                    .str.replace(r"\s+", " ", regex=True)
+                    .str.strip()
+                )
             else:
                 self.logger.error("No product name column found")
                 self.df["Product Name*"] = "Unknown"
@@ -8572,4 +8596,3 @@ class ExcelProcessor:
             
         except Exception as e:
             self.logger.error(f"Error processing descriptions from product names: {e}")
-

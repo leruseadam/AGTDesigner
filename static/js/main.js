@@ -11,7 +11,7 @@ function abbreviateLineage(lineage) {
         'HYBRID/SATIVA': 'SH',
         'MIXED': 'THC',
         'PARA': 'PARA',
-        'CBD_BLEND': 'CBD',
+        'CBD_BLEND': 'CBDE',
     };
     if (!lineage) return '';
     const key = lineage.toString().trim().toUpperCase();
@@ -1155,6 +1155,13 @@ const TagManager = {
         return (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
     },
 
+    hasValidCurrentFileContext() {
+        const file = this.getCurrentFileName();
+        if (!file) return false;
+        const normalized = String(file).trim().toLowerCase();
+        return normalized !== '' && normalized !== 'nofile' && normalized !== 'database';
+    },
+
     getAvailableTagsCacheKey() {
         try {
             const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
@@ -1317,14 +1324,20 @@ const TagManager = {
         try {
             verboseLog('💾 Attempting to load tags from cache...');
 
+            // Deterministic startup: only hydrate tag cache when a real file context exists.
+            // This prevents stale/no-file caches from changing first-load behavior across machines.
+            if (!this.hasValidCurrentFileContext()) {
+                verboseLog('⏭️ Skipping available-tags cache load: no valid current file context');
+                return null;
+            }
+
             // CRITICAL FIX: Use localStorage first (larger capacity), fallback to sessionStorage
             const storage = window.localStorage || window.sessionStorage;
             if (!storage) {
                 return null;
             }
 
-            // CRITICAL FIX: Try to load cache even if no Excel file - database mode uses "nofile" as key
-            // This allows cache to work in both Excel mode and database-only mode
+            // Load cache only for valid file-backed sessions.
             const cacheKey = this.getAvailableTagsCacheKey();
             let raw = storage.getItem(cacheKey);
 
@@ -1405,6 +1418,12 @@ const TagManager = {
     saveAvailableTagsToCache(tags) {
         try {
             if (!Array.isArray(tags) || tags.length === 0) {
+                return;
+            }
+
+            // Deterministic startup: do not persist no-file caches.
+            if (!this.hasValidCurrentFileContext()) {
+                verboseLog('⏭️ Skipping available-tags cache save: no valid current file context');
                 return;
             }
 
@@ -8420,8 +8439,7 @@ const TagManager = {
             'CBD',
             'CBD_BLEND',
             'MIXED',
-            'PARA',
-            'PARAPHERNALIA'
+            'PARA'
         ];
         // Make available globally for legacy code
         window.allLineageOptions = lineageOptions;
@@ -8507,7 +8525,7 @@ const TagManager = {
             let shouldSelect = false;
             if (normalizedLineage === optionValue) {
                 shouldSelect = true;
-            } else if (optionValue === 'CBD' && (normalizedLineage === 'CBD' || normalizedLineage === 'CBD_BLEND')) {
+            } else if (optionValue === 'CBD' && normalizedLineage === 'CBD') {
                 shouldSelect = true;
             } else if (optionValue === 'MIXED' && shouldMapToMixed(normalizedLineage)) {
                 shouldSelect = true;
@@ -8518,7 +8536,9 @@ const TagManager = {
             }
             lineageSelect.appendChild(optionElement);
         });
-        if (normalizedLineage === 'CBD_BLEND' || normalizedLineage === 'CBD') {
+        if (normalizedLineage === 'CBD_BLEND') {
+            lineageSelect.value = 'CBD_BLEND';
+        } else if (normalizedLineage === 'CBD') {
             lineageSelect.value = 'CBD';
         } else if (shouldMapToMixed(normalizedLineage)) {
             // CRITICAL FIX: Classic types should never get MIXED - use HYBRID instead
@@ -8598,6 +8618,19 @@ const TagManager = {
             tag.lineage = newLineage;
             tag.Lineage = newLineage;
             tagElement.dataset.lineage = newLineage.toUpperCase();
+            // Set product-type styling flag for UI based on lineage selection
+            try {
+                const normalized = (newLineage || '').toString().trim().toUpperCase().replace(/\s+/g, '').replace(/[()]/g, '');
+                if (['MIXED', 'THC', 'CBD_BLEND', 'CBDE'].includes(normalized)) {
+                    tagElement.dataset.productType = 'nonclassic';
+                } else if (normalized === 'CBD') {
+                    tagElement.dataset.productType = 'classic';
+                } else {
+                    // leave existing productType alone for other lineage values
+                }
+            } catch (e) {
+                // ignore dataset errors
+            }
 
             // Update the tag color to reflect the new lineage
             this.forceTagColorUpdate(tag, newLineage);
@@ -8880,7 +8913,7 @@ const TagManager = {
             'CBD': 'CBD',
             'PARA': 'P',
             'MIXED': 'THC',
-            'CBD_BLEND': 'CBD'
+            'CBD_BLEND': 'CBDE'
         };
         return map[(lineage || '').toUpperCase()] || '';
     },
@@ -19889,7 +19922,7 @@ window.ABBREVIATED_LINEAGE = {
     "HYBRID/SATIVA": "H/S",
     "HYBRID/INDICA": "H/I",
     "CBD": "CBD",
-    "CBD_BLEND": "CBD",
+    "CBD_BLEND": "CBDE",
     "MIXED": "THC",
     "PARA": "P",
     "PARAPHERNALIA": "P"

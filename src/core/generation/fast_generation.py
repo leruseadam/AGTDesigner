@@ -29,6 +29,32 @@ _template_buffer_cache = {}  # Persistent cache for template buffers
 _cache_timestamps = {}  # Track cache entry times for manual TTL
 
 
+# Helper: normalize lineage when used in cache keys to avoid invisible character
+# mismatches (NBSP, soft-hyphen, newlines) creating duplicate/stale cache entries.
+def _clean_lineage_for_cache(s: str) -> str:
+    if s is None:
+        return ''
+    try:
+        s2 = str(s)
+        s2 = s2.replace('\r', ' ').replace('\n', ' ')
+        s2 = s2.replace('\u00A0', ' ').replace('\u00AD', '')
+        return ' '.join(s2.split()).strip()
+    except Exception:
+        return str(s).strip()
+
+
+# Defensive startup: clear in-memory generation cache on import to avoid reusing
+# potentially corrupted/stale entries after code changes.
+try:
+    if not HAS_CACHETOOLS and isinstance(_generation_cache, dict):
+        _generation_cache.clear()
+        _cache_timestamps.clear()
+    elif HAS_CACHETOOLS and hasattr(_generation_cache, 'clear'):
+        _generation_cache.clear()
+except Exception:
+    logger.debug('Could not clear generation cache on startup')
+
+
 class FastGenerationEngine:
     """
     High-performance label generation engine with caching and optimization
@@ -54,7 +80,13 @@ class FastGenerationEngine:
         for r in records:
             name = str(r.get('Product Name*', r.get('ProductName', '')) or '')
             ptype = str(r.get('ProductType', '') or '')
-            lineage = str(r.get('Lineage', '') or '')
+            # Normalize lineage for cache key stability
+            lineage = _clean_lineage_for_cache(r.get('Lineage', '') or '')
+            # Normalize lineage to remove soft-hyphen and non-breaking space
+            if lineage:
+                lineage = lineage.replace('\u00AD', '')
+                lineage = lineage.replace('\u00A0', ' ')
+                lineage = ' '.join(lineage.split()).strip()
             # CRITICAL: Include _group_key for preroll templates to ensure unique cache per product
             group_key = str(r.get('_group_key', '') or '') if template_type == 'preroll' else ''
             parts.append(f"{name}||{ptype}||{lineage}||{group_key}")
@@ -305,7 +337,9 @@ def optimize_records_for_generation(records: List[Dict]) -> List[Dict]:
             'Product Name*': _get(record, 'Product Name*', 'ProductName'),
             'ProductName': _get(record, 'Product Name*', 'ProductName'),
             'ProductType': _get(record, 'ProductType'),
-            'Lineage': _get(record, 'Lineage', default='MIXED'),
+            # Do not default Lineage to 'MIXED' here; leave empty so later
+            # processors can decide based on ProductType (classic vs non-classic).
+            'Lineage': _get(record, 'Lineage', default=''),
             'ProductBrand': _get(record, 'ProductBrand', 'Product Brand'),
             'Product Brand': _get(record, 'Product Brand', 'ProductBrand'),
             'Vendor': _get(record, 'Vendor', 'Vendor/Supplier*'),

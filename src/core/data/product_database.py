@@ -1455,12 +1455,12 @@ class ProductDatabase:
                     
                     return False
                 
-                # First check exact match (name + vendor + brand + weight) - matches UNIQUE constraint
+                # First check exact match (name + vendor + brand + weight + product type) - matches UNIQUE constraint
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*", Units, "Product Type*"
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
-                ''', (normalized_name, vendor_value, brand_value, weight_value))
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ? AND "Product Type*" = ?
+                ''', (normalized_name, vendor_value, brand_value, weight_value, product_data.get('Product Type*', '')))
                 
                 existing = cursor.fetchone()
                 
@@ -1519,9 +1519,9 @@ class ProductDatabase:
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*", "Product Brand", Units, "Product Type*", "Weight*"
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ?
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Type*" = ?
                     ORDER BY updated_at DESC
-                ''', (normalized_name, vendor_value))
+                ''', (normalized_name, vendor_value, product_data.get('Product Type*', '')))
                 
                 vendor_matches = cursor.fetchall()
                 if vendor_matches:
@@ -1588,12 +1588,12 @@ class ProductDatabase:
                                 return self.add_or_update_product(product_data)
                             raise
                 
-                # Check for similar products (same name + vendor, different brand)
+                # Check for similar products (same name + vendor + product type, different brand)
                 cursor.execute('''
                     SELECT id, total_occurrences, "Product Name*", "Product Brand"
                     FROM products 
-                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" != ?
-                ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Brand')))
+                    WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Type*" = ? AND "Product Brand" != ?
+                ''', (normalized_name, product_data.get('Vendor/Supplier*'), product_data.get('Product Type*', ''), product_data.get('Product Brand')))
                 
                 similar_products = cursor.fetchall()
                 if similar_products:
@@ -1756,11 +1756,11 @@ class ProductDatabase:
 
                     # SAFETY: check for existing product with same normalized name and update instead
                     try:
-                        cursor.execute('SELECT id FROM products WHERE normalized_name = ? LIMIT 1', (normalized_name,))
+                        cursor.execute('SELECT id FROM products WHERE normalized_name = ? AND "Product Type*" = ? LIMIT 1', (normalized_name, product_data.get('Product Type*', '')))
                         existing_row = cursor.fetchone()
                         if existing_row:
                             existing_id = existing_row[0]
-                            logger.info(f"Found existing product with same normalized_name='{normalized_name}' (ID: {existing_id}) - updating instead of inserting")
+                            logger.info(f"Found existing product with same normalized_name='{normalized_name}' and type='{product_data.get('Product Type*', '')}' (ID: {existing_id}) - updating instead of inserting")
                             try:
                                 self._update_existing_product(cursor, existing_id, product_data)
                                 conn.commit()
@@ -1794,8 +1794,8 @@ class ProductDatabase:
                             cursor.execute('''
                                 SELECT id, total_occurrences, "Product Name*"
                                 FROM products 
-                                WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
-                            ''', (normalized_name, vendor_value, brand_value, weight_value))
+                                WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ? AND "Product Type*" = ?
+                            ''', (normalized_name, vendor_value, brand_value, weight_value, product_data.get('Product Type*', '')))
                             
                             existing = cursor.fetchone()
                             if existing:
@@ -2339,33 +2339,35 @@ class ProductDatabase:
                         # Try multiple lookup strategies to find existing product
                         normalized_name = self._normalize_product_name(product_name)
                         vendor = product_data.get('Vendor/Supplier*', '').strip() if product_data.get('Vendor/Supplier*') else ''
+                        product_type = product_data.get('Product Type*', '').strip() if product_data.get('Product Type*') else ''
                         
-                        # Strategy 1: Exact normalized name + vendor match
+                        # Strategy 1: Exact normalized name + vendor + product type match
                         cursor_check.execute('''
                             SELECT "Lineage" FROM products 
-                            WHERE normalized_name = ? AND TRIM("Vendor/Supplier*") = ?
+                            WHERE normalized_name = ? AND TRIM("Vendor/Supplier*") = ? AND TRIM("Product Type*") = ?
                             LIMIT 1
-                        ''', (normalized_name, vendor))
+                        ''', (normalized_name, vendor, product_type))
                         existing_lineage_result = cursor_check.fetchone()
                         
-                        # Strategy 2: If no match, try by product name directly (case-insensitive)
+                        # Strategy 2: If no match, try by product name directly (case-insensitive) + vendor + product type
                         if not existing_lineage_result or not existing_lineage_result[0]:
                             cursor_check.execute('''
                                 SELECT "Lineage" FROM products 
                                 WHERE TRIM(LOWER("Product Name*")) = TRIM(LOWER(?)) 
                                   AND TRIM("Vendor/Supplier*") = ?
+                                  AND TRIM("Product Type*") = ?
                                 LIMIT 1
-                            ''', (product_name, vendor))
+                            ''', (product_name, vendor, product_type))
                             existing_lineage_result = cursor_check.fetchone()
                         
-                        # Strategy 3: If still no match, try without vendor requirement
+                        # Strategy 3: If still no match, try without vendor requirement but with product type
                         if not existing_lineage_result or not existing_lineage_result[0]:
                             cursor_check.execute('''
                                 SELECT "Lineage" FROM products 
-                                WHERE normalized_name = ?
+                                WHERE normalized_name = ? AND TRIM("Product Type*") = ?
                                 ORDER BY updated_at DESC
                                 LIMIT 1
-                            ''', (normalized_name,))
+                            ''', (normalized_name, product_type))
                             existing_lineage_result = cursor_check.fetchone()
                         
                         if existing_lineage_result and existing_lineage_result[0]:
@@ -3788,6 +3790,25 @@ class ProductDatabase:
             self._cache.clear()
         self._timing_stats['cache_hits'] = 0
         self._timing_stats['cache_misses'] = 0
+
+
+    def clear_lineage_cache(product_name: str = None):
+        """Clear the internal lineage TTL cache.
+
+        If `product_name` is provided, only that entry is removed. If `None`,
+        the entire lineage cache is cleared.
+        """
+        with _lineage_cache_lock:
+            if product_name:
+                key = product_name.strip().lower()
+                if key in _lineage_cache:
+                    del _lineage_cache[key]
+                    del _lineage_cache_timestamps[key]
+                    logger.info(f"Cleared lineage cache entry for '{product_name}'")
+            else:
+                _lineage_cache.clear()
+                _lineage_cache_timestamps.clear()
+                logger.info("Cleared entire lineage cache")
     
     def close_connections(self):
         """Close all database connections."""

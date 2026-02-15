@@ -60,13 +60,13 @@ def _set_paragraph_auto_spacing(paragraph):
 
 def apply_lineage_colors(doc, template_type=None):
     """Apply lineage colors to all cells based on keywords in cell text.
-    template_type: when 'horizontal', paragraph spacing in lineage/brand cells is 0/0; otherwise 2pt/1pt.
+    template_type: when 'horizontal', paragraph spacing in lineage/brand cells is 1.5pt/1.5pt (equal margins); otherwise 2pt/1pt.
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     if template_type == 'horizontal':
-        space_before_pt, space_after_pt = 0, 0
-        before_twips, after_twips = '0', '0'
+        space_before_pt, space_after_pt = 1.5, 1.5  # Equal margins above and below for lineage
+        before_twips, after_twips = '30', '30'
     elif template_type == 'double':
         # Double: non-classic (brand) cells use Auto before/after; classic uses 2/1
         space_before_pt, space_after_pt = 2, 1
@@ -670,6 +670,8 @@ def _final_lineage_cleanup_after_coloring(doc):
     This runs after all other processing to ensure clean lineage display.
     """
     try:
+        whitespace_chars = ' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF'
+
         # Define lineage values that should be cleaned
         lineage_values = [
             "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
@@ -680,6 +682,45 @@ def _final_lineage_cleanup_after_coloring(doc):
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
+                    cell_text_upper = (cell.text or "").upper()
+                    is_lineage_cell = any(v in cell_text_upper for v in lineage_values)
+                    if not is_lineage_cell:
+                        continue
+
+                    if cell.paragraphs:
+                        for idx, para in enumerate(cell.paragraphs):
+                            # Non-destructive cleanup: keep paragraph structure intact for Word compatibility.
+                            para.paragraph_format.space_before = Pt(0)
+                            para.paragraph_format.space_after = Pt(0)
+                            pPr = para._element.get_or_add_pPr()
+                            sp = pPr.find(qn('w:spacing'))
+                            if sp is None:
+                                sp = OxmlElement('w:spacing')
+                                pPr.append(sp)
+                            sp.set(qn('w:before'), '0')
+                            sp.set(qn('w:after'), '0')
+                            sp.set(qn('w:lineRule'), 'auto')
+
+                            # Clear fully blank helper paragraphs instead of removing XML nodes.
+                            if idx > 0 and not (para.text or "").strip():
+                                for run in para.runs:
+                                    run.text = ""
+
+                        # Strip leading whitespace/newline runs before first visible lineage text.
+                        started = False
+                        for para in cell.paragraphs:
+                            for run in para.runs:
+                                run_text = run.text or ""
+                                if started:
+                                    continue
+                                cleaned = run_text.lstrip(whitespace_chars)
+                                if cleaned:
+                                    if cleaned != run_text:
+                                        run.text = cleaned
+                                    started = True
+                                else:
+                                    run.text = ""
+
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
                             original_text = run.text
@@ -688,7 +729,7 @@ def _final_lineage_cleanup_after_coloring(doc):
                             for lineage in lineage_values:
                                 if lineage in original_text.upper():
                                     # Aggressively clean leading spaces
-                                    cleaned_text = original_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
+                                    cleaned_text = original_text.lstrip(whitespace_chars)
                                     
                                     if cleaned_text != original_text:
                                         run.text = cleaned_text

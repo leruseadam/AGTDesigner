@@ -57,6 +57,17 @@ DEBUG_ENABLED = False
 
 logger = logging.getLogger(__name__)
 
+def _clean_lineage_text(value) -> str:
+    """Normalize lineage/brand text to prevent hidden-space artifacts in DOCX output."""
+    if value is None:
+        return ""
+    text = str(value)
+    # Remove zero-width characters and normalize uncommon Unicode spaces to normal spaces.
+    text = re.sub(r"[\u200B-\u200D\u2060\uFEFF]", "", text)
+    text = re.sub(r"[\u00A0\u2000-\u200A\u202F\u205F\u3000]", " ", text)
+    # Collapse repeated whitespace and trim.
+    return re.sub(r"\s+", " ", text).strip()
+
 def _find_most_likely_ounce_weight(product_name, product_type):
     """
     Find the most common ounce weight for similar nonclassic products.
@@ -1244,15 +1255,18 @@ def process_chunk(args):
                     lineage_val = 'MIXED'  # Default for non-classic types
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
-            # No extra space before Lineage in the output
+            # Final hardening: normalize lineage text so LabelX.Lineage never carries extra/hidden spaces.
+            lineage_val = _clean_lineage_text(lineage_val).upper()
+            if not lineage_val:
+                lineage_val = "HYBRID" if is_classic_type else "MIXED"
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
             
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
             if is_classic_type:
                 if lineage_val:
                     # Use the lineage value from database (never Excel)
-                    label_data["ProductBrand"] = lineage_val.strip()  # Don't wrap with markers for template rendering
-                    label_data["ProductBrand_Center"] = lineage_val.strip()  # Don't wrap with markers for template rendering
+                    label_data["ProductBrand"] = lineage_val  # Don't wrap with markers for template rendering
+                    label_data["ProductBrand_Center"] = lineage_val  # Don't wrap with markers for template rendering
                 else:
                     # No lineage available - use default HYBRID for classic types (never fall back to Excel)
                     label_data["ProductBrand"] = "HYBRID"
@@ -1697,6 +1711,5 @@ def create_safe_document():
     except Exception as e:
         logger.error(f"Error creating safe document: {e}")
         raise
-
 
 

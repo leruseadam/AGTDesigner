@@ -283,6 +283,12 @@ class ProductTypeSpecificMatcher:
         'vape pen': 'vape',
         'disposable vape': 'disposable vape',
         'disposable': 'disposable',
+        'aio': 'disposable vape',
+        'all-in-one': 'disposable vape',
+        'all in one': 'disposable vape',
+        'aio': 'disposable vape',
+        'all-in-one': 'disposable vape',
+        'all in one': 'disposable vape',
         # add more synonyms here as needed
     }
 
@@ -408,18 +414,34 @@ class ProductTypeSpecificMatcher:
         matches = []
         json_name = self._get_product_name(json_product).lower()
         
-        # Vape-specific indicators
-        vape_indicators = ['cart', 'cartridge', 'pod', 'disposable', 'pen', '510']
+        # Check if this is a disposable/AIO product - these should NOT match cartridges
+        disposable_indicators = ['aio', 'all-in-one', 'all in one', 'disposable', 'vaporizer']
+        is_disposable = any(indicator in json_name for indicator in disposable_indicators)
+        
+        # Vape-specific indicators (only for cartridges, not disposables)
+        cartridge_indicators = ['cart', 'cartridge', 'pod', 'pen', '510']
         
         for db_product in database_products:
             score = 0.0
             factors = {}
             
             db_name = str(db_product.get('Product Name*', '')).lower()
+            db_type = str(db_product.get('ProductType', '')).lower()
+            
+            # If JSON product is disposable/AIO, only match against disposable products
+            if is_disposable:
+                if not any(indicator in db_name or indicator in db_type for indicator in disposable_indicators):
+                    continue  # Skip non-disposable products
+            # If JSON product mentions cartridge/510, avoid matching disposables
+            elif any(indicator in json_name for indicator in cartridge_indicators):
+                if any(indicator in db_name or indicator in db_type for indicator in disposable_indicators):
+                    continue  # Skip disposable products when looking for cartridges
             
             # Vape type matching (25% weight)
             vape_type_score = 0.0
-            for indicator in vape_indicators:
+            all_indicators = cartridge_indicators + disposable_indicators
+            
+            for indicator in all_indicators:
                 if indicator in json_name and indicator in db_name:
                     vape_type_score = 1.0
                     break
@@ -1075,6 +1097,40 @@ class EnhancedJSONMatcher:
         except Exception:
             return str(obj)
 
+    def _guess_unit_from_weight(self, weight_value):
+        """Heuristic to guess weight units when units are missing.
+        - If explicit unit text in weight_value, use that.
+        - Otherwise, numeric values <= 16 are assumed to be ounces (common packaging), else grams.
+        """
+        try:
+            if not weight_value:
+                return 'g'
+            s = str(weight_value).lower()
+            # If explicit units present inside the string, respect them
+            if 'mg' in s:
+                return 'mg'
+            if 'g' in s and 'kg' not in s and 'gr' not in s and 'oz' not in s:
+                return 'g'
+            if 'kg' in s:
+                return 'kg'
+            if 'oz' in s or 'ounce' in s:
+                return 'oz'
+            # Extract the first numeric token
+            import re
+            m = re.search(r"[\d]+(?:\.[\d]+)?", s)
+            if m:
+                val = float(m.group(0))
+                # Heuristic: typical ounce sizes are <= 16 (1oz, 3.5oz, 7oz, etc.)
+                if val <= 16:
+                    return 'oz'
+                # If very small like <1 but with decimal (0.5), treat as oz
+                if val < 1:
+                    return 'oz'
+                return 'g'
+        except Exception:
+            pass
+        return 'g'
+
     def _is_void_product(self, product: dict) -> bool:
         """Return True if product name contains VOID (case-insensitive)."""
         try:
@@ -1190,15 +1246,15 @@ class EnhancedJSONMatcher:
                 # Extract units using comprehensive field mapping
                 units_value = self._extract_field_from_json_item(matched_json_item, "Weight Unit* (grams/gm or ounces/oz)")
                 if not units_value:
-                    # Try alternative unit fields
+                    # Try alternative unit fields (leave None to allow guessing)
                     units_value = (matched_json_item.get('unit_weight_uom') or 
                                  matched_json_item.get('uom') or 
-                                 matched_json_item.get('units') or 'g')
+                                 matched_json_item.get('units') or None)
                 
                 if weight_value:
                     weight_str = str(weight_value).strip()
                     if weight_str and weight_str.lower() not in ('none', '', '0', '0.0', '0.00'):
-                        units_str = str(units_value).strip() if units_value else 'g'
+                        units_str = str(units_value).strip() if units_value else self._guess_unit_from_weight(weight_str)
                         # Format as "weightunits" (no space per user preference)
                         formatted_weight = f"{weight_str}{units_str}"
                         logging.info(f"⚖️ Using JSON weight '{formatted_weight}' from matched JSON item for '{product_dict.get('Product Name*', 'Unknown')}'")
@@ -1223,15 +1279,15 @@ class EnhancedJSONMatcher:
                     # Extract units using comprehensive field mapping
                     units_value = self._extract_field_from_json_item(json_item, "Weight Unit* (grams/gm or ounces/oz)")
                     if not units_value:
-                        # Try alternative unit fields
+                        # Try alternative unit fields (leave None to allow guessing)
                         units_value = (json_item.get('unit_weight_uom') or 
                                      json_item.get('uom') or 
-                                     json_item.get('units') or 'g')
+                                     json_item.get('units') or None)
                     
                     if weight_value:
                         weight_str = str(weight_value).strip()
                         if weight_str and weight_str.lower() not in ('none', '', '0', '0.0', '0.00'):
-                            units_str = str(units_value).strip() if units_value else 'g'
+                            units_str = str(units_value).strip() if units_value else self._guess_unit_from_weight(weight_str)
                             # Format as "weightunits" (no space per user preference)
                             formatted_weight = f"{weight_str}{units_str}"
                             logging.info(f"⚖️ Using JSON weight '{formatted_weight}' for '{product_name}'")
@@ -1343,14 +1399,16 @@ class EnhancedJSONMatcher:
                              json_item.get('uom') or 
                              json_item.get('units') or 
                              json_item.get('WeightUnits') or 
-                             json_item.get('weight_units') or 'g')
+                             json_item.get('weight_units') or None)
             
             if weight_value:
                 merged_product['Weight*'] = weight_value
                 merged_product['Weight'] = weight_value
-                merged_product['Units'] = units_value
+                # Decide units: prefer discovered units, else guess from weight value
+                units_final = str(units_value).strip() if units_value else self._guess_unit_from_weight(weight_value)
+                merged_product['Units'] = units_final
                 # Format weight with units (no space per user preference)
-                merged_product['WeightUnits'] = f"{weight_value}{units_value}"
+                merged_product['WeightUnits'] = f"{weight_value}{units_final}"
                 merged_product['WeightWithUnits'] = merged_product['WeightUnits']
             else:
                 merged_product['Weight*'] = ''
@@ -2234,7 +2292,9 @@ class EnhancedJSONMatcher:
             return 'flower'
         elif any(term in inventory_type or term in product_name for term in ['concentrate', 'extract', 'oil', 'wax', 'shatter', 'rosin', 'resin']):
             return 'concentrate'
-        elif any(term in inventory_type or term in product_name for term in ['cart', 'vape', 'pen', 'disposable']):
+        elif any(term in inventory_type or term in product_name for term in ['disposable', 'aio', 'all-in-one']):
+            return 'disposable'
+        elif any(term in inventory_type or term in product_name for term in ['cart', 'vape', 'pen', 'cartridge', '510', 'pod', 'battery']):
             return 'vape_cartridge'
         elif any(term in inventory_type or term in product_name for term in ['edible', 'gummy', 'chocolate', 'cookie']):
             return 'edible'
@@ -2725,7 +2785,7 @@ class EnhancedJSONMatcher:
                     # CRITICAL FIX: Prioritize database weight, then JSON weight, never use fallback
                     # Database weights are more reliable than JSON weights
                     db_weight = hybrid_product.get('Weight*') or hybrid_product.get('Weight') or ''
-                    db_units = hybrid_product.get('Units') or 'g'
+                    db_units = hybrid_product.get('Units') or (self._guess_unit_from_weight(db_weight) if db_weight else 'g')
                     
                     if db_weight and str(db_weight).strip() not in ('0', '0.0', '0.00', ''):
                         hybrid_product['Weight*'] = db_weight
@@ -2744,17 +2804,17 @@ class EnhancedJSONMatcher:
                             weight_match = re.match(r'^(\d+(?:\.\d+)?)([a-zA-Z]+)?$', str(json_weight).strip())
                             if weight_match:
                                 weight_value = weight_match.group(1)
-                                units_value = weight_match.group(2) or hybrid_product.get('Units') or 'g'
+                                units_value = weight_match.group(2) or hybrid_product.get('Units') or self._guess_unit_from_weight(weight_value)
                             else:
                                 # If it doesn't match the pattern, try to extract just the numeric part
                                 weight_match = re.search(r'(\d+(?:\.\d+)?)', str(json_weight))
                                 if weight_match:
                                     weight_value = weight_match.group(1)
-                                    units_value = hybrid_product.get('Units') or 'g'
+                                    units_value = hybrid_product.get('Units') or self._guess_unit_from_weight(weight_value)
                                 else:
                                     # Fallback: use the whole string as weight
                                     weight_value = str(json_weight).strip()
-                                    units_value = hybrid_product.get('Units') or 'g'
+                                    units_value = hybrid_product.get('Units') or self._guess_unit_from_weight(weight_value)
                             
                             hybrid_product['Weight*'] = weight_value
                             hybrid_product['Weight'] = weight_value

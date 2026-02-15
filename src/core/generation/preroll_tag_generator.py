@@ -477,6 +477,16 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # Ensure representative preserves a sensible Lineage value
         # Prefer proprietary/sovereign lineage fields first (owner-managed),
         # then fall back to canonical or generic Lineage fields.
+        def _clean_lineage(val):
+            if val is None:
+                return ''
+            # Remove soft-hyphen and non-breaking spaces which may be injected
+            s = str(val)
+            s = s.replace('\u00AD', '')
+            s = s.replace('\u00A0', ' ')
+            # Collapse multiple whitespace into single spaces and trim
+            return ' '.join(s.split()).strip()
+
         rep_lineage = ''
         for r in group_records_list:
             candidate = (
@@ -488,7 +498,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 r.get('lineage')
             )
             if candidate and str(candidate).strip() and str(candidate).strip().lower() not in ['none', 'nan', '']:
-                rep_lineage = str(candidate).strip()
+                rep_lineage = _clean_lineage(candidate)
                 logging.info(f"PREROLL GROUP REP: Using lineage '{rep_lineage}' for group representative of '{group_display_name}'")
                 break
         representative['Lineage'] = rep_lineage
@@ -600,6 +610,8 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 else:
                     doh_display = doh_str
 
+            # Clean lineage field for cached group items as well
+            raw_lineage = record.get('Lineage', '')
             item = {
                 'product_name': record.get('Product Name*', record.get('ProductName', '')),
                 'description': record.get('Description', ''),
@@ -608,7 +620,7 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
                 'brand': record.get('Product Brand', record.get('ProductBrand', '')),
                 'strain': record.get('Product Strain', ''),
-                'lineage': record.get('Lineage', ''),
+                'lineage': _clean_lineage(raw_lineage),
                 'doh': doh_display,
             }
             group_items.append(item)

@@ -20,7 +20,7 @@ if (typeof window.ABBREVIATED_LINEAGE === 'undefined') {
         "HYBRID/SATIVA": "H/S",
         "HYBRID/INDICA": "H/I",
         "CBD": "CBD",
-        "CBD_BLEND": "CBD",
+        "CBD_BLEND": "CBDE",
         "MIXED": "THC",
         "PARA": "P",
         "PARAPHERNALIA": "P"
@@ -43,8 +43,8 @@ if (typeof window.normalizeLineageValue === 'undefined') {
     }
     
     // Handle common variations
-    if (normalized === 'CBD_BLEND' || normalized === 'CBD BLEND') {
-      return 'CBD';
+    if (normalized === 'CBD_BLEND' || normalized === 'CBD BLEND' || normalized === 'CBDE') {
+      return 'CBD_BLEND';
     }
     if (normalized.includes('HYBRID/INDICA') || normalized.includes('HYBRID INDICA')) {
       return 'HYBRID/INDICA';
@@ -1419,7 +1419,7 @@ class TagsTable {
                      lin;
       }
       option.textContent = displayName;
-      if ((currentLineage === lin) || (lin === 'CBD' && currentLineage === 'CBD_BLEND')) {
+      if (currentLineage === lin) {
         option.selected = true;
       }
       select.appendChild(option);
@@ -1439,6 +1439,8 @@ class TagsTable {
   static async saveLineageChanges() {
       const tagName = document.getElementById('editTagName').value;
       const newLineage = document.getElementById('editLineageSelect').value;
+      // Map UI-only option to server value
+      const sendLineage = (newLineage === 'THC') ? 'MIXED' : newLineage;
 
       try {
           const response = await fetch('/api/update-lineage', {
@@ -1446,10 +1448,10 @@ class TagsTable {
               headers: {
                   'Content-Type': 'application/json'
               },
-              body: JSON.stringify({
-                  tag_name: tagName,
-                  lineage: newLineage
-              })
+                body: JSON.stringify({
+                    tag_name: tagName,
+                    lineage: sendLineage
+                  })
           });
 
           if (!response.ok) throw new Error('Failed to update lineage');

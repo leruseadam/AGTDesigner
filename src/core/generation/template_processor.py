@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import time
+import unicodedata
 from typing import Dict, Any, List, Optional
 import traceback
 import pandas as pd
@@ -92,6 +93,33 @@ def get_font_scheme(template_type, base_size=12):
         field: {**schemes.get(template_type, schemes['default'])}
         for field in ["Description", "ProductBrand", "Price", "Lineage", "DOH", "Ratio_or_THC_CBD", "Ratio"]
     }
+
+
+def _is_invisible_edge_char(ch: str) -> bool:
+    """Treat Unicode separators/control/format chars as edge whitespace."""
+    if not ch:
+        return False
+    category = unicodedata.category(ch)
+    return category in {"Zs", "Zl", "Zp", "Cc", "Cf"}
+
+
+def _trim_invisible_edges(value: Any) -> str:
+    """Trim only leading/trailing invisible whitespace/control characters."""
+    if value is None:
+        return ""
+    text = str(value)
+    start = 0
+    end = len(text)
+    while start < end and _is_invisible_edge_char(text[start]):
+        start += 1
+    while end > start and _is_invisible_edge_char(text[end - 1]):
+        end -= 1
+    return text[start:end]
+
+
+def _has_visible_text(value: Any) -> bool:
+    """Return True when text contains visible content after edge trim."""
+    return bool(_trim_invisible_edges(value))
 
 class TemplateProcessor:
     # ...rest of the code...
@@ -1490,8 +1518,9 @@ class TemplateProcessor:
                                 pname, lineage = row_result
                                 if not pname or pname in seen:
                                     continue
-                                if lineage and str(lineage).strip() not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
-                                    product_lineage_cache[pname] = str(lineage).strip().upper()
+                                normalized_lineage = _trim_invisible_edges(lineage)
+                                if normalized_lineage and normalized_lineage not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
+                                    product_lineage_cache[pname] = normalized_lineage.upper()
                                     seen.add(pname)
                             
                             # Load JointRatio data
@@ -2142,8 +2171,9 @@ class TemplateProcessor:
             record_lineage = None
             for lineage_field in ['sovereign_lineage', 'canonical_lineage', 'Lineage', 'lineage']:
                 candidate = record.get(lineage_field)
-                if candidate and str(candidate).strip() not in ['', 'None', 'nan']:
-                    lineage_str = str(candidate).strip().upper()
+                normalized_candidate = _trim_invisible_edges(candidate)
+                if normalized_candidate and normalized_candidate not in ['', 'None', 'nan']:
+                    lineage_str = normalized_candidate.upper()
                     if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
                         record_lineage = lineage_str
                         break
@@ -2213,8 +2243,9 @@ class TemplateProcessor:
                             elif product_lineage:
                                 source = 'product.Lineage'
                             
-                            if lineage_val and str(lineage_val).strip().upper() not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
-                                db_lineage = str(lineage_val).strip().upper()
+                            normalized_lineage_val = _trim_invisible_edges(lineage_val).upper()
+                            if normalized_lineage_val and normalized_lineage_val not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
+                                db_lineage = normalized_lineage_val
                                 self.logger.info(f"🔒 DOCX: Using {source} '{db_lineage}' for '{product_name}'")
                             else:
                                 db_lineage = None
@@ -2224,8 +2255,9 @@ class TemplateProcessor:
                         db_lineage = product_db.get_product_lineage(product_name)
                     
                     # CRITICAL: Always use database lineage if available, never Excel
-                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                        db_lineage_upper = str(db_lineage).strip().upper()
+                    normalized_db_lineage = _trim_invisible_edges(db_lineage)
+                    if normalized_db_lineage and normalized_db_lineage not in ['', 'None', 'nan']:
+                        db_lineage_upper = normalized_db_lineage.upper()
                         # Always override Excel lineage with database lineage
                         if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
                             # Database lineage differs from Excel - use database
@@ -2267,12 +2299,15 @@ class TemplateProcessor:
             # We need to preserve the user's DOH selection even for JSON matches
             pass
 
-        # Fast value cleaning - only process non-empty values
+        # Fast value cleaning - trim only leading/trailing whitespace.
+        # Keep internal spaces intact (e.g., descriptions and product names).
         for key, value in label_context.items():
-            if value is not None:
-                label_context[key] = str(value).strip()
-            else:
+            if value is None:
                 label_context[key] = ""
+                continue
+
+            cleaned_val = _trim_invisible_edges(value)
+            label_context[key] = cleaned_val
 
         # Ensure WeightUnits is populated from available weight fields
         # Special handling for pre-roll products: use JointRatio instead of Weight* + Units
@@ -3012,8 +3047,9 @@ class TemplateProcessor:
             
             # PRIORITY 1: Use lineage from record (includes manual dropdown changes and database updates)
             # CRITICAL: Always use uppercase to ensure consistency
-            if lineage_text and lineage_text.strip():
-                lineage_val = str(lineage_text).strip().upper()
+            normalized_lineage_text = _trim_invisible_edges(lineage_text)
+            if normalized_lineage_text:
+                lineage_val = normalized_lineage_text.upper()
                 self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
             else:
                 # PRIORITY 2: Fallback to cache lookup if record lineage is empty
@@ -3024,8 +3060,9 @@ class TemplateProcessor:
                 record_lineage = None
                 for lineage_field in ['sovereign_lineage', 'canonical_lineage', 'Lineage', 'lineage']:
                     candidate = record.get(lineage_field)
-                    if candidate and str(candidate).strip() not in ['', 'None', 'nan']:
-                        lineage_str = str(candidate).strip().upper()
+                    normalized_candidate = _trim_invisible_edges(candidate)
+                    if normalized_candidate and normalized_candidate not in ['', 'None', 'nan']:
+                        lineage_str = normalized_candidate.upper()
                         if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
                             record_lineage = lineage_str
                             break
@@ -3041,8 +3078,9 @@ class TemplateProcessor:
                     if db_lineage:
                         self.logger.info(f"✅ Using cached lineage '{db_lineage}' for '{product_name}'")
                 
-                if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
-                    lineage_val = str(db_lineage).strip().upper()
+                normalized_db_lineage = _trim_invisible_edges(db_lineage)
+                if normalized_db_lineage and normalized_db_lineage not in ['', 'None', 'nan']:
+                    lineage_val = normalized_db_lineage.upper()
                     self.logger.info(f"✅ Using product lineage: '{lineage_val}' for '{product_name}'")
                 
                 # If no product-level lineage, try strain-level from cache
@@ -3055,7 +3093,7 @@ class TemplateProcessor:
                             strain_info.get('canonical_lineage')
                         )
                         if preferred:
-                            preferred_str = str(preferred).strip().upper()
+                            preferred_str = _trim_invisible_edges(preferred).upper()
                             # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
                             if preferred_str != 'SOVEREIGN':
                                 lineage_val = preferred_str
@@ -3065,7 +3103,7 @@ class TemplateProcessor:
                     self.logger.debug(f"No lineage found in record or cache")
             
             # CRITICAL FIX: Ensure classic types always have lineage data
-            if not lineage_val or lineage_val.strip() == "":
+            if not lineage_val or _trim_invisible_edges(lineage_val) == "":
                 lineage_val = "HYBRID"
                 self.logger.info(f"🔧 FALLBACK LINEAGE: Set HYBRID lineage for classic type '{product_name}' (no lineage data available)")
             
@@ -3073,7 +3111,7 @@ class TemplateProcessor:
             if lineage_val:
                 # Debug: Log the lineage value to see if it has leading spaces
                 self.logger.debug(f"DEBUG: Original lineage_val: '{repr(lineage_val)}'")
-                cleaned_lineage_val = lineage_val.strip()
+                cleaned_lineage_val = _trim_invisible_edges(lineage_val)
                 self.logger.debug(f"DEBUG: Cleaned lineage_val: '{repr(cleaned_lineage_val)}'")
                 
                 # CRITICAL FIX: For horizontal and vertical templates, preserve the full lineage value
@@ -3105,7 +3143,7 @@ class TemplateProcessor:
             
             # If _vendor_from_record wasn't set, try reading directly from record again
             # This handles cases where vendor reading at the start might have failed
-            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+            if not vendor_val or _trim_invisible_edges(vendor_val) in ['', 'None', 'NULL', 'null', 'nan']:
                 # Try ALL possible vendor field variations directly from record
                 vendor_fields = [
                     'Vendor/Supplier*',
@@ -3120,36 +3158,39 @@ class TemplateProcessor:
                 # Also check label_context (from dict copy) in case field name doesn't match exactly
                 for field in vendor_fields:
                     val = label_context.get(field) or record.get(field)
-                    if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                        vendor_val = str(val).strip()
+                    normalized_val = _trim_invisible_edges(val)
+                    if val is not None and not pd.isna(val) and normalized_val and normalized_val.lower() not in ['nan', 'none', 'null', '']:
+                        vendor_val = normalized_val
                         self.logger.info(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}' (direct read)")
                         # Store it for later use
                         label_context['_vendor_from_record'] = vendor_val
                         break
                 
                 # If still not found, check ALL vendor-related keys (case-insensitive)
-                if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+                if not vendor_val or _trim_invisible_edges(vendor_val) in ['', 'None', 'NULL', 'null', 'nan']:
                     vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
                     for key in vendor_related_keys:
                         val = record.get(key)
-                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                            vendor_val = str(val).strip()
+                        normalized_val = _trim_invisible_edges(val)
+                        if val is not None and not pd.isna(val) and normalized_val and normalized_val.lower() not in ['nan', 'none', 'null', '']:
+                            vendor_val = normalized_val
                             self.logger.info(f"✅ Found vendor in field '{key}': '{vendor_val}' for '{product_name}' (case-insensitive match)")
                             label_context['_vendor_from_record'] = vendor_val
                             break
             
             # PRIORITY 2: Try database cache as fallback ONLY if record doesn't have it
-            if not vendor_val or str(vendor_val).strip() in ['', 'None', 'NULL', 'null', 'nan']:
+            if not vendor_val or _trim_invisible_edges(vendor_val) in ['', 'None', 'NULL', 'null', 'nan']:
                 try:
                     cached_vendor = product_vendor_cache.get(product_name, "")
-                    if cached_vendor and str(cached_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                        vendor_val = cached_vendor
+                    normalized_cached_vendor = _trim_invisible_edges(cached_vendor)
+                    if normalized_cached_vendor and normalized_cached_vendor not in ['', 'None', 'NULL', 'null', 'nan']:
+                        vendor_val = normalized_cached_vendor
                         self.logger.info(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
                 except Exception as e:
                     self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
             
             # If still no vendor, log all available fields for debugging
-            if not vendor_val or not str(vendor_val).strip():
+            if not vendor_val or not _trim_invisible_edges(vendor_val):
                 available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
                 self.logger.warning(f"⚠️ INITIAL EXTRACTION: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
                 # Log actual values from vendor fields for debugging
@@ -3168,11 +3209,11 @@ class TemplateProcessor:
             existing_vendor = label_context.get('ProductVendor', '')
             # Check if existing_vendor has actual content (unwrap markers to check)
             existing_vendor_has_content = False
-            if existing_vendor and str(existing_vendor).strip():
+            if existing_vendor and _trim_invisible_edges(existing_vendor):
                 try:
                     # unwrap_marker is already imported at the top of the file
                     unwrapped = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
-                    if unwrapped and str(unwrapped).strip():
+                    if unwrapped and _trim_invisible_edges(unwrapped):
                         existing_vendor_has_content = True
                 except:
                     # If unwrapping fails, check if it's just the plain value (no markers)
@@ -3181,23 +3222,24 @@ class TemplateProcessor:
                     else:
                         # Has markers, check if content between markers is non-empty
                         match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', str(existing_vendor))
-                        if match and match.group(1).strip():
+                        if match and _trim_invisible_edges(match.group(1)):
                             existing_vendor_has_content = True
             
             if existing_vendor_has_content:
                 # ProductVendor was set at the start with content, keep it
                 self.logger.info(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
-            elif vendor_val and str(vendor_val).strip():
+            elif vendor_val and _trim_invisible_edges(vendor_val):
                 # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
-                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val).strip()}PRODUCTVENDOR_END"
+                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{_trim_invisible_edges(vendor_val)}PRODUCTVENDOR_END"
                 self.logger.info(f"✅ Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
             else:
                 # CRITICAL: Even if vendor_val is empty, check _vendor_from_record one more time
                 # This catches cases where vendor reading at the start found it but it wasn't used above
                 final_vendor = label_context.get('_vendor_from_record', '')
-                if final_vendor and str(final_vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                normalized_final_vendor = _trim_invisible_edges(final_vendor)
+                if normalized_final_vendor and normalized_final_vendor not in ['', 'None', 'NULL', 'null', 'nan']:
                     # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(final_vendor).strip()}PRODUCTVENDOR_END"
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{normalized_final_vendor}PRODUCTVENDOR_END"
                     self.logger.info(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
                 else:
                     # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
@@ -3217,9 +3259,9 @@ class TemplateProcessor:
                 self.logger.debug(f"VERTICAL CLASSIC FIX: Cleared ProductStrain for classic type '{product_type}' (Lineage already shows strain)")
             elif product_strain_value:
                 if self.template_type == 'mini':
-                    label_context['ProductStrain'] = str(product_strain_value).strip()
+                    label_context['ProductStrain'] = _trim_invisible_edges(product_strain_value)
                 else:
-                    label_context['ProductStrain'] = wrap_with_marker(str(product_strain_value).strip(), 'PRODUCTSTRAIN')
+                    label_context['ProductStrain'] = wrap_with_marker(_trim_invisible_edges(product_strain_value), 'PRODUCTSTRAIN')
             else:
                 label_context['ProductStrain'] = ""
             
@@ -3227,7 +3269,7 @@ class TemplateProcessor:
             # However, mini templates still display brand in dedicated cells
             if self.template_type == 'mini' or self.template_type == 'preroll':
                 if product_brand:
-                    classic_brand_text = str(product_brand).strip().upper()
+                    classic_brand_text = _trim_invisible_edges(product_brand).upper()
                     # Ensure markers are applied consistently for downstream formatting
                     plain_brand = classic_brand_text
                     if is_already_wrapped(plain_brand, 'PRODUCTBRAND'):
@@ -3276,7 +3318,7 @@ class TemplateProcessor:
 
                     product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
                     if product_strain_value:
-                        strain_token = str(product_strain_value).strip().upper()
+                        strain_token = _trim_invisible_edges(product_strain_value).upper()
                         strain_token = strain_token.replace('PRODUCTSTRAIN_START', '').replace('PRODUCTSTRAIN_END', '').strip()
                         if strain_token:
                             original_brand = final_brand_text
@@ -3406,7 +3448,7 @@ class TemplateProcessor:
                     # Remove trailing strain content if it was concatenated with the brand text
                     product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
                     if product_strain_value:
-                        strain_token = str(product_strain_value).strip().upper()
+                        strain_token = _trim_invisible_edges(product_strain_value).upper()
                         # Remove marker remnants if present
                         strain_token = strain_token.replace('PRODUCTSTRAIN_START', '').replace('PRODUCTSTRAIN_END', '').strip()
                         if strain_token:
@@ -3870,6 +3912,17 @@ class TemplateProcessor:
                 label_context['DescAndWeight_RAW'] = unwrap_marker(label_context['DescAndWeight'], 'DESC')
             if label_context.get('Lineage'):
                 label_context['Lineage_RAW'] = unwrap_marker(label_context['Lineage'], 'LINEAGE')
+            # Normalize Lineage: remove line breaks and collapse whitespace to avoid added lines
+            if label_context.get('Lineage'):
+                try:
+                    raw_lineage = str(label_context.get('Lineage') or '')
+                    raw_lineage = raw_lineage.replace('\r', ' ').replace('\n', ' ')
+                    # Replace NBSP/soft-hyphen with normal space/empty
+                    raw_lineage = raw_lineage.replace('\u00A0', ' ').replace('\u00AD', '')
+                    label_context['Lineage'] = ' '.join(raw_lineage.split()).strip()
+                except Exception:
+                    # If normalization fails, keep original value
+                    pass
             if label_context.get('ProductStrain'):
                 label_context['ProductStrain_RAW'] = unwrap_marker(label_context['ProductStrain'], 'PRODUCTSTRAIN')
             if label_context.get('ProductVendor'):
@@ -5042,7 +5095,7 @@ class TemplateProcessor:
                 # Extract lineage content before removing markers
                 lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
                 if lineage_match:
-                    lineage_content = lineage_match.group(1)
+                    lineage_content = lineage_match.group(1).strip()
                     # Replace the full lineage marker pattern with just the content
                     cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
                 
@@ -5050,7 +5103,7 @@ class TemplateProcessor:
                 # Extract product brand content before removing markers (handle both PRODUCTBRAND and PRODUCTBRAND_CENTER)
                 brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE)
                 if brand_match:
-                    brand_content = brand_match.group(1)
+                    brand_content = brand_match.group(1).strip()
                     # Now that Product Strain is separate, brand content is just the brand name
                     # No need to extract brand name from combined content
                     
@@ -5061,7 +5114,7 @@ class TemplateProcessor:
                 # Extract product strain content before removing markers
                 strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE)
                 if strain_match:
-                    strain_content = strain_match.group(1)
+                    strain_content = strain_match.group(1).strip()
                     # Replace the full product strain marker pattern with just the content
                     cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
 
@@ -5897,6 +5950,8 @@ class TemplateProcessor:
                     marker_start = final_content.find(start_marker) + len(start_marker)
                     marker_end = final_content.find(end_marker)
                     content = final_content[marker_start:marker_end]
+                    # Trim only leading/trailing invisible characters; preserve internal spacing.
+                    content = _trim_invisible_edges(content)
                     
                     # Get font size for this marker using unified system
                     font_size = self._get_template_specific_font_size(content, marker_name)
@@ -5937,8 +5992,8 @@ class TemplateProcessor:
                 # Add any text before this marker
                 if marker_data['start_pos'] > current_pos:
                     text_before = full_text[current_pos:marker_data['start_pos']]
-                    # Preserve line breaks and whitespace, but skip if completely empty
-                    if text_before or text_before.strip():
+                    # Drop whitespace-only/invisible fragments around markers.
+                    if _has_visible_text(text_before):
                         run = paragraph.add_run(text_before)
                         run.font.name = "Arial"
                         run.font.bold = True
@@ -5979,8 +6034,8 @@ class TemplateProcessor:
             # Add any remaining text
             if current_pos < len(full_text):
                 text_after = full_text[current_pos:]
-                # Preserve line breaks and whitespace, but skip if completely empty
-                if text_after or text_after.strip():
+                # Drop whitespace-only/invisible fragments around markers.
+                if _has_visible_text(text_after):
                     run = paragraph.add_run(text_after)
                     run.font.name = "Arial"
                     run.font.bold = True
@@ -6061,7 +6116,7 @@ class TemplateProcessor:
                     
                     # CRITICAL FIX: Check if lineage content itself is a classic lineage value
                     # Clean the content to check for classic lineage values
-                    clean_content = content.strip().upper()
+                    clean_content = _trim_invisible_edges(content).upper()
                     # Remove any marker remnants
                     clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
                     clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
@@ -6099,7 +6154,7 @@ class TemplateProcessor:
                         original_text = run.text or ''
                         set_run_font_size(run, font_size)
                         if brand_clean_regex:
-                            run.text = brand_clean_regex.sub('', original_text).strip()
+                            run.text = _trim_invisible_edges(brand_clean_regex.sub('', original_text))
                     
                     # Handle alignment based on PRODUCT TYPE OR classic lineage value
                     # CRITICAL FIX: If lineage content is a classic lineage value, always left-align
@@ -6478,7 +6533,7 @@ class TemplateProcessor:
                     # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
                     content = re.sub(r'\$.*', '', content)
                     
-                    content = content.strip()
+                    content = _trim_invisible_edges(content)
                     
                     if original_content != content:
                         self.logger.warning(f"Cleaned corrupted lineage content: '{original_content}' -> '{content}'")
@@ -6553,7 +6608,7 @@ class TemplateProcessor:
                                 
                                 # CRITICAL FIX: Check if lineage content itself is a classic lineage value
                                 from src.core.constants import VALID_CLASSIC_LINEAGES
-                                clean_lineage = actual_lineage.strip().upper()
+                                clean_lineage = _trim_invisible_edges(actual_lineage).upper()
                                 clean_lineage = re.sub(r'LINEAGE_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
                                 clean_lineage = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
                                 is_classic_lineage_value = clean_lineage in VALID_CLASSIC_LINEAGES or any(
@@ -6598,7 +6653,7 @@ class TemplateProcessor:
                         
                         # CRITICAL FIX: Check if lineage content itself is a classic lineage value
                         # Clean the content to check for classic lineage values
-                        clean_content = content.strip().upper()
+                        clean_content = _trim_invisible_edges(content).upper()
                         # Remove any marker remnants
                         clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
                         clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
@@ -6813,29 +6868,25 @@ class TemplateProcessor:
                 # Check if this paragraph contains lineage or vendor content
                 text = paragraph.text.lower()
                 if any(keyword in text for keyword in ['indica', 'sativa', 'hybrid', 'cbd', 'alpha crux', 'constellation']):
-                    # Vertical template: 6pt before/after; others: 2pt/1pt
+                    # Enforce equal spacing above/below lineage/brand banner text.
+                    # Vertical keeps the larger spacing; other templates use compact equal spacing.
                     if self.template_type == 'vertical':
-                        paragraph.paragraph_format.space_before = Pt(6)
-                        paragraph.paragraph_format.space_after = Pt(6)
-                        # Also set at XML level for maximum compatibility
-                        pPr = paragraph._element.get_or_add_pPr()
-                        spacing = pPr.find(qn('w:spacing'))
-                        if spacing is None:
-                            spacing = OxmlElement('w:spacing')
-                            pPr.append(spacing)
-                        spacing.set(qn('w:before'), '120')  # 6pt = 120 twips
-                        spacing.set(qn('w:after'), '120')   # 6pt = 120 twips
+                        spacing_pt = 6
                     else:
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
-                        # Also set at XML level for maximum compatibility
-                        pPr = paragraph._element.get_or_add_pPr()
-                        spacing = pPr.find(qn('w:spacing'))
-                        if spacing is None:
-                            spacing = OxmlElement('w:spacing')
-                            pPr.append(spacing)
-                        spacing.set(qn('w:before'), '40')  # 2pt = 40 twips
-                        spacing.set(qn('w:after'), '20')   # 1pt = 20 twips
+                        spacing_pt = 2
+
+                    paragraph.paragraph_format.space_before = Pt(spacing_pt)
+                    paragraph.paragraph_format.space_after = Pt(spacing_pt)
+
+                    # Also set at XML level for maximum compatibility
+                    pPr = paragraph._element.get_or_add_pPr()
+                    spacing = pPr.find(qn('w:spacing'))
+                    if spacing is None:
+                        spacing = OxmlElement('w:spacing')
+                        pPr.append(spacing)
+                    twips = str(int(spacing_pt * 20))
+                    spacing.set(qn('w:before'), twips)
+                    spacing.set(qn('w:after'), twips)
                     spacing.set(qn('w:lineRule'), 'auto')
             
             # Process all tables
