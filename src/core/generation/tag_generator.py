@@ -153,6 +153,7 @@ def get_template_path(template_type):
         'horizontal': 'horizontal.docx',
         'vertical': 'vertical.docx',
         'mini': 'mini.docx',
+        'miniroll': 'miniroll.docx',
         'double': 'double.docx',
         'inventory': 'inventory.docx',
         'preroll': 'preroll.docx'
@@ -877,10 +878,10 @@ def process_chunk(args):
     # Skip verbose lineage debugging to improve performance
     # CRITICAL FIX: Disable ALL dynamic templates to prevent XML corruption
     # Use standard template expansion with post-processing cleanup instead
-    if orientation == "mini":
+    if orientation == "mini" or orientation == "miniroll":
         local_template_buffer = base_template
         num_labels = 20  # Use standard 4x5 grid
-        logger.debug(f"🔧 MINI TEMPLATE EXPANSION: Using standard template expansion")
+        logger.debug(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using standard template expansion")
     elif orientation == "preroll":
         local_template_buffer = base_template
         num_labels = 12  # Use standard 4x3 grid (same as double)
@@ -906,7 +907,7 @@ def process_chunk(args):
         # Fallback to direct load
         tpl = DocxTemplate(local_template_buffer)
     context = {}
-    image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)
+    image_width = Mm(8) if orientation in ("mini", "miniroll") else Mm(9 if orientation == 'vertical' else 12)
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")
@@ -1198,6 +1199,64 @@ def process_chunk(args):
             label_data["ProductName"] = product_name  # Do not repurpose ProductName
             label_data["Description"] = description  # Primary clean display field
             label_data["WeightUnits"] = wrap_with_marker(display_weight, "WEIGHTUNITS")  # CRITICAL FIX: Wrap with markers for template rendering
+
+            # --- PREROLL BRAND INFERENCE ---
+            # If this is a preroll and Product Brand is missing, try to infer brand
+            # from the product name using common patterns (e.g., "by BrandName - ...")
+            try:
+                if is_preroll and (not product_brand or product_brand.strip() == ''):
+                    # Detect known preroll subbrands embedded in product names (user-provided map)
+                    preroll_subbrand_map = {
+                        'honey stixx': 'Honey Stixx',
+                        'honey stix': 'Honey Stixx',
+                        'sugar stix': 'Sugar Stix',
+                        'sugar stixx': 'Sugar Stixx',
+                        'flavour stix': 'Flavour Stix',
+                        'flavour stixx': 'Flavour Stix',
+                        'rosin rolls': 'Rosin Rolls',
+                        'bang stix': 'Bang Stix',
+                        'bloomers': 'Bloomers',
+                        'rose infused': 'Rose Infused',
+                        'sugar cone': 'Sugar Cone',
+                        'snickerdoobie': 'SnickerDoobie',
+                        'hash holes': 'Hash Holes',
+                        'hash infused': 'Hash Infused',
+                        'sparklers': 'Sparklers',
+                        'melt stix': 'Melt Stix',
+                        'blunts': 'Blunts',
+                        'bubble hash': 'Bubble Hash'
+                    }
+                    pname_lower = product_name.lower()
+                    for sub, canonical in preroll_subbrand_map.items():
+                        if sub in pname_lower:
+                            inferred_brand = canonical
+                            product_brand = inferred_brand
+                            if logger.isEnabledFor(logging.INFO):
+                                logger.info(f"PREROLL SUBBRAND INFERRED: '{product_name}' -> '{product_brand}' (matched '{sub}')")
+                            break
+                    inferred_brand = ''
+                    # Look for "by BrandName -" or "by BrandName" at end
+                    by_match = re.search(r'\sby\s+([^-\n]+?)(?:\s+-|$)', product_name, re.IGNORECASE)
+                    if by_match:
+                        inferred_brand = by_match.group(1).strip()
+                    else:
+                        # Fallback: left-of-dash could be brand if product names are "Brand - Product"
+                        if ' - ' in product_name:
+                            left = product_name.split(' - ')[0].strip()
+                            # Heuristic: left side should be reasonably short and not contain weight/unit tokens
+                            if left and len(left) < 40 and not re.search(r'\d+g|mg|pack|x\s*\d+', left, re.IGNORECASE):
+                                inferred_brand = left
+                    # Final fallback: check other fields like Brand/ProductBrand/Vendor
+                    if not inferred_brand:
+                        inferred_brand = (row.get('ProductBrand') or row.get('Brand') or row.get('Vendor') or '').strip()
+
+                    if inferred_brand:
+                        product_brand = inferred_brand
+                        if logger.isEnabledFor(logging.INFO):
+                            logger.info(f"PREROLL BRAND INFERRED: '{product_name}' -> '{product_brand}'")
+            except Exception:
+                # Don't block generation for inference errors
+                pass
             
             # For edibles, use brand instead of lineage in the label
             edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}

@@ -3903,8 +3903,8 @@ class ExcelProcessor:
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
-                                            'Description': product.get('Description', product_name),
-                                            'DescAndWeight': self._process_description_from_product_name(product_name),
+                                            'Description': product.get('Description', ''),
+                                            'DescAndWeight': product.get('DescAndWeight', product.get('Description', '')),
                                             'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
                                             'Product Brand': product.get('Product Brand', ''),
                                             'Product Strain': product.get('Product Strain', ''),
@@ -3958,8 +3958,8 @@ class ExcelProcessor:
                                         record = {
                                             'ProductName': product_name,
                                             'Product Name*': product_name,
-                                            'Description': product.get('Description', product_name),
-                                            'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
+                                            'Description': product.get('Description', ''),
+                                            'DescAndWeight': product.get('DescAndWeight', product.get('Description', '')),
                                             'Product Type*': product.get('Product Type*', 'flower'),  # Default to flower for new products
                                             'Product Brand': product.get('Product Brand', ''),
                                             'Product Strain': product.get('Product Strain', ''),
@@ -7617,8 +7617,8 @@ class ExcelProcessor:
             description = get_val('Description')
             product_name_for_desc = get_val(product_name_col)
 
-            # Use Description if available, otherwise use Product Name
-            desc_and_weight = description if description else product_name_for_desc
+            # Use Description if available; do NOT fall back to Product Name when missing
+            desc_and_weight = description if description else ''
 
             # Extract THC/CBD values from the appropriate columns using fast accessor
             total_thc_value = get_val('Total THC')

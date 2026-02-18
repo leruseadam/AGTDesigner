@@ -22009,4 +22009,148 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     modalEl.addEventListener('shown.bs.modal', refreshUserTemplatesList);
+        // --- Placeholder styling panel -------------------------------------------------
+        const placeholderPanelId = 'templatePlaceholderSettingsPanel';
+        function ensurePlaceholderPanel() {
+                if (document.getElementById(placeholderPanelId)) return;
+                const panel = document.createElement('div');
+                panel.id = placeholderPanelId;
+                panel.className = 'mt-3';
+                panel.innerHTML = `
+                    <div class="glass-card p-3 placeholder-panel">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0 text-white">Placeholder styling</h6>
+                            <div>
+                                <select id="placeholderTemplateTypeSelect" class="form-select form-select-sm">
+                                    <option value="horizontal">Horizontal</option>
+                                    <option value="vertical">Vertical</option>
+                                    <option value="mini">Mini</option>
+                                    <option value="miniroll">Mini-roll</option>
+                                    <option value="double">Double</option>
+                                    <option value="inventory">Inventory</option>
+                                    <option value="preroll">Preroll</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="placeholderSettingsList" style="max-height:320px; overflow:auto;"></div>
+                        <div class="mt-3 d-flex justify-content-between align-items-center">
+                            <div class="text-white-50 small">Tip: enable Auto color to apply lineage colors to the field text.</div>
+                            <div>
+                                <button id="savePlaceholderSettingsBtn" class="btn btn-sm btn-primary">Save placeholder settings</button>
+                            </div>
+                        </div>
+                    </div>`;
+                modalEl.querySelector('.modal-body').appendChild(panel);
+
+                document.getElementById('placeholderTemplateTypeSelect').addEventListener('change', function(){
+                        renderPlaceholderSettings(this.value);
+                });
+                document.getElementById('savePlaceholderSettingsBtn').addEventListener('click', savePlaceholderSettings);
+        }
+
+        const PLACEHOLDERS = ['Description','WeightUnits','ProductBrand','ProductBrand_Center','Price','Lineage','DOH','Ratio_or_THC_CBD','THC_CBD','ProductName','ProductStrain','ProductType'];
+
+        function renderPlaceholderSettings(templateType) {
+                ensurePlaceholderPanel();
+                const list = document.getElementById('placeholderSettingsList');
+                list.innerHTML = '';
+                // Load saved settings from backend
+                fetch('/api/template-settings').then(r=>r.json()).then(j=>{
+                        const saved = (j && j.settings) || {};
+                        const placeholderSettingsRoot = saved.placeholderSettings || {};
+                        const savedForType = placeholderSettingsRoot[templateType] || {};
+
+                        PLACEHOLDERS.forEach(ph => {
+                                const cfg = savedForType[ph] || {};
+                                const node = document.createElement('div');
+                                node.className = 'placeholder-row';
+                                node.innerHTML = `
+                                    <div class="ph-label">${ph}</div>
+                                    <div class="ph-controls">
+                                        <label class="form-check form-switch mb-0 text-white d-flex align-items-center">
+                                            <input class="form-check-input apply-lineage-toggle" data-field="${ph}" type="checkbox" ${cfg.applyLineage ? 'checked' : ''}>
+                                            <span class="form-check-label small ms-2 text-white">Auto color</span>
+                                        </label>
+                                        <label class="form-check form-switch mb-0 text-white d-flex align-items-center">
+                                            <input class="form-check-input remove-shading-toggle" data-field="${ph}" type="checkbox" ${cfg.removeShading ? 'checked' : ''}>
+                                            <span class="form-check-label small ms-2 text-white">Clear shading</span>
+                                        </label>
+                                    </div>
+                                    <div class="ph-font-size">
+                                        <select class="form-select form-select-sm ph-font-select" data-field="${ph}" style="min-width:130px">
+                                            <option ${cfg.font==='Arial'?'selected':''}>Arial</option>
+                                            <option ${cfg.font==='Helvetica'?'selected':''}>Helvetica</option>
+                                            <option ${cfg.font==='Times New Roman'?'selected':''}>Times New Roman</option>
+                                            <option ${cfg.font==='Calibri'?'selected':''}>Calibri</option>
+                                        </select>
+                                        <select class="form-select form-select-sm ph-size-select" data-field="${ph}" style="width:90px">
+                                            ${[8,9,10,11,12,13,14,16,18,20,22,24,28,32].map(s=>`<option value="${s}" ${cfg.size==s?'selected':''}>${s}px</option>`).join('')}
+                                        </select>
+                                    </div>`;
+                                list.appendChild(node);
+                        });
+                }).catch(()=>{
+                        // Render defaults if backend fails
+                        PLACEHOLDERS.forEach(ph => {
+                                const node = document.createElement('div');
+                                node.className = 'placeholder-row';
+                                node.innerHTML = `
+                                    <div class="ph-label">${ph}</div>
+                                    <div class="ph-controls">
+                                        <label class="form-check form-switch mb-0 text-white d-flex align-items-center">
+                                            <input class="form-check-input apply-lineage-toggle" data-field="${ph}" type="checkbox">
+                                            <span class="form-check-label small ms-2 text-white">Auto color</span>
+                                        </label>
+                                        <label class="form-check form-switch mb-0 text-white d-flex align-items-center">
+                                            <input class="form-check-input remove-shading-toggle" data-field="${ph}" type="checkbox">
+                                            <span class="form-check-label small ms-2 text-white">Clear shading</span>
+                                        </label>
+                                    </div>
+                                    <div class="ph-font-size">
+                                        <select class="form-select form-select-sm ph-font-select" data-field="${ph}" style="min-width:130px">
+                                            <option>Arial</option>
+                                            <option>Helvetica</option>
+                                            <option>Times New Roman</option>
+                                            <option>Calibri</option>
+                                        </select>
+                                        <select class="form-select form-select-sm ph-size-select" data-field="${ph}" style="width:90px">
+                                            ${[8,9,10,11,12,13,14,16,18,20,22,24,28,32].map(s=>`<option value="${s}">${s}px</option>`).join('')}
+                                        </select>
+                                    </div>`;
+                                list.appendChild(node);
+                        });
+                });
+        }
+
+        function savePlaceholderSettings(){
+                const templateType = document.getElementById('placeholderTemplateTypeSelect').value;
+                const nodes = document.querySelectorAll('#placeholderSettingsList > div');
+                const settings = {};
+                nodes.forEach(n => {
+                        const field = n.querySelector('.apply-lineage-toggle').getAttribute('data-field');
+                        const applyLineage = n.querySelector('.apply-lineage-toggle').checked;
+                        const removeShading = n.querySelector('.remove-shading-toggle').checked;
+                        const font = n.querySelector('.ph-font-select').value;
+                        const size = parseInt(n.querySelector('.ph-size-select').value, 10) || 12;
+                        settings[field] = { applyLineage, removeShading, font, size };
+                });
+
+                // Build payload consistent with backend session structure
+                // Keep any existing templateSettings in session by fetching first
+                fetch('/api/template-settings').then(r=>r.json()).then(j=>{
+                        const root = (j && j.settings) || {};
+                        root.placeholderSettings = root.placeholderSettings || {};
+                        root.placeholderSettings[templateType] = settings;
+                        return fetch('/api/template-settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(root)});
+                }).then(r=>r.ok ? r.json() : r.json().then(j=>Promise.reject(j))).then(()=>{
+                        alert('Placeholder settings saved');
+                }).catch(err=>alert(err && err.error ? err.error : 'Failed to save settings'));
+        }
+
+        // Initialize placeholder panel when modal body is ready
+        modalEl.addEventListener('shown.bs.modal', function(){
+                ensurePlaceholderPanel();
+                const sel = document.getElementById('placeholderTemplateTypeSelect');
+                renderPlaceholderSettings(sel.value);
+        });
 });

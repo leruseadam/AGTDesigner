@@ -2255,7 +2255,7 @@ def save_template_settings(template_type, font_settings):
         raise
 
 # --- User template uploads (designs per template type, per store) ---
-USER_TEMPLATE_TYPES = ['horizontal', 'vertical', 'mini', 'double', 'preroll', 'inventory']
+USER_TEMPLATE_TYPES = ['horizontal', 'vertical', 'mini', 'miniroll', 'double', 'preroll', 'inventory']
 
 def _sanitize_store_for_path(store_name):
     """Return a filesystem-safe subdir name for the store (no slashes, no parent path)."""
@@ -5889,7 +5889,7 @@ def edit_template():
         if not template_type:
             return jsonify({'error': 'Template type is required'}), 400
             
-        if template_type not in ['horizontal', 'vertical', 'mini', 'double', 'inventory']:
+        if template_type not in ['horizontal', 'vertical', 'mini', 'miniroll', 'double', 'inventory']:
             return jsonify({'error': 'Invalid template type'}), 400
 
         # Validate font settings
@@ -10399,8 +10399,8 @@ def generate_labels():
                             record = {
                                 'ProductName': product_name,
                                 'Product Name*': product_name,
-                                'Description': json_product.get('Description', product_name),
-                                'DescAndWeight': json_product.get('DescAndWeight', product_name),
+                                'Description': json_product.get('Description', ''),
+                                'DescAndWeight': json_product.get('DescAndWeight', ''),
                                 'Product Type*': json_product.get('Product Type*', 'flower'),
                                 'Product Brand': json_product.get('Product Brand', ''),
                                 'Product Strain': json_product.get('Product Strain', ''),
@@ -10631,6 +10631,11 @@ def generate_labels():
                 'smart_truncation': template_settings.get('smartTruncation', True),
                 'optimization': template_settings.get('optimization', False)
             }
+            # Placeholder-specific settings (per-template-type)
+            try:
+                processor.placeholder_settings = template_settings.get('placeholderSettings', {}).get(template_type, {}) if template_settings else {}
+            except Exception:
+                processor.placeholder_settings = {}
         
         # Log the number of records passed to the template processor
         logging.info(f"🔍 LABEL RENDER: Passing {len(records)} records to TemplateProcessor for template '{template_type}'")
@@ -11008,6 +11013,7 @@ def generate_labels():
             'horizontal': 'HORIZ',
             'vertical': 'VERT', 
             'mini': 'MINI',
+            'miniroll': 'MINIROLL',
             'double': 'DOUBLE'
         }.get(template_type, template_type.upper())
         
@@ -11688,12 +11694,13 @@ def process_database_product_for_api(db_product):
     if product_name and weight_units and weight_units != 'N/A':
         processed_product['DescAndWeight'] = _create_desc_and_weight(product_name, weight_units)
     elif product_name:
-        # If still no weight, just use the cleaned product name
-        description = str(product_name).strip()
-        if " by " in description:
-            description = description.split(" by ")[0].strip()
-        description = re.sub(r' - [\d.].*$', '', description)
-        processed_product['DescAndWeight'] = description
+        # If still no weight, prefer an explicit Description field if provided.
+        explicit_desc = processed_product.get('Description') or processed_product.get('DescAndWeight') or ''
+        if explicit_desc and str(explicit_desc).strip():
+            processed_product['DescAndWeight'] = str(explicit_desc).strip()
+        else:
+            # Do NOT fall back to full product name as the description; leave empty to avoid confusing labels
+            processed_product['DescAndWeight'] = ''
     else:
         processed_product['DescAndWeight'] = 'N/A'
 

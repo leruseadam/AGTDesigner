@@ -58,7 +58,7 @@ def _set_paragraph_auto_spacing(paragraph):
         del sp.attrib[qn('w:after')]
     sp.set(qn('w:lineRule'), 'auto')
 
-def apply_lineage_colors(doc, template_type=None):
+def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
     """Apply lineage colors to all cells based on keywords in cell text.
     template_type: when 'horizontal', paragraph spacing in lineage/brand cells is 1.5pt/1.5pt (equal margins); otherwise 2pt/1pt.
     """
@@ -108,6 +108,34 @@ def apply_lineage_colors(doc, template_type=None):
                         else:
                             logger.debug(f"🔍 NO LINEAGE HINT TOKEN found in cell text: '{original_text[:100]}'")
                         
+                        # Detect placeholder field markers (so we can apply per-field controls)
+                        marker_to_field = {
+                            'DESC_START': 'Description',
+                            'WEIGHTUNITS_START': 'WeightUnits',
+                            'PRODUCTBRAND_START': 'ProductBrand',
+                            'PRODUCTBRAND_CENTER_START': 'ProductBrand_Center',
+                            'PRICE_START': 'Price',
+                            'LINEAGE_START': 'Lineage',
+                            'DOH': 'DOH',
+                            'RATIO_START': 'Ratio_or_THC_CBD',
+                            'THC_CBD_START': 'THC_CBD',
+                            'PRODUCTNAME_START': 'ProductName',
+                            'PRODUCTSTRAIN_START': 'ProductStrain',
+                            'PRODUCTTYPE_START': 'ProductType'
+                        }
+                        detected_field = None
+                        for mk, fk in marker_to_field.items():
+                            if mk in original_text:
+                                detected_field = fk
+                                break
+
+                        # Convenience: fetch per-placeholder configuration
+                        ph_cfg = None
+                        try:
+                            ph_cfg = (placeholder_settings or {}).get(detected_field) if placeholder_settings else None
+                        except Exception:
+                            ph_cfg = None
+
                         # CRITICAL FIX: Skip blank cells - don't apply any background color
                         # But NOT if we extracted a lineage hint token (cell had color info)
                         if (not original_text.strip() or original_text.strip() == '') and not lineage_hint_value:
@@ -155,25 +183,39 @@ def apply_lineage_colors(doc, template_type=None):
                                     COLORS.get('CBD_BLEND') if 'CBD' in hint_upper or hint_upper.endswith('_BLEND') or hint_upper == '_BLEND' else None
                                 )
                                 if color_candidate:
-                                    tc = cell._tc
-                                    tcPr = tc.get_or_add_tcPr()
-                                    for old_shd in tcPr.findall(qn('w:shd')):
-                                        tcPr.remove(old_shd)
-                                    shd = OxmlElement('w:shd')
-                                    shd.set(qn('w:fill'), color_candidate)
-                                    shd.set(qn('w:val'), 'clear')
-                                    shd.set(qn('w:color'), 'auto')
-                                    tcPr.append(shd)
-                                    from src.core.generation.unified_font_sizing import get_font_size
-                                    field = 'lineage' if is_classic_type_before_processing else 'brand'
-                                    orient = template_type if template_type in ('horizontal', 'vertical', 'double') else 'vertical'
-                                    bar_font_size = get_font_size(hint_upper or ' ', field, orient, 1.0)
-                                    for paragraph in cell.paragraphs:
-                                        for run in paragraph.runs:
-                                            _set_lineage_run_white(run)
-                                            run.font.bold = True
-                                            run.font.name = "Arial"
-                                            run.font.size = bar_font_size
+                                    # If placeholder config exists and explicitly disables applying lineage, skip
+                                    if ph_cfg and ph_cfg.get('applyLineage') is False:
+                                        logger.info(f"Skipping lineage hint color for field '{detected_field}' due to placeholder settings")
+                                    else:
+                                        tc = cell._tc
+                                        tcPr = tc.get_or_add_tcPr()
+                                        for old_shd in tcPr.findall(qn('w:shd')):
+                                            tcPr.remove(old_shd)
+                                        shd = OxmlElement('w:shd')
+                                        shd.set(qn('w:fill'), color_candidate)
+                                        shd.set(qn('w:val'), 'clear')
+                                        shd.set(qn('w:color'), 'auto')
+                                        tcPr.append(shd)
+                                        from src.core.generation.unified_font_sizing import get_font_size
+                                        field = 'lineage' if is_classic_type_before_processing else 'brand'
+                                        orient = template_type if template_type in ('horizontal', 'vertical', 'double') else 'vertical'
+                                        bar_font_size = get_font_size(hint_upper or ' ', field, orient, 1.0)
+                                        for paragraph in cell.paragraphs:
+                                            for run in paragraph.runs:
+                                                _set_lineage_run_white(run)
+                                                run.font.bold = True
+                                                # Apply placeholder font/size overrides if provided
+                                                if ph_cfg and ph_cfg.get('font'):
+                                                    run.font.name = ph_cfg.get('font')
+                                                else:
+                                                    run.font.name = "Arial"
+                                                if ph_cfg and ph_cfg.get('size'):
+                                                    try:
+                                                        run.font.size = Pt(int(ph_cfg.get('size')))
+                                                    except Exception:
+                                                        run.font.size = bar_font_size
+                                                else:
+                                                    run.font.size = bar_font_size
                                     # Center brand text when markers are used (but only for non-classic types)
                                     if has_productbrand_center_marker and not is_classic_type_before_processing:
                                         for paragraph in cell.paragraphs:
@@ -311,6 +353,21 @@ def apply_lineage_colors(doc, template_type=None):
     
                         # Apply color if we have one and there's actual content
                         if color_hex and text.strip():
+                            # If placeholder config explicitly disables lineage color for this field, skip applying color
+                            if ph_cfg and ph_cfg.get('applyLineage') is False:
+                                logger.info(f"Skipping lineage color for field '{detected_field}' due to placeholder settings")
+                                # If configured to remove shading, do that and continue
+                                if ph_cfg and ph_cfg.get('removeShading'):
+                                    try:
+                                        tc = cell._tc
+                                        tcPr = tc.find(qn('w:tcPr'))
+                                        if tcPr is not None:
+                                            shd = tcPr.find(qn('w:shd'))
+                                            if shd is not None:
+                                                tcPr.remove(shd)
+                                    except Exception:
+                                        pass
+                                continue
                             # Set cell background color
                             tc = cell._tc
                             tcPr = tc.get_or_add_tcPr()
@@ -333,8 +390,19 @@ def apply_lineage_colors(doc, template_type=None):
                                 for run in paragraph.runs:
                                     _set_lineage_run_white(run)
                                     run.font.bold = True
-                                    run.font.name = "Arial"
-                                    run.font.size = bar_font_size
+                                    # Apply placeholder font override if provided
+                                    if ph_cfg and ph_cfg.get('font'):
+                                        run.font.name = ph_cfg.get('font')
+                                    else:
+                                        run.font.name = "Arial"
+                                    # Apply placeholder size override if provided (use Pt)
+                                    try:
+                                        if ph_cfg and ph_cfg.get('size'):
+                                            run.font.size = Pt(int(ph_cfg.get('size')))
+                                        else:
+                                            run.font.size = bar_font_size
+                                    except Exception:
+                                        run.font.size = bar_font_size
                             
                             # CRITICAL: For non-classic types (brand in banner), center and match lineage spacing
                             # Double template: non-classic uses Auto before/after; others use default
@@ -362,6 +430,18 @@ def apply_lineage_colors(doc, template_type=None):
                                         logger.info(f"✅ CENTERED+SPACING non-classic brand cell (color applied): '{original_text[:50]}'")
                                     except Exception as e:
                                         logger.warning(f"⚠️ Failed to set alignment/spacing: {e}")
+
+                        # If placeholder config requested shading removal for this field, remove any shading now
+                        if ph_cfg and ph_cfg.get('removeShading'):
+                            try:
+                                tc = cell._tc
+                                tcPr = tc.find(qn('w:tcPr'))
+                                if tcPr is not None:
+                                    shd = tcPr.find(qn('w:shd'))
+                                    if shd is not None:
+                                        tcPr.remove(shd)
+                            except Exception:
+                                pass
                         
                         # CRITICAL: Center brand text when PRODUCTBRAND_CENTER markers are present (backup path)
                         # BUT only for non-classic types - classic types (INDICA, HYBRID, SATIVA) should remain left-aligned

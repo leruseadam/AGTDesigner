@@ -13,6 +13,29 @@ from flask import session
 from flask_caching import Cache
 from src.core.constants import PREROLL_ALLOWED_BRANDS
 import threading
+import re
+
+# Known preroll subbrands to surface as brands when present in product names
+PREROLL_SUBBRAND_MAP = {
+    'honey stixx': 'Honey Stixx',
+    'honey stix': 'Honey Stixx',
+    'sugar stix': 'Sugar Stix',
+    'sugar stixx': 'Sugar Stixx',
+    'flavour stix': 'Flavour Stix',
+    'flavour stixx': 'Flavour Stix',
+    'rosin rolls': 'Rosin Rolls',
+    'bang stix': 'Bang Stix',
+    'bloomers': 'Bloomers',
+    'rose infused': 'Rose Infused',
+    'sugar cone': 'Sugar Cone',
+    'snickerdoobie': 'SnickerDoobie',
+    'hash holes': 'Hash Holes',
+    'hash infused': 'Hash Infused',
+    'sparklers': 'Sparklers',
+    'melt stix': 'Melt Stix',
+    'blunts': 'Blunts',
+    'bubble hash': 'Bubble Hash'
+}
 
 
 def _store_preroll_group_in_database(group_key: str, group_id: str, group_items: List[Dict], group_info: Dict):
@@ -518,6 +541,16 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
         # This is the most reliable source since product names follow the pattern:
         # "Product Description by BrandName - Size"
         rep_brand = ''
+        # PRIORITY 0: If the product name contains a known preroll subbrand, use that as the brand
+        try:
+            pn_check = (group_records_list[0].get('Product Name*') or group_records_list[0].get('ProductName') or '').lower()
+            for sub, canonical in PREROLL_SUBBRAND_MAP.items():
+                if sub in pn_check:
+                    rep_brand = canonical
+                    logging.info(f"PREROLL GROUP REP: Detected subbrand '{rep_brand}' in product name '{pn_check}', using as brand")
+                    break
+        except Exception:
+            pass
         for r in group_records_list:
             product_name = r.get('Product Name*', '') or r.get('ProductName', '') or r.get('Description', '')
             if product_name:
@@ -628,7 +661,12 @@ def generate_preroll_tags(records: List[Dict[str, Any]], cache: Cache) -> List[D
                 'price': record.get('Price', ''),
                 'weight': record.get('CombinedWeight', record.get('WeightUnits', '')),
                 'vendor': record.get('Vendor', record.get('Vendor/Supplier*', '')),
-                'brand': record.get('Product Brand', record.get('ProductBrand', '')),
+                # Ensure brand is inferred if missing: prefer Product Brand, then parse product name, then vendor
+                'brand': (
+                    (record.get('Product Brand') or record.get('ProductBrand') or record.get('Brand') or '')
+                    or (lambda pn: (re.search(r'\sby\s+([^-\n]+?)(?:\s+-|$)', pn, re.IGNORECASE).group(1).strip() if re.search(r'\sby\s+([^-\n]+?)(?:\s+-|$)', pn, re.IGNORECASE) else '') )(str(record.get('Product Name*', record.get('ProductName', ''))))
+                    or (record.get('Vendor') or record.get('Vendor/Supplier*') or '')
+                ),
                 'strain': record.get('Product Strain', ''),
                 'lineage': _clean_lineage(raw_lineage),
                 'doh': doh_display,

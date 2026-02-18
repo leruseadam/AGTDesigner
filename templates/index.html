@@ -4107,6 +4107,36 @@
         overflow-x: hidden !important;
         padding-right: 4px !important;
       }
+
+      /* Placeholder settings panel improvements */
+      .placeholder-panel .placeholder-row {
+        display: grid;
+        grid-template-columns: 1fr 260px 200px;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+      }
+      .placeholder-panel .ph-label {
+        font-weight: 600;
+        color: #ffffff;
+      }
+      .placeholder-panel .ph-controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: flex-start;
+      }
+      .placeholder-panel .ph-font-size {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: flex-end;
+      }
+      @media (max-width: 760px) {
+        .placeholder-panel .placeholder-row { grid-template-columns: 1fr; gap:8px; }
+        .placeholder-panel .ph-font-size { justify-content: flex-start; }
+      }
       
       .product-type-item {
         min-height: 24px !important;
@@ -6660,6 +6690,7 @@
                     <option value="horizontal">Horizontal</option>
                     <option value="vertical">Vertical</option>
                     <option value="mini">Mini</option>
+                    <option value="miniroll">Mini-roll</option>
                     <option value="double">Double</option>
                     <option value="preroll">Preroll</option>
                     <option value="inventory">Inventory</option>

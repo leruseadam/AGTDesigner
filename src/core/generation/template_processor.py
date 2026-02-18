@@ -128,6 +128,7 @@ class TemplateProcessor:
         base_dir = Path(__file__).parent / 'templates'
         template_map = {
             'mini': 'mini.docx',
+            'miniroll': 'miniroll.docx',
             'double': 'double.docx',
             'inventory': 'inventory.docx',
             'horizontal': 'horizontal.docx',
@@ -219,7 +220,7 @@ class TemplateProcessor:
         if not IS_PYTHONANYWHERE:
             self.logger.info(f"DEBUG: Setting chunk size for template_type='{self.template_type}' (type: {type(self.template_type)})")
         
-        if self.template_type == 'mini':
+        if self.template_type in ('mini', 'miniroll'):
             self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
@@ -271,7 +272,7 @@ class TemplateProcessor:
             matches = re.findall(r'Label(\d+)\.', text)
             
             # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 4 for 2x2)
-            if self.template_type == 'mini':
+            if self.template_type in ('mini', 'miniroll'):
                 required_labels = 20  # 4x5 grid
             elif self.template_type == 'double':
                 required_labels = 12  # 4x3 grid
@@ -287,7 +288,7 @@ class TemplateProcessor:
             if len(unique_labels) < required_labels or force_expand:
                 # CRITICAL FIX: Use standard expansion methods for now
                 # Dynamic templates will be created later in _process_chunk based on actual product count
-                if self.template_type == 'mini':
+                if self.template_type in ('mini', 'miniroll'):
                     self.logger.info("Calling 4x5 expansion method")
                     return self._expand_template_to_4x5_fixed_scaled()
                 elif self.template_type == 'inventory':
@@ -1412,7 +1413,7 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
                 elif self.template_type == 'double':
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                elif self.template_type == 'mini':
+                elif self.template_type in ('mini', 'miniroll'):
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
                 elif self.template_type == 'preroll':
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
@@ -1562,7 +1563,7 @@ class TemplateProcessor:
             # For other fixed-grid templates, pad to required_labels
             if self.template_type == 'preroll':
                 required_labels = len(chunk)  # Use all records - template expands to 4x5 grid per chunk
-            elif self.template_type == 'mini':
+            elif self.template_type in ('mini', 'miniroll'):
                 required_labels = 20  # Fixed grid: 4x5 = 20 labels
             elif self.template_type == 'double':
                 required_labels = 12  # Fixed grid: 3x4 = 12 labels
@@ -1752,7 +1753,10 @@ class TemplateProcessor:
             # Apply lineage colors FIRST (in own try/except so one failure doesn't skip post-process).
             # Must run before _post_process because post-process strips __LINEAGE_HINT_*__ from cell text.
             try:
-                apply_lineage_colors(rendered_doc, self.template_type)
+                # Pass placeholder-specific settings if available so coloration/clearing
+                # can be controlled per-field by UI settings stored in session.
+                ph_settings = getattr(self, 'placeholder_settings', {}) or {}
+                apply_lineage_colors(rendered_doc, self.template_type, ph_settings)
             except Exception as color_err:
                 self.logger.warning(f"Lineage color application failed (post-process will still run): {color_err}")
                 self.logger.debug(traceback.format_exc())
@@ -3282,7 +3286,7 @@ class TemplateProcessor:
                 label_context['ProductStrain'] = ""
                 self.logger.debug(f"VERTICAL CLASSIC FIX: Cleared ProductStrain for classic type '{product_type}' (Lineage already shows strain)")
             elif product_strain_value:
-                if self.template_type == 'mini':
+                if self.template_type in ('mini', 'miniroll'):
                     label_context['ProductStrain'] = _trim_invisible_edges(product_strain_value)
                 else:
                     label_context['ProductStrain'] = wrap_with_marker(_trim_invisible_edges(product_strain_value), 'PRODUCTSTRAIN')
@@ -3291,7 +3295,7 @@ class TemplateProcessor:
             
             # CRITICAL FIX: Classic types should NOT have ProductBrand for most templates
             # However, mini templates still display brand in dedicated cells
-            if self.template_type == 'mini' or self.template_type == 'preroll':
+            if self.template_type in ('mini', 'miniroll', 'preroll'):
                 if product_brand:
                     classic_brand_text = _trim_invisible_edges(product_brand).upper()
                     # Ensure markers are applied consistently for downstream formatting
@@ -3441,7 +3445,7 @@ class TemplateProcessor:
                     label_context['ProductBrand_Center'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     # Store per-cell color so apply_lineage_colors can use it even if hint is stripped
                     label_context['_lineage_color'] = lineage_for_color
-                elif self.template_type == 'mini':
+                elif self.template_type in ('mini', 'miniroll'):
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
                     plain_brand = brand_center_text
@@ -3663,7 +3667,7 @@ class TemplateProcessor:
                         self.logger.debug(f"VERTICAL FIX: No ProductStrain available")
                 elif product_strain:
                     # For mini templates, don't wrap with markers since they use simple placeholders
-                    if self.template_type == 'mini':
+                    if self.template_type in ('mini', 'miniroll'):
                         label_context['ProductStrain'] = product_strain
                     else:
                         label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
@@ -4401,7 +4405,7 @@ class TemplateProcessor:
             self.logger.warning(f"DOH cell cleanup failed: {e}")
         
         # Enhanced mini template processing
-        if self.template_type == 'mini':
+        if self.template_type in ('mini', 'miniroll'):
             try:
                 self.logger.info("Processing mini template with enhanced design preservation")
                 
@@ -7227,7 +7231,7 @@ class TemplateProcessor:
                 elif self.template_type == 'double':
                     # 4x3 grid = 12 cells max
                     max_cells = 12
-                elif self.template_type == 'mini':
+                elif self.template_type in ('mini', 'miniroll'):
                     # 4x5 grid = 20 cells max
                     max_cells = 20
                 else:
@@ -7568,7 +7572,7 @@ class TemplateProcessor:
                 expected_rows, expected_cols = 3, 3
             elif template_type == 'double':
                 expected_rows, expected_cols = 4, 3
-            elif template_type == 'mini':
+            elif template_type in ('mini', 'miniroll'):
                 expected_rows, expected_cols = 4, 5
             elif template_type == 'inventory':
                 expected_rows, expected_cols = 2, 2
@@ -7944,7 +7948,7 @@ class TemplateProcessor:
                                         self.logger.debug(f"BRAND MARKERS DEBUG: Lost non-breaking hyphens: '{run.text}'")
                                     
                                     # Ensure brand content is centered for mini templates
-                                    if self.template_type == 'mini':
+                                    if self.template_type in ('mini', 'miniroll'):
                                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                         self.logger.debug(f"Set center alignment for mini template brand: {run_text}")
                                     
@@ -7959,9 +7963,9 @@ class TemplateProcessor:
         This method specifically handles mini template brand alignment.
         """
         try:
-            if self.template_type != 'mini':
+            if self.template_type not in ('mini', 'miniroll'):
                 return
-                
+
             self.logger.debug("Ensuring brand content centering for mini template")
             
             for table in doc.tables:
@@ -7982,7 +7986,7 @@ class TemplateProcessor:
                                 is_brand_content = True
                             
                             # For mini templates, also check for content that looks like brand names
-                            elif self.template_type == 'mini':
+                            elif self.template_type in ('mini', 'miniroll'):
                                 # Look for content that appears to be brand names (not empty, not numbers, not prices, not weights)
                                 clean_text = paragraph_text.strip()
                                 if (clean_text and 
@@ -8662,7 +8666,7 @@ class TemplateProcessor:
             
             # Check if we need to split to multiple lines due to content length
             # Calculate approximate character limits based on template type
-            if self.template_type == 'mini':
+            if self.template_type in ('mini', 'miniroll'):
                 max_chars_per_line = 25
             elif self.template_type == 'vertical':
                 max_chars_per_line = 35
@@ -8742,7 +8746,7 @@ class TemplateProcessor:
                 # Clear existing tab stops
                 paragraph.paragraph_format.tab_stops.clear_all()
                 # Add right-aligned tab stop at the right margin - positioned further right for full justification
-                if self.template_type == 'mini':
+                if self.template_type in ('mini', 'miniroll'):
                     tab_position = Inches(1.4)  # Increased for more aggressive right alignment
                 elif self.template_type == 'vertical':
                     tab_position = Inches(2.5)  # Increased for more aggressive right alignment
@@ -8761,7 +8765,7 @@ class TemplateProcessor:
                     # Add backup tab stop for vertical template too
                     backup_tab_position = Inches(2.7)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
-                elif self.template_type == 'mini':
+                elif self.template_type in ('mini', 'miniroll'):
                     # Add backup tab stop for mini template too
                     backup_tab_position = Inches(1.6)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
@@ -8866,7 +8870,7 @@ class TemplateProcessor:
                 
                 # Set tab stops to position vendor on the right
                 paragraph.paragraph_format.tab_stops.clear_all()
-                if self.template_type == 'mini':
+                if self.template_type in ('mini', 'miniroll'):
                     tab_position = Inches(1.4)  # Increased for more aggressive right alignment
                 elif self.template_type == 'vertical':
                     tab_position = Inches(2.5)  # Increased for more aggressive right alignment
@@ -8882,7 +8886,7 @@ class TemplateProcessor:
                 elif self.template_type == 'vertical':
                     backup_tab_position = Inches(2.7)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
-                elif self.template_type == 'mini':
+                elif self.template_type in ('mini', 'miniroll'):
                     backup_tab_position = Inches(1.6)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
             

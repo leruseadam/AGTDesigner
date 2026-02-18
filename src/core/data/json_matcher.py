@@ -4147,8 +4147,8 @@ class JSONMatcher:
             weight_with_units = f"{weight_value}{units or 'g'}"
             
             # Create DescAndWeight field in the same format as other tags
-            # CRITICAL FIX: Don't add weight to description to avoid duplication
-            desc_and_weight = cleaned_product_name
+            # Do NOT fall back to the product name for Description/DescAndWeight when no explicit description exists
+            desc_and_weight = ''
             
             # Determine DOH value based on product type (proper DOH handling)
             doh_value = self._determine_doh_value(final_assigned_type, cleaned_product_name)
@@ -4157,7 +4157,7 @@ class JSONMatcher:
             product = {
                 'Product Name*': cleaned_product_name,
                 'ProductName': cleaned_product_name,
-                'Description': cleaned_product_name,  # EXCEL PRIORITY: Description reflects product name
+                'Description': '',
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'displayName': cleaned_product_name,  # Use clean name for UI display
                 'Product Type*': final_assigned_type,  # EXCEL PRIORITY: Product Type from inferred/mapped data
