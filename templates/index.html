@@ -215,13 +215,13 @@
         const vh = window.innerHeight / 100;
         const vmin = Math.min(vw, vh);
         const vmax = Math.max(vw, vh);
-        
+
         // Set normalized viewport units as CSS custom properties
         document.documentElement.style.setProperty('--vw', vw + 'px');
         document.documentElement.style.setProperty('--vh', vh + 'px');
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
-        
+
         // UNIVERSAL SCALING: Adapt to any screen size
         // Calculate scale factor based on viewport width (1920px = baseline)
         const baseWidth = 1920;
@@ -229,7 +229,31 @@
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
 
-        console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, scale: ${scaleFactor.toFixed(2)}x`);
+        // DPI NORMALIZATION: Counteract OS-level display scaling (e.g. Windows 125%/150%)
+        // so the app looks the same on every monitor as it does on a MacBook Pro.
+        // MacBook Pro baseline: ~1512px CSS viewport at devicePixelRatio 2.0
+        // Windows PC at 125%: 1536px CSS viewport at devicePixelRatio 1.25
+        // Windows PC at 150%: 1280px CSS viewport at devicePixelRatio 1.5
+        // We only compensate for non-Retina DPI scaling (devicePixelRatio between 1.0 and 2.0
+        // that isn't a true HiDPI display). True HiDPI displays (ratio >= 2.0) are fine as-is.
+        const dpr = window.devicePixelRatio || 1;
+        const physicalWidth = window.screen.width * dpr;
+        // Detect OS-level scaling: if physical screen is wide (>=1920 real pixels)
+        // but CSS viewport is small, the OS is scaling up.
+        // Only apply zoom correction on non-Mac platforms to avoid double-correction.
+        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+        if (!isMac && dpr > 1.0 && dpr < 2.0 && window.innerWidth < 1800) {
+          // The OS is scaling up by dpr (e.g. 1.25x or 1.5x).
+          // Zoom out the body to compensate, clamped to prevent extreme shrinking.
+          const zoomCorrection = Math.max(1 / dpr, 0.7);
+          document.body.style.zoom = zoomCorrection;
+          console.log(`DPI normalization: dpr=${dpr}, zoom=${zoomCorrection.toFixed(3)} (compensating for ${Math.round(dpr*100)}% OS scaling)`);
+        } else {
+          // Mac or standard DPI or true HiDPI — no correction needed
+          document.body.style.zoom = '';
+        }
+
+        console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, dpr: ${dpr}, scale: ${scaleFactor.toFixed(2)}x`);
       }
 
       // Run normalization after DOM is loaded

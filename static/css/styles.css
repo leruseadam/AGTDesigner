@@ -207,13 +207,16 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
    These values MUST match the base html font-size above (16px).
    Changing these causes zoom issues on large monitors.
    ======================================================================== */
+/* Large screens (1921px+): Cap content width, keep standard font sizes.
+   DPI normalization is handled by JS (normalizeViewport) — no need for
+   destructive wildcard font-size overrides or html font-size changes. */
 @media (min-width: 1921px) {
   html {
     font-size: 16px !important; /* LOCKED - must match base html font-size */
   }
 
   body {
-    overflow-y: auto !important; /* Allow scrolling when content exceeds viewport */
+    overflow-y: auto !important;
     overflow-x: hidden !important;
     min-height: 100vh !important;
   }
@@ -228,46 +231,6 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
     min-height: auto !important;
   }
 
-  /* Keep standard font sizes - EXCEPT tag lists */
-  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 1em !important; /* Standard sizing - DO NOT CHANGE */
-  }
-
-  html {
-    font-size: 16px !important; /* LOCKED - must match base html font-size */
-  }
-  
-  /* Override: Keep inventory list at readable size on large screens - use absolute px to avoid scaling issues */
-  #availableTags,
-  #availableTags *,
-  #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-text,
-  #availableTags .tag-info,
-  #selectedTags .tag-entry,
-  #selectedTags .tag-name,
-  #selectedTags .tag-text,
-  #selectedTags .tag-info,
-  .tag-list-container .tag-item,
-  .tag-list-container .tag-entry,
-  .tag-list-container .tag-name,
-  .tag-list-container .tag-text,
-  .tag-list-container .tag-info {
-    font-size: 1.9rem !important; /* Increased substantially */
-    font-weight: 700 !important;
-    color: #fff !important;
-    text-shadow: 2px 2px #ff0000; !important;
-  }
-  
-  /* Reduce padding and margins */
-  .btn-modern, .btn-modern2, .btn-modern3, .btn-glass {
-    padding: 6px 12px !important;
-    font-size: 0.9rem !important;
-    min-height: 36px !important;
-    min-width: 80px !important;
-  }
-  
   /* Remove height restrictions - allow scrolling */
   #availableTags,
   #selectedTags,
@@ -282,83 +245,17 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
   }
 }
 
+/* Very large screens (2560px+): same rules, just cap container */
 @media (min-width: 2560px) {
   html {
-    font-size: 12px !important;
-  }
-  
-  /* Reduce font sizes - EXCEPT tag lists */
-  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 0.67em !important; /* Scale down all fonts by 33% */
-  }
-  
-  html {
-    font-size: 12px !important;
-  }
-  
-  /* Override: Keep inventory list at readable size on very large screens - use absolute px */
-  #availableTags,
-  #availableTags *,
-  #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-text,
-  #availableTags .tag-info,
-  #selectedTags,
-  #selectedTags *,
-  #selectedTags .tag-item,
-  #selectedTags .tag-entry,
-  #selectedTags .tag-name,
-  #selectedTags .tag-text,
-  #selectedTags .tag-info,
-  .tag-list-container,
-  .tag-list-container *,
-  .tag-list-container .tag-item,
-  .tag-list-container .tag-entry,
-  .tag-list-container .tag-name,
-  .tag-list-container .tag-text,
-  .tag-list-container .tag-info {
-    font-size: 44px !important; /* Increased substantially */
+    font-size: 16px !important; /* LOCKED */
   }
 }
 
+/* Ultra-wide / 4K (3840px+): same rules */
 @media (min-width: 3840px) {
   html {
-    font-size: 10px !important;
-  }
-  
-  /* Reduce font sizes - EXCEPT tag lists */
-  *:not(#availableTags):not(#availableTags *):not(#selectedTags):not(#selectedTags *):not(.tag-list-container):not(.tag-list-container *) {
-    font-size: 0.56em !important; /* Scale down all fonts by 44% */
-  }
-  
-  html {
-    font-size: 10px !important;
-  }
-  
-  /* Override: Keep inventory list at readable size on ultra-large screens - use absolute px */
-  #availableTags,
-  #availableTags *,
-  #availableTags .tag-item,
-  #availableTags .tag-entry,
-  #availableTags .tag-name,
-  #availableTags .tag-text,
-  #availableTags .tag-info,
-  #selectedTags,
-  #selectedTags *,
-  #selectedTags .tag-item,
-  #selectedTags .tag-entry,
-  #selectedTags .tag-name,
-  #selectedTags .tag-text,
-  #selectedTags .tag-info,
-  .tag-list-container,
-  .tag-list-container *,
-  .tag-list-container .tag-item,
-  .tag-list-container .tag-entry,
-  .tag-list-container .tag-name,
-  .tag-list-container .tag-text,
-  .tag-list-container .tag-info {
-    font-size: 48px !important; /* Increased substantially */
+    font-size: 16px !important; /* LOCKED */
   }
 }
   
