@@ -282,7 +282,7 @@ class ProductTypeSpecificMatcher:
             factors['vendor_match'] = vendor_score
             score += vendor_score * 0.15
             
-            if score > 0.1:  # Ultra-lenient threshold for flower
+            if score > 0.3:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
@@ -291,9 +291,9 @@ class ProductTypeSpecificMatcher:
                     processing_time=0.0,
                     match_factors=factors
                 ))
-                
+
         return sorted(matches, key=lambda x: x.score, reverse=True)
-        
+
     def _match_concentrate(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
         """Concentrate-specific matching focusing on extraction method and potency"""
         matches = []
@@ -336,7 +336,7 @@ class ProductTypeSpecificMatcher:
             factors['vendor_match'] = vendor_score
             score += vendor_score * 0.15
             
-            if score > 0.15:  # Ultra-lenient threshold for concentrates
+            if score > 0.3:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
@@ -394,7 +394,7 @@ class ProductTypeSpecificMatcher:
             factors['vendor_match'] = vendor_score
             score += vendor_score * 0.1
             
-            if score > 0.1:  # Ultra-lenient threshold for vapes
+            if score > 0.3:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
@@ -446,7 +446,7 @@ class ProductTypeSpecificMatcher:
             factors['brand_match'] = brand_score
             score += brand_score * 0.2
             
-            if score > 0.1:  # Ultra-lenient threshold for edibles
+            if score > 0.3:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
@@ -494,7 +494,7 @@ class ProductTypeSpecificMatcher:
             factors['vendor_match'] = vendor_score
             score += vendor_score * 0.05
             
-            if score > 0.1:  # Threshold for pre-roll matches
+            if score > 0.3:
                 matches.append(MatchResult(
                     score=score,
                     matched_product=db_product,
@@ -529,7 +529,7 @@ class ProductTypeSpecificMatcher:
             # Simple fuzzy matching
             score = fuzz.ratio(json_name, db_name) / 100.0
             
-            if score > 0.1:  # Ultra-lenient threshold for generic
+            if score > 0.3:
                 matches.append(MatchResult(
                     score=score,
                     match_data=db_product,
@@ -1138,38 +1138,29 @@ class EnhancedJSONMatcher:
             logging.debug("🔄 DATABASE PRIORITY: No JSON items to merge")
             return product_dict
             
-        # Find the best matching JSON item for this product (for matching purposes only)
+        # Use source_json_item from match result directly (O(1) instead of O(n) search)
         json_item = None
-        product_name = (product_dict.get('Product Name*') or 
-                       product_dict.get('ProductName') or '').lower().strip()
-        
-        logging.debug(f"🔍 DATABASE PRIORITY: Looking for JSON match for '{product_name}' (matching only)")
-        
-        # Try to find exact or best matching JSON item with multiple strategies
         best_match_score = 0
-        for i, item in enumerate(json_items):
-            item_name = (item.get('product_name') or 
-                        item.get('inventory_name') or '').lower().strip()
-            if item_name:
-                # Strategy 1: Word overlap similarity
-                similarity = len(set(item_name.split()) & set(product_name.split())) / max(len(set(item_name.split())), len(set(product_name.split())), 1)
-                
-                # Strategy 2: Substring matching
-                substring_score = 0
-                if item_name in product_name or product_name in item_name:
-                    substring_score = 0.8
-                
-                # Strategy 3: Fuzzy matching (simple)
-                common_chars = set(item_name) & set(product_name)
-                fuzzy_score = len(common_chars) / max(len(set(item_name)), len(set(product_name)), 1) * 0.6
-                
-                # Combined score
-                total_score = max(similarity, substring_score, fuzzy_score)
-                
-                if total_score > best_match_score:
-                    best_match_score = total_score
-                    json_item = item
-                    logging.debug(f"🎯 DATABASE PRIORITY: Better match found at index {i}: '{item_name}' (score: {total_score:.3f})")
+        product_name = (product_dict.get('Product Name*') or
+                       product_dict.get('ProductName') or '').lower().strip()
+
+        if match_result and hasattr(match_result, 'source_json_item') and match_result.source_json_item:
+            json_item = match_result.source_json_item
+            best_match_score = getattr(match_result, 'confidence', 0.8)
+            logging.debug(f"🎯 DATABASE PRIORITY: Using source_json_item directly (confidence: {best_match_score:.3f})")
+        else:
+            # Fallback: search JSON items if source_json_item not available
+            logging.debug(f"🔍 DATABASE PRIORITY: No source_json_item, searching {len(json_items)} items for '{product_name}'")
+            for i, item in enumerate(json_items):
+                item_name = (item.get('product_name') or
+                            item.get('inventory_name') or '').lower().strip()
+                if item_name:
+                    words_a = set(item_name.split())
+                    words_b = set(product_name.split())
+                    similarity = len(words_a & words_b) / max(len(words_a), len(words_b), 1)
+                    if similarity > best_match_score:
+                        best_match_score = similarity
+                        json_item = item
         
         # GUARANTEE: If no good match found (low confidence), use JSON item for all template-required columns
         if not json_item and json_items:
@@ -1591,31 +1582,25 @@ class EnhancedJSONMatcher:
         for match in matches:
             match.processing_time = processing_time
             
-        return matches[:50]  # Return top 50 matches per product for maximum results
+        return matches[:5]  # Return top 5 matches per product
         
     def _hybrid_match(self, json_product: Dict, database_products: List[Dict], product_type: str) -> List[MatchResult]:
-        """Hybrid matching combining multiple strategies"""
-        
+        """Hybrid matching: type-specific first, fuzzy fallback only if needed"""
+
         # Start with product-type specific matching
         type_matches = self.product_matcher.match_by_type(product_type, json_product, database_products)
-        
-        # Enhance with semantic similarity if we have ML models
-        if self.tfidf_vectorizer and self.product_embeddings is not None:
-            semantic_matches = self._semantic_match(json_product, database_products)
-            
-            # Combine scores using weighted average
-            combined_matches = self._combine_match_results(type_matches, semantic_matches)
-        else:
-            combined_matches = type_matches
-            
-        # Apply fuzzy matching as fallback for low-scoring items
-        if not combined_matches or (combined_matches and combined_matches[0].score < 0.7):
+
+        # Early exit: if top match is strong, no need for fuzzy fallback
+        if type_matches and type_matches[0].score >= 0.85:
+            return type_matches
+
+        # Fuzzy fallback only when type-specific matching produced weak results
+        if not type_matches or type_matches[0].score < 0.5:
             fuzzy_matches = self._fuzzy_match(json_product, database_products)
             if fuzzy_matches:
-                # Blend the top fuzzy match with existing matches
-                combined_matches = self._blend_match_results(combined_matches, fuzzy_matches[:3])
-                
-        return combined_matches
+                type_matches = self._blend_match_results(type_matches, fuzzy_matches[:3])
+
+        return type_matches
         
     def _exact_match(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
         """Exact string matching"""
@@ -1638,49 +1623,36 @@ class EnhancedJSONMatcher:
         return matches
         
     def _fuzzy_match(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
-        """Enhanced fuzzy matching with multiple algorithms"""
+        """Fuzzy matching using token_sort_ratio"""
         matches = []
         json_name = self._get_product_name(json_product)
-        
-        # Get all database product names
-        db_names = [str(db.get('Product Name*', '')) for db in database_products]
-        
-        # Use fuzzywuzzy's process.extract for efficient fuzzy matching
-        fuzzy_results = process.extract(json_name, db_names, limit=50, scorer=fuzz.token_sort_ratio)
-        
+
+        # Build name->product lookup once
+        db_lookup = {}
+        db_names = []
+        for db in database_products:
+            name = str(db.get('Product Name*', ''))
+            db_names.append(name)
+            db_lookup[name] = db
+
+        # Get top 10 fuzzy matches with minimum threshold of 60
+        fuzzy_results = process.extract(json_name, db_names, limit=10, scorer=fuzz.token_sort_ratio)
+
         for db_name, score in fuzzy_results:
-            if score >= 30:  # Ultra-low fuzzy score threshold for more matches
-                # Find the corresponding database product
-                db_product = next((db for db in database_products if str(db.get('Product Name*', '')) == db_name), None)
-                
-                if db_product:
-                    # Calculate additional similarity metrics
-                    ratio_score = fuzz.ratio(json_name, db_name) / 100.0
-                    partial_score = fuzz.partial_ratio(json_name, db_name) / 100.0
-                    token_set_score = fuzz.token_set_ratio(json_name, db_name) / 100.0
-                    
-                    # Weighted combination of different fuzzy metrics
-                    final_score = (
-                        (score / 100.0) * 0.4 +  # token_sort_ratio
-                        ratio_score * 0.3 +       # ratio
-                        partial_score * 0.2 +     # partial_ratio
-                        token_set_score * 0.1     # token_set_ratio
-                    )
-                    
-                    matches.append(MatchResult(
-                        score=final_score,
-                        match_data=db_product,
-                        strategy_used=MatchStrategy.FUZZY,
-                        confidence=final_score * 0.9,  # Slightly lower confidence for fuzzy
-                        processing_time=0.0,
-                        match_factors={
-                            'token_sort': score / 100.0,
-                            'ratio': ratio_score,
-                            'partial': partial_score,
-                            'token_set': token_set_score
-                        }
-                    ))
-                    
+            if score < 60:
+                continue
+            db_product = db_lookup.get(db_name)
+            if db_product:
+                final_score = score / 100.0
+                matches.append(MatchResult(
+                    score=final_score,
+                    match_data=db_product,
+                    strategy_used=MatchStrategy.FUZZY,
+                    confidence=final_score * 0.9,
+                    processing_time=0.0,
+                    match_factors={'token_sort': final_score}
+                ))
+
         return sorted(matches, key=lambda x: x.score, reverse=True)
         
     def _semantic_match(self, json_product: Dict, database_products: List[Dict]) -> List[MatchResult]:
@@ -1739,24 +1711,30 @@ class EnhancedJSONMatcher:
         return combined_matches
         
     def _classify_product_type(self, json_product: Dict) -> str:
-        """Classify product type from JSON data"""
+        """Classify product type from JSON data.
+
+        Order matters: check vape/disposable BEFORE concentrate (vapes contain 'live resin'),
+        check pre-roll BEFORE concentrate (infused prerolls contain 'batter'/'crystal').
+        """
         inventory_type = str(json_product.get('inventory_type', '')).lower()
         product_name = self._get_product_name(json_product).lower()
-        
-        # Product type classification logic
-        if any(term in inventory_type or term in product_name for term in ['flower', 'bud']):
+        combined = inventory_type + ' ' + product_name
+
+        if any(term in combined for term in ['flower', 'bud']):
             return 'flower'
-        elif any(term in inventory_type or term in product_name for term in ['concentrate', 'extract', 'oil', 'wax', 'shatter', 'rosin', 'resin']):
-            return 'concentrate'
-        elif any(term in inventory_type or term in product_name for term in ['cart', 'vape', 'pen', 'disposable']):
+        elif any(term in combined for term in ['disposable', 'aio', 'all-in-one', 'all in one']):
             return 'vape_cartridge'
-        elif any(term in inventory_type or term in product_name for term in ['edible', 'gummy', 'chocolate', 'cookie']):
-            return 'edible'
-        elif any(term in inventory_type or term in product_name for term in ['pre-roll', 'preroll', 'joint', 'infused pre-roll']):
+        elif any(term in combined for term in ['cart', 'vape', 'pen', '510']):
+            return 'vape_cartridge'
+        elif any(term in combined for term in ['pre-roll', 'preroll', 'pre roll', 'joint', 'infused pre-roll']):
             return 'pre_roll'
-        elif any(term in inventory_type or term in product_name for term in ['topical', 'balm', 'cream', 'lotion']):
+        elif any(term in combined for term in ['concentrate', 'extract', 'wax', 'shatter', 'rosin', 'resin', 'badder', 'batter', 'diamonds', 'sauce']):
+            return 'concentrate'
+        elif any(term in combined for term in ['edible', 'gummy', 'chocolate', 'cookie']):
+            return 'edible'
+        elif any(term in combined for term in ['topical', 'balm', 'cream', 'lotion']):
             return 'topical'
-        elif any(term in inventory_type or term in product_name for term in ['tincture', 'drops', 'oil']):
+        elif any(term in combined for term in ['tincture', 'drops']):
             return 'tincture'
         else:
             return 'unknown'
@@ -1879,7 +1857,7 @@ class EnhancedJSONMatcher:
         for match in matches:
             product_key = str(match.match_data.get('Product Name*', ''))
             
-            if product_key not in seen_products and match.score > 0.05:  # Ultra-low final threshold
+            if product_key not in seen_products and match.score > 0.3:
                 seen_products.add(product_key)
                 filtered_matches.append(match)
                 
