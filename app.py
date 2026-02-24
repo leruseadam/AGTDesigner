@@ -9127,6 +9127,7 @@ def generate_labels():
     try:
         import re  # CRITICAL FIX: Import re locally to avoid scoping issues
         import time
+        import json
         _start_time = time.time()
         verbose_generation_logs = app.config.get('GENERATION_VERBOSE_LOGS', False)
         logging.info("=== GENERATE LABELS ACTION START ===")
