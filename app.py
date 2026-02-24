@@ -218,6 +218,27 @@ def _robust_load_persistent_json(path):
             logging.debug(f"robust_load_persistent_json failed for {path}: {_e}")
     return None
 
+
+def _sanitize_persisted_path(p):
+    """Sanitize a persisted file path read from `.last_upload.json`.
+
+    - Convert None -> ''
+    - Coerce to str, strip control characters and excessive whitespace
+    - Normalize via `os.path.normpath`
+    """
+    try:
+        if not p:
+            return ''
+        s = str(p)
+        # Remove non-printable/control chars except standard whitespace
+        import re
+        s = re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]+", " ", s)
+        # Replace newlines and multiple whitespace with single space
+        s = re.sub(r"\s+", " ", s).strip()
+        return os.path.normpath(s)
+    except Exception:
+        return ''
+
 def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
     """Load file with timeout protection (gracefully degrades when signals unavailable)."""
     def _load_without_timeout():
@@ -2508,7 +2529,7 @@ def get_session_excel_processor():
                             last_upload = _robust_load_persistent_json(persistence_file)
                             if last_upload is None:
                                 raise ValueError("Could not parse persistent upload JSON")
-                        persisted_file_path = last_upload.get('file_path')
+                        persisted_file_path = _sanitize_persisted_path(last_upload.get('file_path'))
                         persisted_store = last_upload.get('store')
                         current_store = get_current_store_name() if has_store_selection() else None
                         
@@ -3168,7 +3189,7 @@ def index():
                     last_upload = _robust_load_persistent_json(persistence_file)
                     if last_upload is None:
                         raise ValueError("Could not parse persistent upload JSON")
-                    persisted_file_path = last_upload.get('file_path')
+                    persisted_file_path = _sanitize_persisted_path(last_upload.get('file_path'))
                     persisted_store = last_upload.get('store')
                     current_store = get_current_store_name() if has_store_selection() else None
                     
@@ -3271,7 +3292,7 @@ def index():
                     current_store = get_current_store_name(allow_fallback=True)
                     if last.get('file_path') and (not current_store or last_store == current_store):
                         logging.info(f"🔁 Index recovery: Restoring upload info from {persistence_file}")
-                        session['file_path'] = os.path.normpath(last.get('file_path'))
+                        session['file_path'] = _sanitize_persisted_path(last.get('file_path'))
                         session['uploaded_filename'] = last.get('filename')
                         try:
                             session['upload_timestamp'] = float(last.get('timestamp') or 0)
@@ -9340,7 +9361,7 @@ def generate_labels():
                     current_store = get_current_store_name(allow_fallback=True)
                     if last.get('file_path') and (not current_store or last_store == current_store):
                         logging.info(f"🔁 Recovering upload info from persistence: {persistence_file}")
-                        session['file_path'] = os.path.normpath(last.get('file_path'))
+                        session['file_path'] = _sanitize_persisted_path(last.get('file_path'))
                         session['uploaded_filename'] = last.get('filename')
                         # timestamp may be a string - coerce to float/int
                         try:
@@ -16506,7 +16527,7 @@ def get_web_available_tags():
                     last_store = last.get('store')
                     current_store = store_name or get_current_store_name(allow_fallback=True)
                     if last.get('file_path') and (not current_store or last_store == current_store):
-                        session['file_path'] = last.get('file_path')
+                        session['file_path'] = _sanitize_persisted_path(last.get('file_path'))
                         session['uploaded_filename'] = last.get('filename')
                         session['upload_timestamp'] = last.get('timestamp')
                         session.modified = True
