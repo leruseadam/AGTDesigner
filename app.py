@@ -20674,26 +20674,10 @@ def json_match():
         
         logging.info("JSON matcher created successfully")
 
-        # PERFORMANCE OPTIMIZATION: Use simplified matching on PythonAnywhere to avoid slow database queries
-        # On production, database queries can take 2+ minutes per item, making JSON match unusably slow
-        is_pythonanywhere = os.environ.get('PYTHONANYWHERE_DOMAIN') or os.environ.get('PYTHONANYWHERE_SITE')
-
-        if is_pythonanywhere or PYTHONANYWHERE_OPTIMIZATION:
-            # Production: Use fast simplified matching (no database queries)
-            logging.info("🚀 PythonAnywhere detected - using simplified matching for fast JSON match")
-            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=True)
-            logging.info(f"JSON matching (simplified/fast) returned {len(matched_products) if matched_products else 0} products")
-        else:
-            # Local: Use full database-aware matching for better accuracy
-            logging.info("💻 Local environment - using database-first matching for maximum accuracy")
-            matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=False, deduplicate=True)
-            logging.info(f"JSON matching (database-first) returned {len(matched_products) if matched_products else 0} products")
-
-            # If nothing matched (e.g., database unavailable), fall back to the legacy simplified flow.
-            if not matched_products:
-                logging.warning("Primary database matching returned no products – falling back to simplified matcher")
-                matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=True)
-                logging.info(f"JSON matching (simplified fallback) returned {len(matched_products) if matched_products else 0} products")
+        # Always use simplified matching — the full DB path is too slow (2+ min per item)
+        logging.info("🚀 Using fast simplified matching for JSON match")
+        matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=True)
+        logging.info(f"JSON matching returned {len(matched_products) if matched_products else 0} products")
         
         # Sort matched products alphabetically by product name
         if matched_products:

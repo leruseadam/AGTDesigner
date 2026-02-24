@@ -2441,6 +2441,7 @@ class JSONMatcher:
         print("🔍 DEBUG: Using SIMPLIFIED matching approach for maximum matches")
         self._sheet_cache = None
         self._indexed_cache = None
+        self._json_col_index = None  # Reset JSON column index for fresh build
         self._build_sheet_cache()
             
         # DEBUG: Log the current state of Excel data
@@ -7847,23 +7848,91 @@ class JSONMatcher:
 
         return strain.strip()
 
+    def _build_json_column_index(self):
+        """Build a lookup index for JSON column matching (called once, reused for all items)."""
+        if hasattr(self, '_json_col_index') and self._json_col_index is not None:
+            return  # Already built
+
+        self._json_col_index = {
+            'exact': {},       # lowercase json_col -> product dict
+            'normalized': {},  # alphanumeric-only json_col -> product dict
+            'strain': {},      # extracted strain -> list of product dicts
+            'sku_stem': {},    # sku family stem -> list of product dicts
+        }
+
+        def _sku_family_stem(value):
+            text = str(value or "").strip().lower()
+            if not text:
+                return ""
+            return re.sub(r'_(single|\d+\s*(?:pk|pack))$', '', text)
+
+        def _index_product(json_col_value, product, source):
+            """Add a product to all index maps."""
+            if not json_col_value or json_col_value.lower() in {'none', 'nan', 'null'}:
+                return
+            json_col_lower = json_col_value.lower()
+            normalized = re.sub(r"[^a-z0-9]+", "", self._normalize_name(json_col_value))
+            transformed = transform_sku_to_readable_name(json_col_value) or ""
+            normalized_transformed = re.sub(r"[^a-z0-9]+", "", self._normalize_name(transformed))
+
+            product_entry = dict(product)
+            product_entry['_source'] = source
+
+            # Exact lookup
+            if json_col_lower not in self._json_col_index['exact']:
+                self._json_col_index['exact'][json_col_lower] = product_entry
+            # Normalized lookup
+            if normalized and normalized not in self._json_col_index['normalized']:
+                self._json_col_index['normalized'][normalized] = product_entry
+            if normalized_transformed and normalized_transformed not in self._json_col_index['normalized']:
+                self._json_col_index['normalized'][normalized_transformed] = product_entry
+            # Strain lookup
+            strain = self._extract_strain_from_bamboo_name(json_col_value)
+            if strain and len(strain) >= 5:
+                self._json_col_index['strain'].setdefault(strain, []).append(product_entry)
+            # SKU family lookup
+            sku_stem = _sku_family_stem(json_col_lower)
+            if sku_stem:
+                self._json_col_index['sku_stem'].setdefault(sku_stem, []).append(product_entry)
+
+        # Index Excel data
+        if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
+            try:
+                df = self.excel_processor.df
+                if 'JSON' in df.columns:
+                    for _, row in df.iterrows():
+                        json_col_value = self._normalize_name(str(row.get('JSON', '')))
+                        _index_product(json_col_value, row.to_dict(), 'excel')
+            except Exception as e:
+                logging.debug(f"Error indexing Excel JSON column: {e}")
+
+        # Index database products
+        try:
+            product_db = self._get_product_database()
+            if product_db:
+                db_products = product_db.get_all_products()
+                if db_products:
+                    for product in db_products:
+                        json_col_value = self._normalize_name(str(product.get('JSON', '')))
+                        _index_product(json_col_value, product, 'database')
+        except Exception as e:
+            logging.debug(f"Error indexing database JSON column: {e}")
+
+        logging.info(f"📇 JSON column index built: {len(self._json_col_index['exact'])} exact, "
+                     f"{len(self._json_col_index['normalized'])} normalized, "
+                     f"{len(self._json_col_index['strain'])} strains, "
+                     f"{len(self._json_col_index['sku_stem'])} SKU stems")
+
     def _find_json_column_match(self, json_description: str) -> Optional[dict]:
         """
         Find match by comparing incoming JSON description against the JSON column in database/excel.
-        The JSON column stores original Description values from Excel files before transformation.
-
-        Matching strategy:
-        1. Try exact match first (highest confidence)
-        2. Try strain-based match for Bamboo format names (e.g., "MAC x Trophy Wife LR Dabstract 1g AIO - (I)")
-
-        Args:
-            json_description: The description field from the incoming JSON URL
-
-        Returns:
-            The matched product dict with all fields, or None if no match
+        Uses pre-built index for O(1) lookups instead of scanning all products.
         """
         if not json_description:
             return None
+
+        # Build index on first call (cached for subsequent calls)
+        self._build_json_column_index()
 
         description_lower = self._normalize_name(json_description).lower()
         normalized_description = re.sub(r"[^a-z0-9]+", "", self._normalize_name(description_lower))
@@ -7873,159 +7942,40 @@ class JSONMatcher:
             "",
             self._normalize_name(transformed_description)
         )
-        logging.debug(f"🔍 JSON COLUMN MATCH: Looking for '{description_lower[:50]}...'")
 
-        # Extract strain from Bamboo format for fallback matching
-        extracted_strain = self._extract_strain_from_bamboo_name(json_description)
-        logging.debug(f"   Extracted strain: '{extracted_strain}'")
+        # 1. Exact match (O(1) lookup)
+        exact_match = self._json_col_index['exact'].get(description_lower)
+        if exact_match:
+            result = dict(exact_match)
+            result['_match_type'] = 'json_column_exact'
+            logging.info(f"✅ JSON COLUMN EXACT MATCH: Found '{result.get('Product Name*', 'Unknown')}'")
+            return result
 
-        # SKU-family fallback support:
-        # If one side uses *_SINGLE and the other uses *_10pk (or similar),
-        # still treat them as related candidates and rank by product-name hints.
-        sku_family_matches = []
-        input_desc_lower = str(json_description or "").lower().strip()
+        # 2. Normalized match (O(1) lookup)
+        if normalized_description and len(normalized_description) >= 6:
+            for candidate in [normalized_description, normalized_transformed_description]:
+                if candidate:
+                    norm_match = self._json_col_index['normalized'].get(candidate)
+                    if norm_match:
+                        result = dict(norm_match)
+                        result['_match_type'] = 'json_column_normalized_exact'
+                        logging.info(f"✅ JSON COLUMN NORMALIZED MATCH: Found '{result.get('Product Name*', 'Unknown')}'")
+                        return result
 
-        def _sku_family_stem(value: str) -> str:
+        # 3. SKU family match
+        def _sku_family_stem(value):
             text = str(value or "").strip().lower()
             if not text:
                 return ""
-            # Strip trailing pack indicators only; keep core SKU tokens intact.
-            text = re.sub(r'_(single|\d+\s*(?:pk|pack))$', '', text)
-            return text
+            return re.sub(r'_(single|\d+\s*(?:pk|pack))$', '', text)
 
+        input_desc_lower = str(json_description or "").lower().strip()
         input_sku_stem = _sku_family_stem(input_desc_lower)
         input_is_single = bool(re.search(r'_single$', input_desc_lower))
         input_pack_match = re.search(r'_(\d+)\s*(?:pk|pack)$', input_desc_lower)
         input_pack_count = input_pack_match.group(1) if input_pack_match else None
 
-        # Check Excel data first (current session data)
-        excel_strain_matches = []
-        if hasattr(self, 'excel_processor') and self.excel_processor and hasattr(self.excel_processor, 'df') and self.excel_processor.df is not None:
-            try:
-                df = self.excel_processor.df
-                if 'JSON' in df.columns:
-                    for _, row in df.iterrows():
-                        json_col_value = self._normalize_name(str(row.get('JSON', '')))
-                        if not json_col_value or json_col_value.lower() in {'none', 'nan', 'null'}:
-                            continue
-                        json_col_lower = json_col_value.lower()
-                        normalized_json_col = re.sub(r"[^a-z0-9]+", "", self._normalize_name(json_col_value))
-                        transformed_json_col = transform_sku_to_readable_name(json_col_value) or ""
-                        normalized_transformed_json_col = re.sub(
-                            r"[^a-z0-9]+",
-                            "",
-                            self._normalize_name(transformed_json_col)
-                        )
-
-                        # Try exact match first
-                        if json_col_lower == description_lower:
-                            match = row.to_dict()
-                            match['_source'] = 'excel'
-                            match['_match_type'] = 'json_column_exact'
-                            logging.info(f"✅ JSON COLUMN EXACT MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
-                            return match
-
-                        # Fallback exactness: normalized SKU/name equality
-                        if normalized_description and len(normalized_description) >= 6:
-                            normalized_candidates = {
-                                normalized_description,
-                                normalized_transformed_description,
-                            } - {''}
-                            if (
-                                normalized_json_col in normalized_candidates or
-                                normalized_transformed_json_col in normalized_candidates
-                            ):
-                                match = row.to_dict()
-                                match['_source'] = 'excel'
-                                match['_match_type'] = 'json_column_normalized_exact'
-                                logging.info(f"✅ JSON COLUMN NORMALIZED MATCH (Excel): Found '{match.get('Product Name*', 'Unknown')}'")
-                                return match
-
-                        # Collect strain matches for fallback
-                        if extracted_strain and len(extracted_strain) >= 5:
-                            db_strain = self._extract_strain_from_bamboo_name(json_col_value)
-                            if db_strain and extracted_strain == db_strain:
-                                match = row.to_dict()
-                                match['_source'] = 'excel'
-                                match['_match_type'] = 'json_column_strain'
-                                excel_strain_matches.append(match)
-
-                        # Collect SKU-family matches (e.g., *_SINGLE vs *_10pk)
-                        if input_sku_stem:
-                            candidate_sku_stem = _sku_family_stem(json_col_lower)
-                            if candidate_sku_stem and candidate_sku_stem == input_sku_stem:
-                                match = row.to_dict()
-                                match['_source'] = 'excel'
-                                match['_match_type'] = 'json_column_sku_family'
-                                sku_family_matches.append(match)
-            except Exception as e:
-                logging.debug(f"Error checking Excel JSON column: {e}")
-
-        # Check database products
-        db_strain_matches = []
-        try:
-            # Use the matcher's store-aware database resolver so JSON-column matches
-            # query the active store DB (e.g. product_database_AGT_Bothell.db),
-            # not the generic fallback database.
-            product_db = self._get_product_database()
-            if product_db:
-                db_products = product_db.get_all_products()
-                if db_products:
-                    for product in db_products:
-                        json_col_value = self._normalize_name(str(product.get('JSON', '')))
-                        if not json_col_value or json_col_value.lower() in {'none', 'nan', 'null'}:
-                            continue
-                        json_col_lower = json_col_value.lower()
-                        normalized_json_col = re.sub(r"[^a-z0-9]+", "", self._normalize_name(json_col_value))
-                        transformed_json_col = transform_sku_to_readable_name(json_col_value) or ""
-                        normalized_transformed_json_col = re.sub(
-                            r"[^a-z0-9]+",
-                            "",
-                            self._normalize_name(transformed_json_col)
-                        )
-
-                        # Try exact match first
-                        if json_col_lower == description_lower:
-                            product['_source'] = 'database'
-                            product['_match_type'] = 'json_column_exact'
-                            logging.info(f"✅ JSON COLUMN EXACT MATCH (Database): Found '{product.get('Product Name*', 'Unknown')}'")
-                            return product
-
-                        # Fallback exactness: normalized SKU/name equality
-                        if normalized_description and len(normalized_description) >= 6:
-                            normalized_candidates = {
-                                normalized_description,
-                                normalized_transformed_description,
-                            } - {''}
-                            if (
-                                normalized_json_col in normalized_candidates or
-                                normalized_transformed_json_col in normalized_candidates
-                            ):
-                                product_copy = dict(product)
-                                product_copy['_source'] = 'database'
-                                product_copy['_match_type'] = 'json_column_normalized_exact'
-                                logging.info(f"✅ JSON COLUMN NORMALIZED MATCH (Database): Found '{product_copy.get('Product Name*', 'Unknown')}'")
-                                return product_copy
-
-                        # Collect strain matches for fallback
-                        if extracted_strain and len(extracted_strain) >= 5:
-                            db_strain = self._extract_strain_from_bamboo_name(json_col_value)
-                            if db_strain and extracted_strain == db_strain:
-                                product_copy = dict(product)
-                                product_copy['_source'] = 'database'
-                                product_copy['_match_type'] = 'json_column_strain'
-                                db_strain_matches.append(product_copy)
-
-                        # Collect SKU-family matches (e.g., *_SINGLE vs *_10pk)
-                        if input_sku_stem:
-                            candidate_sku_stem = _sku_family_stem(json_col_lower)
-                            if candidate_sku_stem and candidate_sku_stem == input_sku_stem:
-                                product_copy = dict(product)
-                                product_copy['_source'] = 'database'
-                                product_copy['_match_type'] = 'json_column_sku_family'
-                                sku_family_matches.append(product_copy)
-        except Exception as e:
-            logging.debug(f"Error checking database JSON column: {e}")
+        sku_family_matches = self._json_col_index['sku_stem'].get(input_sku_stem, []) if input_sku_stem else []
 
         if sku_family_matches:
             def score_sku_family_match(match: dict) -> int:
@@ -8042,77 +7992,44 @@ class JSONMatcher:
                         score += 10
                     if 'single' not in name_lower:
                         score += 2
-                # Ratio token parity helps choose the correct variant.
                 if ':1' in input_desc_lower and ':1' in name_lower:
                     score += 3
                 return score
 
             sku_family_matches.sort(key=score_sku_family_match, reverse=True)
             best_sku_family = sku_family_matches[0]
-            logging.info(
-                f"✅ JSON COLUMN SKU-FAMILY MATCH: '{json_description}' → "
-                f"'{best_sku_family.get('Product Name*', 'Unknown')}' "
-                f"(source={best_sku_family.get('_source', 'unknown')})"
-            )
+            best_sku_family['_match_type'] = 'json_column_sku_family'
+            logging.info(f"✅ JSON COLUMN SKU-FAMILY MATCH: '{json_description}' → '{best_sku_family.get('Product Name*', 'Unknown')}'")
             return best_sku_family
 
-        # If no exact match, try strain-based matches (prefer database over excel)
-        # Score matches by product type similarity
-        def score_product_type_match(match_json: str, input_name: str) -> int:
-            """Score how well product types match between input and database."""
-            score = 0
-            input_lower = input_name.lower()
-            match_lower = match_json.lower()
+        # 4. Strain-based fallback (O(1) lookup + scoring)
+        extracted_strain = self._extract_strain_from_bamboo_name(json_description)
+        strain_matches = self._json_col_index['strain'].get(extracted_strain, []) if extracted_strain else []
 
-            # Product type keywords to check
-            type_keywords = [
-                ('sugar cone', 20),
-                ('pre-roll', 15),
-                ('preroll', 15),
-                ('cartridge', 15),
-                ('cart', 10),
-                ('vape', 10),
-                ('vaporizer', 10),
-                ('disposable', 10),
-                ('aio', 10),
-                ('510', 10),
-                ('live resin', 8),
-                ('liquid diamond', 8),
-                ('flower', 5),
-            ]
+        if strain_matches:
+            # Score by product type similarity
+            def score_product_type_match(match_entry):
+                score = 0
+                input_lower = json_description.lower()
+                match_lower = str(match_entry.get('JSON', '')).lower()
+                for keyword, points in [('sugar cone', 20), ('pre-roll', 15), ('preroll', 15),
+                                        ('cartridge', 15), ('cart', 10), ('vape', 10),
+                                        ('disposable', 10), ('aio', 10), ('510', 10),
+                                        ('live resin', 8), ('flower', 5)]:
+                    in_input = keyword in input_lower
+                    in_match = keyword in match_lower
+                    if in_input and in_match:
+                        score += points
+                    elif in_input != in_match:
+                        score -= points // 2
+                if self._has_disposable_cartridge_conflict(json_description, '', match_lower, ''):
+                    score -= 1000
+                return score
 
-            for keyword, points in type_keywords:
-                in_input = keyword in input_lower
-                in_match = keyword in match_lower
-                if in_input and in_match:
-                    score += points
-                elif in_input != in_match:
-                    score -= points // 2  # Penalty for mismatch
-
-            # Hard disallow for AIO/Disposable vs 510/Cartridge cross-match.
-            if self._has_disposable_cartridge_conflict(input_name, '', match_json, ''):
-                score -= 1000
-
-            return score
-
-        if db_strain_matches:
-            # Score and sort matches by product type similarity
-            for m in db_strain_matches:
-                m['_type_score'] = score_product_type_match(m.get('JSON', ''), json_description)
-            db_strain_matches.sort(key=lambda x: x.get('_type_score', 0), reverse=True)
-
-            best_match = db_strain_matches[0]
-            logging.info(f"✅ JSON COLUMN STRAIN MATCH (Database): '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}' (type_score: {best_match.get('_type_score', 0)})")
-            return best_match
-
-        if excel_strain_matches:
-            # Score and sort matches by product type similarity
-            for m in excel_strain_matches:
-                m['_type_score'] = score_product_type_match(m.get('JSON', ''), json_description)
-            excel_strain_matches.sort(key=lambda x: x.get('_type_score', 0), reverse=True)
-
-            best_match = excel_strain_matches[0]
-            logging.info(f"✅ JSON COLUMN STRAIN MATCH (Excel): '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}'")
+            strain_matches.sort(key=score_product_type_match, reverse=True)
+            best_match = dict(strain_matches[0])
+            best_match['_match_type'] = 'json_column_strain'
+            logging.info(f"✅ JSON COLUMN STRAIN MATCH: '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}'")
             return best_match
 
         logging.debug(f"❌ No JSON column match found for '{description_lower[:50]}...'")
