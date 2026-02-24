@@ -20943,8 +20943,6 @@ def json_match():
         try:
             import requests
             response = requests.get(url, timeout=30)
-            import requests
-            response = requests.get(url, timeout=30)
             payload = response.json()
             
             if isinstance(payload, list):
