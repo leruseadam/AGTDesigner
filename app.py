@@ -3147,6 +3147,32 @@ def test():
     """Simple test route to verify the app is working."""
     return jsonify({'status': 'ok', 'message': 'Flask app is running'})
 
+
+@app.route('/api/debug/upload-info', methods=['GET'])
+def debug_upload_info():
+    """Local debug endpoint returning session upload info and persistent file contents.
+
+    Accessible only from localhost to avoid exposing data.
+    """
+    client_ip = request.remote_addr
+    if client_ip not in ('127.0.0.1', '::1'):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        sess_info = {
+            'session_file_path': session.get('file_path'),
+            'uploaded_filename': session.get('uploaded_filename'),
+            'upload_timestamp': session.get('upload_timestamp'),
+            'file_store': session.get('file_store'),
+            'lineage_update_timestamp': session.get('lineage_update_timestamp')
+        }
+        persistence = None
+        persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+        if os.path.exists(persistence_file):
+            persistence = _robust_load_persistent_json(persistence_file)
+        return jsonify({'session': sess_info, 'persistence': persistence})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # Auto check downloads functionality removed
 
 @app.route('/')
@@ -21320,6 +21346,51 @@ def json_match_detailed():
         def _normalize_for_match(text):
             return re.sub(r'[^a-z0-9\s]+', ' ', str(text or '').lower()).strip()
 
+        # Type keywords for classifying JSON items and DB products
+        _TYPE_KEYWORDS = {
+            'vape': {'vape', 'cartridge', 'cart', 'c cell', 'ccell', '510', 'aio', 'all in one', 'disposable', 'panda pen', 'dabstract'},
+            'preroll': {'preroll', 'pre roll', 'pre-roll', 'firecracker', 'infused preroll', 'infused pre roll'},
+            'flower': {'flower', 'bong buddies', 'core flower', 'platinum line', 'platinum flower'},
+            'edible': {'edible', 'gummiez', 'gummies', 'fruit drops', 'chocolate', 'candy'},
+            'concentrate': {'sugar', 'batter', 'wax', 'shatter', 'rosin', 'badder', 'diamonds', 'sauce', 'snickle fritz'},
+        }
+
+        def _classify_type(text):
+            """Classify product type from name/description text."""
+            text_lower = text.lower()
+            # Check in priority order: vape before concentrate
+            for ptype in ['edible', 'preroll', 'vape', 'concentrate', 'flower']:
+                for kw in _TYPE_KEYWORDS[ptype]:
+                    if kw in text_lower:
+                        return ptype
+            return 'unknown'
+
+        def _classify_json_item_type(json_item, json_name):
+            """Classify a JSON item's product type using inventory_type and name."""
+            inv_type = str(json_item.get('inventory_type', '')).lower()
+            name_lower = json_name.lower()
+            # Map Bamboo inventory types
+            if 'edible' in inv_type:
+                return 'edible'
+            if 'usable cannabis' in inv_type:
+                # Could be flower or preroll — check name
+                if any(kw in name_lower for kw in ['preroll', 'pre-roll', 'pre roll']):
+                    return 'preroll'
+                if any(kw in name_lower for kw in ['bong buddies', 'flower']):
+                    return 'flower'
+                return 'flower'  # default for usable cannabis
+            if 'cannabis mix infused' in inv_type:
+                return 'preroll'  # infused prerolls
+            if 'concentrate for inhalation' in inv_type:
+                # Could be vape or concentrate — check name
+                if any(kw in name_lower for kw in ['aio', 'c-cell', 'ccell', '510', 'cartridge', 'cart', 'pen', 'disposable', 'dabstract']):
+                    return 'vape'
+                if any(kw in name_lower for kw in ['sugar', 'batter', 'wax', 'shatter', 'rosin', 'badder', 'diamonds', 'sauce']):
+                    return 'concentrate'
+                return 'vape'  # default for concentrate for inhalation
+            # Fallback: classify from name
+            return _classify_type(name_lower)
+
         detailed_matches = []
         high_confidence_matches = []
 
@@ -21331,7 +21402,8 @@ def json_match_detailed():
                 f"JSON Product {i + 1}"
             )
             json_name_norm = _normalize_for_match(json_name)
-            json_tokens = set(json_name_norm.split())
+            json_tokens = set(t for t in json_name_norm.split() if len(t) >= 3)
+            json_type = _classify_json_item_type(json_item, json_name)
 
             # Try to find best match from already-matched products
             best_match = None
@@ -21342,12 +21414,29 @@ def json_match_detailed():
                 best_match = matched_by_name[json_name.lower().strip()]
                 best_score = 1.0
             else:
-                # 2. Token overlap matching
+                # 2. Type-aware token overlap matching
                 for name_key, product in matched_by_name.items():
-                    prod_tokens = set(_normalize_for_match(name_key).split())
+                    prod_name_norm = _normalize_for_match(name_key)
+                    prod_tokens = set(t for t in prod_name_norm.split() if len(t) >= 3)
                     if not json_tokens or not prod_tokens:
                         continue
+
+                    # Base token overlap
                     overlap = len(json_tokens & prod_tokens) / len(json_tokens | prod_tokens)
+
+                    # Product type matching — big bonus/penalty
+                    prod_type_str = str(
+                        product.get('Product Type*') or product.get('Product Type') or
+                        product.get('ProductType') or ''
+                    ).lower()
+                    prod_type = _classify_type(f"{name_key} {prod_type_str}")
+
+                    if json_type != 'unknown' and prod_type != 'unknown':
+                        if json_type == prod_type:
+                            overlap += 0.3  # Big bonus for type match
+                        else:
+                            overlap -= 0.4  # Big penalty for type mismatch
+
                     if overlap > best_score:
                         best_score = overlap
                         best_match = product
