@@ -3231,7 +3231,29 @@ def index():
         initial_data = None
         
         # CRITICAL FIX: Pass uploaded filename to template so it persists on refresh
+        # Recovery: If session lost uploaded file info, try to restore from persistent last-upload JSON
         uploaded_filename = session.get('uploaded_filename', '')
+        if not uploaded_filename and UPLOADS_DIR:
+            try:
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    import json
+                    with open(persistence_file, 'r', encoding='utf-8') as pf:
+                        last = json.load(pf)
+                    last_store = last.get('store')
+                    current_store = get_current_store_name(allow_fallback=True)
+                    if last.get('file_path') and (not current_store or last_store == current_store):
+                        logging.info(f"🔁 Index recovery: Restoring upload info from {persistence_file}")
+                        session['file_path'] = os.path.normpath(last.get('file_path'))
+                        session['uploaded_filename'] = last.get('filename')
+                        try:
+                            session['upload_timestamp'] = float(last.get('timestamp') or 0)
+                        except Exception:
+                            session['upload_timestamp'] = last.get('timestamp')
+                        session.modified = True
+                        uploaded_filename = session.get('uploaded_filename', '')
+            except Exception as _idx_rec_err:
+                logging.debug(f"Index upload recovery failed: {_idx_rec_err}")
         
         logging.info("=== PAGE REFRESH COMPLETE ===")
         return render_template('index.html', 
@@ -9275,8 +9297,33 @@ def generate_labels():
         # They're processed through the same pipeline as Excel tags
 
         # CRITICAL: Check for stale data - prevent generation with old Excel uploads
+        # Recovery: if session lost upload info, try to recover from persistent last-upload file
         upload_timestamp = session.get('upload_timestamp', 0)
         session_file_path = session.get('file_path')
+        if (not upload_timestamp or not session_file_path) and UPLOADS_DIR:
+            try:
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    import json
+                    with open(persistence_file, 'r', encoding='utf-8') as pf:
+                        last = json.load(pf)
+                    # Only restore if store matches current store or if no store selected
+                    last_store = last.get('store')
+                    current_store = get_current_store_name(allow_fallback=True)
+                    if last.get('file_path') and (not current_store or last_store == current_store):
+                        logging.info(f"🔁 Recovering upload info from persistence: {persistence_file}")
+                        session['file_path'] = os.path.normpath(last.get('file_path'))
+                        session['uploaded_filename'] = last.get('filename')
+                        # timestamp may be a string - coerce to float/int
+                        try:
+                            session['upload_timestamp'] = float(last.get('timestamp') or 0)
+                        except Exception:
+                            session['upload_timestamp'] = last.get('timestamp')
+                        session.modified = True
+                        upload_timestamp = session.get('upload_timestamp', 0)
+                        session_file_path = session.get('file_path')
+            except Exception as _recover_err:
+                logging.debug(f"Upload recovery failed: {_recover_err}")
         current_time = time.time()
         stale_threshold = 21600  # 6 hours in seconds
         
