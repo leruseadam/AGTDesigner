@@ -21278,649 +21278,141 @@ def json_status():
 
 @app.route('/api/json-match-detailed', methods=['POST'])
 def json_match_detailed():
-    """Detailed JSON matching with before/after comparisons and scoring information."""
+    """Detailed JSON matching — fast version that reuses /api/json-match results."""
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
-        
+
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
 
-        # Always refresh JSON matching caches/state before running a new match.
-        refresh_json_match_runtime_state('api/json-match-detailed')
-            
-        json_matcher = get_session_json_matcher()
-        if json_matcher is None:
-            return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
-            
-        # Fetch JSON items first
-        import requests
-        response = requests.get(url, timeout=30)
-        payload = response.json()
-        
+        # Fetch JSON items from URL
+        import requests as req_lib
+        resp = req_lib.get(url, timeout=30)
+        payload = resp.json()
+
         if isinstance(payload, list):
             json_items = payload
         elif isinstance(payload, dict):
             json_items = payload.get("inventory_transfer_items", [])
         else:
             json_items = []
-            
-        # Get available tags
+
+        # Get matched products already in the excel processor (from prior /api/json-match call)
         excel_processor = get_session_excel_processor()
-        if not excel_processor or not hasattr(excel_processor, 'df') or excel_processor.df is None:
-            return jsonify({'error': 'No Excel data available for matching'}), 400
-            
-        available_tags = excel_processor.df.to_dict('records')
-        
-        # FIXED: Use regular JSON Matcher with Excel-priority system
-        logging.info("Using regular JSON Matcher with Excel-priority approach")
-        
-        # Use the Enhanced JSON Matcher to get database-enhanced results
-        enhanced_matches = json_matcher.fetch_and_match(url)
-        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
-        
-        # Build a lookup map of enhanced matches by JSON product name for reliable matching
-        # This handles cases where order doesn't align or some items don't have matches
-        enhanced_match_map = {}
-        for match in (enhanced_matches or []):
-            # Try to find the original JSON name from various fields
-            json_name_key = None
-            # Check if match has original JSON item stored
-            if '__json_item__' in match:
-                json_item = match.get('__json_item__')
-                if isinstance(json_item, dict):
-                    json_name_key = str(json_item.get('product_name', '')).strip()
-            # Check for original JSON name in metadata fields
-            if not json_name_key:
-                json_name_key = match.get('Original JSON Product Name', '')
-            if not json_name_key:
-                json_name_key = match.get('_original_json_name', '')
-            if not json_name_key:
-                # Check for matched JSON item
-                matched_json_item = match.get('_matched_json_item')
-                if isinstance(matched_json_item, dict):
-                    json_name_key = str(matched_json_item.get('product_name', '')).strip()
-            if not json_name_key:
-                # Fallback: use the product name itself (may have been transformed)
-                json_name_key = str(match.get('Product Name*', match.get('ProductName', ''))).strip()
-            
-            if json_name_key:
-                # Normalize for matching
-                json_name_normalized = json_name_key.lower().strip()
-                if json_name_normalized not in enhanced_match_map:
-                    enhanced_match_map[json_name_normalized] = match
-                # Also store by product name for fallback matching
-                product_name = str(match.get('Product Name*', match.get('ProductName', ''))).strip()
-                if product_name:
-                    product_name_normalized = product_name.lower().strip()
-                    if product_name_normalized not in enhanced_match_map:
-                        enhanced_match_map[product_name_normalized] = match
-        
-        detailed_matches = []
-        high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
-        
-        # Build a reverse map: JSON items by their normalized product names
-        json_items_map = {}
-        for json_item in json_items:
-            json_item_name = (
-                str(json_item.get('product_name', '')).strip() or
-                str(json_item.get('inventory_name', '')).strip() or
-                str(json_item.get('name', '')).strip() or
-                ''
-            )
-            if json_item_name:
-                json_items_map[json_item_name.lower().strip()] = json_item
-        
-        logging.info(f"Building detailed matches: {len(json_items)} JSON items, {len(enhanced_matches) if enhanced_matches else 0} enhanced matches")
+        matched_products = []
+        if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
+            matched_products = excel_processor.df.to_dict('records')
 
-        def is_aio_disposable_conflict(current_json_item, candidate_match):
-            """Prevent AIO/disposable JSON items from being paired to cartridge/510 DB matches in detailed view."""
-            if not candidate_match or not hasattr(json_matcher, '_has_disposable_cartridge_conflict'):
-                return False
-            try:
-                json_name_for_check = (
-                    str((current_json_item or {}).get('product_name', '')).strip() or
-                    str((current_json_item or {}).get('inventory_name', '')).strip() or
-                    str((current_json_item or {}).get('name', '')).strip()
-                )
-                json_type_for_check = str((current_json_item or {}).get('inventory_type', '')).strip()
-                db_name_for_check = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', ''))).strip()
-                db_type_for_check = str(
-                    candidate_match.get('Product Type*', '') or
-                    candidate_match.get('ProductType', '') or
-                    candidate_match.get('product_type', '')
-                ).strip()
-                return json_matcher._has_disposable_cartridge_conflict(
-                    json_name_for_check,
-                    json_type_for_check,
-                    db_name_for_check,
-                    db_type_for_check
-                )
-            except Exception:
-                return False
-
-        def _extract_json_strain_for_debug(current_json_item, current_json_name):
-            """Best-effort strain extraction for diagnostics."""
-            explicit = str((current_json_item or {}).get('strain_name', '')).strip().lower()
-            if explicit:
-                return explicit
-            parts = [p.strip().lower() for p in str(current_json_name or '').split(' - ') if p and p.strip()]
-            if len(parts) >= 3:
-                candidate = parts[-3]
-                if candidate not in {'sativa', 'indica', 'hybrid'}:
-                    return candidate
-            return ''
+        # Build lookup of matched products by normalized name for fast pairing
+        matched_by_name = {}
+        for product in matched_products:
+            name = str(product.get('Product Name*', '') or product.get('ProductName', '') or '').strip().lower()
+            if name and name not in matched_by_name:
+                matched_by_name[name] = product
+            # Also index by Description
+            desc = str(product.get('Description', '') or '').strip().lower()
+            if desc and desc not in matched_by_name:
+                matched_by_name[desc] = product
 
         def _normalize_for_match(text):
             return re.sub(r'[^a-z0-9\s]+', ' ', str(text or '').lower()).strip()
 
-        def _is_obviously_incompatible_match(current_json_item, current_json_name, candidate_match):
-            """
-            Reject clearly wrong pairings while keeping matching permissive enough.
-            Hard rules only:
-            1) JSON vape/concentrate-for-inhalation must not map to pre-roll DB types.
-            2) If JSON strain is present, require basic strain token presence in DB name.
-            """
-            try:
-                if not candidate_match:
-                    return True
-
-                json_name_raw = str(current_json_name or '')
-                json_name_norm = _normalize_for_match(json_name_raw)
-                json_type_norm = _normalize_for_match((current_json_item or {}).get('inventory_type', ''))
-                db_name_raw = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', '')) or '')
-                db_name_norm = _normalize_for_match(db_name_raw)
-                db_type_norm = _normalize_for_match(
-                    candidate_match.get('Product Type*', '') or
-                    candidate_match.get('ProductType', '') or
-                    candidate_match.get('product_type', '')
-                )
-
-                # Hard type gate: vape/concentrate JSON should not map to pre-roll DB rows.
-                json_is_vape_like = (
-                    'concentrate for inhalation' in json_type_norm or
-                    '510' in json_name_norm or
-                    'vape' in json_name_norm
-                )
-                db_is_preroll = ('pre roll' in db_type_norm or 'preroll' in db_type_norm)
-                if json_is_vape_like and db_is_preroll:
-                    return True
-
-                # HARD RULE: JSON 510/cartridge items must never map to disposable DB items.
-                json_is_510_like = (' 510 ' in f" {json_name_norm} " or 'cartridge' in json_name_norm)
-                db_is_disposable = (
-                    ' disposable ' in f" {db_name_norm} " or
-                    ' disposable ' in f" {db_type_norm} " or
-                    ' aio ' in f" {db_name_norm} " or
-                    ' all in one ' in f" {db_name_norm} "
-                )
-                if json_is_510_like and db_is_disposable:
-                    return True
-
-                # Hard strain gate: require at least 50% of meaningful strain tokens to appear.
-                expected_strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
-                strain_tokens = [
-                    t for t in _normalize_for_match(expected_strain).split()
-                    if len(t) >= 3 and t not in {'sativa', 'indica', 'hybrid'}
-                ]
-                if strain_tokens:
-                    matched_tokens = sum(1 for t in strain_tokens if t in db_name_norm)
-                    required = max(1, int(math.ceil(len(strain_tokens) * 0.5)))
-                    if matched_tokens < required:
-                        return True
-
-                return False
-            except Exception:
-                return False
-
-        def _log_match_diagnostics(stage, method, current_json_item, current_json_name, candidate_match, extra_score=None):
-            """Structured diagnostics for why a candidate was chosen/rejected."""
-            try:
-                if not candidate_match:
-                    logging.debug(f"[JSON_DIAG] stage={stage} method={method} json='{current_json_name}' candidate=None")
-                    return
-
-                json_name_lower = str(current_json_name or '').lower().strip()
-                db_name = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', ''))).strip()
-                db_name_lower = db_name.lower()
-                json_type = str((current_json_item or {}).get('inventory_type', '')).strip().lower()
-                db_type = str(
-                    candidate_match.get('Product Type*', '') or
-                    candidate_match.get('ProductType', '') or
-                    candidate_match.get('product_type', '')
-                ).strip().lower()
-
-                json_terms = set(re.findall(r"[a-z0-9]+", json_name_lower))
-                db_terms = set(re.findall(r"[a-z0-9]+", db_name_lower))
-                overlap = (len(json_terms & db_terms) / len(json_terms | db_terms)) if (json_terms | db_terms) else 0.0
-
-                expected_strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
-                strain_hit = bool(expected_strain and expected_strain in db_name_lower)
-
-                msg = (
-                    f"[JSON_DIAG] stage={stage} method={method} score={extra_score if extra_score is not None else 'n/a'} "
-                    f"json='{current_json_name}' db='{db_name}' overlap={overlap:.3f} "
-                    f"json_type='{json_type}' db_type='{db_type}' strain='{expected_strain or 'n/a'}' strain_hit={strain_hit}"
-                )
-                logging.info(msg)
-            except Exception as diag_err:
-                logging.debug(f"[JSON_DIAG] diagnostics logging failed: {diag_err}")
-
-        def _extract_vendor_from_json_item(current_json_item, current_json_name):
-            """Best-effort vendor extraction for DB fallback lookup."""
-            try:
-                vendor = str((current_json_item or {}).get('vendor', '')).strip()
-                if vendor:
-                    return vendor
-                # Common format: "Honey Tree - ...", "Pure - ...", "Original - ..."
-                first_segment = str(current_json_name or '').split(' - ')[0].strip()
-                if first_segment and first_segment.lower() not in {'pure', 'original'}:
-                    return first_segment
-            except Exception:
-                pass
-            return ''
-
-        def _lookup_db_by_vendor_and_strain(current_json_item, current_json_name, product_db):
-            """Direct DB fallback for cases where fuzzy threshold misses an existing product."""
-            try:
-                if not product_db or not hasattr(product_db, '_get_connection'):
-                    return None
-
-                json_name_norm = _normalize_for_match(current_json_name)
-                vendor = _extract_vendor_from_json_item(current_json_item, current_json_name)
-                strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
-                strain_tokens = [t for t in _normalize_for_match(strain).split() if len(t) >= 3]
-                if not strain_tokens:
-                    return None
-
-                # Hardware intent from JSON name
-                json_is_disposable = (
-                    ' aio ' in f" {json_name_norm} " or
-                    ' disposable ' in f" {json_name_norm} " or
-                    ' all in one ' in f" {json_name_norm} "
-                )
-                json_is_510 = (' 510 ' in f" {json_name_norm} " or 'cartridge' in json_name_norm)
-
-                conn = product_db._get_connection()
-                cursor = conn.cursor()
-
-                where_clauses = []
-                params = []
-                if vendor:
-                    where_clauses.append('LOWER("Vendor/Supplier*") LIKE ?')
-                    params.append(f"%{vendor.lower()}%")
-
-                for tok in strain_tokens:
-                    where_clauses.append('LOWER("Product Name*") LIKE ?')
-                    params.append(f"%{tok}%")
-
-                if not where_clauses:
-                    return None
-
-                sql = f'''
-                    SELECT * FROM products
-                    WHERE {' AND '.join(where_clauses)}
-                    LIMIT 200
-                '''
-                cursor.execute(sql, params)
-                rows = cursor.fetchall()
-                if not rows:
-                    return None
-
-                columns = [c[0] for c in cursor.description]
-                best = None
-                best_score = -1
-                json_terms = set(_normalize_for_match(current_json_name).split())
-
-                for row in rows:
-                    candidate = dict(zip(columns, row))
-                    db_name = str(candidate.get('Product Name*', '') or '')
-                    db_type = str(candidate.get('Product Type*', '') or '')
-                    db_text = _normalize_for_match(f"{db_name} {db_type}")
-
-                    # Respect hardware intent
-                    db_is_disposable = (
-                        ' disposable ' in f" {db_text} " or
-                        ' aio ' in f" {db_text} " or
-                        ' all in one ' in f" {db_text} "
-                    )
-                    if json_is_disposable and not db_is_disposable:
-                        continue
-                    if json_is_510 and db_is_disposable:
-                        continue
-
-                    if is_aio_disposable_conflict(current_json_item, candidate):
-                        continue
-                    if _is_obviously_incompatible_match(current_json_item, current_json_name, candidate):
-                        continue
-
-                    db_terms = set(_normalize_for_match(db_name).split())
-                    overlap = len(json_terms & db_terms)
-                    strain_hits = sum(1 for t in strain_tokens if t in _normalize_for_match(db_name))
-                    score = (strain_hits * 10) + overlap
-
-                    if score > best_score:
-                        best_score = score
-                        best = candidate
-
-                return best
-            except Exception as e:
-                logging.debug(f"[JSON_DIAG] vendor+strain fallback failed for '{current_json_name}': {e}")
-                return None
+        detailed_matches = []
+        high_confidence_matches = []
 
         for i, json_item in enumerate(json_items):
-            # Try multiple fields for product name
             json_name = (
                 str(json_item.get('product_name', '')).strip() or
                 str(json_item.get('inventory_name', '')).strip() or
                 str(json_item.get('name', '')).strip() or
-                ''
+                f"JSON Product {i + 1}"
             )
-            # Don't skip items - create a fallback name if needed
-            if not json_name:
-                # Try to build a name from other fields
-                brand = str(json_item.get('brand', '')).strip()
-                inventory_type = str(json_item.get('inventory_type', '')).strip()
-                strain = str(json_item.get('strain_name', '')).strip()
-                if brand and strain:
-                    json_name = f"{strain} by {brand}"
-                elif brand:
-                    json_name = brand
-                elif inventory_type:
-                    json_name = inventory_type
-                else:
-                    json_name = f"JSON Product {i + 1}"
-                logging.info(f"⚠️ Created fallback JSON name: '{json_name}' for item {i}")
-            
-            # Find corresponding enhanced match by name (more reliable than index)
-            enhanced_match = None
-            json_name_normalized = json_name.lower().strip()
-            match_method = None
+            json_name_norm = _normalize_for_match(json_name)
+            json_tokens = set(json_name_norm.split())
 
-            # HIGHEST PRIORITY: exact source/SKU matching via DB/Excel JSON column.
-            try:
-                if hasattr(json_matcher, '_extract_json_column_match_candidates') and hasattr(json_matcher, '_find_json_column_match'):
-                    json_column_candidates = json_matcher._extract_json_column_match_candidates(json_item)
-                    if not json_column_candidates and json_name:
-                        json_column_candidates = [json_name]
-                    for candidate in (json_column_candidates or []):
-                        json_col_match = json_matcher._find_json_column_match(candidate)
-                        if json_col_match:
-                            # Honor hard hardware/type safety checks only.
-                            if is_aio_disposable_conflict(json_item, json_col_match):
-                                _log_match_diagnostics('candidate_rejected_aio_conflict', 'json_column_exact', json_item, json_name, json_col_match)
-                                continue
-                            if _is_obviously_incompatible_match(json_item, json_name, json_col_match):
-                                _log_match_diagnostics('candidate_rejected_incompatible', 'json_column_exact', json_item, json_name, json_col_match)
-                                continue
-                            enhanced_match = json_col_match
-                            match_method = 'json_column_exact'
-                            _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match, 1.0)
-                            break
-            except Exception as json_col_err:
-                logging.debug(f"[JSON_DIAG] json-column priority lookup failed for '{json_name}': {json_col_err}")
-            
-            # Extract key terms from JSON name for better matching
-            json_key_terms = set([term for term in json_name_normalized.split() if len(term) > 2])
-            
-            # Try exact map match first (only if JSON-column match didn't already resolve)
-            if not enhanced_match and json_name_normalized in enhanced_match_map:
-                enhanced_match = enhanced_match_map[json_name_normalized]
-                match_method = 'exact'
-                _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
-                if is_aio_disposable_conflict(json_item, enhanced_match):
-                    _log_match_diagnostics('candidate_rejected_aio_conflict', match_method, json_item, json_name, enhanced_match)
-                    enhanced_match = None
-                    match_method = None
-                elif _is_obviously_incompatible_match(json_item, json_name, enhanced_match):
-                    _log_match_diagnostics('candidate_rejected_incompatible', match_method, json_item, json_name, enhanced_match)
-                    enhanced_match = None
-                    match_method = None
-            elif not enhanced_match:
-                # Try fuzzy matching by comparing normalized names and key terms
-                best_fuzzy_match = None
-                best_fuzzy_score = 0
-                for normalized_key, match in enhanced_match_map.items():
-                    if is_aio_disposable_conflict(json_item, match):
-                        continue
-                    if _is_obviously_incompatible_match(json_item, json_name, match):
-                        continue
-                    # Calculate similarity score
-                    if json_name_normalized == normalized_key:
-                        best_fuzzy_match = match
-                        best_fuzzy_score = 1.0
-                        break
-                    # Check if JSON name contains the key or vice versa (partial match)
-                    elif json_name_normalized in normalized_key or normalized_key in json_name_normalized:
-                        # Calculate a simple similarity score based on overlap
-                        overlap = min(len(json_name_normalized), len(normalized_key)) / max(len(json_name_normalized), len(normalized_key)) if max(len(json_name_normalized), len(normalized_key)) > 0 else 0
-                        if overlap > best_fuzzy_score:
-                            best_fuzzy_match = match
-                            best_fuzzy_score = overlap
-                    else:
-                        # Try keyword matching - check if key terms from JSON name appear in match's product name
-                        match_product_name = str(match.get('Product Name*', match.get('ProductName', ''))).lower().strip()
-                        if match_product_name:
-                            match_key_terms = set([term for term in match_product_name.split() if len(term) > 2])
-                            # Calculate overlap of key terms
-                            if json_key_terms and match_key_terms:
-                                term_overlap = len(json_key_terms & match_key_terms) / len(json_key_terms | match_key_terms) if (json_key_terms | match_key_terms) else 0
-                                if term_overlap > best_fuzzy_score:
-                                    best_fuzzy_match = match
-                                    best_fuzzy_score = term_overlap
-                                # Also check if JSON name keywords appear in product name
-                                elif any(term in match_product_name for term in json_key_terms if len(term) > 3):
-                                    keyword_match_score = len([t for t in json_key_terms if t in match_product_name]) / len(json_key_terms) if json_key_terms else 0
-                                    if keyword_match_score > best_fuzzy_score:
-                                        best_fuzzy_match = match
-                                        best_fuzzy_score = keyword_match_score
-                
-                if best_fuzzy_match and best_fuzzy_score > 0.3:  # Lower threshold to 30% for better matching
-                    enhanced_match = best_fuzzy_match
-                    match_method = f'fuzzy_{best_fuzzy_score:.2f}'
-                    _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match, best_fuzzy_score)
-                
-                # Fallback: try index-based matching if name matching fails
-                if not enhanced_match and i < len(enhanced_matches):
-                    enhanced_match = enhanced_matches[i]
-                    match_method = 'index'
-                    _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
-                    if is_aio_disposable_conflict(json_item, enhanced_match):
-                        _log_match_diagnostics('candidate_rejected_aio_conflict', match_method, json_item, json_name, enhanced_match)
-                        enhanced_match = None
-                        match_method = None
-                    elif _is_obviously_incompatible_match(json_item, json_name, enhanced_match):
-                        _log_match_diagnostics('candidate_rejected_incompatible', match_method, json_item, json_name, enhanced_match)
-                        enhanced_match = None
-                        match_method = None
-            
-            # If we found a match but it doesn't have JSON data, try to find the JSON item by the match's product name
-            if enhanced_match and json_item.get('product_name', '').strip() != json_name:
-                # The match might be for a different JSON item - try to find the right one
-                match_product_name = str(enhanced_match.get('Product Name*', enhanced_match.get('ProductName', ''))).strip()
-                if match_product_name:
-                    # Extract key terms from match product name
-                    match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
-                    # Try to find a JSON item that matches better
-                    for json_item_name, candidate_json_item in json_items_map.items():
-                        json_item_key_terms = set([term for term in json_item_name.split() if len(term) > 2])
-                        if match_key_terms and json_item_key_terms:
-                            overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
-                            if overlap > 0.5:  # Good match
-                                json_item = candidate_json_item
-                                json_name = json_item_name
-                                logging.info(f"🔄 Found better JSON item match: '{json_name}' for product '{match_product_name}'")
-                                _log_match_diagnostics('json_item_rebound', match_method, json_item, json_name, enhanced_match)
-                                break
+            # Try to find best match from already-matched products
+            best_match = None
+            best_score = 0.0
 
-            # Fallback: if no mapped enhanced match, do a direct DB lookup for this JSON row.
-            if not enhanced_match:
+            # 1. Direct name lookup
+            if json_name.lower().strip() in matched_by_name:
+                best_match = matched_by_name[json_name.lower().strip()]
+                best_score = 1.0
+            else:
+                # 2. Token overlap matching
+                for name_key, product in matched_by_name.items():
+                    prod_tokens = set(_normalize_for_match(name_key).split())
+                    if not json_tokens or not prod_tokens:
+                        continue
+                    overlap = len(json_tokens & prod_tokens) / len(json_tokens | prod_tokens)
+                    if overlap > best_score:
+                        best_score = overlap
+                        best_match = product
+
+            # Only accept matches with reasonable overlap
+            if best_score < 0.25:
+                best_match = None
+                best_score = 0.0
+
+            # Use Match_Confidence from the product if available
+            if best_match:
                 try:
-                    product_db = json_matcher._get_product_database() if hasattr(json_matcher, '_get_product_database') else None
-                    if product_db and hasattr(json_matcher, '_find_best_database_match'):
-                        fallback_vendor = _extract_vendor_from_json_item(json_item, json_name)
-                        fallback_strain = (
-                            str(json_item.get('strain_name', '')).strip() or
-                            _extract_json_strain_for_debug(json_item, json_name)
-                        )
-                        fallback_weight = str(
-                            json_item.get('unit_weight', json_item.get('weight', ''))
-                        ).strip()
+                    conf = float(best_match.get('Match_Confidence', best_score))
+                except (ValueError, TypeError):
+                    conf = best_score
+                high_confidence_matches.append(best_match)
+            else:
+                conf = 0.0
 
-                        db_fallback = json_matcher._find_best_database_match(
-                            product_name=json_name,
-                            vendor=fallback_vendor,
-                            weight=fallback_weight,
-                            strain=fallback_strain,
-                            product_db=product_db
-                        )
-                        if not db_fallback:
-                            db_fallback = _lookup_db_by_vendor_and_strain(json_item, json_name, product_db)
-                        if db_fallback and not is_aio_disposable_conflict(json_item, db_fallback) and \
-                           not _is_obviously_incompatible_match(json_item, json_name, db_fallback):
-                            enhanced_match = db_fallback
-                            match_method = 'direct_db_fallback'
-                            _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
-                except Exception as fallback_err:
-                    logging.debug(f"[JSON_DIAG] direct DB fallback failed for '{json_name}': {fallback_err}")
-            
-            # Log matching results for debugging
-            if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
-                logging.info(f"🔍 Presidential Kush match: JSON='{json_name}', Match={enhanced_match.get('Product Name*', 'None') if enhanced_match else 'None'}, Method={match_method}")
-                logging.info(f"🔍 Presidential Kush JSON data keys: {list(json_item.keys())}")
-                logging.info(f"🔍 Presidential Kush JSON data: brand={json_item.get('brand')}, vendor={json_item.get('vendor')}, type={json_item.get('inventory_type')}")
-            
-            # Create detailed match info using database-priority data
-            # CRITICAL: Always include json_name and json_data, even if no match found
-            # Use the actual Match_Confidence provided by the enhanced matcher when available
-            enhanced_conf_str = enhanced_match.get('Match_Confidence') if enhanced_match else None
-            try:
-                enhanced_conf = float(enhanced_conf_str) if enhanced_conf_str is not None else 0.0
-            except Exception:
-                enhanced_conf = 0.0
+            match_display_name = ''
+            if best_match:
+                match_display_name = (
+                    best_match.get('Product Name*') or
+                    best_match.get('ProductName') or
+                    best_match.get('Description') or
+                    best_match.get('displayName') or
+                    ''
+                )
 
             match_info = {
                 'json_name': json_name,
-                'json_data': json_item,  # Always include full JSON item data
-                'best_score': enhanced_conf if enhanced_match else 0.0,
-                'best_match': enhanced_match,
-                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': enhanced_conf, 'excel_data': enhanced_match}] if enhanced_match else [],
-                'is_match': enhanced_match is not None,
-                'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
-                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
-                'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
-                'match_confidence': f"{enhanced_conf:.3f}" if enhanced_match else '0.0'
+                'json_data': json_item,
+                'best_score': conf,
+                'best_match': best_match,
+                'top_candidates': [{'excel_name': match_display_name, 'score': conf, 'excel_data': best_match}] if best_match else [],
+                'is_match': best_match is not None,
+                'match_reason': 'Database Match' if best_match else 'No match found',
+                'source': best_match.get('Source', 'Database') if best_match else 'No match',
+                'data_source': 'Database' if best_match else 'None',
+                'match_confidence': f"{conf:.3f}" if best_match else '0.0'
             }
-
-            if enhanced_match:
-                _log_match_diagnostics('final_match', match_method, json_item, json_name, enhanced_match, enhanced_conf)
-            else:
-                logging.info(f"[JSON_DIAG] stage=final_match method=none json='{json_name}' db=None")
-            
-            # Debug: Verify JSON data is included
-            if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
-                logging.info(f"🔍 Presidential Kush match_info keys: {list(match_info.keys())}")
-                logging.info(f"🔍 Presidential Kush match_info json_name: '{match_info.get('json_name')}'")
-                logging.info(f"🔍 Presidential Kush match_info json_data present: {match_info.get('json_data') is not None}")
-                if match_info.get('json_data'):
-                    logging.info(f"🔍 Presidential Kush match_info json_data keys: {list(match_info.get('json_data', {}).keys())}")
-            
             detailed_matches.append(match_info)
-        
-        # CRITICAL FIX: Also create detailed matches for enhanced matches that weren't matched to any JSON item
-        # This ensures products like Presidential Kush that were matched but whose JSON item wasn't found still show JSON data
-        matched_enhanced_indices = set()
-        for match_info in detailed_matches:
-            if match_info.get('best_match'):
-                # Find the index of this enhanced match
-                for idx, em in enumerate(enhanced_matches):
-                    if em == match_info['best_match'] or (
-                        em.get('Product Name*') == match_info['best_match'].get('Product Name*') and
-                        em.get('Product Name*')
-                    ):
-                        matched_enhanced_indices.add(idx)
-                        break
-        
-        # For any unmatched enhanced matches, try to find their JSON item and create a detailed match
-        for idx, enhanced_match in enumerate(enhanced_matches):
-            if idx not in matched_enhanced_indices:
-                # Try to find JSON item by product name
-                match_product_name = str(enhanced_match.get('Product Name*', enhanced_match.get('ProductName', ''))).strip()
-                if match_product_name:
-                    # Look for JSON item with matching name
-                    found_json_item = None
-                    found_json_name = None
-                    for json_item_name, json_item in json_items_map.items():
-                        json_item_key_terms = set([term for term in json_item_name.split() if len(term) > 2])
-                        match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
-                        if match_key_terms and json_item_key_terms:
-                            overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
-                            if overlap > 0.4:  # Reasonable match
-                                found_json_item = json_item
-                                found_json_name = json_item_name
-                                break
-                    
-                    # Also check original JSON items list
-                    if not found_json_item:
-                        for json_item in json_items:
-                            json_item_name = (
-                                str(json_item.get('product_name', '')).strip() or
-                                str(json_item.get('inventory_name', '')).strip() or
-                                ''
-                            )
-                            if json_item_name:
-                                json_item_key_terms = set([term for term in json_item_name.lower().split() if len(term) > 2])
-                                match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
-                                if match_key_terms and json_item_key_terms:
-                                    overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
-                                    if overlap > 0.4:
-                                        found_json_item = json_item
-                                        found_json_name = json_item_name
-                                        break
-                    
-                    if found_json_item:
-                        if is_aio_disposable_conflict(found_json_item, enhanced_match):
-                            continue
-                        if _is_obviously_incompatible_match(found_json_item, found_json_name or match_product_name, enhanced_match):
-                            continue
-                        match_info = {
-                            'json_name': found_json_name or match_product_name,
-                            'json_data': found_json_item,
-                            'best_score': 0.95,
-                            'best_match': enhanced_match,
-                            'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}],
-                            'is_match': True,
-                            'match_reason': 'Database Priority (100% DB data)',
-                            'source': enhanced_match.get('Source', 'Database Priority (100% DB)'),
-                            'data_source': enhanced_match.get('Data_Source', 'Database'),
-                            'match_confidence': enhanced_match.get('Match_Confidence', '0.95')
-                        }
-                        detailed_matches.append(match_info)
-                        if 'presidential' in match_product_name.lower() or 'kush' in match_product_name.lower():
-                            logging.info(f"✅ Added Presidential Kush detailed match from unmatched enhanced match: '{match_product_name}'")
-        
-        logging.info(f"DATABASE PRIORITY: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} high-confidence database-enhanced products")
-        
+
+        logging.info(f"Detailed JSON match: {len(detailed_matches)} items, {len(high_confidence_matches)} matched")
+
         return jsonify({
             'success': True,
             'total_json_items': len(json_items),
             'total_matches': len(high_confidence_matches),
             'threshold': 'Database Priority (100% DB)',
-            'approach': 'Enhanced JSON Matcher with Database Priority',
+            'approach': 'Fast detailed matching',
             'data_source': '100% Database-derived information',
             'detailed_matches': detailed_matches,
             'high_confidence_matches': high_confidence_matches,
             'database_info': {
-                'total_database_products': len(available_tags),
-                'enhanced_matches': len(enhanced_matches) if enhanced_matches else 0,
+                'total_database_products': len(matched_products),
+                'enhanced_matches': len(high_confidence_matches),
                 'match_strategy': 'Database Priority with safe defaults'
             }
         })
-        
+
     except Exception as e:
         logging.error(f"Error in detailed JSON matching: {str(e)}")
+        import traceback
+        logging.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Detailed matching failed: {str(e)}'}), 500
 
 @app.route('/api/match-json-tags', methods=['POST'])
