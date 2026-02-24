@@ -9373,44 +9373,13 @@ def generate_labels():
                         session_file_path = session.get('file_path')
             except Exception as _recover_err:
                 logging.debug(f"Upload recovery failed: {_recover_err}")
+        # Log upload age for diagnostics but never block generation
         current_time = time.time()
-        stale_threshold = 21600  # 6 hours in seconds
-        
-        # Check if upload is stale (missing timestamp or older than 1 hour)
-        is_stale = False
-        stale_reason = None
-        
-        if not upload_timestamp or upload_timestamp == 0:
-            is_stale = True
-            stale_reason = "No upload timestamp found"
-        elif current_time - upload_timestamp > stale_threshold:
-            is_stale = True
+        if upload_timestamp and upload_timestamp > 0:
             age_hours = (current_time - upload_timestamp) / 3600
-            stale_reason = f"Upload is {age_hours:.1f} hours old (max 6 hours allowed)"
-        
-        # Also check if file exists and matches session
-        if session_file_path and os.path.exists(session_file_path):
-            file_mtime = os.path.getmtime(session_file_path)
-            file_age = current_time - file_mtime
-            if file_age > stale_threshold:
-                is_stale = True
-                stale_reason = f"Excel file is {file_age / 3600:.1f} hours old (max 6 hours allowed)"
-        elif session_file_path and not os.path.exists(session_file_path):
-            is_stale = True
-            stale_reason = "Excel file no longer exists"
-        
-        # Block generation if data is stale - always check, even if tags come from request
-        # UI may show stale data if cache is stale, so we must verify upload freshness
-        if is_stale:
-            logging.warning(f"⚠️ STALE DATA BLOCK: {stale_reason} - blocking tag generation")
-            generate_labels._processing_requests.discard(request_fingerprint)
-            return jsonify({
-                'error': 'stale_upload',
-                'message': f'Your Excel data is stale ({stale_reason}). Please upload a fresh Excel file before generating tags.',
-                'stale_reason': stale_reason,
-                'upload_timestamp': upload_timestamp,
-                'current_time': current_time
-            }), 400
+            logging.info(f"📋 Upload age: {age_hours:.1f} hours")
+        if session_file_path and not os.path.exists(session_file_path):
+            logging.warning(f"⚠️ Session file path does not exist: {session_file_path}")
         
         # Check if we have data in Excel processor OR database
         has_excel_data = excel_processor.df is not None and not excel_processor.df.empty
