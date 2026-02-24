@@ -5724,6 +5724,22 @@ def get_current_file():
         uploaded_filename = session.get('uploaded_filename', '')
         upload_timestamp = session.get('upload_timestamp', 0)
         
+        # If session doesn't have a file_path, try persisted .last_upload.json as a read-only fallback
+        if not file_path:
+            try:
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    last_upload = _robust_load_persistent_json(persistence_file)
+                    if last_upload:
+                        candidate = _sanitize_persisted_path(last_upload.get('file_path'))
+                        if candidate and os.path.exists(candidate):
+                            file_path = os.path.normpath(candidate)
+                            uploaded_filename = last_upload.get('filename', uploaded_filename)
+                            upload_timestamp = last_upload.get('timestamp', upload_timestamp)
+                            logging.info(f"ℹ️ get_current_file: using persisted upload {file_path}")
+            except Exception as e:
+                logging.debug(f"get_current_file: could not read persisted upload: {e}")
+
         # Check if file exists
         file_exists = False
         if file_path:
