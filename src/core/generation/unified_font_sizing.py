@@ -375,6 +375,19 @@ def _apply_field_specific_rules(
     # Vertical template brand rules
     if field == 'brand' and orientation_norm == 'vertical':
         final_size = _apply_vertical_brand_rules(text, final_size, scale_factor)
+
+    # Horizontal template description rule
+    # If the description has more than 4 words and at least one word is 8+ letters,
+    # reduce the computed font size by 1pt (but not below sensible minimum).
+    if field == 'description' and orientation_norm == 'horizontal':
+        words = [w for w in str(text).split() if w]
+        if len(words) > 4 and any(len(w) >= 8 for w in words):
+            min_size = 8 * scale_factor
+            final_size = max(min_size, final_size - 1 * scale_factor)
+            logger.debug(
+                f"Horizontal description rule: text='{text}' has >4 words and a word>=8 letters, "
+                f"reducing font size by 1pt -> {final_size}pt"
+            )
     
     return final_size
 

@@ -9249,6 +9249,20 @@ def generate_labels():
         has_request_selected_tags = selected_tags_count > 0
         direct_request_mode = has_request_selected_tags and all(isinstance(tag, dict) for tag in selected_tags_from_request)
         file_path = data.get('file_path') or session.get('file_path')  # Use session file_path if not provided
+        # If no file_path found in request or session (browser may have blocked cookies),
+        # use persisted .last_upload.json as a read-only fallback for this generation request.
+        if not file_path:
+            try:
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    last_upload = _robust_load_persistent_json(persistence_file)
+                    if last_upload:
+                        candidate = _sanitize_persisted_path(last_upload.get('file_path'))
+                        if candidate and os.path.exists(candidate):
+                            file_path = os.path.normpath(candidate)
+                            logging.info(f"ℹ️ Using persisted upload file for generate request: {file_path}")
+            except Exception as _gen_pf_err:
+                logging.debug(f"Could not read persisted fallback for generate: {_gen_pf_err}")
         filters = data.get('filters', None)
 
         logging.info(f"🎯 Generation: {selected_tags_count} tags, template={template_type}, scale={scale_factor}")
@@ -11987,13 +12001,31 @@ def get_available_tags():
         session_file_path = session.get('file_path', '')
         logging.info(f"🔍 AVAILABLE-TAGS: session_file_path='{session_file_path}', store='{store_name}'")
 
+        # Read-only fallback: if the session does not have a file_path (cookie may be blocked),
+        # use the persisted .last_upload.json value for this request only (do NOT mutate session).
+        persisted_fallback_path = None
+        if not session_file_path:
+            try:
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    last_upload = _robust_load_persistent_json(persistence_file)
+                    if last_upload:
+                        candidate = _sanitize_persisted_path(last_upload.get('file_path'))
+                        if candidate and os.path.exists(candidate):
+                            persisted_fallback_path = os.path.normpath(candidate)
+                            logging.info(f"ℹ️ Using persisted upload file for request (no session): {persisted_fallback_path}")
+            except Exception as _pf_err:
+                logging.debug(f"Could not read persisted fallback upload file: {_pf_err}")
+        # Effective file path for this request (prefer session, fall back to persisted file)
+        effective_file_path = session_file_path or persisted_fallback_path or ''
+
         # CRITICAL FIX: Cache key should use session file path even if the temp file was cleaned up.
         # Rely on cache/_excel_processor instead of file existence to avoid losing tags after reload.
         file_exists = False
-        if session_file_path:
+        if effective_file_path:
             try:
-                file_exists = os.path.exists(session_file_path)
-                logging.info(f"🔍 AVAILABLE-TAGS: file_exists={file_exists} for path='{session_file_path}'")
+                file_exists = os.path.exists(effective_file_path)
+                logging.info(f"🔍 AVAILABLE-TAGS: file_exists={file_exists} for path='{effective_file_path}'")
             except Exception as path_err:
                 logging.warning(f"Error checking file path: {path_err}")
                 file_exists = False
@@ -12001,8 +12033,9 @@ def get_available_tags():
         # CRITICAL FIX: Don't rely on global _excel_processor - it's shared across all sessions/users
         # Only trust file existence and session state to prevent serving wrong user's data
         # The processor is not session-safe and can contain data from other users
-        has_excel_data = file_exists and session_file_path
-        logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)})")
+        # Treat persisted fallback as valid excel data for this request even if session cookie missing
+        has_excel_data = file_exists and bool(effective_file_path)
+        logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)}, persisted_fallback={bool(persisted_fallback_path)})")
 
         # DISABLED: Do not automatically load default file - require explicit upload
         # User must upload an Excel file to see tags
@@ -12046,34 +12079,34 @@ def get_available_tags():
             session.modified = True
             has_excel_data = False
         
-        # CRITICAL FIX: If processor was cleared after lineage update, try to reload from session file path
-        # This prevents tags from disappearing after lineage updates
-        if not has_excel_data and session_file_path:
+        # CRITICAL FIX: If processor was cleared after lineage update, try to reload from the effective file path
+        # (session or persisted fallback). This prevents tags from disappearing after lineage updates.
+        if not has_excel_data and effective_file_path:
             # Check if file exists
-            file_actually_exists = os.path.exists(session_file_path) if session_file_path else False
+            file_actually_exists = os.path.exists(effective_file_path) if effective_file_path else False
 
             if file_actually_exists:
                 try:
-                    logging.info(f"🔄 Processor was cleared - reloading from session file: {session_file_path}")
+                    logging.info(f"🔄 Processor was cleared - reloading from file: {effective_file_path}")
                     from src.core.data.excel_processor import ExcelProcessor
                     reloaded_processor = ExcelProcessor(store_name=store_name)
-                    if reloaded_processor.load_file(session_file_path):
+                    if reloaded_processor.load_file(effective_file_path):
                         if reloaded_processor.df is not None and not reloaded_processor.df.empty:
                             has_excel_data = True
                             g.excel_processor = reloaded_processor
-                            reloaded_processor._last_loaded_file = session_file_path
+                            reloaded_processor._last_loaded_file = effective_file_path
                             file_exists = True  # Update file_exists flag
-                            logging.info(f"✅ Reloaded Excel processor from session file: {len(reloaded_processor.df)} rows")
+                            logging.info(f"✅ Reloaded Excel processor from file: {len(reloaded_processor.df)} rows")
                         else:
                             logging.warning(f"⚠️ Reloaded processor has empty DataFrame")
                     else:
                         logging.warning(f"⚠️ Reloaded processor load_file returned False")
                 except Exception as reload_err:
-                    logging.warning(f"Failed to reload processor from session file: {reload_err}")
+                    logging.warning(f"Failed to reload processor from file: {reload_err}")
                     import traceback
                     logging.warning(traceback.format_exc())
             else:
-                logging.info(f"📁 Session file doesn't exist, will try to load tags from database: {session_file_path}")
+                logging.info(f"📁 File doesn't exist, will try to load tags from database: {effective_file_path}")
 
         # CRITICAL FIX: Include upload timestamp in cache key to ensure each upload has unique cache
         # This prevents serving stale data from previous uploads or other sessions
@@ -12082,8 +12115,8 @@ def get_available_tags():
         lineage_update_timestamp = session.get('lineage_update_timestamp', '')
         effective_timestamp = lineage_update_timestamp if lineage_update_timestamp else upload_timestamp
         cache_bust = _get_available_tags_cache_bust()
-        if has_excel_data and session_file_path:
-            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}_b{cache_bust}')
+        if has_excel_data and effective_file_path:
+            cache_key = get_session_cache_key(f'available_tags_{effective_file_path}_{effective_timestamp}_b{cache_bust}')
             if lineage_update_timestamp:
                 logging.info(f"📦 Cache key with lineage_update_timestamp: ..._{effective_timestamp}")
             else:
