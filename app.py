@@ -21,6 +21,7 @@ import math
 import signal  # Add signal import for timeout handling
 from decimal import Decimal
 import pandas as pd  # Add this import
+import json
 
 # Optional NumPy dependency: try to import and expose a flag so code
 # checks like `if NUMPY_AVAILABLE and np is not None:` are safe.
@@ -195,6 +196,28 @@ def normalize_product_name_columns(df):
 def timeout_handler(signum, frame):
     raise TimeoutError("File operation timed out")
 
+
+def _robust_load_persistent_json(path):
+    """Load JSON from `path` but tolerate trailing garbage or accidental extra characters.
+
+    Returns the parsed object on success or None on failure.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        try:
+            # Fallback: try to extract the first JSON object in the file text
+            txt = open(path, 'r', encoding='utf-8').read()
+            first = txt.find('{')
+            last = txt.rfind('}')
+            if first != -1 and last != -1 and last > first:
+                snippet = txt[first:last+1]
+                return json.loads(snippet)
+        except Exception as _e:
+            logging.debug(f"robust_load_persistent_json failed for {path}: {_e}")
+    return None
+
 def safe_load_file_with_timeout(processor, file_path, timeout_seconds=30):
     """Load file with timeout protection (gracefully degrades when signals unavailable)."""
     def _load_without_timeout():
@@ -347,8 +370,9 @@ def load_available_tags_cache(store_name):
         cache_path = get_available_tags_cache_path(store_name)
         if not os.path.exists(cache_path):
             return None
-        with open(cache_path, 'r', encoding='utf-8') as cache_file:
-            return json.load(cache_file)
+            last = _robust_load_persistent_json(cache_path)
+            if last is None:
+                raise ValueError("Could not parse persistent upload JSON")
     except Exception as e:
         logging.warning(f"Failed to load available tags cache for {store_name}: {e}")
         return None
@@ -2480,9 +2504,10 @@ def get_session_excel_processor():
                     import json
                     # CRITICAL FIX: Use UPLOADS_DIR constant instead of constructing path for Windows compatibility
                     persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-                    if os.path.exists(persistence_file):
-                        with open(persistence_file, 'r') as f:
-                            last_upload = json.load(f)
+                        if os.path.exists(persistence_file):
+                            last_upload = _robust_load_persistent_json(persistence_file)
+                            if last_upload is None:
+                                raise ValueError("Could not parse persistent upload JSON")
                         persisted_file_path = last_upload.get('file_path')
                         persisted_store = last_upload.get('store')
                         current_store = get_current_store_name() if has_store_selection() else None
@@ -2543,8 +2568,9 @@ def get_session_excel_processor():
                     # CRITICAL FIX: Use UPLOADS_DIR constant for Windows compatibility
                     persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                     if os.path.exists(persistence_file):
-                        with open(persistence_file, 'r') as f:
-                            last_upload = json.load(f)
+                        last_upload = _robust_load_persistent_json(persistence_file)
+                        if last_upload is None:
+                            raise ValueError("Could not parse persistent upload JSON")
                         # CRITICAL FIX: Normalize paths for comparison on Windows
                         persisted_path = os.path.normpath(last_upload.get('file_path', ''))
                         session_path = os.path.normpath(session_file_path)
@@ -3139,8 +3165,9 @@ def index():
                 # CRITICAL FIX: Use UPLOADS_DIR constant for Windows compatibility
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                 if os.path.exists(persistence_file):
-                    with open(persistence_file, 'r') as f:
-                        last_upload = json.load(f)
+                    last_upload = _robust_load_persistent_json(persistence_file)
+                    if last_upload is None:
+                        raise ValueError("Could not parse persistent upload JSON")
                     persisted_file_path = last_upload.get('file_path')
                     persisted_store = last_upload.get('store')
                     current_store = get_current_store_name() if has_store_selection() else None
@@ -3237,9 +3264,9 @@ def index():
             try:
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                 if os.path.exists(persistence_file):
-                    import json
-                    with open(persistence_file, 'r', encoding='utf-8') as pf:
-                        last = json.load(pf)
+                    last = _robust_load_persistent_json(persistence_file)
+                    if last is None:
+                        raise ValueError("Could not parse persistent upload JSON")
                     last_store = last.get('store')
                     current_store = get_current_store_name(allow_fallback=True)
                     if last.get('file_path') and (not current_store or last_store == current_store):
@@ -9305,9 +9332,9 @@ def generate_labels():
             try:
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                 if os.path.exists(persistence_file):
-                    import json
-                    with open(persistence_file, 'r', encoding='utf-8') as pf:
-                        last = json.load(pf)
+                    last = _robust_load_persistent_json(persistence_file)
+                    if last is None:
+                        raise ValueError("Could not parse persistent upload JSON")
                     # Only restore if store matches current store or if no store selected
                     last_store = last.get('store')
                     current_store = get_current_store_name(allow_fallback=True)
@@ -15719,8 +15746,9 @@ def update_lineage():
                 import json
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                 if os.path.exists(persistence_file):
-                    with open(persistence_file, 'r') as f:
-                        last_upload = json.load(f)
+                    last_upload = _robust_load_persistent_json(persistence_file)
+                    if last_upload is None:
+                        raise ValueError("Could not parse persistent upload JSON")
                     last_upload['lineage_update_timestamp'] = lineage_timestamp
                     with open(persistence_file, 'w') as f:
                         json.dump(last_upload, f)
@@ -16471,9 +16499,9 @@ def get_web_available_tags():
             try:
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                 if os.path.exists(persistence_file):
-                    import json
-                    with open(persistence_file, 'r') as pf:
-                        last = json.load(pf)
+                    last = _robust_load_persistent_json(persistence_file)
+                    if last is None:
+                        raise ValueError("Could not parse persistent upload JSON")
                     # Ensure store matches (or allow fallback)
                     last_store = last.get('store')
                     current_store = store_name or get_current_store_name(allow_fallback=True)
