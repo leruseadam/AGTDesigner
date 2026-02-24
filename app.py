@@ -2525,18 +2525,18 @@ def get_session_excel_processor():
                     import json
                     # CRITICAL FIX: Use UPLOADS_DIR constant instead of constructing path for Windows compatibility
                     persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-                        if os.path.exists(persistence_file):
-                            last_upload = _robust_load_persistent_json(persistence_file)
-                            if last_upload is None:
-                                raise ValueError("Could not parse persistent upload JSON")
+                    if os.path.exists(persistence_file):
+                        last_upload = _robust_load_persistent_json(persistence_file)
+                        if last_upload is None:
+                            raise ValueError("Could not parse persistent upload JSON")
                         persisted_file_path = _sanitize_persisted_path(last_upload.get('file_path'))
                         persisted_store = last_upload.get('store')
                         current_store = get_current_store_name() if has_store_selection() else None
-                        
+
                         # CRITICAL FIX: Normalize path for Windows compatibility
                         if persisted_file_path:
                             persisted_file_path = os.path.normpath(persisted_file_path)
-                        
+
                         # Only restore if file exists and store matches (or no store selected)
                         if persisted_file_path and os.path.exists(persisted_file_path):
                             if not current_store or persisted_store == current_store:
