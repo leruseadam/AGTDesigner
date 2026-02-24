@@ -28,16 +28,18 @@
   
   <!-- PC Performance Optimization - Load ONLY if on Windows -->
   <script>
-    // Detect Windows platform and load PC performance CSS conditionally
-    if (navigator.platform.toLowerCase().includes('win') || 
-        navigator.userAgent.toLowerCase().includes('windows')) {
+    // PC performance optimization is optional. Disabled by default to preserve
+    // visual parity with the MacBook design. Set `LOAD_PC_PERF = true` only
+    // when you explicitly want the simplified PC-only stylesheet for perf.
+    const LOAD_PC_PERF = false; // set to true to enable pc-performance.css
+    if (LOAD_PC_PERF && (navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows'))) {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
       link.href = "{{ url_for('static', filename='css/pc-performance.css') }}?v={{ cache_bust }}";
       document.head.appendChild(link);
       console.log('PC performance optimization loaded for Windows');
     } else {
-      console.log('Mac detected - using full styling (no PC performance optimizations)');
+      console.log('PC performance optimization disabled; using full styling for visual parity');
     }
   </script>
   
@@ -206,68 +208,63 @@
     // This prevents the backdrop from appearing when a store is already selected
 
     // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
-    // Works universally on all devices - MacBook Pro, PC, tablets, phones
+    // Apply a one-time zoom correction on load (never on resize) so that
+    // non-Mac monitors (e.g. 1920x1080 with Windows scaling) match the
+    // MacBook Pro appearance. Resize events will only update CSS vars.
     (function() {
       'use strict';
-      
-      function normalizeViewport() {
+
+      function applyZoomOnce() {
+        try {
+          const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+          const dpr = window.devicePixelRatio || 1;
+          // Only correct for common Windows scaling scenarios (1.25, 1.5)
+          if (!isMac && dpr > 1.0 && dpr < 2.0) {
+            // Use innerWidth (CSS pixels) as the effective viewport reference
+            const targetCssWidth = 1512; // MacBook Pro effective CSS width baseline
+            const currentCssWidth = window.innerWidth;
+            if (currentCssWidth > targetCssWidth) {
+              const zoom = Math.max(Math.min(targetCssWidth / currentCssWidth, 1.0), 0.7);
+              document.body.style.zoom = zoom;
+              console.log(`Applied one-time zoom=${zoom.toFixed(3)} to normalize non-Mac display (dpr=${dpr})`);
+            }
+          } else {
+            document.body.style.zoom = '';
+          }
+        } catch (e) {
+          console.warn('applyZoomOnce failed', e);
+        }
+      }
+
+      function normalizeViewportVars() {
         const vw = window.innerWidth / 100;
         const vh = window.innerHeight / 100;
         const vmin = Math.min(vw, vh);
         const vmax = Math.max(vw, vh);
-
-        // Set normalized viewport units as CSS custom properties
         document.documentElement.style.setProperty('--vw', vw + 'px');
         document.documentElement.style.setProperty('--vh', vh + 'px');
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
-
-        // UNIVERSAL SCALING: Adapt to any screen size
-        // Calculate scale factor based on viewport width (1920px = baseline)
         const baseWidth = 1920;
         const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
-
-        // DPI NORMALIZATION: Counteract OS-level display scaling (e.g. Windows 125%/150%)
-        // so the app looks the same on every monitor as it does on a MacBook Pro.
-        // MacBook Pro baseline: ~1512px CSS viewport at devicePixelRatio 2.0
-        // Windows PC at 125%: 1536px CSS viewport at devicePixelRatio 1.25
-        // Windows PC at 150%: 1280px CSS viewport at devicePixelRatio 1.5
-        // We only compensate for non-Retina DPI scaling (devicePixelRatio between 1.0 and 2.0
-        // that isn't a true HiDPI display). True HiDPI displays (ratio >= 2.0) are fine as-is.
-        const dpr = window.devicePixelRatio || 1;
-        const physicalWidth = window.screen.width * dpr;
-        // Detect OS-level scaling: if physical screen is wide (>=1920 real pixels)
-        // but CSS viewport is small, the OS is scaling up.
-        // Only apply zoom correction on non-Mac platforms to avoid double-correction.
-        const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
-        if (!isMac && dpr > 1.0 && dpr < 2.0 && window.innerWidth < 1800) {
-          // The OS is scaling up by dpr (e.g. 1.25x or 1.5x).
-          // Zoom out the body to compensate, clamped to prevent extreme shrinking.
-          const zoomCorrection = Math.max(1 / dpr, 0.7);
-          document.body.style.zoom = zoomCorrection;
-          console.log(`DPI normalization: dpr=${dpr}, zoom=${zoomCorrection.toFixed(3)} (compensating for ${Math.round(dpr*100)}% OS scaling)`);
-        } else {
-          // Mac or standard DPI or true HiDPI — no correction needed
-          document.body.style.zoom = '';
-        }
-
-        console.log(`Viewport: ${window.innerWidth}x${window.innerHeight}, dpr: ${dpr}, scale: ${scaleFactor.toFixed(2)}x`);
       }
 
-      // Run normalization after DOM is loaded
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', normalizeViewport);
+        document.addEventListener('DOMContentLoaded', function() { applyZoomOnce(); normalizeViewportVars(); });
       } else {
-        normalizeViewport();
+        applyZoomOnce();
+        normalizeViewportVars();
       }
-      window.addEventListener('resize', normalizeViewport);
-      window.addEventListener('orientationchange', normalizeViewport);
 
-      // Re-normalize after a short delay to catch any late-loading elements
-      setTimeout(normalizeViewport, 100);
-      setTimeout(normalizeViewport, 500);
+      // Only update CSS vars on resize/orientationchange — never reapply zoom
+      window.addEventListener('resize', normalizeViewportVars, {passive: true});
+      window.addEventListener('orientationchange', normalizeViewportVars, {passive: true});
+
+      // Re-calc CSS vars after short delays to catch late layout changes
+      setTimeout(normalizeViewportVars, 100);
+      setTimeout(normalizeViewportVars, 500);
     })();
     
     // Define showDatabaseEditor function immediately to prevent errors
