@@ -24676,6 +24676,23 @@ def upload_file_optimized():
         
         # Clear selected tags in session to ensure fresh start
         session['selected_tags'] = []
+        # Persist upload metadata to uploads/.last_upload.json for page-reload recovery
+        try:
+            import json
+            persistence_file = os.path.join(upload_folder, '.last_upload.json')
+            timestamp_persist = int(time.time())
+            normalized_file_path = os.path.normpath(temp_path)
+            with open(persistence_file, 'w') as pf:
+                json.dump({
+                    'file_path': normalized_file_path,
+                    'filename': sanitized_filename,
+                    'timestamp': timestamp_persist,
+                    'store': selected_store,
+                    'lineage_update_timestamp': None
+                }, pf)
+            logging.info(f"[ULTRA-FAST] Saved upload info to persistent file: {persistence_file}")
+        except Exception as persist_err:
+            logging.warning(f"[ULTRA-FAST] Could not save persistent upload info: {persist_err}")
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time
@@ -24761,6 +24778,24 @@ def upload_file_fast():
         # Store file path in session
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
+        # Persist upload metadata to uploads/.last_upload.json for page-reload recovery
+        try:
+            import json
+            uploads_dir_path = str(uploads_dir)
+            persistence_file = os.path.join(uploads_dir_path, '.last_upload.json')
+            timestamp_persist = int(time.time())
+            normalized_file_path = os.path.normpath(str(file_path))
+            with open(persistence_file, 'w') as pf:
+                json.dump({
+                    'file_path': normalized_file_path,
+                    'filename': filename,
+                    'timestamp': timestamp_persist,
+                    'store': selected_store,
+                    'lineage_update_timestamp': None
+                }, pf)
+            logging.info(f"[FAST] Saved upload info to persistent file: {persistence_file}")
+        except Exception as persist_err:
+            logging.warning(f"[FAST] Could not save persistent upload info: {persist_err}")
         
         # Clear cached initial data so fresh upload is visible immediately
         try:

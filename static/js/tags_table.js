@@ -611,6 +611,7 @@ class TagsTable {
           <input type="checkbox" 
                  class="tag-checkbox" 
                  id="${safeId}"
+                 data-tag-name="${safeTagName}"
                  value="${safeTagName}"
                  ${isSelected ? 'checked' : ''}>
         </div>

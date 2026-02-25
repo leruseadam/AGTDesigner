@@ -755,6 +755,16 @@ class ProductTypeSpecificMatcher:
             logging.warning(f"Error in _extract_vendor: {e}")
             return ""
 
+    def _is_store_vendor(self, vendor: str) -> bool:
+        """Return True if the vendor string looks like a store/owner marker (not a supplier/vendor).
+        Common examples: 'AGT Bothell', 'A Greener Today', variations containing 'bothell' or 'a greener'.
+        """
+        if not vendor:
+            return False
+        v = vendor.lower()
+        markers = ('bothell', 'a greener', 'agt', 'a greener today')
+        return any(m in v for m in markers)
+
     def _compare_vendors(self, json_product: Dict, db_product: Dict) -> float:
         """Compare vendor names with fuzzy matching"""
         json_vendor = str(json_product.get('vendor', '') or json_product.get('vendor_name', '')).lower().strip()
@@ -1102,6 +1112,19 @@ class EnhancedJSONMatcher:
         except Exception:
             return str(obj)
 
+    def _is_store_vendor(self, vendor: str) -> bool:
+        """Return True if the vendor string looks like a store/owner marker (not a supplier/vendor).
+        Treat common markers like 'bothell', 'a greener', or 'agt' as store markers.
+        """
+        if not vendor:
+            return False
+        try:
+            v = str(vendor).lower()
+            markers = ('bothell', 'a greener', 'agt', 'a greener today')
+            return any(m in v for m in markers)
+        except Exception:
+            return False
+
     def _guess_unit_from_weight(self, weight_value):
         """Heuristic to guess weight units when units are missing.
         - If explicit unit text in weight_value, use that.
@@ -1336,11 +1359,23 @@ class EnhancedJSONMatcher:
 
                 # If strict matching is enabled, require exact equality (case-insensitive)
                 if self.strict_json_name_match:
-                    if item_name == product_name:
+                    # Enforce exact name AND same vendor when strict mode is enabled
+                    item_vendor = str(item.get('vendor') or item.get('vendor_name') or item.get('vendor_name_raw', '')).lower().strip()
+                    prod_vendor = str(product_dict.get('Vendor/Supplier*') or product_dict.get('Vendor') or '').lower().strip()
+                    # Ignore store/owner markers (e.g., AGT Bothell) when enforcing vendor equality
+                    if self._is_store_vendor(prod_vendor):
+                        prod_vendor = ''
+                    if self._is_store_vendor(item_vendor):
+                        item_vendor = ''
+                    if item_name == product_name and (not prod_vendor or not item_vendor or item_vendor == prod_vendor):
                         best_match_score = 1.0
                         json_item = item
-                        logging.debug(f"✅ Exact JSON name match found for '{product_name}'")
+                        logging.debug(f"✅ Exact JSON name + vendor match found for '{product_name}'")
                         break
+                    # If names match but vendors differ, skip this JSON item in strict mode
+                    if item_name == product_name and item_vendor and prod_vendor and item_vendor != prod_vendor:
+                        logging.debug(f"⛔ Skipping JSON match for '{product_name}' due to vendor mismatch: json='{item_vendor}' db='{prod_vendor}'")
+                        continue
                     # no exact match -> continue searching (do not accept fuzzy matches)
                     continue
 

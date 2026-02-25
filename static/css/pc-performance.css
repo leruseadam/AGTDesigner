@@ -161,8 +161,8 @@ select:not(#templateSelect):not(#templateSelectModal) option {
     /* Padding - match filter dropdowns */
     padding: 1rem 48px 1rem 1.25rem !important;
     
-    /* Font styling - larger text for template name */
-    font-size: 22px !important;
+    /* Font styling - larger text for template name (increased by ~3px) */
+    font-size: 25px !important;
     font-weight: 700 !important;
     color: #00d4aa !important; /* Cyan text to match filters */
     line-height: 1.5 !important;

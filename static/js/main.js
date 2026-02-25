@@ -5528,7 +5528,7 @@ const TagManager = {
                                     checkbox.checked = isChecked;
                                     return;
                                 }
-                                
+
                                 checkbox.checked = isChecked;
                                 const tagName = checkbox.value;
                                 const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
@@ -5617,39 +5617,55 @@ const TagManager = {
                                 priceCheckbox.type = 'checkbox';
                                 priceCheckbox.className = 'select-all-checkbox me-2';
                                 priceCheckbox.addEventListener('change', (e) => {
-                                    const savedScroll = this._saveAvailableScrollPosition();
-                                    const isChecked = e.target.checked;
-                                    const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
-                                    checkboxes.forEach(checkbox => {
-                                        if (!checkbox.classList.contains('tag-checkbox')) {
-                                            checkbox.checked = isChecked;
-                                            return;
-                                        }
-                                        
-                                        checkbox.checked = isChecked;
-                                        const tagName = checkbox.value;
-                                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
-                                        if (tag) {
-                                            if (isChecked) {
-                                                if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                    this.state.persistentSelectedTags.push(tagName);
+                                    try {
+                                        const savedScroll = (typeof this._saveAvailableScrollPosition === 'function') ? this._saveAvailableScrollPosition() : null;
+                                        const isChecked = !!e.target.checked;
+                                        const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
+                                        console.debug('Price group select-all changed:', isChecked, 'found checkboxes:', checkboxes.length);
+                                        checkboxes.forEach(checkbox => {
+                                            try {
+                                                // Always toggle the visual checked state
+                                                checkbox.checked = isChecked;
+
+                                                // For product tag checkboxes, update persistentSelectedTags using data-tag-name when available
+                                                if (checkbox.classList.contains('tag-checkbox')) {
+                                                    const tagNameAttr = checkbox.getAttribute('data-tag-name') || checkbox.value || null;
+                                                    if (!tagNameAttr) return;
+                                                    const tagName = tagNameAttr;
+
+                                                    if (isChecked) {
+                                                        if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                            this.state.persistentSelectedTags.push(tagName);
+                                                        }
+                                                    } else {
+                                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                        if (index > -1) {
+                                                            this.state.persistentSelectedTags.splice(index, 1);
+                                                        }
+                                                    }
                                                 }
-                                            } else {
-                                                const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                if (index > -1) {
-                                                    this.state.persistentSelectedTags.splice(index, 1);
-                                                }
+                                            } catch (innerErr) {
+                                                console.warn('Error toggling checkbox in price group:', innerErr);
                                             }
+                                        });
+
+                                        this.state.selectedTags = new Set(this.state.persistentSelectedTags || []);
+                                        // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                                        const selectedTagObjects = (typeof this.getSelectedTagObjects === 'function') ? this.getSelectedTagObjects() : [];
+                                        if (typeof this.updateSelectedTags === 'function') {
+                                            this.updateSelectedTags(selectedTagObjects);
                                         }
-                                    });
-                                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
-                                    // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
-                                    const selectedTagObjects = this.getSelectedTagObjects();
-                                    this.updateSelectedTags(selectedTagObjects);
-                                    this.efficientlyUpdateAvailableTagsDisplay();
-                                    requestAnimationFrame(() => {
-                                        this._restoreAvailableScrollPosition(savedScroll);
-                                    });
+                                        if (typeof this.efficientlyUpdateAvailableTagsDisplay === 'function') {
+                                            this.efficientlyUpdateAvailableTagsDisplay();
+                                        }
+                                        requestAnimationFrame(() => {
+                                            if (typeof this._restoreAvailableScrollPosition === 'function') {
+                                                this._restoreAvailableScrollPosition(savedScroll);
+                                            }
+                                        });
+                                    } catch (err) {
+                                        console.error('Error handling price group select-all change:', err);
+                                    }
                                 });
                                 
                                 priceHeader.appendChild(priceCheckbox);

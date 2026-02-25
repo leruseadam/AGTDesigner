@@ -6310,10 +6310,10 @@
       flex-direction: column !important;
     }
 
-    /* Center column - full height to match side columns, no scrolling needed */
+    /* Center column - shorter than side columns so tag lists extend beyond it */
     div[data-container-type="center"] {
-      height: var(--center-panel-height) !important;
-      min-height: var(--center-panel-height) !important;
+      height: auto !important;
+      min-height: auto !important;
       display: flex !important;
       flex-direction: column !important;
       align-items: center !important;
