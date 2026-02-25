@@ -531,31 +531,30 @@ async function openStrainLineageEditor() {
             </div>
             
                             <div class="list-group" id="strainListContainer">
-                            ${strains.map(strain => {
-                                const sName = (strain.strain_name || '');
-                                const safeAttr = sName.toLowerCase();
-                                const escapedName = sName.replace(/'/g, "\\'");
-                                return `
-                                <button type="button" class="list-group-item list-group-item-action strain-item" 
-                                                data-strain-name="${safeAttr}"
-                                                onclick="selectStrainForEditing('${escapedName}', '${strain.current_lineage}')">
-                                `;
-                            }).join('')}
-                  <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                      <strong class="strain-name">${strain.strain_name}</strong>
-                      <br>
-                      <small class="text-muted">
-                        Current: ${strain.current_lineage} | 
-                        Products: ${strain.total_occurrences} | 
-                        Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
-                      </small>
-                    </div>
-                    <span class="badge bg-primary">${strain.current_lineage}</span>
-                  </div>
-                </button>
-              `).join('')}
-            </div>
+                                ${strains.map(strain => {
+                                    const sName = (strain.strain_name || '');
+                                    const safeAttr = sName.toLowerCase();
+                                    const escapedName = sName.replace(/'/g, "\\'");
+                                    return `
+                                        <button type="button" class="list-group-item list-group-item-action strain-item" 
+                                                        data-strain-name="${safeAttr}"
+                                                        onclick="selectStrainForEditing('${escapedName}', '${strain.current_lineage}')">
+                                            <div class="d-flex justify-content-between align-items-start">
+                                                <div>
+                                                    <strong class="strain-name">${strain.strain_name}</strong>
+                                                    <br>
+                                                    <small class="text-muted">
+                                                        Current: ${strain.current_lineage} | 
+                                                        Products: ${strain.total_occurrences} | 
+                                                        Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
+                                                    </small>
+                                                </div>
+                                                <span class="badge bg-primary">${strain.current_lineage}</span>
+                                            </div>
+                                        </button>
+                                    `;
+                                }).join('')}
+                            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" id="strainSelectionCancelBtn">Cancel</button>
