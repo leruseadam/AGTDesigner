@@ -1066,6 +1066,11 @@ class EnhancedJSONMatcher:
         
         # Threading
         self.max_workers = min(32, (multiprocessing.cpu_count() or 1) + 4)
+        # Enforce strict JSON name matching by default: incoming JSON product names
+        # must exactly match database product names (case-insensitive, trimmed)
+        # to be considered a JSON-sourced match. Set to False to restore legacy
+        # fuzzy JSON fallback behaviour.
+        self.strict_json_name_match = True
 
     def _to_json_safe(self, obj):
         """Recursively convert objects to JSON-serializable forms."""
@@ -1326,16 +1331,33 @@ class EnhancedJSONMatcher:
             for i, item in enumerate(json_items):
                 item_name = (item.get('product_name') or
                             item.get('inventory_name') or '').lower().strip()
-                if item_name:
-                    words_a = set(item_name.split())
-                    words_b = set(product_name.split())
-                    similarity = len(words_a & words_b) / max(len(words_a), len(words_b), 1)
-                    if similarity > best_match_score:
-                        best_match_score = similarity
+                if not item_name:
+                    continue
+
+                # If strict matching is enabled, require exact equality (case-insensitive)
+                if self.strict_json_name_match:
+                    if item_name == product_name:
+                        best_match_score = 1.0
                         json_item = item
+                        logging.debug(f"✅ Exact JSON name match found for '{product_name}'")
+                        break
+                    # no exact match -> continue searching (do not accept fuzzy matches)
+                    continue
+
+                # Legacy behaviour: compute simple word-overlap similarity
+                words_a = set(item_name.split())
+                words_b = set(product_name.split())
+                similarity = len(words_a & words_b) / max(len(words_a), len(words_b), 1)
+                if similarity > best_match_score:
+                    best_match_score = similarity
+                    json_item = item
         
-        # GUARANTEE: If no good match found (low confidence), use JSON item for all template-required columns
+        # If strict JSON matching is enabled, do not use a fallback JSON item
         if not json_item and json_items:
+            if self.strict_json_name_match:
+                logging.info(f"🔍 DATABASE PRIORITY: No exact JSON name match found for '{product_name}' (strict mode). Skipping JSON merge.")
+                return product_dict
+            # GUARANTEE: If no good match found (low confidence), use JSON item for all template-required columns
             json_item = json_items[0]
             best_match_score = 0.05  # Very low confidence fallback
             json_item_name = (json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN')

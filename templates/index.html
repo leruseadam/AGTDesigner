@@ -11251,53 +11251,67 @@
     
     window.acceptAllMatches = function() {
       const acceptAllBtn = document.getElementById('acceptAllBtn');
-      const matchesData = acceptAllBtn.getAttribute('data-matches');
-      
+      const matchesData = acceptAllBtn && acceptAllBtn.getAttribute ? acceptAllBtn.getAttribute('data-matches') : null;
+
       if (!matchesData) {
         alert('No match data available');
         return;
       }
-      
+
       try {
-        const matches = JSON.parse(matchesData);
-        
-        // Update the UI with the accepted matches
-        if (typeof TagManager !== 'undefined') {
-          TagManager.updateSelectedTags(matches);
-          
-          // Show success notification
+        let matches = JSON.parse(matchesData);
+
+        // Normalize matches into tag objects acceptable to TagManager
+        // Support arrays of strings, arrays of objects with various keys, and DB product objects
+        const normalized = [];
+        for (const m of (matches || [])) {
+          if (!m) continue;
+
+          // If it's a simple string, treat as product name
+          if (typeof m === 'string') {
+            normalized.push({ 'Product Name*': m });
+            continue;
+          }
+
+          // If it's an object, try to extract a product name from common fields
+          if (typeof m === 'object') {
+            const name = m['Product Name*'] || m.ProductName || m.excel_name || m.product_name || m.name || m.displayName || m['ProductName'];
+            if (name) {
+              // Preserve other useful DB fields if present
+              const obj = Object.assign({}, m);
+              if (!obj['Product Name*']) obj['Product Name*'] = name;
+              normalized.push(obj);
+              continue;
+            }
+          }
+
+          // Fallback: stringify the item into a display name
+          try { normalized.push({ 'Product Name*': String(m) }); } catch (e) { /* ignore */ }
+        }
+
+        // Apply to TagManager if available
+        if (typeof TagManager !== 'undefined' && typeof TagManager.updateSelectedTags === 'function') {
+          TagManager.updateSelectedTags(normalized);
+
+          // Provide a brief success notification
           const notification = document.createElement('div');
           notification.className = 'alert alert-success alert-dismissible fade show';
-          notification.innerHTML = `
-            <strong>Matches Accepted!</strong> ${matches.length} high-quality matches have been added to your selected tags.
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-          `;
-          
+          notification.innerHTML = `\n            <strong>Matches Accepted!</strong> ${normalized.length} high-quality matches have been added to your selected tags.\n            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>\n          `;
           const container = document.querySelector('.container-fluid') || document.querySelector('.container');
           if (container) {
             container.insertBefore(notification, container.firstChild);
-            setTimeout(() => {
-              if (notification.parentNode) {
-                notification.remove();
-              }
-            }, 5000);
+            setTimeout(() => { if (notification.parentNode) notification.remove(); }, 4500);
           }
+        } else {
+          console.warn('TagManager not available to accept matches');
         }
-        
-        // Close the detailed modal
-        const detailedModal = bootstrap.Modal.getInstance(document.getElementById('detailedJsonMatchModal'));
-        if (detailedModal) {
-          detailedModal.hide();
-        }
-        
-        // Close the main JSON match modal too
-        const mainModal = bootstrap.Modal.getInstance(document.getElementById('jsonMatchModal'));
-        if (mainModal) {
-          mainModal.hide();
-        }
-        
-        console.log(`Accepted ${matches.length} high-quality matches`);
-        
+
+        // Close modals
+        try { const detailedModal = bootstrap.Modal.getInstance(document.getElementById('detailedJsonMatchModal')); if (detailedModal) detailedModal.hide(); } catch (e) {}
+        try { const mainModal = bootstrap.Modal.getInstance(document.getElementById('jsonMatchModal')); if (mainModal) mainModal.hide(); } catch (e) {}
+
+        console.log(`Accepted ${normalized.length} high-quality matches`);
+
       } catch (error) {
         console.error('Error accepting matches:', error);
         alert('Error processing matches');

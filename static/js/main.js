@@ -530,11 +530,17 @@ async function openStrainLineageEditor() {
               </div>
             </div>
             
-            <div class="list-group" id="strainListContainer">
-              ${strains.map(strain => `
-                <button type="button" class="list-group-item list-group-item-action strain-item" 
-                        data-strain-name="${strain.strain_name.toLowerCase()}"
-                        onclick="selectStrainForEditing('${strain.strain_name.replace(/'/g, "\\'")}', '${strain.current_lineage}')">
+                            <div class="list-group" id="strainListContainer">
+                            ${strains.map(strain => {
+                                const sName = (strain.strain_name || '');
+                                const safeAttr = sName.toLowerCase();
+                                const escapedName = sName.replace(/'/g, "\\'");
+                                return `
+                                <button type="button" class="list-group-item list-group-item-action strain-item" 
+                                                data-strain-name="${safeAttr}"
+                                                onclick="selectStrainForEditing('${escapedName}', '${strain.current_lineage}')">
+                                `;
+                            }).join('')}
                   <div class="d-flex justify-content-between align-items-start">
                     <div>
                       <strong class="strain-name">${strain.strain_name}</strong>
@@ -674,13 +680,18 @@ async function openStrainLineageEditor() {
       
       // Handle Enter key to select first visible strain
       searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const firstVisible = document.querySelector('.strain-item[style*="block"], .strain-item:not([style*="none"])');
-          if (firstVisible) {
-            firstVisible.click();
-          }
-        }
+                    if (e.key === 'Enter') {
+                    e.preventDefault();
+                    // Find the first visible strain item robustly (works regardless of inline style or CSS rules)
+                    const items = Array.from(document.querySelectorAll('.strain-item'));
+                    const firstVisible = items.find(item => {
+                        const style = window.getComputedStyle(item);
+                        return style && style.display !== 'none' && style.visibility !== 'hidden' && item.offsetParent !== null;
+                    });
+                    if (firstVisible) {
+                        firstVisible.click();
+                    }
+                }
       });
     }
     
