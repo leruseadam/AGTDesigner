@@ -4228,11 +4228,6 @@ const TagManager = {
             }
         }
         
-        // If still no brand found, try to use the vendor as the brand
-        if (!brand && tag.vendor) {
-            brand = tag.vendor.trim();
-        }
-        
         return brand;
     },
 
