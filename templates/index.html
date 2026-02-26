@@ -5962,8 +5962,8 @@
     #jsonMatchModal .modal-dialog {
       max-height: 92vh !important;
       height: auto !important;
-      max-width: 90vw !important;
-      min-width: 720px !important;
+      max-width: min(90vw, 900px) !important;
+      min-width: 0 !important;
       margin: 4vh auto !important;
     }
 
@@ -12037,10 +12037,10 @@
     #jsonMatchModal .modal-title svg { vertical-align: -3px; }
   </style>
 
-  <div class="modal fade" id="jsonMatchModal" tabindex="-1" aria-labelledby="jsonMatchModalLabel" inert>
+  <div class="modal fade" id="jsonMatchModal" tabindex="-1" aria-labelledby="jsonMatchModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" inert>
     <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content">
-        <div class="modal-header border-0 bg-transparent">
+        <div class="modal-header border-0 bg-transparent" style="flex-wrap:wrap;gap:8px;">
           <h5 class="modal-title d-flex align-items-center" id="jsonMatchModalLabel">
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2 text-info">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -12049,27 +12049,21 @@
             </svg>
             <span class="fs-5">JSON Product Matching</span>
           </h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close JSON match modal"></button>
+          <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
+            <button type="button" class="btn btn-sm btn-outline-warning" onclick="resetJsonMatchResults()" title="Clear cached results and start fresh" id="jsonMatchResetBtn"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
+            <button type="button" class="btn btn-sm btn-outline-info" onclick="testStrainSearch()" title="Test strain search API"><i class="bi bi-bug me-1"></i>Test API</button>
+            <button type="button" class="btn btn-sm btn-glass" data-bs-dismiss="modal">Close</button>
+          </div>
         </div>
         <div class="modal-body p-4">
-          <div class="row align-items-center mb-3">
-            <div class="col-md-8">
-              <div class="mb-1 text-muted">🔗 Match Products from JSON URL</div>
-              <p class="small text-muted mb-2">Paste a JSON URL containing inventory transfer data to automatically match and select products from your loaded Excel file.</p>
-
-              <div class="input-group mb-2">
-                <input type="text" inputmode="url" class="form-control form-control-lg" id="jsonUrlInput" placeholder="https://example.com/inventory-transfer.json" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" required>
-                <button class="btn btn-primary btn-lg" type="button" onclick="performDetailedJsonMatch()">Match JSON</button>
-              </div>
-              <div class="text-muted small">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
+          <div class="mb-3">
+            <div class="mb-1 text-muted">🔗 Match Products from JSON URL</div>
+            <p class="small text-muted mb-2">Paste a JSON URL containing inventory transfer data to automatically match and select products from your loaded Excel file.</p>
+            <div class="input-group mb-2">
+              <input type="text" inputmode="url" class="form-control form-control-lg" id="jsonUrlInput" placeholder="https://example.com/inventory-transfer.json" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore data-form-type="other" required>
+              <button class="btn btn-primary btn-lg" type="button" onclick="performDetailedJsonMatch()">Match JSON</button>
             </div>
-            <div class="col-md-4 text-md-end mt-3 mt-md-0">
-              <div class="d-inline-flex json-actions gap-2">
-                <button type="button" class="btn btn-outline-warning" onclick="resetJsonMatchResults()" title="Clear cached results and start fresh" id="jsonMatchResetBtn"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
-                <button type="button" class="btn btn-outline-info" onclick="testStrainSearch()" title="Test strain search API"><i class="bi bi-bug me-1"></i>Test API</button>
-                <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Close</button>
-              </div>
-            </div>
+            <div class="text-muted small">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
           </div>
 
           <div id="jsonMatchResults" class="d-none mt-3">
