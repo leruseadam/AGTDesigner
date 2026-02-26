@@ -3879,7 +3879,7 @@ body.modal-open #mainContent.store-selection-disabled,
 */
   /* Tag items with dropdowns */
   .tag-row {
-    margin-bottom: 1px !important;
+    margin-bottom: 0 !important;
     padding-bottom: 0 !important;
     position: relative !important;
     padding-left: 28px !important;
@@ -3900,9 +3900,9 @@ body.modal-open #mainContent.store-selection-disabled,
   
   .tag-item {
     border-radius: 8px !important;
-    padding: 8px 8px 8px 36px !important; /* Right padding to allow dropdowns to show */
-    margin-bottom: 8px !important; /* Increased from 6px */
-    min-height: 36px !important; /* Increased from 32px */
+    padding: 4px 8px 4px 36px !important;
+    margin-bottom: 3px !important;
+    min-height: 28px !important;
     box-shadow: none !important;
     background: rgba(160, 132, 232, 0.13) !important;
     display: flex !important;
@@ -4082,15 +4082,14 @@ body.modal-open #mainContent.store-selection-disabled,
     margin-left: 6px !important;
   }
   .vendor-header {
-      font-size: 1.25rem !important; /* Increased from 1.5rem (24px) to ~26px */
+      font-size: 1.25rem !important;
       font-weight: 700 !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
       padding: 4px 6px !important;
   }
   .brand-header, .product-type-header, .subcategory-header, .weight-header, .container-label {
-      font-size: 1.5rem !important; /* Increased from 1.3rem (20.8px) to ~22.8px */
-      font-weight: 700 !important;
+      font-size: 1.5rem !important;
       letter-spacing: 0.08em !important;
     color: #e0d7ff !important;
       padding: 4px 6px !important;
@@ -4106,10 +4105,14 @@ body.modal-open #mainContent.store-selection-disabled,
     box-sizing: border-box !important;
     margin-left: 0 !important;
     margin-right: 0 !important;
-    word-break: keep-all !important; /* Prevent word breaking */
-    overflow-wrap: anywhere !important; /* Allow breaking only at word boundaries */
-    hyphens: none !important; /* Prevent automatic hyphenation */
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+    hyphens: none !important;
   }
+  /* Cascading font-weight by hierarchy level */
+  .brand-header { font-weight: 600 !important; }
+  .product-type-header, .subcategory-header { font-weight: 500 !important; }
+  .weight-header, .container-label { font-weight: 400 !important; }
   
   .lineage-select, .lineage-dropdown {
     flex-shrink: 0;
@@ -12865,3 +12868,48 @@ html, body {
 }
 
 /* End compact tag entries */
+
+/* ── MAXIMIZE TAG LIST DENSITY ─────────────────────────────────────────────
+   High-specificity overrides to reclaim vertical space without touching
+   font sizes. All values use !important to beat earlier cascade entries.
+   ─────────────────────────────────────────────────────────────────────── */
+
+/* Search bars: slimmer height */
+#availableTagsSearch,
+#selectedTagsSearch,
+.search-input-container #availableTagsSearch,
+.search-input-container #selectedTagsSearch {
+  height: 36px !important;
+  min-height: 36px !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  font-size: 1.05rem !important;
+}
+
+/* Section wrappers: tighter spacing between groups */
+#availableTags .vendor-section,
+#availableTags .brand-section,
+#availableTags .product-type-section,
+#availableTags .weight-section {
+  margin-bottom: 3px !important;
+}
+
+/* Vendor header: less top breathing room */
+#availableTags .vendor-header {
+  margin-top: 4px !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+/* All hierarchy headers: tighter padding + margin */
+#availableTags .vendor-header,
+#availableTags .brand-header,
+#availableTags .product-type-header,
+#availableTags .subcategory-header,
+#availableTags .weight-header,
+#availableTags .container-label {
+  padding: 3px 8px !important;
+  margin-bottom: 3px !important;
+}
+
+/* ── END MAXIMIZE TAG LIST DENSITY ──────────────────────────────────────── */
