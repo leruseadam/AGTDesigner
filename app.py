@@ -12153,6 +12153,10 @@ def get_available_tags():
         # generate labels (useful for quick previews or after server restarts).
         if not has_excel_data:
             logging.info("📦 No Excel file - attempting DB fallback for available-tags")
+            # Use allow_fallback=True here so we can still serve DB tags even when
+            # the session is fresh (e.g. after a server restart with no cookie).
+            if not store_name:
+                store_name = get_current_store_name(allow_fallback=True)
             try:
                 if store_name:
                     pdb = get_product_database(store_name)
