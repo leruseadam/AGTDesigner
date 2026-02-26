@@ -10729,7 +10729,7 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1px solid rgba(160, 132, 232, 0.25) !important;
     color: white !important;
     font-weight: 600 !important;
-    font-size: 0.85rem !important;
+    font-size: 1.0rem !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
     letter-spacing: 0.02em !important;
     transition: background 0.2s ease, color 0.2s ease !important;
@@ -10743,7 +10743,7 @@ body.modal-open #mainContent.store-selection-disabled,
     overflow-wrap: anywhere !important;
     hyphens: none !important;
   }
-  
+
   /* Left-justify subcategory headers specifically */
   .subcategory-header {
     justify-content: flex-start !important;
@@ -10756,7 +10756,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .product-type-header .collapse-icon,
   .subcategory-header .collapse-icon,
   .weight-header .collapse-icon {
-    font-size: 0.85rem !important;
+    font-size: 1.0rem !important;
     padding: 0 4px !important;
     min-width: 18px !important;
     min-height: 18px !important;
