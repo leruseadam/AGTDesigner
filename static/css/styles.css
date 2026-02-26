@@ -12913,3 +12913,18 @@ html, body {
 }
 
 /* ── END MAXIMIZE TAG LIST DENSITY ──────────────────────────────────────── */
+
+/* ── NO ALL-CAPS ON TAG LIST HEADERS ────────────────────────────────────── */
+#availableTags .vendor-header,
+#availableTags .brand-header,
+#availableTags .product-type-header,
+#availableTags .subcategory-header,
+#availableTags .weight-header,
+#availableTags .container-label,
+#availableTags .vendor-title,
+#availableTags .brand-title,
+#availableTags .product-type-title,
+#availableTags .weight-title {
+  text-transform: none !important;
+}
+/* ── END NO ALL-CAPS ─────────────────────────────────────────────────────── */
