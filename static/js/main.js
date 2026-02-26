@@ -7568,7 +7568,10 @@ const TagManager = {
                 
                 // Defer expensive operations to background with longer delay
                 setTimeout(() => this.saveSelectionState('checkbox_selection'), 500);
-                
+
+                // CRITICAL: Save deselection to backend so it isn't restored on next fetch
+                setTimeout(() => this.saveSelectedTagsToBackend(), 100);
+
                 // CRITICAL: Do NOT trigger any filter updates or available tags re-render
                 return; // Exit immediately to prevent any further processing
             }
@@ -11250,15 +11253,17 @@ const TagManager = {
                         weightContent.className = 'collapsible-content';
                         weightSection.appendChild(weightContent);
                         
+                        // Flatten price groups Map into a single array (selected list doesn't show price headers)
+                        const flatTags = (tags instanceof Map) ? Array.from(tags.values()).flat() : (tags || []);
                         // Always render tags as leaf nodes - sort alphabetically by product name
-                        if (tags && tags.length > 0) {
+                        if (flatTags.length > 0) {
                             // Sort tags alphabetically by product name
-                            const orderedTags = [...tags].sort((a, b) => {
+                            const orderedTags = [...flatTags].sort((a, b) => {
                                 const nameA = (a['Product Name*'] || '').toLowerCase();
                                 const nameB = (b['Product Name*'] || '').toLowerCase();
                                 return nameA.localeCompare(nameB);
                             });
-                            
+
                             orderedTags.forEach(tag => {
                                 // CRITICAL: Before creating tag element, ensure tag has database lineage
                                 // If database lineage is missing, try to get it from available tags
@@ -11426,15 +11431,17 @@ const TagManager = {
                             weightContent.className = 'collapsible-content';
                             weightSection.appendChild(weightContent);
                             
+                            // Flatten price groups Map into a single array (selected list doesn't show price headers)
+                            const flatTags = (tags instanceof Map) ? Array.from(tags.values()).flat() : (tags || []);
                             // Always render tags as leaf nodes - sort alphabetically by product name
-                            if (tags && tags.length > 0) {
+                            if (flatTags.length > 0) {
                                 // Sort tags alphabetically by product name
-                                const orderedTags = [...tags].sort((a, b) => {
+                                const orderedTags = [...flatTags].sort((a, b) => {
                                     const nameA = (a['Product Name*'] || '').toLowerCase();
                                     const nameB = (b['Product Name*'] || '').toLowerCase();
                                     return nameA.localeCompare(nameB);
                                 });
-                                
+
                                 orderedTags.forEach(tag => {
                                     const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
                                     const checkbox = tagElement.querySelector('.tag-checkbox');

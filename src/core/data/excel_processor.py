@@ -3810,10 +3810,10 @@ class ExcelProcessor:
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
 
-            # CRITICAL: Excel lineage is preserved in 'excel_lineage' but will be IGNORED
-            # unless the product is new (not present in database). For now, set placeholder
-            # lineage to a neutral default; database alignment will overwrite when available.
-            lineage = 'MIXED'  # Placeholder - replaced by database lineage when available
+            # Use the actual lineage from the Excel row so the DB update receives a real value
+            # and writes it correctly (product_database.py line ~4447: has_valid_incoming_lineage).
+            excel_lineage_raw = safe_get_value(row.get('Lineage', ''))
+            lineage = normalize_lineage(excel_lineage_raw) if excel_lineage_raw else 'MIXED'
 
             tag['Lineage'] = lineage
             tag['lineage'] = lineage

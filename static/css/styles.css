@@ -285,11 +285,11 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
 /* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
-  font-size: 28px !important;
+  font-size: 24px !important;
   min-height: 0 !important;
-  padding-top: 3px !important;
-  padding-bottom: 3px !important;
-  margin-bottom: 2px !important;
+  padding-top: 1px !important;
+  padding-bottom: 1px !important;
+  margin-bottom: 1px !important;
 }
 
 /* Force larger font size for all tag content globally */
@@ -303,8 +303,8 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 #selectedTags .tag-name,
 #selectedTags .tag-row,
 #selectedTags .tag-item * {
-  font-size: 30px !important;
-  line-height: 1.2 !important;
+  font-size: 24px !important;
+  line-height: 1.05 !important;
 }
 
 /* Compact tag item dropdowns — override global 38px min-height */
@@ -2301,7 +2301,7 @@ body.modal-open #mainContent.store-selection-disabled,
   #availableTags .tag-entry,
   #availableTags .tag-name,
   #availableTags .tag-text {
-    font-size: 18px !important; /* Increased from 16px by 2px */
+    font-size: 24px !important; /* Match selected tags font size */
   }
   
   /* Match selected tags font styling to available tags */
@@ -2309,7 +2309,7 @@ body.modal-open #mainContent.store-selection-disabled,
   #selectedTags .tag-entry,
   #selectedTags .tag-name,
   #selectedTags .tag-text {
-    font-size: 18px !important; /* Increased from 16px by 2px */
+    font-size: 24px !important; /* Match current inventory font size */
   }
   
   /* Fix selected tags container height */
@@ -6778,7 +6778,7 @@ body.modal-open #mainContent.store-selection-disabled,
     gap: 4px !important;
   }
   .tag-name {
-      font-size: 18px !important; /* Increased from 16px by 2px */
+      font-size: 24px !important; /* Increased from 16px by 2px */
       line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
@@ -12851,89 +12851,89 @@ html, body {
   }
 }
 
-/* ===== Compact Tag Entries (reduce vertical spacing without changing fonts) ===== */
-/* These overrides prioritize keeping font sizes intact while tightening paddings, gaps, and element sizes. */
+/* ===== Compact Tag Entries ===== */
 #availableTags .tag-item,
 #selectedTags .tag-item,
 .tag-entry {
-  padding: 4px 6px 4px 28px !important; /* tighter padding */
-  margin-bottom: 4px !important;
-  gap: 6px !important;
-  min-height: 32px !important; /* keep enough room for font */
-  border-radius: 6px !important;
+  padding: 2px 4px 2px 24px !important;
+  margin-bottom: 2px !important;
+  gap: 4px !important;
+  min-height: 24px !important;
+  border-radius: 5px !important;
+  font-size: 0.82em !important;
 }
 
 #availableTags .tag-list,
 #selectedTags .tag-list,
 .tag-list {
-  gap: 6px !important;
-  padding: 8px !important;
+  gap: 3px !important;
+  padding: 6px !important;
 }
 
-/* Shrink checkbox container and checkbox visual size while preserving accessibility */
+/* Shrink checkbox container */
 .tag-item .checkbox-container {
-  width: 34px !important;
-  height: 34px !important;
+  width: 26px !important;
+  height: 26px !important;
   padding: 0 !important;
-  margin-right: 8px !important;
+  margin-right: 4px !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
 }
 
 .tag-item .tag-checkbox {
-  width: 20px !important;
-  height: 20px !important;
+  width: 16px !important;
+  height: 16px !important;
   margin: 0 !important;
   transform: none !important;
   flex-shrink: 0 !important;
 }
 
-/* Compact quantity badge and reduce extra spacing */
+/* Compact quantity badge */
 .tag-item .quantity-badge {
-  padding: 2px 6px !important;
-  font-size: 0.9em !important;
-  min-width: 28px !important;
+  padding: 1px 4px !important;
+  font-size: 0.85em !important;
+  min-width: 22px !important;
   height: auto !important;
-  margin-right: 6px !important;
+  margin-right: 4px !important;
 }
 
 .tag-item .tag-info {
-  gap: 6px !important;
+  gap: 4px !important;
   padding-right: 2px !important;
 }
 
-/* Reduce select and dropdown vertical footprint inside tag items */
+/* Reduce select and dropdown vertical footprint */
 .tag-item .form-select,
 .tag-item .form-select.form-select-sm,
 .tag-item select,
 .tag-item .lineage-dropdown,
 .tag-item .doh-dropdown {
-  padding: 0.15rem 0.35rem !important;
-  min-height: 28px !important;
+  padding: 0.1rem 0.25rem !important;
+  min-height: 22px !important;
   height: auto !important;
-  font-size: 0.9em !important;
+  font-size: 0.85em !important;
   line-height: 1.1 !important;
 }
 
 /* Tighter tag-name spacing */
 .tag-item .tag-name {
-  margin-right: 6px !important;
+  margin-right: 4px !important;
   line-height: 1.1 !important;
 }
 
-/* Ensure compact mode applies to selected list too */
+/* Drag handle for selected list */
 #selectedTags .tag-item .drag-handle {
-  left: 6px !important;
-  width: 20px !important;
-  height: 20px !important;
-  padding: 2px !important;
+  left: 4px !important;
+  width: 16px !important;
+  height: 16px !important;
+  padding: 1px !important;
 }
 
-/* Minor: reduce hover uplift to keep compact feel */
+/* No hover uplift */
 .tag-item:hover {
   transform: translateY(0) !important;
-  box-shadow: 0 6px 12px rgba(160, 132, 232, 0.12) !important;
+  box-shadow: 0 4px 8px rgba(160, 132, 232, 0.1) !important;
 }
 
 /* End compact tag entries */
@@ -12959,12 +12959,17 @@ html, body {
 #availableTags .vendor-section,
 #availableTags .brand-section,
 #availableTags .product-type-section,
-#availableTags .weight-section {
+#availableTags .weight-section,
+#selectedTags .vendor-section,
+#selectedTags .brand-section,
+#selectedTags .product-type-section,
+#selectedTags .weight-section {
   margin-bottom: 3px !important;
 }
 
 /* Vendor header: less top breathing room */
-#availableTags .vendor-header {
+#availableTags .vendor-header,
+#selectedTags .vendor-header {
   margin-top: 4px !important;
   padding-top: 4px !important;
   padding-bottom: 4px !important;
@@ -12976,7 +12981,13 @@ html, body {
 #availableTags .product-type-header,
 #availableTags .subcategory-header,
 #availableTags .weight-header,
-#availableTags .container-label {
+#availableTags .container-label,
+#selectedTags .vendor-header,
+#selectedTags .brand-header,
+#selectedTags .product-type-header,
+#selectedTags .subcategory-header,
+#selectedTags .weight-header,
+#selectedTags .container-label {
   padding: 3px 8px !important;
   margin-bottom: 3px !important;
 }
@@ -13007,3 +13018,5 @@ html, body {
   text-transform: none !important;
 }
 /* ── END NO ALL-CAPS ─────────────────────────────────────────────────────── */
+
+/* ── END FONT SIZE PARITY ────────────────────────────────────────────────── */

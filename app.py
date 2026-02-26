@@ -230,11 +230,11 @@ def _sanitize_persisted_path(p):
         if not p:
             return ''
         s = str(p)
-        # Remove non-printable/control chars except standard whitespace
+        # Remove non-printable/control chars (but NOT regular spaces — filenames can have multiple spaces)
         import re
-        s = re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]+", " ", s)
-        # Replace newlines and multiple whitespace with single space
-        s = re.sub(r"\s+", " ", s).strip()
+        s = re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]+", "", s)
+        # Only strip leading/trailing whitespace, preserve internal spaces
+        s = s.strip()
         return os.path.normpath(s)
     except Exception:
         return ''
@@ -12016,10 +12016,13 @@ def get_available_tags():
         if not session_file_path:
             try:
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                logging.info(f"🔍 PERSIST-CHECK: file={persistence_file}, exists={os.path.exists(persistence_file)}")
                 if os.path.exists(persistence_file):
                     last_upload = _robust_load_persistent_json(persistence_file)
+                    logging.info(f"🔍 PERSIST-CHECK: last_upload={'OK' if last_upload else 'None'}")
                     if last_upload:
                         candidate = _sanitize_persisted_path(last_upload.get('file_path'))
+                        logging.info(f"🔍 PERSIST-CHECK: candidate={repr(candidate)}, exists={os.path.exists(candidate) if candidate else 'n/a'}")
                         if candidate and os.path.exists(candidate):
                             persisted_fallback_path = os.path.normpath(candidate)
                             persisted_store = last_upload.get('store')
@@ -12187,40 +12190,14 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        # Prefer Excel uploads for tag lists, but if none is present and a store
-        # is selected, attempt a lightweight DB fallback so the UI can still
-        # generate labels (useful for quick previews or after server restarts).
+        # No Excel file — return empty immediately. No DB fallback shown in UI.
         if not has_excel_data:
-            logging.info("📦 No Excel file - attempting DB fallback for available-tags")
-            # Use allow_fallback=True here so we can still serve DB tags even when
-            # the session is fresh (e.g. after a server restart with no cookie).
-            if not store_name:
-                store_name = get_current_store_name(allow_fallback=True)
-            try:
-                if store_name:
-                    pdb = get_product_database(store_name)
-                    if pdb:
-                        db_tags = pdb.get_available_tags_fast()
-                        # Enforce non-classic lineage rules and make JSON safe
-                        db_tags = _enforce_nonclassic_lineage_rules(db_tags)
-                        safe_db_tags = make_json_safe(db_tags)
-                        logging.info(f"📦 Returning {len(safe_db_tags)} DB-fallback tags for store={store_name}")
-                        return jsonify({
-                            'tags': safe_db_tags,
-                            'total_count': len(safe_db_tags),
-                            'source': 'db-fallback',
-                            'message': 'No Excel file uploaded; showing products from the database for this store.'
-                        }), 200
-            except Exception as db_fallback_err:
-                logging.warning(f"DB fallback for available-tags failed: {db_fallback_err}")
-
-            # If DB fallback not possible, return explicit empty message instructing upload
-            logging.info("📦 No Excel file and DB fallback unavailable - returning empty tags")
+            logging.info("📦 No Excel file - returning empty tags (no DB fallback)")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
                 'source': 'no-excel-file',
-                'message': 'No Excel file uploaded. Please upload an Excel file to see products in CURRENT INVENTORY.'
+                'message': 'No Excel file uploaded. Please upload an Excel file to see available tags.'
             }), 200
 
         # CRITICAL: Check if lineage was updated recently BEFORE checking cache.
@@ -12854,6 +12831,16 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
+                # LIMIT EXCEL TAGS TO PREVENT UI OVERLOAD: Only return first 500 tags for performance
+                # This prevents loading 12,000+ tags which causes performance issues
+                original_excel_count = len(simple_tags)
+                if len(simple_tags) > 500:
+                    simple_tags = simple_tags[:500]
+                    excel_message = f'Excel file contains {original_excel_count} products. Showing first 500 for performance. Use filters to find specific products.'
+                    logging.info(f"⚡ PERFORMANCE: Limited Excel tags from {original_excel_count} to 500")
+                else:
+                    excel_message = f'Loaded {len(simple_tags)} products from Excel file.'
+
                 # CRITICAL PERFORMANCE FIX: Skip database enrichment when fast_load=1 UNLESS lineage was manually updated
                 # or the database contains lineage information. If the DB contains lineage (strains.sovereign_lineage)
                 # we must prefer DB enrichment so manual edits and authoritative lineage appear immediately.
@@ -13167,15 +13154,39 @@ def get_available_tags():
                     worker = threading.Thread(target=_align_worker, args=(tags_copy, store_name, align_result), daemon=True)
                     worker.start()
 
-                    # Wait briefly for quick align to finish (half a second)
-                    worker.join(0.5)
-
-                    if 'tags' in align_result:
-                        simple_tags = align_result['tags']
-                        logging.info("✅ SIMPLE PATH: Alignment completed within timeout")
+                    # CRITICAL FIX: If database has lineage, do synchronous alignment to ensure tags have correct lineage
+                    # This prevents wrong lineages from being shown when DB has authoritative data
+                    if db_has_lineage:
+                        logging.info(f"🔄 DB HAS LINEAGE: Doing synchronous alignment for {len(simple_tags)} tags")
+                        try:
+                            simple_tags = _align_tags_with_db_lineage(simple_tags, store_name, skip_if_aligned=False, force_overwrite=True)
+                            logging.info("✅ SYNCHRONOUS ALIGNMENT: Completed successfully")
+                        except Exception as sync_align_err:
+                            logging.warning(f"❌ SYNCHRONOUS ALIGNMENT FAILED: {sync_align_err}")
+                            # Fall back to async alignment
+                            worker.join(2.0)
+                            if 'tags' in align_result:
+                                simple_tags = align_result['tags']
+                                logging.info("✅ ASYNC ALIGNMENT: Completed within timeout after sync failed")
+                            else:
+                                logging.warning("❌ BOTH SYNC AND ASYNC ALIGNMENT FAILED: Tags may have wrong lineage")
                     else:
-                        # Didn't finish quickly: schedule background alignment to complete and cache results
-                        logging.info("⏱️ SIMPLE PATH: Alignment timed out; scheduling background alignment and returning immediately")
+                        # Original async logic for when DB has no lineage
+                        # Wait for align to finish (2 seconds for better completion rate)
+                        # If database has lineage and there are lineage updates, wait longer (5 seconds)
+                        wait_timeout = 2.0
+                        if db_has_lineage and has_lineage_updates:
+                            wait_timeout = 5.0
+                            logging.info(f"🔄 LINEAGE UPDATE DETECTED: Waiting up to {wait_timeout}s for alignment to complete")
+                        
+                        worker.join(wait_timeout)
+
+                        if 'tags' in align_result:
+                            simple_tags = align_result['tags']
+                            logging.info("✅ SIMPLE PATH: Alignment completed within timeout")
+                        else:
+                            # Didn't finish quickly: schedule background alignment to complete and cache results
+                            logging.info("⏱️ SIMPLE PATH: Alignment timed out; scheduling background alignment and returning immediately")
 
                         def _bg_align_and_cache(tags_snapshot, store, cache_key_local):
                             try:
@@ -13232,11 +13243,15 @@ def get_available_tags():
             # CRITICAL FIX: Wrap response in try-catch to handle OSError: write error
             # This can happen if response is too large or client disconnects
             try:
-                response = jsonify({
+                response_data = {
                     'tags': safe_simple_tags,
                     'total_count': len(safe_simple_tags),
                     'source': 'excel-simple'
-                })
+                }
+                if 'excel_message' in locals():
+                    response_data['message'] = excel_message
+                
+                response = jsonify(response_data)
                 # Log response size for debugging
                 import sys
                 response_size = sys.getsizeof(str(response.get_json()))
@@ -16040,13 +16055,17 @@ def update_lineage_by_vendor():
             conn.rollback()
             return jsonify({'success': False, 'error': 'Failed to commit changes'}), 500
         
-        # Clear only the lineage cache — do NOT bust available-tags cache.
-        # The JS already updates all vendor tags in-memory, so a full reload is unnecessary
-        # and causes a slow full-DB fetch on the next available-tags request.
+        # Clear lineage cache and bust the in-memory available-tags cache key so lineage
+        # alignment re-runs on the next fetch — without deleting disk caches (avoids full DB reload).
         try:
             from src.core.data.product_database import clear_lineage_cache
-            clear_lineage_cache(None)  # Clear lineage cache so fresh values are returned on next DB read
-            logging.info(f"✅ Cleared lineage cache after vendor-wide lineage update")
+            clear_lineage_cache(None)
+            cache.delete(get_session_cache_key('available_tags'))
+            cache.delete(get_session_cache_key('web_available_tags'))
+            _bump_available_tags_cache_bust()
+            session['lineage_update_timestamp'] = time.time()
+            session.modified = True
+            logging.info(f"✅ Cleared lineage cache + bumped cache bust after vendor-wide lineage update")
         except Exception as cache_err:
             logging.warning(f"Could not clear lineage cache: {cache_err}")
         
@@ -21560,8 +21579,49 @@ def json_match_detailed():
                     if not json_tokens or not prod_tokens:
                         continue
 
-                    # Base token overlap
-                    overlap = len(json_tokens & prod_tokens) / len(json_tokens | prod_tokens)
+                    # Base token overlap (Jaccard)
+                    raw_overlap = len(json_tokens & prod_tokens) / len(json_tokens | prod_tokens)
+
+                    # CROSS-STRAIN GUARD: "MAC x Trophy Wife" is NOT "Trophy Wife".
+                    # If the JSON name contains " x " (cross indicator), all meaningful strain
+                    # tokens from both sides of the cross must appear in the DB product name.
+                    if ' x ' in json_name_norm:
+                        cross_parts = json_name_norm.split(' x ', 1)
+                        # Extract meaningful tokens (len≥3, skip type/format words) from each side
+                        _skip = {'aio', 'lr', 'the', 'and', 'for', 'by', 'live', 'resin', 'cart',
+                                 'pen', 'oil', 'wax', '1g', '2g', '3g', '7g', '14g', '28g'}
+                        left_tokens = {t for t in cross_parts[0].split() if len(t) >= 3 and t not in _skip}
+                        right_tokens = {t for t in cross_parts[1].split() if len(t) >= 3 and t not in _skip}
+                        # Remove brand/type tokens (they appear in prod_tokens regardless of strain)
+                        # Require at least one token from each side to be in the DB product name
+                        left_covered = bool(left_tokens & prod_tokens)
+                        right_covered = bool(right_tokens & prod_tokens)
+                        if not (left_covered and right_covered):
+                            continue  # DB product only covers one side of the cross — skip
+
+                    # VENDOR GUARD: require that either there is meaningful name overlap, or
+                    # the product's vendor/brand appears somewhere in the JSON item's name.
+                    # This prevents single shared words like "sunset" or "dragon" from
+                    # producing cross-vendor matches (e.g. "Sunset Sherbert LR Dabstract AIO"
+                    # → "Pineapple Sunset Distillate Cartridge by Hustler's Ambition").
+                    if raw_overlap < 0.20:
+                        # Low name overlap — only keep if vendor/brand aligns
+                        prod_vendor_lower = str(
+                            product.get('Vendor/Supplier*') or product.get('Vendor') or
+                            product.get('Product Brand') or ''
+                        ).lower()
+                        prod_brand_lower = str(product.get('Product Brand') or '').lower()
+                        # Check if any vendor/brand word (len≥5) from this product appears
+                        # in the JSON item's normalized name tokens
+                        vendor_words = set(
+                            w for w in re.split(r'\W+', prod_vendor_lower + ' ' + prod_brand_lower)
+                            if len(w) >= 5
+                        )
+                        vendor_in_json = bool(vendor_words & json_tokens)
+                        if not vendor_in_json:
+                            continue  # Skip — no brand alignment and low name overlap
+
+                    overlap = raw_overlap
 
                     # Product type matching — big bonus/penalty
                     prod_type_str = str(
@@ -21581,7 +21641,7 @@ def json_match_detailed():
                         best_match = product
 
             # Only accept matches with reasonable overlap
-            if best_score < 0.25:
+            if best_score < 0.35:
                 best_match = None
                 best_score = 0.0
 

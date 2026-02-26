@@ -4,6 +4,8 @@ Unified font sizing system that consolidates all font sizing logic.
 This module replaces the repetitive font sizing functions across the codebase.
 """
 
+from __future__ import annotations
+
 import logging
 from docx.shared import Pt
 from docx.oxml.ns import qn
