@@ -9873,9 +9873,10 @@ def generate_labels():
                                             or tag.get('displayName')
                                         )
                                         # Prefer displayLineage from TagManager if present (already includes CBD logic),
-                                        # otherwise fall back to canonical/current/Lineage values.
+                                        # then sovereign_lineage (user edits), then canonical/current/Lineage values.
                                         ui_lineage = (
                                             tag.get('displayLineage')
+                                            or tag.get('sovereign_lineage')
                                             or tag.get('canonical_lineage')
                                             or tag.get('currentLineage')
                                             or tag.get('Lineage')
@@ -14383,8 +14384,8 @@ def get_available_tags():
         excel_tags = []
 
         # CRITICAL: Create NEW processor instance instead of using deprecated global
-        # ALWAYS load Excel when has_excel_data=True, regardless of all_tags state
-        if has_excel_data and session_file_path and not prefer_db:
+        # Only load Excel here if all_tags is still empty (Path 1 did not already populate it)
+        if has_excel_data and session_file_path and not prefer_db and len(all_tags) == 0:
             try:
                 from src.core.data.excel_processor import ExcelProcessor
                 logging.info(f"🆕 Creating NEW processor for main path: {session_file_path}")

@@ -138,18 +138,23 @@ function createTagRow(tag) {
   const nameAndStrainLower = (productNameForCbd + ' ' + productStrainForCbd).toLowerCase();
   const hasCbdIndicator = ['cbd', 'cbn', 'cbg', 'cbc'].some(token => nameAndStrainLower.includes(token));
 
-  // CRITICAL FIX: For non-classic types, CBD indicators ALWAYS override other lineages
-  // Check CBD indicators FIRST before applying defaults
-  if (!isClassicType && hasCbdIndicator) {
-    // Non-classic types with CBD indicators should show CBD_BLEND (yellow), regardless of database value
-    lineage = 'CBD_BLEND';
+  // CBD indicators override lineage for all product types unless an explicit classic lineage is set
+  // Classic types: CBD in name → 'CBD' (yellow), unless DB already has SATIVA/INDICA/HYBRID/etc.
+  // Non-classic types: CBD in name → 'CBD_BLEND' (yellow), regardless of DB value
+  if (hasCbdIndicator) {
+    if (isClassicType) {
+      // Only override if DB doesn't have an explicit non-CBD classic lineage
+      if (!lineage || lineage === 'MIXED' || lineage === 'THC' || lineage === 'CBD_BLEND') {
+        lineage = 'CBD';
+      }
+      // If DB has SATIVA/INDICA/HYBRID, respect it — user set it intentionally
+    } else {
+      // Non-classic types with CBD indicators always show CBD_BLEND (yellow)
+      lineage = 'CBD_BLEND';
+    }
   } else if (!lineage) {
     // Only set default if lineage is completely missing
-    if (isClassicType) {
-      lineage = 'HYBRID';
-    } else {
-      lineage = 'MIXED';
-    }
+    lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
     // CRITICAL FIX: Extract DOH status and normalize it consistently (same as TagsTable.createTagRow)
     const rawDohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '';
@@ -689,6 +694,7 @@ class TagsTable {
       if (window.TagManager && window.TagManager.state) {
         const tag = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName);
         if (tag) {
+          tag.sovereign_lineage = newLineage;
           tag.currentLineage = newLineage;
           tag.canonical_lineage = newLineage;
           tag.Lineage = newLineage;
@@ -1229,17 +1235,19 @@ class TagsTable {
                     (t['Product Name*'] || t.ProductName) === tagName
                   );
                   if (originalTagIndex >= 0) {
+                    TagManager.state.originalTags[originalTagIndex].sovereign_lineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].Lineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].lineage = dbLineageClean.toLowerCase();
                     TagManager.state.originalTags[originalTagIndex].currentLineage = dbLineageClean;
                     TagManager.state.originalTags[originalTagIndex].canonical_lineage = dbLineageClean;
                   }
-                  
+
                   // Update in current tags
-                  const currentTagIndex = TagManager.state.tags.findIndex(t => 
+                  const currentTagIndex = TagManager.state.tags.findIndex(t =>
                     (t['Product Name*'] || t.ProductName) === tagName
                   );
                   if (currentTagIndex >= 0) {
+                    TagManager.state.tags[currentTagIndex].sovereign_lineage = dbLineageClean;
                     TagManager.state.tags[currentTagIndex].Lineage = dbLineageClean;
                     TagManager.state.tags[currentTagIndex].lineage = dbLineageClean.toLowerCase();
                     TagManager.state.tags[currentTagIndex].currentLineage = dbLineageClean;

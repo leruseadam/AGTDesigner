@@ -1829,10 +1829,10 @@ const TagManager = {
                     freshTags.forEach(tag => {
                         const name = tag['Product Name*'] || tag.ProductName;
                         if (name) {
-                            const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage;
+                            const dbLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage;
                             if (dbLineage) {
                                 // CRITICAL: Normalize lineage value using consistent helper function
-                                const normalizedLineage = (typeof window.normalizeLineageValue !== 'undefined') 
+                                const normalizedLineage = (typeof window.normalizeLineageValue !== 'undefined')
                                     ? window.normalizeLineageValue(dbLineage)
                                     : dbLineage.toString().trim().toUpperCase();
                                 lineageMap.set(name, normalizedLineage);
@@ -1853,6 +1853,7 @@ const TagManager = {
                                 ? window.normalizeLineageValue(oldLineageRaw)
                                 : oldLineageRaw.toString().trim().toUpperCase();
                             if (oldLineage !== dbLineage) {
+                                tag.sovereign_lineage = dbLineage;
                                 tag.canonical_lineage = dbLineage;
                                 tag.currentLineage = dbLineage;
                                 tag.Lineage = dbLineage;
@@ -1861,6 +1862,7 @@ const TagManager = {
                                 verboseLog(`🔄 Updated lineage for "${name}": "${oldLineage}" → "${dbLineage}"`);
                             } else {
                                 // Ensure fields are set even if values match
+                                tag.sovereign_lineage = dbLineage;
                                 tag.canonical_lineage = dbLineage;
                                 tag.currentLineage = dbLineage;
                                 tag.Lineage = dbLineage;
@@ -1875,6 +1877,7 @@ const TagManager = {
                             const name = tag['Product Name*'] || tag.ProductName;
                             if (name && lineageMap.has(name)) {
                                 const dbLineage = lineageMap.get(name);
+                                tag.sovereign_lineage = dbLineage;
                                 tag.canonical_lineage = dbLineage;
                                 tag.currentLineage = dbLineage;
                                 tag.Lineage = dbLineage;
@@ -7827,9 +7830,14 @@ const TagManager = {
         const isClassicLineage = classicLineages.includes(lineage);
         
         if (hasValidDatabaseLineage && !isNonclassic) {
-            // CRITICAL: Use database lineage directly for classic types only - this is the source of truth
-            displayLineage = lineage;
-            verboseLog(`🎨 Using database lineage for classic type: "${displayName}" → ${displayLineage}`);
+            // Classic type with valid DB lineage — but CBD indicators still override HYBRID/missing
+            if (hasCbdIndicator() && (!lineage || lineage === 'HYBRID' || lineage === 'MIXED' || lineage === 'THC' || lineage === 'CBD_BLEND')) {
+                displayLineage = 'CBD';
+                verboseLog(`🎨 CLASSIC CBD indicator overrides DB lineage "${lineage}" for: "${displayName}" → CBD`);
+            } else {
+                displayLineage = lineage;
+                verboseLog(`🎨 Using database lineage for classic type: "${displayName}" → ${displayLineage}`);
+            }
         } else if (isNonclassic) {
             // CRITICAL FIX: For capsules and nonclassic types, ignore classic lineages from database
             // They should ONLY use MIXED or CBD_BLEND based on CBD indicators
@@ -7874,8 +7882,8 @@ const TagManager = {
             // CRITICAL FIX: Check for CBD family indicators (CBD, CBG, CBN, CBC) in product name and force CBD_BLEND if detected
             // This ensures products with CBD, CBG, CBN, or CBC in the title get yellow color regardless of database lineage
             if (hasCbdIndicator()) {
-                displayLineage = 'CBD_BLEND';
-                verboseLog(`🎨 CLASSIC with CBD family indicator (CBD/CBG/CBN/CBC): "${displayName}" → CBD_BLEND (yellow)`);
+                displayLineage = 'CBD';
+                verboseLog(`🎨 CLASSIC with CBD family indicator (CBD/CBG/CBN/CBC): "${displayName}" → CBD (yellow)`);
             } else {
                 // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
                 displayLineage = lineage || 'HYBRID';
@@ -9165,6 +9173,7 @@ const TagManager = {
             originalTag.currentLineage = newLineage;
             originalTag.canonical_lineage = newLineage;
             originalTag.sovereign_lineage = newLineage; // CRITICAL: Set user-edited lineage for UI display
+            originalTag.displayLineage = newLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
         }
         const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
         if (currentTag) {
@@ -9173,6 +9182,7 @@ const TagManager = {
             currentTag.currentLineage = newLineage;
             currentTag.canonical_lineage = newLineage;
             currentTag.sovereign_lineage = newLineage; // CRITICAL: Set user-edited lineage for UI display
+            currentTag.displayLineage = newLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
 
             // CRITICAL FIX: Update _tagLookupMap immediately for getSelectedTagObjects()
             // This ensures tag objects retrieved for generation have the latest lineage
@@ -9283,6 +9293,7 @@ const TagManager = {
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
                 originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set user-edited lineage for UI display
+                originalTag.displayLineage = verifiedLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
                 verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
@@ -9293,6 +9304,8 @@ const TagManager = {
                 currentTag.Lineage = verifiedLineage;
                 currentTag.currentLineage = verifiedLineage;
                 currentTag.canonical_lineage = verifiedLineage;
+                currentTag.sovereign_lineage = verifiedLineage;
+                currentTag.displayLineage = verifiedLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
                 verboseLog(`📝 Updated tag in current tags with verified lineage: ${verifiedLineage}`);
             }
 
@@ -9300,7 +9313,7 @@ const TagManager = {
             // Use verified lineage from backend response
             this.updateTagLineageInUI(tagName, verifiedLineage);
             verboseLog(`🎨 Updated UI elements for ${tagName} with verified lineage: ${verifiedLineage}`);
-            
+
             // CRITICAL FIX: Immediately update the tag in originalTags so future renders show correct lineage
             // This ensures that when the tag list is filtered or re-rendered, it shows the updated lineage
             const originalTagIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
@@ -9311,6 +9324,7 @@ const TagManager = {
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
                 originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set user-edited lineage to preserve user edit
+                originalTag.displayLineage = verifiedLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
                 originalTag['Lineage*'] = verifiedLineage;
                 verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
@@ -9934,12 +9948,14 @@ const TagManager = {
                 : null;
             
             if (stateTag) {
+                stateTag.sovereign_lineage = newLineage;
                 stateTag.lineage = newLineage;
                 stateTag.Lineage = newLineage;
                 stateTag.currentLineage = newLineage;
                 stateTag.canonical_lineage = newLineage;
             }
             if (originalTag) {
+                originalTag.sovereign_lineage = newLineage;
                 originalTag.lineage = newLineage;
                 originalTag.Lineage = newLineage;
                 originalTag.currentLineage = newLineage;
