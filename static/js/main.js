@@ -12356,6 +12356,15 @@ const TagManager = {
             }
             
             if (tags.length === 0) {
+                // CRITICAL: If we're in a JSON-matched session and server says no-excel,
+                // do NOT overwrite the tags already displayed — the server cache may not
+                // have been populated yet (race) or the session/cache expired briefly.
+                const isNoExcelSource = responseData && responseData.source === 'web-no-excel';
+                if (isNoExcelSource && this.state.isJsonMatchedSession && this.state.tags && this.state.tags.length > 0) {
+                    console.log('🛡️ JSON-matched session active — ignoring web-no-excel empty response, keeping existing tags');
+                    this._fetchingAvailableTags = false;
+                    return true;
+                }
                 // Check if this is an error response with a message
                 if (responseData.error || responseData.message) {
                     const errorMsg = responseData.error || responseData.message;
