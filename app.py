@@ -3147,32 +3147,6 @@ def test():
     """Simple test route to verify the app is working."""
     return jsonify({'status': 'ok', 'message': 'Flask app is running'})
 
-
-@app.route('/api/debug/upload-info', methods=['GET'])
-def debug_upload_info():
-    """Local debug endpoint returning session upload info and persistent file contents.
-
-    Accessible only from localhost to avoid exposing data.
-    """
-    client_ip = request.remote_addr
-    if client_ip not in ('127.0.0.1', '::1'):
-        return jsonify({'error': 'Forbidden'}), 403
-    try:
-        sess_info = {
-            'session_file_path': session.get('file_path'),
-            'uploaded_filename': session.get('uploaded_filename'),
-            'upload_timestamp': session.get('upload_timestamp'),
-            'file_store': session.get('file_store'),
-            'lineage_update_timestamp': session.get('lineage_update_timestamp')
-        }
-        persistence = None
-        persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-        if os.path.exists(persistence_file):
-            persistence = _robust_load_persistent_json(persistence_file)
-        return jsonify({'session': sess_info, 'persistence': persistence})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 # Auto check downloads functionality removed
 
 @app.route('/')
@@ -5724,22 +5698,6 @@ def get_current_file():
         uploaded_filename = session.get('uploaded_filename', '')
         upload_timestamp = session.get('upload_timestamp', 0)
         
-        # If session doesn't have a file_path, try persisted .last_upload.json as a read-only fallback
-        if not file_path:
-            try:
-                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-                if os.path.exists(persistence_file):
-                    last_upload = _robust_load_persistent_json(persistence_file)
-                    if last_upload:
-                        candidate = _sanitize_persisted_path(last_upload.get('file_path'))
-                        if candidate and os.path.exists(candidate):
-                            file_path = os.path.normpath(candidate)
-                            uploaded_filename = last_upload.get('filename', uploaded_filename)
-                            upload_timestamp = last_upload.get('timestamp', upload_timestamp)
-                            logging.info(f"ℹ️ get_current_file: using persisted upload {file_path}")
-            except Exception as e:
-                logging.debug(f"get_current_file: could not read persisted upload: {e}")
-
         # Check if file exists
         file_exists = False
         if file_path:
@@ -9265,20 +9223,6 @@ def generate_labels():
         has_request_selected_tags = selected_tags_count > 0
         direct_request_mode = has_request_selected_tags and all(isinstance(tag, dict) for tag in selected_tags_from_request)
         file_path = data.get('file_path') or session.get('file_path')  # Use session file_path if not provided
-        # If no file_path found in request or session (browser may have blocked cookies),
-        # use persisted .last_upload.json as a read-only fallback for this generation request.
-        if not file_path:
-            try:
-                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-                if os.path.exists(persistence_file):
-                    last_upload = _robust_load_persistent_json(persistence_file)
-                    if last_upload:
-                        candidate = _sanitize_persisted_path(last_upload.get('file_path'))
-                        if candidate and os.path.exists(candidate):
-                            file_path = os.path.normpath(candidate)
-                            logging.info(f"ℹ️ Using persisted upload file for generate request: {file_path}")
-            except Exception as _gen_pf_err:
-                logging.debug(f"Could not read persisted fallback for generate: {_gen_pf_err}")
         filters = data.get('filters', None)
 
         logging.info(f"🎯 Generation: {selected_tags_count} tags, template={template_type}, scale={scale_factor}")
@@ -9873,10 +9817,9 @@ def generate_labels():
                                             or tag.get('displayName')
                                         )
                                         # Prefer displayLineage from TagManager if present (already includes CBD logic),
-                                        # then sovereign_lineage (user edits), then canonical/current/Lineage values.
+                                        # otherwise fall back to canonical/current/Lineage values.
                                         ui_lineage = (
                                             tag.get('displayLineage')
-                                            or tag.get('sovereign_lineage')
                                             or tag.get('canonical_lineage')
                                             or tag.get('currentLineage')
                                             or tag.get('Lineage')
@@ -12018,31 +11961,13 @@ def get_available_tags():
         session_file_path = session.get('file_path', '')
         logging.info(f"🔍 AVAILABLE-TAGS: session_file_path='{session_file_path}', store='{store_name}'")
 
-        # Read-only fallback: if the session does not have a file_path (cookie may be blocked),
-        # use the persisted .last_upload.json value for this request only (do NOT mutate session).
-        persisted_fallback_path = None
-        if not session_file_path:
-            try:
-                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-                if os.path.exists(persistence_file):
-                    last_upload = _robust_load_persistent_json(persistence_file)
-                    if last_upload:
-                        candidate = _sanitize_persisted_path(last_upload.get('file_path'))
-                        if candidate and os.path.exists(candidate):
-                            persisted_fallback_path = os.path.normpath(candidate)
-                            logging.info(f"ℹ️ Using persisted upload file for request (no session): {persisted_fallback_path}")
-            except Exception as _pf_err:
-                logging.debug(f"Could not read persisted fallback upload file: {_pf_err}")
-        # Effective file path for this request (prefer session, fall back to persisted file)
-        effective_file_path = session_file_path or persisted_fallback_path or ''
-
         # CRITICAL FIX: Cache key should use session file path even if the temp file was cleaned up.
         # Rely on cache/_excel_processor instead of file existence to avoid losing tags after reload.
         file_exists = False
-        if effective_file_path:
+        if session_file_path:
             try:
-                file_exists = os.path.exists(effective_file_path)
-                logging.info(f"🔍 AVAILABLE-TAGS: file_exists={file_exists} for path='{effective_file_path}'")
+                file_exists = os.path.exists(session_file_path)
+                logging.info(f"🔍 AVAILABLE-TAGS: file_exists={file_exists} for path='{session_file_path}'")
             except Exception as path_err:
                 logging.warning(f"Error checking file path: {path_err}")
                 file_exists = False
@@ -12050,9 +11975,8 @@ def get_available_tags():
         # CRITICAL FIX: Don't rely on global _excel_processor - it's shared across all sessions/users
         # Only trust file existence and session state to prevent serving wrong user's data
         # The processor is not session-safe and can contain data from other users
-        # Treat persisted fallback as valid excel data for this request even if session cookie missing
-        has_excel_data = file_exists and bool(effective_file_path)
-        logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)}, persisted_fallback={bool(persisted_fallback_path)})")
+        has_excel_data = file_exists and session_file_path
+        logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)})")
 
         # DISABLED: Do not automatically load default file - require explicit upload
         # User must upload an Excel file to see tags
@@ -12096,34 +12020,34 @@ def get_available_tags():
             session.modified = True
             has_excel_data = False
         
-        # CRITICAL FIX: If processor was cleared after lineage update, try to reload from the effective file path
-        # (session or persisted fallback). This prevents tags from disappearing after lineage updates.
-        if not has_excel_data and effective_file_path:
+        # CRITICAL FIX: If processor was cleared after lineage update, try to reload from session file path
+        # This prevents tags from disappearing after lineage updates
+        if not has_excel_data and session_file_path:
             # Check if file exists
-            file_actually_exists = os.path.exists(effective_file_path) if effective_file_path else False
+            file_actually_exists = os.path.exists(session_file_path) if session_file_path else False
 
             if file_actually_exists:
                 try:
-                    logging.info(f"🔄 Processor was cleared - reloading from file: {effective_file_path}")
+                    logging.info(f"🔄 Processor was cleared - reloading from session file: {session_file_path}")
                     from src.core.data.excel_processor import ExcelProcessor
                     reloaded_processor = ExcelProcessor(store_name=store_name)
-                    if reloaded_processor.load_file(effective_file_path):
+                    if reloaded_processor.load_file(session_file_path):
                         if reloaded_processor.df is not None and not reloaded_processor.df.empty:
                             has_excel_data = True
                             g.excel_processor = reloaded_processor
-                            reloaded_processor._last_loaded_file = effective_file_path
+                            reloaded_processor._last_loaded_file = session_file_path
                             file_exists = True  # Update file_exists flag
-                            logging.info(f"✅ Reloaded Excel processor from file: {len(reloaded_processor.df)} rows")
+                            logging.info(f"✅ Reloaded Excel processor from session file: {len(reloaded_processor.df)} rows")
                         else:
                             logging.warning(f"⚠️ Reloaded processor has empty DataFrame")
                     else:
                         logging.warning(f"⚠️ Reloaded processor load_file returned False")
                 except Exception as reload_err:
-                    logging.warning(f"Failed to reload processor from file: {reload_err}")
+                    logging.warning(f"Failed to reload processor from session file: {reload_err}")
                     import traceback
                     logging.warning(traceback.format_exc())
             else:
-                logging.info(f"📁 File doesn't exist, will try to load tags from database: {effective_file_path}")
+                logging.info(f"📁 Session file doesn't exist, will try to load tags from database: {session_file_path}")
 
         # CRITICAL FIX: Include upload timestamp in cache key to ensure each upload has unique cache
         # This prevents serving stale data from previous uploads or other sessions
@@ -12132,8 +12056,8 @@ def get_available_tags():
         lineage_update_timestamp = session.get('lineage_update_timestamp', '')
         effective_timestamp = lineage_update_timestamp if lineage_update_timestamp else upload_timestamp
         cache_bust = _get_available_tags_cache_bust()
-        if has_excel_data and effective_file_path:
-            cache_key = get_session_cache_key(f'available_tags_{effective_file_path}_{effective_timestamp}_b{cache_bust}')
+        if has_excel_data and session_file_path:
+            cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}_b{cache_bust}')
             if lineage_update_timestamp:
                 logging.info(f"📦 Cache key with lineage_update_timestamp: ..._{effective_timestamp}")
             else:
@@ -12154,10 +12078,6 @@ def get_available_tags():
         # generate labels (useful for quick previews or after server restarts).
         if not has_excel_data:
             logging.info("📦 No Excel file - attempting DB fallback for available-tags")
-            # Use allow_fallback=True here so we can still serve DB tags even when
-            # the session is fresh (e.g. after a server restart with no cookie).
-            if not store_name:
-                store_name = get_current_store_name(allow_fallback=True)
             try:
                 if store_name:
                     pdb = get_product_database(store_name)
@@ -14384,8 +14304,8 @@ def get_available_tags():
         excel_tags = []
 
         # CRITICAL: Create NEW processor instance instead of using deprecated global
-        # Only load Excel here if all_tags is still empty (Path 1 did not already populate it)
-        if has_excel_data and session_file_path and not prefer_db and len(all_tags) == 0:
+        # ALWAYS load Excel when has_excel_data=True, regardless of all_tags state
+        if has_excel_data and session_file_path and not prefer_db:
             try:
                 from src.core.data.excel_processor import ExcelProcessor
                 logging.info(f"🆕 Creating NEW processor for main path: {session_file_path}")
@@ -16664,6 +16584,19 @@ def get_web_available_tags():
         
         # CRITICAL: Check if Excel file exists BEFORE serving cache
         if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
+            # Before returning empty, check if we have JSON-matched products in session cache.
+            jm_cache_key = session.get('json_matched_cache_key')
+            if jm_cache_key:
+                jm_tags = cache.get(jm_cache_key)
+                if jm_tags:
+                    logging.info(f"WEB: No Excel data but found {len(jm_tags)} JSON-matched tags in cache — serving those")
+                    safe_jm = make_json_safe(jm_tags)
+                    response = make_response(jsonify({
+                        'tags': safe_jm,
+                        'total_count': len(safe_jm),
+                        'source': 'web-json-matched'
+                    }))
+                    return compress_response(response)
             logging.info("WEB: No Excel data available - user must upload file")
             return jsonify({
                 'tags': [],
@@ -21023,6 +20956,8 @@ def json_match():
         try:
             import requests
             response = requests.get(url, timeout=30)
+            import requests
+            response = requests.get(url, timeout=30)
             payload = response.json()
             
             if isinstance(payload, list):
@@ -21123,6 +21058,21 @@ def json_match():
             logging.info(f"Post-processed first product source: {response_products[0].get('Source')}")
             logging.info(f"Post-processed first product type: {response_products[0].get('Product Type*')}")
             logging.info(f"Post-processed first product price: {response_products[0].get('Price')}")
+
+        # CRITICAL FIX: Persist JSON matched products in server-side cache so that
+        # subsequent calls to /api/web/available-tags can serve them even when no
+        # Excel file is loaded in the session.
+        if response_products:
+            try:
+                jm_cache_key = get_session_cache_key('json_matched_tags')
+                cache.set(jm_cache_key, response_products, timeout=7200)
+                session['json_matched_cache_key'] = jm_cache_key
+                session['last_json_match_count'] = len(response_products)
+                session['json_match_timestamp'] = time.time()
+                session.modified = True
+                logging.info(f"✅ Stored {len(response_products)} JSON matched products in cache key '{jm_cache_key}'")
+            except Exception as cache_err:
+                logging.warning(f"Could not store JSON matched tags in cache: {cache_err}")
 
         logging.info(f"✅ Sending JSON match response:")
         logging.info(f"   - matched_count: {len(response_products)}")
@@ -21358,204 +21308,649 @@ def json_status():
 
 @app.route('/api/json-match-detailed', methods=['POST'])
 def json_match_detailed():
-    """Detailed JSON matching — fast version that reuses /api/json-match results."""
+    """Detailed JSON matching with before/after comparisons and scoring information."""
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
-
+        
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         if not (url.lower().startswith('http') or url.lower().startswith('data:')):
             return jsonify({'error': 'Please provide a valid HTTP URL or data URL'}), 400
 
-        # Fetch JSON items from URL
-        import requests as req_lib
-        resp = req_lib.get(url, timeout=30)
-        payload = resp.json()
-
+        # Always refresh JSON matching caches/state before running a new match.
+        refresh_json_match_runtime_state('api/json-match-detailed')
+            
+        json_matcher = get_session_json_matcher()
+        if json_matcher is None:
+            return jsonify({'error': 'Failed to initialize JSON matcher'}), 500
+            
+        # Fetch JSON items first
+        import requests
+        response = requests.get(url, timeout=30)
+        payload = response.json()
+        
         if isinstance(payload, list):
             json_items = payload
         elif isinstance(payload, dict):
             json_items = payload.get("inventory_transfer_items", [])
         else:
             json_items = []
-
-        # Get matched products already in the excel processor (from prior /api/json-match call)
+            
+        # Get available tags
         excel_processor = get_session_excel_processor()
-        matched_products = []
-        if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
-            matched_products = excel_processor.df.to_dict('records')
+        if not excel_processor or not hasattr(excel_processor, 'df') or excel_processor.df is None:
+            return jsonify({'error': 'No Excel data available for matching'}), 400
+            
+        available_tags = excel_processor.df.to_dict('records')
+        
+        # FIXED: Use regular JSON Matcher with Excel-priority system
+        logging.info("Using regular JSON Matcher with Excel-priority approach")
+        
+        # Use the Enhanced JSON Matcher to get database-enhanced results
+        enhanced_matches = json_matcher.fetch_and_match(url)
+        logging.info(f"Enhanced JSON Matcher returned {len(enhanced_matches) if enhanced_matches else 0} database-enhanced products")
+        
+        # Build a lookup map of enhanced matches by JSON product name for reliable matching
+        # This handles cases where order doesn't align or some items don't have matches
+        enhanced_match_map = {}
+        for match in (enhanced_matches or []):
+            # Try to find the original JSON name from various fields
+            json_name_key = None
+            # Check if match has original JSON item stored
+            if '__json_item__' in match:
+                json_item = match.get('__json_item__')
+                if isinstance(json_item, dict):
+                    json_name_key = str(json_item.get('product_name', '')).strip()
+            # Check for original JSON name in metadata fields
+            if not json_name_key:
+                json_name_key = match.get('Original JSON Product Name', '')
+            if not json_name_key:
+                json_name_key = match.get('_original_json_name', '')
+            if not json_name_key:
+                # Check for matched JSON item
+                matched_json_item = match.get('_matched_json_item')
+                if isinstance(matched_json_item, dict):
+                    json_name_key = str(matched_json_item.get('product_name', '')).strip()
+            if not json_name_key:
+                # Fallback: use the product name itself (may have been transformed)
+                json_name_key = str(match.get('Product Name*', match.get('ProductName', ''))).strip()
+            
+            if json_name_key:
+                # Normalize for matching
+                json_name_normalized = json_name_key.lower().strip()
+                if json_name_normalized not in enhanced_match_map:
+                    enhanced_match_map[json_name_normalized] = match
+                # Also store by product name for fallback matching
+                product_name = str(match.get('Product Name*', match.get('ProductName', ''))).strip()
+                if product_name:
+                    product_name_normalized = product_name.lower().strip()
+                    if product_name_normalized not in enhanced_match_map:
+                        enhanced_match_map[product_name_normalized] = match
+        
+        detailed_matches = []
+        high_confidence_matches = enhanced_matches or []  # All enhanced matches are high confidence
+        
+        # Build a reverse map: JSON items by their normalized product names
+        json_items_map = {}
+        for json_item in json_items:
+            json_item_name = (
+                str(json_item.get('product_name', '')).strip() or
+                str(json_item.get('inventory_name', '')).strip() or
+                str(json_item.get('name', '')).strip() or
+                ''
+            )
+            if json_item_name:
+                json_items_map[json_item_name.lower().strip()] = json_item
+        
+        logging.info(f"Building detailed matches: {len(json_items)} JSON items, {len(enhanced_matches) if enhanced_matches else 0} enhanced matches")
 
-        # Build lookup of matched products by normalized name for fast pairing
-        matched_by_name = {}
-        for product in matched_products:
-            name = str(product.get('Product Name*', '') or product.get('ProductName', '') or '').strip().lower()
-            if name and name not in matched_by_name:
-                matched_by_name[name] = product
-            # Also index by Description
-            desc = str(product.get('Description', '') or '').strip().lower()
-            if desc and desc not in matched_by_name:
-                matched_by_name[desc] = product
+        def is_aio_disposable_conflict(current_json_item, candidate_match):
+            """Prevent AIO/disposable JSON items from being paired to cartridge/510 DB matches in detailed view."""
+            if not candidate_match or not hasattr(json_matcher, '_has_disposable_cartridge_conflict'):
+                return False
+            try:
+                json_name_for_check = (
+                    str((current_json_item or {}).get('product_name', '')).strip() or
+                    str((current_json_item or {}).get('inventory_name', '')).strip() or
+                    str((current_json_item or {}).get('name', '')).strip()
+                )
+                json_type_for_check = str((current_json_item or {}).get('inventory_type', '')).strip()
+                db_name_for_check = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', ''))).strip()
+                db_type_for_check = str(
+                    candidate_match.get('Product Type*', '') or
+                    candidate_match.get('ProductType', '') or
+                    candidate_match.get('product_type', '')
+                ).strip()
+                return json_matcher._has_disposable_cartridge_conflict(
+                    json_name_for_check,
+                    json_type_for_check,
+                    db_name_for_check,
+                    db_type_for_check
+                )
+            except Exception:
+                return False
+
+        def _extract_json_strain_for_debug(current_json_item, current_json_name):
+            """Best-effort strain extraction for diagnostics."""
+            explicit = str((current_json_item or {}).get('strain_name', '')).strip().lower()
+            if explicit:
+                return explicit
+            parts = [p.strip().lower() for p in str(current_json_name or '').split(' - ') if p and p.strip()]
+            if len(parts) >= 3:
+                candidate = parts[-3]
+                if candidate not in {'sativa', 'indica', 'hybrid'}:
+                    return candidate
+            return ''
 
         def _normalize_for_match(text):
             return re.sub(r'[^a-z0-9\s]+', ' ', str(text or '').lower()).strip()
 
-        # Type keywords for classifying JSON items and DB products
-        _TYPE_KEYWORDS = {
-            'vape': {'vape', 'cartridge', 'cart', 'c cell', 'ccell', '510', 'aio', 'all in one', 'disposable', 'panda pen', 'dabstract'},
-            'preroll': {'preroll', 'pre roll', 'pre-roll', 'firecracker', 'infused preroll', 'infused pre roll'},
-            'flower': {'flower', 'bong buddies', 'core flower', 'platinum line', 'platinum flower'},
-            'edible': {'edible', 'gummiez', 'gummies', 'fruit drops', 'chocolate', 'candy'},
-            'concentrate': {'sugar', 'batter', 'wax', 'shatter', 'rosin', 'badder', 'diamonds', 'sauce', 'snickle fritz'},
-        }
+        def _is_obviously_incompatible_match(current_json_item, current_json_name, candidate_match):
+            """
+            Reject clearly wrong pairings while keeping matching permissive enough.
+            Hard rules only:
+            1) JSON vape/concentrate-for-inhalation must not map to pre-roll DB types.
+            2) If JSON strain is present, require basic strain token presence in DB name.
+            """
+            try:
+                if not candidate_match:
+                    return True
 
-        def _classify_type(text):
-            """Classify product type from name/description text."""
-            text_lower = text.lower()
-            # Check in priority order: vape before concentrate
-            for ptype in ['edible', 'preroll', 'vape', 'concentrate', 'flower']:
-                for kw in _TYPE_KEYWORDS[ptype]:
-                    if kw in text_lower:
-                        return ptype
-            return 'unknown'
+                json_name_raw = str(current_json_name or '')
+                json_name_norm = _normalize_for_match(json_name_raw)
+                json_type_norm = _normalize_for_match((current_json_item or {}).get('inventory_type', ''))
+                db_name_raw = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', '')) or '')
+                db_name_norm = _normalize_for_match(db_name_raw)
+                db_type_norm = _normalize_for_match(
+                    candidate_match.get('Product Type*', '') or
+                    candidate_match.get('ProductType', '') or
+                    candidate_match.get('product_type', '')
+                )
 
-        def _classify_json_item_type(json_item, json_name):
-            """Classify a JSON item's product type using inventory_type and name."""
-            inv_type = str(json_item.get('inventory_type', '')).lower()
-            name_lower = json_name.lower()
-            # Map Bamboo inventory types
-            if 'edible' in inv_type:
-                return 'edible'
-            if 'usable cannabis' in inv_type:
-                # Could be flower or preroll — check name
-                if any(kw in name_lower for kw in ['preroll', 'pre-roll', 'pre roll']):
-                    return 'preroll'
-                if any(kw in name_lower for kw in ['bong buddies', 'flower']):
-                    return 'flower'
-                return 'flower'  # default for usable cannabis
-            if 'cannabis mix infused' in inv_type:
-                return 'preroll'  # infused prerolls
-            if 'concentrate for inhalation' in inv_type:
-                # Could be vape or concentrate — check name
-                if any(kw in name_lower for kw in ['aio', 'c-cell', 'ccell', '510', 'cartridge', 'cart', 'pen', 'disposable', 'dabstract']):
-                    return 'vape'
-                if any(kw in name_lower for kw in ['sugar', 'batter', 'wax', 'shatter', 'rosin', 'badder', 'diamonds', 'sauce']):
-                    return 'concentrate'
-                return 'vape'  # default for concentrate for inhalation
-            # Fallback: classify from name
-            return _classify_type(name_lower)
+                # Hard type gate: vape/concentrate JSON should not map to pre-roll DB rows.
+                json_is_vape_like = (
+                    'concentrate for inhalation' in json_type_norm or
+                    '510' in json_name_norm or
+                    'vape' in json_name_norm
+                )
+                db_is_preroll = ('pre roll' in db_type_norm or 'preroll' in db_type_norm)
+                if json_is_vape_like and db_is_preroll:
+                    return True
 
-        detailed_matches = []
-        high_confidence_matches = []
+                # HARD RULE: JSON 510/cartridge items must never map to disposable DB items.
+                json_is_510_like = (' 510 ' in f" {json_name_norm} " or 'cartridge' in json_name_norm)
+                db_is_disposable = (
+                    ' disposable ' in f" {db_name_norm} " or
+                    ' disposable ' in f" {db_type_norm} " or
+                    ' aio ' in f" {db_name_norm} " or
+                    ' all in one ' in f" {db_name_norm} "
+                )
+                if json_is_510_like and db_is_disposable:
+                    return True
+
+                # Hard strain gate: require at least 50% of meaningful strain tokens to appear.
+                expected_strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
+                strain_tokens = [
+                    t for t in _normalize_for_match(expected_strain).split()
+                    if len(t) >= 3 and t not in {'sativa', 'indica', 'hybrid'}
+                ]
+                if strain_tokens:
+                    matched_tokens = sum(1 for t in strain_tokens if t in db_name_norm)
+                    required = max(1, int(math.ceil(len(strain_tokens) * 0.5)))
+                    if matched_tokens < required:
+                        return True
+
+                return False
+            except Exception:
+                return False
+
+        def _log_match_diagnostics(stage, method, current_json_item, current_json_name, candidate_match, extra_score=None):
+            """Structured diagnostics for why a candidate was chosen/rejected."""
+            try:
+                if not candidate_match:
+                    logging.debug(f"[JSON_DIAG] stage={stage} method={method} json='{current_json_name}' candidate=None")
+                    return
+
+                json_name_lower = str(current_json_name or '').lower().strip()
+                db_name = str(candidate_match.get('Product Name*', candidate_match.get('ProductName', ''))).strip()
+                db_name_lower = db_name.lower()
+                json_type = str((current_json_item or {}).get('inventory_type', '')).strip().lower()
+                db_type = str(
+                    candidate_match.get('Product Type*', '') or
+                    candidate_match.get('ProductType', '') or
+                    candidate_match.get('product_type', '')
+                ).strip().lower()
+
+                json_terms = set(re.findall(r"[a-z0-9]+", json_name_lower))
+                db_terms = set(re.findall(r"[a-z0-9]+", db_name_lower))
+                overlap = (len(json_terms & db_terms) / len(json_terms | db_terms)) if (json_terms | db_terms) else 0.0
+
+                expected_strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
+                strain_hit = bool(expected_strain and expected_strain in db_name_lower)
+
+                msg = (
+                    f"[JSON_DIAG] stage={stage} method={method} score={extra_score if extra_score is not None else 'n/a'} "
+                    f"json='{current_json_name}' db='{db_name}' overlap={overlap:.3f} "
+                    f"json_type='{json_type}' db_type='{db_type}' strain='{expected_strain or 'n/a'}' strain_hit={strain_hit}"
+                )
+                logging.info(msg)
+            except Exception as diag_err:
+                logging.debug(f"[JSON_DIAG] diagnostics logging failed: {diag_err}")
+
+        def _extract_vendor_from_json_item(current_json_item, current_json_name):
+            """Best-effort vendor extraction for DB fallback lookup."""
+            try:
+                vendor = str((current_json_item or {}).get('vendor', '')).strip()
+                if vendor:
+                    return vendor
+                # Common format: "Honey Tree - ...", "Pure - ...", "Original - ..."
+                first_segment = str(current_json_name or '').split(' - ')[0].strip()
+                if first_segment and first_segment.lower() not in {'pure', 'original'}:
+                    return first_segment
+            except Exception:
+                pass
+            return ''
+
+        def _lookup_db_by_vendor_and_strain(current_json_item, current_json_name, product_db):
+            """Direct DB fallback for cases where fuzzy threshold misses an existing product."""
+            try:
+                if not product_db or not hasattr(product_db, '_get_connection'):
+                    return None
+
+                json_name_norm = _normalize_for_match(current_json_name)
+                vendor = _extract_vendor_from_json_item(current_json_item, current_json_name)
+                strain = _extract_json_strain_for_debug(current_json_item, current_json_name)
+                strain_tokens = [t for t in _normalize_for_match(strain).split() if len(t) >= 3]
+                if not strain_tokens:
+                    return None
+
+                # Hardware intent from JSON name
+                json_is_disposable = (
+                    ' aio ' in f" {json_name_norm} " or
+                    ' disposable ' in f" {json_name_norm} " or
+                    ' all in one ' in f" {json_name_norm} "
+                )
+                json_is_510 = (' 510 ' in f" {json_name_norm} " or 'cartridge' in json_name_norm)
+
+                conn = product_db._get_connection()
+                cursor = conn.cursor()
+
+                where_clauses = []
+                params = []
+                if vendor:
+                    where_clauses.append('LOWER("Vendor/Supplier*") LIKE ?')
+                    params.append(f"%{vendor.lower()}%")
+
+                for tok in strain_tokens:
+                    where_clauses.append('LOWER("Product Name*") LIKE ?')
+                    params.append(f"%{tok}%")
+
+                if not where_clauses:
+                    return None
+
+                sql = f'''
+                    SELECT * FROM products
+                    WHERE {' AND '.join(where_clauses)}
+                    LIMIT 200
+                '''
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+                if not rows:
+                    return None
+
+                columns = [c[0] for c in cursor.description]
+                best = None
+                best_score = -1
+                json_terms = set(_normalize_for_match(current_json_name).split())
+
+                for row in rows:
+                    candidate = dict(zip(columns, row))
+                    db_name = str(candidate.get('Product Name*', '') or '')
+                    db_type = str(candidate.get('Product Type*', '') or '')
+                    db_text = _normalize_for_match(f"{db_name} {db_type}")
+
+                    # Respect hardware intent
+                    db_is_disposable = (
+                        ' disposable ' in f" {db_text} " or
+                        ' aio ' in f" {db_text} " or
+                        ' all in one ' in f" {db_text} "
+                    )
+                    if json_is_disposable and not db_is_disposable:
+                        continue
+                    if json_is_510 and db_is_disposable:
+                        continue
+
+                    if is_aio_disposable_conflict(current_json_item, candidate):
+                        continue
+                    if _is_obviously_incompatible_match(current_json_item, current_json_name, candidate):
+                        continue
+
+                    db_terms = set(_normalize_for_match(db_name).split())
+                    overlap = len(json_terms & db_terms)
+                    strain_hits = sum(1 for t in strain_tokens if t in _normalize_for_match(db_name))
+                    score = (strain_hits * 10) + overlap
+
+                    if score > best_score:
+                        best_score = score
+                        best = candidate
+
+                return best
+            except Exception as e:
+                logging.debug(f"[JSON_DIAG] vendor+strain fallback failed for '{current_json_name}': {e}")
+                return None
 
         for i, json_item in enumerate(json_items):
+            # Try multiple fields for product name
             json_name = (
                 str(json_item.get('product_name', '')).strip() or
                 str(json_item.get('inventory_name', '')).strip() or
                 str(json_item.get('name', '')).strip() or
-                f"JSON Product {i + 1}"
+                ''
             )
-            json_name_norm = _normalize_for_match(json_name)
-            json_tokens = set(t for t in json_name_norm.split() if len(t) >= 3)
-            json_type = _classify_json_item_type(json_item, json_name)
+            # Don't skip items - create a fallback name if needed
+            if not json_name:
+                # Try to build a name from other fields
+                brand = str(json_item.get('brand', '')).strip()
+                inventory_type = str(json_item.get('inventory_type', '')).strip()
+                strain = str(json_item.get('strain_name', '')).strip()
+                if brand and strain:
+                    json_name = f"{strain} by {brand}"
+                elif brand:
+                    json_name = brand
+                elif inventory_type:
+                    json_name = inventory_type
+                else:
+                    json_name = f"JSON Product {i + 1}"
+                logging.info(f"⚠️ Created fallback JSON name: '{json_name}' for item {i}")
+            
+            # Find corresponding enhanced match by name (more reliable than index)
+            enhanced_match = None
+            json_name_normalized = json_name.lower().strip()
+            match_method = None
 
-            # Try to find best match from already-matched products
-            best_match = None
-            best_score = 0.0
-
-            # 1. Direct name lookup
-            if json_name.lower().strip() in matched_by_name:
-                best_match = matched_by_name[json_name.lower().strip()]
-                best_score = 1.0
-            else:
-                # 2. Type-aware token overlap matching
-                for name_key, product in matched_by_name.items():
-                    prod_name_norm = _normalize_for_match(name_key)
-                    prod_tokens = set(t for t in prod_name_norm.split() if len(t) >= 3)
-                    if not json_tokens or not prod_tokens:
+            # HIGHEST PRIORITY: exact source/SKU matching via DB/Excel JSON column.
+            try:
+                if hasattr(json_matcher, '_extract_json_column_match_candidates') and hasattr(json_matcher, '_find_json_column_match'):
+                    json_column_candidates = json_matcher._extract_json_column_match_candidates(json_item)
+                    if not json_column_candidates and json_name:
+                        json_column_candidates = [json_name]
+                    for candidate in (json_column_candidates or []):
+                        json_col_match = json_matcher._find_json_column_match(candidate)
+                        if json_col_match:
+                            # Honor hard hardware/type safety checks only.
+                            if is_aio_disposable_conflict(json_item, json_col_match):
+                                _log_match_diagnostics('candidate_rejected_aio_conflict', 'json_column_exact', json_item, json_name, json_col_match)
+                                continue
+                            if _is_obviously_incompatible_match(json_item, json_name, json_col_match):
+                                _log_match_diagnostics('candidate_rejected_incompatible', 'json_column_exact', json_item, json_name, json_col_match)
+                                continue
+                            enhanced_match = json_col_match
+                            match_method = 'json_column_exact'
+                            _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match, 1.0)
+                            break
+            except Exception as json_col_err:
+                logging.debug(f"[JSON_DIAG] json-column priority lookup failed for '{json_name}': {json_col_err}")
+            
+            # Extract key terms from JSON name for better matching
+            json_key_terms = set([term for term in json_name_normalized.split() if len(term) > 2])
+            
+            # Try exact map match first (only if JSON-column match didn't already resolve)
+            if not enhanced_match and json_name_normalized in enhanced_match_map:
+                enhanced_match = enhanced_match_map[json_name_normalized]
+                match_method = 'exact'
+                _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
+                if is_aio_disposable_conflict(json_item, enhanced_match):
+                    _log_match_diagnostics('candidate_rejected_aio_conflict', match_method, json_item, json_name, enhanced_match)
+                    enhanced_match = None
+                    match_method = None
+                elif _is_obviously_incompatible_match(json_item, json_name, enhanced_match):
+                    _log_match_diagnostics('candidate_rejected_incompatible', match_method, json_item, json_name, enhanced_match)
+                    enhanced_match = None
+                    match_method = None
+            elif not enhanced_match:
+                # Try fuzzy matching by comparing normalized names and key terms
+                best_fuzzy_match = None
+                best_fuzzy_score = 0
+                for normalized_key, match in enhanced_match_map.items():
+                    if is_aio_disposable_conflict(json_item, match):
                         continue
+                    if _is_obviously_incompatible_match(json_item, json_name, match):
+                        continue
+                    # Calculate similarity score
+                    if json_name_normalized == normalized_key:
+                        best_fuzzy_match = match
+                        best_fuzzy_score = 1.0
+                        break
+                    # Check if JSON name contains the key or vice versa (partial match)
+                    elif json_name_normalized in normalized_key or normalized_key in json_name_normalized:
+                        # Calculate a simple similarity score based on overlap
+                        overlap = min(len(json_name_normalized), len(normalized_key)) / max(len(json_name_normalized), len(normalized_key)) if max(len(json_name_normalized), len(normalized_key)) > 0 else 0
+                        if overlap > best_fuzzy_score:
+                            best_fuzzy_match = match
+                            best_fuzzy_score = overlap
+                    else:
+                        # Try keyword matching - check if key terms from JSON name appear in match's product name
+                        match_product_name = str(match.get('Product Name*', match.get('ProductName', ''))).lower().strip()
+                        if match_product_name:
+                            match_key_terms = set([term for term in match_product_name.split() if len(term) > 2])
+                            # Calculate overlap of key terms
+                            if json_key_terms and match_key_terms:
+                                term_overlap = len(json_key_terms & match_key_terms) / len(json_key_terms | match_key_terms) if (json_key_terms | match_key_terms) else 0
+                                if term_overlap > best_fuzzy_score:
+                                    best_fuzzy_match = match
+                                    best_fuzzy_score = term_overlap
+                                # Also check if JSON name keywords appear in product name
+                                elif any(term in match_product_name for term in json_key_terms if len(term) > 3):
+                                    keyword_match_score = len([t for t in json_key_terms if t in match_product_name]) / len(json_key_terms) if json_key_terms else 0
+                                    if keyword_match_score > best_fuzzy_score:
+                                        best_fuzzy_match = match
+                                        best_fuzzy_score = keyword_match_score
+                
+                if best_fuzzy_match and best_fuzzy_score > 0.3:  # Lower threshold to 30% for better matching
+                    enhanced_match = best_fuzzy_match
+                    match_method = f'fuzzy_{best_fuzzy_score:.2f}'
+                    _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match, best_fuzzy_score)
+                
+                # Fallback: try index-based matching if name matching fails
+                if not enhanced_match and i < len(enhanced_matches):
+                    enhanced_match = enhanced_matches[i]
+                    match_method = 'index'
+                    _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
+                    if is_aio_disposable_conflict(json_item, enhanced_match):
+                        _log_match_diagnostics('candidate_rejected_aio_conflict', match_method, json_item, json_name, enhanced_match)
+                        enhanced_match = None
+                        match_method = None
+                    elif _is_obviously_incompatible_match(json_item, json_name, enhanced_match):
+                        _log_match_diagnostics('candidate_rejected_incompatible', match_method, json_item, json_name, enhanced_match)
+                        enhanced_match = None
+                        match_method = None
+            
+            # If we found a match but it doesn't have JSON data, try to find the JSON item by the match's product name
+            if enhanced_match and json_item.get('product_name', '').strip() != json_name:
+                # The match might be for a different JSON item - try to find the right one
+                match_product_name = str(enhanced_match.get('Product Name*', enhanced_match.get('ProductName', ''))).strip()
+                if match_product_name:
+                    # Extract key terms from match product name
+                    match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
+                    # Try to find a JSON item that matches better
+                    for json_item_name, candidate_json_item in json_items_map.items():
+                        json_item_key_terms = set([term for term in json_item_name.split() if len(term) > 2])
+                        if match_key_terms and json_item_key_terms:
+                            overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
+                            if overlap > 0.5:  # Good match
+                                json_item = candidate_json_item
+                                json_name = json_item_name
+                                logging.info(f"🔄 Found better JSON item match: '{json_name}' for product '{match_product_name}'")
+                                _log_match_diagnostics('json_item_rebound', match_method, json_item, json_name, enhanced_match)
+                                break
 
-                    # Base token overlap
-                    overlap = len(json_tokens & prod_tokens) / len(json_tokens | prod_tokens)
-
-                    # Product type matching — big bonus/penalty
-                    prod_type_str = str(
-                        product.get('Product Type*') or product.get('Product Type') or
-                        product.get('ProductType') or ''
-                    ).lower()
-                    prod_type = _classify_type(f"{name_key} {prod_type_str}")
-
-                    if json_type != 'unknown' and prod_type != 'unknown':
-                        if json_type == prod_type:
-                            overlap += 0.3  # Big bonus for type match
-                        else:
-                            overlap -= 0.4  # Big penalty for type mismatch
-
-                    if overlap > best_score:
-                        best_score = overlap
-                        best_match = product
-
-            # Only accept matches with reasonable overlap
-            if best_score < 0.25:
-                best_match = None
-                best_score = 0.0
-
-            # Use Match_Confidence from the product if available
-            if best_match:
+            # Fallback: if no mapped enhanced match, do a direct DB lookup for this JSON row.
+            if not enhanced_match:
                 try:
-                    conf = float(best_match.get('Match_Confidence', best_score))
-                except (ValueError, TypeError):
-                    conf = best_score
-                high_confidence_matches.append(best_match)
-            else:
-                conf = 0.0
+                    product_db = json_matcher._get_product_database() if hasattr(json_matcher, '_get_product_database') else None
+                    if product_db and hasattr(json_matcher, '_find_best_database_match'):
+                        fallback_vendor = _extract_vendor_from_json_item(json_item, json_name)
+                        fallback_strain = (
+                            str(json_item.get('strain_name', '')).strip() or
+                            _extract_json_strain_for_debug(json_item, json_name)
+                        )
+                        fallback_weight = str(
+                            json_item.get('unit_weight', json_item.get('weight', ''))
+                        ).strip()
 
-            match_display_name = ''
-            if best_match:
-                match_display_name = (
-                    best_match.get('Product Name*') or
-                    best_match.get('ProductName') or
-                    best_match.get('Description') or
-                    best_match.get('displayName') or
-                    ''
-                )
+                        db_fallback = json_matcher._find_best_database_match(
+                            product_name=json_name,
+                            vendor=fallback_vendor,
+                            weight=fallback_weight,
+                            strain=fallback_strain,
+                            product_db=product_db
+                        )
+                        if not db_fallback:
+                            db_fallback = _lookup_db_by_vendor_and_strain(json_item, json_name, product_db)
+                        if db_fallback and not is_aio_disposable_conflict(json_item, db_fallback) and \
+                           not _is_obviously_incompatible_match(json_item, json_name, db_fallback):
+                            enhanced_match = db_fallback
+                            match_method = 'direct_db_fallback'
+                            _log_match_diagnostics('candidate_selected', match_method, json_item, json_name, enhanced_match)
+                except Exception as fallback_err:
+                    logging.debug(f"[JSON_DIAG] direct DB fallback failed for '{json_name}': {fallback_err}")
+            
+            # Log matching results for debugging
+            if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
+                logging.info(f"🔍 Presidential Kush match: JSON='{json_name}', Match={enhanced_match.get('Product Name*', 'None') if enhanced_match else 'None'}, Method={match_method}")
+                logging.info(f"🔍 Presidential Kush JSON data keys: {list(json_item.keys())}")
+                logging.info(f"🔍 Presidential Kush JSON data: brand={json_item.get('brand')}, vendor={json_item.get('vendor')}, type={json_item.get('inventory_type')}")
+            
+            # Create detailed match info using database-priority data
+            # CRITICAL: Always include json_name and json_data, even if no match found
+            # Use the actual Match_Confidence provided by the enhanced matcher when available
+            enhanced_conf_str = enhanced_match.get('Match_Confidence') if enhanced_match else None
+            try:
+                enhanced_conf = float(enhanced_conf_str) if enhanced_conf_str is not None else 0.0
+            except Exception:
+                enhanced_conf = 0.0
 
             match_info = {
                 'json_name': json_name,
-                'json_data': json_item,
-                'best_score': conf,
-                'best_match': best_match,
-                'top_candidates': [{'excel_name': match_display_name, 'score': conf, 'excel_data': best_match}] if best_match else [],
-                'is_match': best_match is not None,
-                'match_reason': 'Database Match' if best_match else 'No match found',
-                'source': best_match.get('Source', 'Database') if best_match else 'No match',
-                'data_source': 'Database' if best_match else 'None',
-                'match_confidence': f"{conf:.3f}" if best_match else '0.0'
+                'json_data': json_item,  # Always include full JSON item data
+                'best_score': enhanced_conf if enhanced_match else 0.0,
+                'best_match': enhanced_match,
+                'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': enhanced_conf, 'excel_data': enhanced_match}] if enhanced_match else [],
+                'is_match': enhanced_match is not None,
+                'match_reason': 'Database Priority (100% DB data)' if enhanced_match else 'No database match found',
+                'source': enhanced_match.get('Source', 'Database Priority (100% DB)') if enhanced_match else 'No match',
+                'data_source': enhanced_match.get('Data_Source', 'Database') if enhanced_match else 'None',
+                'match_confidence': f"{enhanced_conf:.3f}" if enhanced_match else '0.0'
             }
+
+            if enhanced_match:
+                _log_match_diagnostics('final_match', match_method, json_item, json_name, enhanced_match, enhanced_conf)
+            else:
+                logging.info(f"[JSON_DIAG] stage=final_match method=none json='{json_name}' db=None")
+            
+            # Debug: Verify JSON data is included
+            if json_name.lower().find('presidential') >= 0 or json_name.lower().find('kush') >= 0:
+                logging.info(f"🔍 Presidential Kush match_info keys: {list(match_info.keys())}")
+                logging.info(f"🔍 Presidential Kush match_info json_name: '{match_info.get('json_name')}'")
+                logging.info(f"🔍 Presidential Kush match_info json_data present: {match_info.get('json_data') is not None}")
+                if match_info.get('json_data'):
+                    logging.info(f"🔍 Presidential Kush match_info json_data keys: {list(match_info.get('json_data', {}).keys())}")
+            
             detailed_matches.append(match_info)
-
-        logging.info(f"Detailed JSON match: {len(detailed_matches)} items, {len(high_confidence_matches)} matched")
-
+        
+        # CRITICAL FIX: Also create detailed matches for enhanced matches that weren't matched to any JSON item
+        # This ensures products like Presidential Kush that were matched but whose JSON item wasn't found still show JSON data
+        matched_enhanced_indices = set()
+        for match_info in detailed_matches:
+            if match_info.get('best_match'):
+                # Find the index of this enhanced match
+                for idx, em in enumerate(enhanced_matches):
+                    if em == match_info['best_match'] or (
+                        em.get('Product Name*') == match_info['best_match'].get('Product Name*') and
+                        em.get('Product Name*')
+                    ):
+                        matched_enhanced_indices.add(idx)
+                        break
+        
+        # For any unmatched enhanced matches, try to find their JSON item and create a detailed match
+        for idx, enhanced_match in enumerate(enhanced_matches):
+            if idx not in matched_enhanced_indices:
+                # Try to find JSON item by product name
+                match_product_name = str(enhanced_match.get('Product Name*', enhanced_match.get('ProductName', ''))).strip()
+                if match_product_name:
+                    # Look for JSON item with matching name
+                    found_json_item = None
+                    found_json_name = None
+                    for json_item_name, json_item in json_items_map.items():
+                        json_item_key_terms = set([term for term in json_item_name.split() if len(term) > 2])
+                        match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
+                        if match_key_terms and json_item_key_terms:
+                            overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
+                            if overlap > 0.4:  # Reasonable match
+                                found_json_item = json_item
+                                found_json_name = json_item_name
+                                break
+                    
+                    # Also check original JSON items list
+                    if not found_json_item:
+                        for json_item in json_items:
+                            json_item_name = (
+                                str(json_item.get('product_name', '')).strip() or
+                                str(json_item.get('inventory_name', '')).strip() or
+                                ''
+                            )
+                            if json_item_name:
+                                json_item_key_terms = set([term for term in json_item_name.lower().split() if len(term) > 2])
+                                match_key_terms = set([term for term in match_product_name.lower().split() if len(term) > 2])
+                                if match_key_terms and json_item_key_terms:
+                                    overlap = len(match_key_terms & json_item_key_terms) / len(match_key_terms | json_item_key_terms) if (match_key_terms | json_item_key_terms) else 0
+                                    if overlap > 0.4:
+                                        found_json_item = json_item
+                                        found_json_name = json_item_name
+                                        break
+                    
+                    if found_json_item:
+                        if is_aio_disposable_conflict(found_json_item, enhanced_match):
+                            continue
+                        if _is_obviously_incompatible_match(found_json_item, found_json_name or match_product_name, enhanced_match):
+                            continue
+                        match_info = {
+                            'json_name': found_json_name or match_product_name,
+                            'json_data': found_json_item,
+                            'best_score': 0.95,
+                            'best_match': enhanced_match,
+                            'top_candidates': [{'excel_name': enhanced_match.get('Product Name*', 'Enhanced Match'), 'score': 0.95, 'excel_data': enhanced_match}],
+                            'is_match': True,
+                            'match_reason': 'Database Priority (100% DB data)',
+                            'source': enhanced_match.get('Source', 'Database Priority (100% DB)'),
+                            'data_source': enhanced_match.get('Data_Source', 'Database'),
+                            'match_confidence': enhanced_match.get('Match_Confidence', '0.95')
+                        }
+                        detailed_matches.append(match_info)
+                        if 'presidential' in match_product_name.lower() or 'kush' in match_product_name.lower():
+                            logging.info(f"✅ Added Presidential Kush detailed match from unmatched enhanced match: '{match_product_name}'")
+        
+        logging.info(f"DATABASE PRIORITY: Generated {len(detailed_matches)} detailed matches with {len(high_confidence_matches)} high-confidence database-enhanced products")
+        
         return jsonify({
             'success': True,
             'total_json_items': len(json_items),
             'total_matches': len(high_confidence_matches),
             'threshold': 'Database Priority (100% DB)',
-            'approach': 'Fast detailed matching',
+            'approach': 'Enhanced JSON Matcher with Database Priority',
             'data_source': '100% Database-derived information',
             'detailed_matches': detailed_matches,
             'high_confidence_matches': high_confidence_matches,
             'database_info': {
-                'total_database_products': len(matched_products),
-                'enhanced_matches': len(high_confidence_matches),
+                'total_database_products': len(available_tags),
+                'enhanced_matches': len(enhanced_matches) if enhanced_matches else 0,
                 'match_strategy': 'Database Priority with safe defaults'
             }
         })
-
+        
     except Exception as e:
         logging.error(f"Error in detailed JSON matching: {str(e)}")
-        import traceback
-        logging.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Detailed matching failed: {str(e)}'}), 500
 
 @app.route('/api/match-json-tags', methods=['POST'])
@@ -24681,23 +25076,6 @@ def upload_file_optimized():
         
         # Clear selected tags in session to ensure fresh start
         session['selected_tags'] = []
-        # Persist upload metadata to uploads/.last_upload.json for page-reload recovery
-        try:
-            import json
-            persistence_file = os.path.join(upload_folder, '.last_upload.json')
-            timestamp_persist = int(time.time())
-            normalized_file_path = os.path.normpath(temp_path)
-            with open(persistence_file, 'w') as pf:
-                json.dump({
-                    'file_path': normalized_file_path,
-                    'filename': sanitized_filename,
-                    'timestamp': timestamp_persist,
-                    'store': selected_store,
-                    'lineage_update_timestamp': None
-                }, pf)
-            logging.info(f"[ULTRA-FAST] Saved upload info to persistent file: {persistence_file}")
-        except Exception as persist_err:
-            logging.warning(f"[ULTRA-FAST] Could not save persistent upload info: {persist_err}")
         
         # ULTRA-FAST RESPONSE - Return immediately for instant user feedback
         upload_response_time = time.time() - start_time
@@ -24783,24 +25161,6 @@ def upload_file_fast():
         # Store file path in session
         session['file_path'] = str(file_path)
         session['selected_tags'] = []
-        # Persist upload metadata to uploads/.last_upload.json for page-reload recovery
-        try:
-            import json
-            uploads_dir_path = str(uploads_dir)
-            persistence_file = os.path.join(uploads_dir_path, '.last_upload.json')
-            timestamp_persist = int(time.time())
-            normalized_file_path = os.path.normpath(str(file_path))
-            with open(persistence_file, 'w') as pf:
-                json.dump({
-                    'file_path': normalized_file_path,
-                    'filename': filename,
-                    'timestamp': timestamp_persist,
-                    'store': selected_store,
-                    'lineage_update_timestamp': None
-                }, pf)
-            logging.info(f"[FAST] Saved upload info to persistent file: {persistence_file}")
-        except Exception as persist_err:
-            logging.warning(f"[FAST] Could not save persistent upload info: {persist_err}")
         
         # Clear cached initial data so fresh upload is visible immediately
         try:

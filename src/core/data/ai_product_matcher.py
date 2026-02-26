@@ -108,21 +108,20 @@ class AIProductMatcher:
         self._build_caches()
         
         # Scoring weights for different factors
-        # Increase vendor/brand importance to avoid cross-vendor mismatches
         self.weights = {
-            'name_similarity': 0.32,      # Product name similarity
-            'weight_match': 0.18,         # Weight matching
-            'vendor_match': 0.20,         # Vendor matching (increased)
+            'name_similarity': 0.35,      # Product name similarity
+            'weight_match': 0.20,         # Weight matching
+            'vendor_match': 0.15,         # Vendor matching
             'price_match': 0.10,          # Price matching
-            'brand_match': 0.12,          # Brand matching (increased)
-            'lineage_match': 0.08,        # Lineage matching
+            'brand_match': 0.10,          # Brand matching
+            'lineage_match': 0.10,        # Lineage matching
         }
-
-        # Thresholds for confidence levels — tighten to reduce false positives
+        
+        # Thresholds for confidence levels - Much more lenient for better matching
         self.confidence_thresholds = {
-            'high': 0.75,    # require stronger overall score for 'high'
-            'medium': 0.50,  # medium threshold raised
-            'low': 0.35      # low threshold raised slightly
+            'high': 0.65,    # Lowered from 0.75
+            'medium': 0.45,  # Lowered from 0.55
+            'low': 0.25      # Lowered from 0.35
         }
     
     def _build_caches(self):
@@ -355,8 +354,7 @@ class AIProductMatcher:
         # 3. Vendor match score
         vendor_match = self._calculate_vendor_match(
             product_features.get('vendor'),
-            strain_info,
-            product_features.get('product_name_clean')
+            strain_info
         )
         
         # 4. Price match score
@@ -369,8 +367,7 @@ class AIProductMatcher:
         # 5. Brand match score
         brand_match = self._calculate_brand_match(
             product_features.get('brand'),
-            strain_info,
-            product_features.get('product_name_clean')
+            strain_info
         )
         
         # 6. Lineage match score
@@ -506,34 +503,32 @@ class AIProductMatcher:
         
         return 0.6  # Neutral score for weight matching
     
-    def _calculate_vendor_match(self, product_vendor: Optional[str], strain_info: Dict, product_name_clean: Optional[str] = None) -> float:
+    def _calculate_vendor_match(self, product_vendor: Optional[str], strain_info: Dict) -> float:
         """Calculate vendor match score"""
-        # If vendor provided, require stronger match or penalize mismatch
-        strain_vendor = str(strain_info.get('vendor', '') or '').lower().strip()
-        product_vendor_lower = (product_vendor or '').lower().strip()
-
-        if product_vendor_lower:
-            # Exact or contained matches are strong
-            if strain_vendor and (product_vendor_lower == strain_vendor or product_vendor_lower in strain_vendor or strain_vendor in product_vendor_lower):
-                return 1.0
-            # If product name contains vendor token, count that as partial evidence
-            if product_name_clean and product_vendor_lower in product_name_clean.lower():
-                return 0.9
-            # If vendor provided but doesn't match strain vendor, penalize
-            return 0.0
-
-        # No vendor provided in JSON — try to infer from product name or strain info
-        if product_name_clean:
-            pn = product_name_clean.lower()
-            if strain_vendor and strain_vendor in pn:
-                return 0.9
-            # Try matching strain's brand to product name as proxy
-            strain_brand = str(strain_info.get('brand', '') or '').lower().strip()
-            if strain_brand and strain_brand in pn:
+        if not product_vendor:
+            return 0.5  # Neutral score if no vendor info
+        
+        # Check if vendor matches any known vendor patterns in the strain info
+        vendor_lower = product_vendor.lower().strip()
+        
+        # Look for vendor information in strain details
+        strain_vendor = strain_info.get('vendor', '').lower()
+        if strain_vendor and vendor_lower in strain_vendor:
+            return 0.9
+        
+        # Check for common vendor patterns
+        common_vendors = ['phat panda', 'dank czar', 'moonshot', 'blueberry', 'galactic']
+        for common_vendor in common_vendors:
+            if common_vendor in vendor_lower:
                 return 0.8
-
-        # Neutral/weak score when vendor unknown
-        return 0.4
+        
+        # Check for vendor-strain relationships in the database
+        strain_name = strain_info.get('strain_name', '').lower()
+        if strain_name and vendor_lower:
+            # This could be enhanced with historical vendor-strain relationships
+            return 0.6
+        
+        return 0.5  # Neutral score if no clear match
     
     def _calculate_price_match(self, product_price: Optional[float], product_cost: Optional[float], strain_info: Dict) -> float:
         """Calculate price match score"""
@@ -572,25 +567,31 @@ class AIProductMatcher:
         
         return 0.6  # Neutral score for price matching
     
-    def _calculate_brand_match(self, product_brand: Optional[str], strain_info: Dict, product_name_clean: Optional[str] = None) -> float:
+    def _calculate_brand_match(self, product_brand: Optional[str], strain_info: Dict) -> float:
         """Calculate brand match score"""
-        strain_brand = str(strain_info.get('brand', '') or '').lower().strip()
-        product_brand_lower = (product_brand or '').lower().strip()
-
-        if product_brand_lower:
-            if strain_brand and (product_brand_lower == strain_brand or product_brand_lower in strain_brand or strain_brand in product_brand_lower):
-                return 1.0
-            if product_name_clean and product_brand_lower in product_name_clean.lower():
-                return 0.9
-            return 0.0
-
-        # No brand provided — infer from product name or strain info
-        if product_name_clean:
-            pn = product_name_clean.lower()
-            if strain_brand and strain_brand in pn:
-                return 0.9
-
-        return 0.4
+        if not product_brand:
+            return 0.5  # Neutral score if no brand info
+        
+        brand_lower = product_brand.lower().strip()
+        
+        # Check if brand matches strain info
+        strain_brand = strain_info.get('brand', '').lower()
+        if strain_brand and brand_lower in strain_brand:
+            return 0.9
+        
+        # Check for common brand patterns
+        common_brands = ['phat panda', 'dank czar', 'moonshot', 'blueberry', 'galactic']
+        for common_brand in common_brands:
+            if common_brand in brand_lower:
+                return 0.8
+        
+        # Check for brand-strain relationships
+        strain_name = strain_info.get('strain_name', '').lower()
+        if strain_name and brand_lower:
+            # This could be enhanced with historical brand-strain relationships
+            return 0.6
+        
+        return 0.5  # Neutral score if no clear match
     
     def _calculate_lineage_match(self, product_type: Optional[str], strain_info: Dict) -> float:
         """Calculate lineage match score"""

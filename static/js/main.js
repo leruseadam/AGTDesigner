@@ -530,31 +530,26 @@ async function openStrainLineageEditor() {
               </div>
             </div>
             
-                            <div class="list-group" id="strainListContainer">
-                                ${strains.map(strain => {
-                                    const sName = (strain.strain_name || '');
-                                    const safeAttr = sName.toLowerCase();
-                                    const escapedName = sName.replace(/'/g, "\\'");
-                                    return `
-                                        <button type="button" class="list-group-item list-group-item-action strain-item" 
-                                                        data-strain-name="${safeAttr}"
-                                                        onclick="selectStrainForEditing('${escapedName}', '${strain.current_lineage}')">
-                                            <div class="d-flex justify-content-between align-items-start">
-                                                <div>
-                                                    <strong class="strain-name">${strain.strain_name}</strong>
-                                                    <br>
-                                                    <small class="text-muted">
-                                                        Current: ${strain.current_lineage} | 
-                                                        Products: ${strain.total_occurrences} | 
-                                                        Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
-                                                    </small>
-                                                </div>
-                                                <span class="badge bg-primary">${strain.current_lineage}</span>
-                                            </div>
-                                        </button>
-                                    `;
-                                }).join('')}
-                            </div>
+            <div class="list-group" id="strainListContainer">
+              ${strains.map(strain => `
+                <button type="button" class="list-group-item list-group-item-action strain-item" 
+                        data-strain-name="${strain.strain_name.toLowerCase()}"
+                        onclick="selectStrainForEditing('${strain.strain_name.replace(/'/g, "\\'")}', '${strain.current_lineage}')">
+                  <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                      <strong class="strain-name">${strain.strain_name}</strong>
+                      <br>
+                      <small class="text-muted">
+                        Current: ${strain.current_lineage} | 
+                        Products: ${strain.total_occurrences} | 
+                        Last seen: ${new Date(strain.last_seen_date).toLocaleDateString()}
+                      </small>
+                    </div>
+                    <span class="badge bg-primary">${strain.current_lineage}</span>
+                  </div>
+                </button>
+              `).join('')}
+            </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" id="strainSelectionCancelBtn">Cancel</button>
@@ -679,18 +674,13 @@ async function openStrainLineageEditor() {
       
       // Handle Enter key to select first visible strain
       searchInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') {
-                    e.preventDefault();
-                    // Find the first visible strain item robustly (works regardless of inline style or CSS rules)
-                    const items = Array.from(document.querySelectorAll('.strain-item'));
-                    const firstVisible = items.find(item => {
-                        const style = window.getComputedStyle(item);
-                        return style && style.display !== 'none' && style.visibility !== 'hidden' && item.offsetParent !== null;
-                    });
-                    if (firstVisible) {
-                        firstVisible.click();
-                    }
-                }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const firstVisible = document.querySelector('.strain-item[style*="block"], .strain-item:not([style*="none"])');
+          if (firstVisible) {
+            firstVisible.click();
+          }
+        }
       });
     }
     
@@ -1829,10 +1819,10 @@ const TagManager = {
                     freshTags.forEach(tag => {
                         const name = tag['Product Name*'] || tag.ProductName;
                         if (name) {
-                            const dbLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage;
+                            const dbLineage = tag.canonical_lineage || tag.currentLineage || tag.Lineage;
                             if (dbLineage) {
                                 // CRITICAL: Normalize lineage value using consistent helper function
-                                const normalizedLineage = (typeof window.normalizeLineageValue !== 'undefined')
+                                const normalizedLineage = (typeof window.normalizeLineageValue !== 'undefined') 
                                     ? window.normalizeLineageValue(dbLineage)
                                     : dbLineage.toString().trim().toUpperCase();
                                 lineageMap.set(name, normalizedLineage);
@@ -1853,7 +1843,6 @@ const TagManager = {
                                 ? window.normalizeLineageValue(oldLineageRaw)
                                 : oldLineageRaw.toString().trim().toUpperCase();
                             if (oldLineage !== dbLineage) {
-                                tag.sovereign_lineage = dbLineage;
                                 tag.canonical_lineage = dbLineage;
                                 tag.currentLineage = dbLineage;
                                 tag.Lineage = dbLineage;
@@ -1862,7 +1851,6 @@ const TagManager = {
                                 verboseLog(`🔄 Updated lineage for "${name}": "${oldLineage}" → "${dbLineage}"`);
                             } else {
                                 // Ensure fields are set even if values match
-                                tag.sovereign_lineage = dbLineage;
                                 tag.canonical_lineage = dbLineage;
                                 tag.currentLineage = dbLineage;
                                 tag.Lineage = dbLineage;
@@ -1877,7 +1865,6 @@ const TagManager = {
                             const name = tag['Product Name*'] || tag.ProductName;
                             if (name && lineageMap.has(name)) {
                                 const dbLineage = lineageMap.get(name);
-                                tag.sovereign_lineage = dbLineage;
                                 tag.canonical_lineage = dbLineage;
                                 tag.currentLineage = dbLineage;
                                 tag.Lineage = dbLineage;
@@ -4231,6 +4218,11 @@ const TagManager = {
             }
         }
         
+        // If still no brand found, try to use the vendor as the brand
+        if (!brand && tag.vendor) {
+            brand = tag.vendor.trim();
+        }
+        
         return brand;
     },
 
@@ -5526,7 +5518,7 @@ const TagManager = {
                                     checkbox.checked = isChecked;
                                     return;
                                 }
-
+                                
                                 checkbox.checked = isChecked;
                                 const tagName = checkbox.value;
                                 const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
@@ -5615,55 +5607,39 @@ const TagManager = {
                                 priceCheckbox.type = 'checkbox';
                                 priceCheckbox.className = 'select-all-checkbox me-2';
                                 priceCheckbox.addEventListener('change', (e) => {
-                                    try {
-                                        const savedScroll = (typeof this._saveAvailableScrollPosition === 'function') ? this._saveAvailableScrollPosition() : null;
-                                        const isChecked = !!e.target.checked;
-                                        const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
-                                        console.debug('Price group select-all changed:', isChecked, 'found checkboxes:', checkboxes.length);
-                                        checkboxes.forEach(checkbox => {
-                                            try {
-                                                // Always toggle the visual checked state
-                                                checkbox.checked = isChecked;
-
-                                                // For product tag checkboxes, update persistentSelectedTags using data-tag-name when available
-                                                if (checkbox.classList.contains('tag-checkbox')) {
-                                                    const tagNameAttr = checkbox.getAttribute('data-tag-name') || checkbox.value || null;
-                                                    if (!tagNameAttr) return;
-                                                    const tagName = tagNameAttr;
-
-                                                    if (isChecked) {
-                                                        if (!this.state.persistentSelectedTags.includes(tagName)) {
-                                                            this.state.persistentSelectedTags.push(tagName);
-                                                        }
-                                                    } else {
-                                                        const index = this.state.persistentSelectedTags.indexOf(tagName);
-                                                        if (index > -1) {
-                                                            this.state.persistentSelectedTags.splice(index, 1);
-                                                        }
-                                                    }
+                                    const savedScroll = this._saveAvailableScrollPosition();
+                                    const isChecked = e.target.checked;
+                                    const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
+                                    checkboxes.forEach(checkbox => {
+                                        if (!checkbox.classList.contains('tag-checkbox')) {
+                                            checkbox.checked = isChecked;
+                                            return;
+                                        }
+                                        
+                                        checkbox.checked = isChecked;
+                                        const tagName = checkbox.value;
+                                        const tag = this.state.tags.find(t => t['Product Name*'] === tagName);
+                                        if (tag) {
+                                            if (isChecked) {
+                                                if (!this.state.persistentSelectedTags.includes(tagName)) {
+                                                    this.state.persistentSelectedTags.push(tagName);
                                                 }
-                                            } catch (innerErr) {
-                                                console.warn('Error toggling checkbox in price group:', innerErr);
+                                            } else {
+                                                const index = this.state.persistentSelectedTags.indexOf(tagName);
+                                                if (index > -1) {
+                                                    this.state.persistentSelectedTags.splice(index, 1);
+                                                }
                                             }
-                                        });
-
-                                        this.state.selectedTags = new Set(this.state.persistentSelectedTags || []);
-                                        // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
-                                        const selectedTagObjects = (typeof this.getSelectedTagObjects === 'function') ? this.getSelectedTagObjects() : [];
-                                        if (typeof this.updateSelectedTags === 'function') {
-                                            this.updateSelectedTags(selectedTagObjects);
                                         }
-                                        if (typeof this.efficientlyUpdateAvailableTagsDisplay === 'function') {
-                                            this.efficientlyUpdateAvailableTagsDisplay();
-                                        }
-                                        requestAnimationFrame(() => {
-                                            if (typeof this._restoreAvailableScrollPosition === 'function') {
-                                                this._restoreAvailableScrollPosition(savedScroll);
-                                            }
-                                        });
-                                    } catch (err) {
-                                        console.error('Error handling price group select-all change:', err);
-                                    }
+                                    });
+                                    this.state.selectedTags = new Set(this.state.persistentSelectedTags);
+                                    // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
+                                    const selectedTagObjects = this.getSelectedTagObjects();
+                                    this.updateSelectedTags(selectedTagObjects);
+                                    this.efficientlyUpdateAvailableTagsDisplay();
+                                    requestAnimationFrame(() => {
+                                        this._restoreAvailableScrollPosition(savedScroll);
+                                    });
                                 });
                                 
                                 priceHeader.appendChild(priceCheckbox);
@@ -7830,14 +7806,9 @@ const TagManager = {
         const isClassicLineage = classicLineages.includes(lineage);
         
         if (hasValidDatabaseLineage && !isNonclassic) {
-            // Classic type with valid DB lineage — but CBD indicators still override HYBRID/missing
-            if (hasCbdIndicator() && (!lineage || lineage === 'HYBRID' || lineage === 'MIXED' || lineage === 'THC' || lineage === 'CBD_BLEND')) {
-                displayLineage = 'CBD';
-                verboseLog(`🎨 CLASSIC CBD indicator overrides DB lineage "${lineage}" for: "${displayName}" → CBD`);
-            } else {
-                displayLineage = lineage;
-                verboseLog(`🎨 Using database lineage for classic type: "${displayName}" → ${displayLineage}`);
-            }
+            // CRITICAL: Use database lineage directly for classic types only - this is the source of truth
+            displayLineage = lineage;
+            verboseLog(`🎨 Using database lineage for classic type: "${displayName}" → ${displayLineage}`);
         } else if (isNonclassic) {
             // CRITICAL FIX: For capsules and nonclassic types, ignore classic lineages from database
             // They should ONLY use MIXED or CBD_BLEND based on CBD indicators
@@ -7882,8 +7853,8 @@ const TagManager = {
             // CRITICAL FIX: Check for CBD family indicators (CBD, CBG, CBN, CBC) in product name and force CBD_BLEND if detected
             // This ensures products with CBD, CBG, CBN, or CBC in the title get yellow color regardless of database lineage
             if (hasCbdIndicator()) {
-                displayLineage = 'CBD';
-                verboseLog(`🎨 CLASSIC with CBD family indicator (CBD/CBG/CBN/CBC): "${displayName}" → CBD (yellow)`);
+                displayLineage = 'CBD_BLEND';
+                verboseLog(`🎨 CLASSIC with CBD family indicator (CBD/CBG/CBN/CBC): "${displayName}" → CBD_BLEND (yellow)`);
             } else {
                 // CRITICAL FIX: Always use the resolved lineage (which already has database value and MIXED->HYBRID conversion)
                 displayLineage = lineage || 'HYBRID';
@@ -9173,7 +9144,6 @@ const TagManager = {
             originalTag.currentLineage = newLineage;
             originalTag.canonical_lineage = newLineage;
             originalTag.sovereign_lineage = newLineage; // CRITICAL: Set user-edited lineage for UI display
-            originalTag.displayLineage = newLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
         }
         const currentTag = this.state.tags.find(t => t['Product Name*'] === tagName);
         if (currentTag) {
@@ -9182,7 +9152,6 @@ const TagManager = {
             currentTag.currentLineage = newLineage;
             currentTag.canonical_lineage = newLineage;
             currentTag.sovereign_lineage = newLineage; // CRITICAL: Set user-edited lineage for UI display
-            currentTag.displayLineage = newLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
 
             // CRITICAL FIX: Update _tagLookupMap immediately for getSelectedTagObjects()
             // This ensures tag objects retrieved for generation have the latest lineage
@@ -9293,7 +9262,6 @@ const TagManager = {
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
                 originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set user-edited lineage for UI display
-                originalTag.displayLineage = verifiedLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
                 verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
 
@@ -9304,8 +9272,6 @@ const TagManager = {
                 currentTag.Lineage = verifiedLineage;
                 currentTag.currentLineage = verifiedLineage;
                 currentTag.canonical_lineage = verifiedLineage;
-                currentTag.sovereign_lineage = verifiedLineage;
-                currentTag.displayLineage = verifiedLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
                 verboseLog(`📝 Updated tag in current tags with verified lineage: ${verifiedLineage}`);
             }
 
@@ -9313,7 +9279,7 @@ const TagManager = {
             // Use verified lineage from backend response
             this.updateTagLineageInUI(tagName, verifiedLineage);
             verboseLog(`🎨 Updated UI elements for ${tagName} with verified lineage: ${verifiedLineage}`);
-
+            
             // CRITICAL FIX: Immediately update the tag in originalTags so future renders show correct lineage
             // This ensures that when the tag list is filtered or re-rendered, it shows the updated lineage
             const originalTagIndex = this.state.originalTags.findIndex(t => t['Product Name*'] === tagName);
@@ -9324,7 +9290,6 @@ const TagManager = {
                 originalTag.currentLineage = verifiedLineage;
                 originalTag.canonical_lineage = verifiedLineage;
                 originalTag.sovereign_lineage = verifiedLineage; // CRITICAL: Set user-edited lineage to preserve user edit
-                originalTag.displayLineage = verifiedLineage.toUpperCase(); // Keep displayLineage in sync for DOCX coloring
                 originalTag['Lineage*'] = verifiedLineage;
                 verboseLog(`📝 Updated tag in originalTags with verified lineage: ${verifiedLineage}`);
             }
@@ -9948,14 +9913,12 @@ const TagManager = {
                 : null;
             
             if (stateTag) {
-                stateTag.sovereign_lineage = newLineage;
                 stateTag.lineage = newLineage;
                 stateTag.Lineage = newLineage;
                 stateTag.currentLineage = newLineage;
                 stateTag.canonical_lineage = newLineage;
             }
             if (originalTag) {
-                originalTag.sovereign_lineage = newLineage;
                 originalTag.lineage = newLineage;
                 originalTag.Lineage = newLineage;
                 originalTag.currentLineage = newLineage;
@@ -14435,8 +14398,8 @@ const TagManager = {
             return false; // Don't show anything, tags should be displayed
         }
         
-        // Check if tags are being fetched OR a retry is pending - show loading instead of upload prompt
-        const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData || !!this.state.initialDataRetryTimer;
+        // Check if tags are being fetched - show loading instead of upload prompt
+        const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData;
         
         if (isFetchingTags) {
             // Show loading indicator while tags are being fetched
@@ -15078,17 +15041,18 @@ const TagManager = {
                         this.hideActionSplash();
                     }
                     
-                    // Show spinner while retrying — never show "No product data loaded" mid-retry
+                    // Show loading or upload prompt based on fetch status
                     const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;padding:3rem 2rem;">
-                                <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;margin-bottom:1.5rem;"></div>
-                                <h5 style="color:#ffffff;margin-bottom:0.5rem;">Loading tags...</h5>
-                                <p style="color:rgba(255,255,255,0.7);font-size:0.95rem;">Please wait while we load your product data</p>
-                            </div>`;
+                        const showingLoading = this._showLoadingOrUploadPrompt(availableTagsContainer);
+                        // If showing loading, don't initialize empty state yet - wait for tags
+                        if (showingLoading) {
+                            // Continue waiting for tags to load
+                            return;
+                        }
                     }
-
+                    
+                    // FIXED: Initialize empty state instead of loading test data
                     this.initializeEmptyState();
                     this._checkingExistingData = false;
                     this.scheduleInitialDataRetry('Empty initial data response');
@@ -15096,25 +15060,23 @@ const TagManager = {
                 }
             } else {
                 verboseLog('Initial data endpoint returned error:', response.status);
+                // Complete splash loading on error
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
-
+                
+                // Hide action splash on error
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-
-                // Show spinner while retrying — never show "No product data loaded" mid-retry
+                
+                // Show loading or upload prompt based on fetch status
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
-                    availableTagsContainer.innerHTML = `
-                        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;padding:3rem 2rem;">
-                            <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;margin-bottom:1.5rem;"></div>
-                            <h5 style="color:#ffffff;margin-bottom:0.5rem;">Loading tags...</h5>
-                            <p style="color:rgba(255,255,255,0.7);font-size:0.95rem;">Please wait while we load your product data</p>
-                        </div>`;
+                    this._showLoadingOrUploadPrompt(availableTagsContainer);
                 }
-
+                
+                // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
                 this._checkingExistingData = false;
                 this.scheduleInitialDataRetry(`HTTP ${response.status}`);
@@ -15159,18 +15121,24 @@ const TagManager = {
             if (!fallbackSucceeded) {
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
-                    // Show spinner while retrying — never show "No product data loaded" mid-retry
                     availableTagsContainer.innerHTML = `
-                        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;padding:3rem 2rem;">
-                            <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;margin-bottom:1.5rem;"></div>
-                            <h5 style="color:#ffffff;margin-bottom:0.5rem;">Loading tags...</h5>
-                            <p style="color:rgba(255,255,255,0.7);font-size:0.95rem;">Please wait while we load your product data</p>
-                        </div>`;
+                        <div class="text-center py-5">
+                            <div class="upload-prompt">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No product data loaded</h5>
+                                <p class="text-muted">Upload an Excel file to get started</p>
+                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                                    <i class="fas fa-upload me-2"></i>Upload Excel File
+                                </button>
+                            </div>
+                        </div>
+                    `;
                 }
-
+                
+                // FIXED: Initialize empty state instead of loading test data
                 this.initializeEmptyState();
             }
-
+            
             this._checkingExistingData = false;
             this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;
@@ -21981,23 +21949,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const listEl = document.getElementById('userTemplatesList');
     if (!manageBtn || !modalEl || !listEl) return;
 
-    const TEMPLATE_ICONS = {
-        horizontal: 'fa-grip-lines',
-        vertical:   'fa-grip-lines-vertical',
-        mini:       'fa-compress-alt',
-        double:     'fa-columns',
-        preroll:    'fa-scroll',
-        inventory:  'fa-clipboard-list'
-    };
-    const TEMPLATE_COLORS = {
-        horizontal: '#6366f1',
-        vertical:   '#8b5cf6',
-        mini:       '#06b6d4',
-        double:     '#10b981',
-        preroll:    '#f59e0b',
-        inventory:  '#ef4444'
-    };
-
     function renderUserTemplatesList(hasUser) {
         const types = Object.keys(TEMPLATE_LABELS);
         listEl.innerHTML = types.map(type => {
@@ -22005,51 +21956,16 @@ document.addEventListener('DOMContentLoaded', function() {
             const label = TEMPLATE_LABELS[type];
             const rowId = 'userTemplateRow_' + type;
             const inputId = 'userTemplateFile_' + type;
-            const icon = TEMPLATE_ICONS[type] || 'fa-file-word';
-            const color = TEMPLATE_COLORS[type] || '#6366f1';
             return `
-              <div id="${rowId}" data-type="${type}" style="
-                background: rgba(255,255,255,0.05);
-                border: 1px solid ${has ? color + '55' : 'rgba(255,255,255,0.08)'};
-                border-radius: 12px;
-                padding: 14px 16px;
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-                transition: border-color 0.2s, background 0.2s;
-              ">
-                <div style="display:flex;align-items:center;gap:10px;">
-                  <div style="width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,${color}cc,${color}66);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-                    <i class="fas ${icon}" style="color:#fff;font-size:14px;"></i>
-                  </div>
-                  <div style="flex:1;min-width:0;">
-                    <div style="color:#fff;font-weight:600;font-size:0.88rem;">${label}</div>
-                    <div style="color:rgba(255,255,255,0.4);font-size:0.72rem;">${has ? '<span style="color:' + color + ';">✓ Custom design active</span>' : 'Using default layout'}</div>
-                  </div>
-                </div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                  <label style="
-                    display:inline-flex;align-items:center;gap:5px;cursor:pointer;margin:0;
-                    background:${has ? 'rgba(255,255,255,0.08)' : color + '22'};
-                    border:1px solid ${has ? 'rgba(255,255,255,0.15)' : color + '66'};
-                    color:${has ? 'rgba(255,255,255,0.8)' : color};
-                    border-radius:7px;padding:4px 10px;font-size:0.75rem;font-weight:500;
-                    transition:all 0.15s;
-                  ">
-                    <i class="fas ${has ? 'fa-sync-alt' : 'fa-upload'}" style="font-size:11px;"></i>
-                    ${has ? 'Replace' : 'Upload'}
+              <div class="list-group-item d-flex align-items-center justify-content-between flex-wrap gap-2 py-2 bg-transparent border-secondary" id="${rowId}" data-type="${type}">
+                <span class="text-white fw-medium">${label}</span>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <label class="btn btn-sm btn-outline-primary mb-0">
+                    ${has ? 'Replace' : 'Add'} .docx
                     <input type="file" accept=".docx" class="d-none" id="${inputId}" data-type="${type}">
                   </label>
-                  ${has ? `<a href="/api/user-templates/${type}/download" target="_blank" rel="noopener" style="
-                    display:inline-flex;align-items:center;gap:5px;text-decoration:none;
-                    background:rgba(6,182,212,0.1);border:1px solid rgba(6,182,212,0.3);
-                    color:#06b6d4;border-radius:7px;padding:4px 10px;font-size:0.75rem;font-weight:500;
-                  "><i class="fas fa-eye" style="font-size:11px;"></i> Preview</a>` : ''}
-                  ${has ? `<button type="button" class="user-template-remove" data-type="${type}" style="
-                    display:inline-flex;align-items:center;gap:5px;cursor:pointer;border:none;
-                    background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);
-                    color:#ef4444;border-radius:7px;padding:4px 10px;font-size:0.75rem;font-weight:500;
-                  "><i class="fas fa-trash-alt" style="font-size:11px;"></i> Remove</button>` : ''}
+                  ${has ? `<a href="/api/user-templates/${type}/download" class="btn btn-sm btn-outline-info" target="_blank" rel="noopener">View</a>` : ''}
+                  ${has ? `<button type="button" class="btn btn-sm btn-outline-danger user-template-remove" data-type="${type}">Remove</button>` : ''}
                 </div>
               </div>`;
         }).join('');
@@ -22101,28 +22017,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 panel.id = placeholderPanelId;
                 panel.className = 'mt-3';
                 panel.innerHTML = `
-                    <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:16px;margin-top:6px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                            <div style="display:flex;align-items:center;gap:8px;">
-                                <div style="width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;">
-                                    <i class="fas fa-sliders-h" style="color:#fff;font-size:12px;"></i>
-                                </div>
-                                <span style="color:#fff;font-weight:600;font-size:0.88rem;">Placeholder styling</span>
+                    <div class="glass-card p-3 placeholder-panel">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0 text-white">Placeholder styling</h6>
+                            <div>
+                                <select id="placeholderTemplateTypeSelect" class="form-select form-select-sm">
+                                    <option value="horizontal">Horizontal</option>
+                                    <option value="vertical">Vertical</option>
+                                    <option value="mini">Mini</option>
+                                    <option value="miniroll">Mini-roll</option>
+                                    <option value="double">Double</option>
+                                    <option value="inventory">Inventory</option>
+                                    <option value="preroll">Preroll</option>
+                                </select>
                             </div>
-                            <select id="placeholderTemplateTypeSelect" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:7px;padding:4px 10px;font-size:0.78rem;outline:none;">
-                                <option value="horizontal">Horizontal</option>
-                                <option value="vertical">Vertical</option>
-                                <option value="mini">Mini</option>
-                                <option value="miniroll">Mini-roll</option>
-                                <option value="double">Double</option>
-                                <option value="inventory">Inventory</option>
-                                <option value="preroll">Preroll</option>
-                            </select>
                         </div>
-                        <div id="placeholderSettingsList" style="max-height:280px;overflow:auto;"></div>
-                        <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
-                            <div style="color:rgba(255,255,255,0.4);font-size:0.72rem;"><i class="fas fa-lightbulb" style="color:#f59e0b;margin-right:4px;"></i>Enable Auto color to apply lineage colors to field text.</div>
-                            <button id="savePlaceholderSettingsBtn" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;color:#fff;border-radius:7px;padding:5px 14px;font-size:0.78rem;font-weight:600;cursor:pointer;">Save settings</button>
+                        <div id="placeholderSettingsList" style="max-height:320px; overflow:auto;"></div>
+                        <div class="mt-3 d-flex justify-content-between align-items-center">
+                            <div class="text-white-50 small">Tip: enable Auto color to apply lineage colors to the field text.</div>
+                            <div>
+                                <button id="savePlaceholderSettingsBtn" class="btn btn-sm btn-primary">Save placeholder settings</button>
+                            </div>
                         </div>
                     </div>`;
                 modalEl.querySelector('.modal-body').appendChild(panel);

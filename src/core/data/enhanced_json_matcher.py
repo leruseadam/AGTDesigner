@@ -755,16 +755,6 @@ class ProductTypeSpecificMatcher:
             logging.warning(f"Error in _extract_vendor: {e}")
             return ""
 
-    def _is_store_vendor(self, vendor: str) -> bool:
-        """Return True if the vendor string looks like a store/owner marker (not a supplier/vendor).
-        Common examples: 'AGT Bothell', 'A Greener Today', variations containing 'bothell' or 'a greener'.
-        """
-        if not vendor:
-            return False
-        v = vendor.lower()
-        markers = ('bothell', 'a greener', 'agt', 'a greener today')
-        return any(m in v for m in markers)
-
     def _compare_vendors(self, json_product: Dict, db_product: Dict) -> float:
         """Compare vendor names with fuzzy matching"""
         json_vendor = str(json_product.get('vendor', '') or json_product.get('vendor_name', '')).lower().strip()
@@ -1076,11 +1066,6 @@ class EnhancedJSONMatcher:
         
         # Threading
         self.max_workers = min(32, (multiprocessing.cpu_count() or 1) + 4)
-        # Enforce strict JSON name matching by default: incoming JSON product names
-        # must exactly match database product names (case-insensitive, trimmed)
-        # to be considered a JSON-sourced match. Set to False to restore legacy
-        # fuzzy JSON fallback behaviour.
-        self.strict_json_name_match = True
 
     def _to_json_safe(self, obj):
         """Recursively convert objects to JSON-serializable forms."""
@@ -1111,19 +1096,6 @@ class EnhancedJSONMatcher:
             return obj
         except Exception:
             return str(obj)
-
-    def _is_store_vendor(self, vendor: str) -> bool:
-        """Return True if the vendor string looks like a store/owner marker (not a supplier/vendor).
-        Treat common markers like 'bothell', 'a greener', or 'agt' as store markers.
-        """
-        if not vendor:
-            return False
-        try:
-            v = str(vendor).lower()
-            markers = ('bothell', 'a greener', 'agt', 'a greener today')
-            return any(m in v for m in markers)
-        except Exception:
-            return False
 
     def _guess_unit_from_weight(self, weight_value):
         """Heuristic to guess weight units when units are missing.
@@ -1354,45 +1326,16 @@ class EnhancedJSONMatcher:
             for i, item in enumerate(json_items):
                 item_name = (item.get('product_name') or
                             item.get('inventory_name') or '').lower().strip()
-                if not item_name:
-                    continue
-
-                # If strict matching is enabled, require exact equality (case-insensitive)
-                if self.strict_json_name_match:
-                    # Enforce exact name AND same vendor when strict mode is enabled
-                    item_vendor = str(item.get('vendor') or item.get('vendor_name') or item.get('vendor_name_raw', '')).lower().strip()
-                    prod_vendor = str(product_dict.get('Vendor/Supplier*') or product_dict.get('Vendor') or '').lower().strip()
-                    # Ignore store/owner markers (e.g., AGT Bothell) when enforcing vendor equality
-                    if self._is_store_vendor(prod_vendor):
-                        prod_vendor = ''
-                    if self._is_store_vendor(item_vendor):
-                        item_vendor = ''
-                    if item_name == product_name and (not prod_vendor or not item_vendor or item_vendor == prod_vendor):
-                        best_match_score = 1.0
+                if item_name:
+                    words_a = set(item_name.split())
+                    words_b = set(product_name.split())
+                    similarity = len(words_a & words_b) / max(len(words_a), len(words_b), 1)
+                    if similarity > best_match_score:
+                        best_match_score = similarity
                         json_item = item
-                        logging.debug(f"✅ Exact JSON name + vendor match found for '{product_name}'")
-                        break
-                    # If names match but vendors differ, skip this JSON item in strict mode
-                    if item_name == product_name and item_vendor and prod_vendor and item_vendor != prod_vendor:
-                        logging.debug(f"⛔ Skipping JSON match for '{product_name}' due to vendor mismatch: json='{item_vendor}' db='{prod_vendor}'")
-                        continue
-                    # no exact match -> continue searching (do not accept fuzzy matches)
-                    continue
-
-                # Legacy behaviour: compute simple word-overlap similarity
-                words_a = set(item_name.split())
-                words_b = set(product_name.split())
-                similarity = len(words_a & words_b) / max(len(words_a), len(words_b), 1)
-                if similarity > best_match_score:
-                    best_match_score = similarity
-                    json_item = item
         
-        # If strict JSON matching is enabled, do not use a fallback JSON item
+        # GUARANTEE: If no good match found (low confidence), use JSON item for all template-required columns
         if not json_item and json_items:
-            if self.strict_json_name_match:
-                logging.info(f"🔍 DATABASE PRIORITY: No exact JSON name match found for '{product_name}' (strict mode). Skipping JSON merge.")
-                return product_dict
-            # GUARANTEE: If no good match found (low confidence), use JSON item for all template-required columns
             json_item = json_items[0]
             best_match_score = 0.05  # Very low confidence fallback
             json_item_name = (json_item.get('product_name') or json_item.get('inventory_name') or 'UNKNOWN')

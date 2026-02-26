@@ -6310,10 +6310,10 @@
       flex-direction: column !important;
     }
 
-    /* Center column - shorter than side columns so tag lists extend beyond it */
+    /* Center column - full height to match side columns, no scrolling needed */
     div[data-container-type="center"] {
-      height: auto !important;
-      min-height: auto !important;
+      height: var(--center-panel-height) !important;
+      min-height: var(--center-panel-height) !important;
       display: flex !important;
       flex-direction: column !important;
       align-items: center !important;
@@ -7424,26 +7424,19 @@
   <!-- User Templates Modal: add, replace, view custom .docx designs (same sizes as Classic) -->
   <div class="modal fade" id="userTemplatesModal" tabindex="-1" aria-labelledby="userTemplatesModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
-      <div class="modal-content" style="background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,0.6);">
-        <div class="modal-header border-0 pb-0 pt-4 px-4">
-          <div class="d-flex align-items-center gap-3">
-            <div style="width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(99,102,241,0.4);">
-              <i class="fas fa-palette" style="color:#fff;font-size:18px;"></i>
-            </div>
-            <div>
-              <h5 class="modal-title text-white mb-0 fw-bold" id="userTemplatesModalLabel" style="font-size:1.15rem;letter-spacing:0.01em;">Custom Template Designs</h5>
-              <p class="text-white-50 mb-0" style="font-size:0.78rem;">Upload .docx layouts &mdash; sizes stay fixed, only the design changes</p>
-            </div>
-          </div>
-          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close" style="opacity:0.6;"></button>
+      <div class="modal-content glass-card">
+        <div class="modal-header border-0">
+          <h5 class="modal-title text-white" id="userTemplatesModalLabel">User template designs</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
-        <div class="modal-body px-4 pt-3 pb-2">
-          <div id="userTemplatesList" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="modal-body">
+          <p class="text-white-50 small mb-3">Upload your own .docx design for each template type. Sizes and options stay the same; only the layout/design changes. Choose &quot;User&quot; in the Design set dropdown to use these when generating.</p>
+          <div id="userTemplatesList" class="list-group list-group-flush">
             <!-- Rows filled by JS: Horizontal, Vertical, Mini, Double, Preroll, Inventory -->
           </div>
         </div>
-        <div class="modal-footer border-0 px-4 pb-4 pt-2">
-          <button type="button" class="btn btn-sm px-4" data-bs-dismiss="modal" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;">Done</button>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
     </div>
@@ -11258,67 +11251,53 @@
     
     window.acceptAllMatches = function() {
       const acceptAllBtn = document.getElementById('acceptAllBtn');
-      const matchesData = acceptAllBtn && acceptAllBtn.getAttribute ? acceptAllBtn.getAttribute('data-matches') : null;
-
+      const matchesData = acceptAllBtn.getAttribute('data-matches');
+      
       if (!matchesData) {
         alert('No match data available');
         return;
       }
-
+      
       try {
-        let matches = JSON.parse(matchesData);
-
-        // Normalize matches into tag objects acceptable to TagManager
-        // Support arrays of strings, arrays of objects with various keys, and DB product objects
-        const normalized = [];
-        for (const m of (matches || [])) {
-          if (!m) continue;
-
-          // If it's a simple string, treat as product name
-          if (typeof m === 'string') {
-            normalized.push({ 'Product Name*': m });
-            continue;
-          }
-
-          // If it's an object, try to extract a product name from common fields
-          if (typeof m === 'object') {
-            const name = m['Product Name*'] || m.ProductName || m.excel_name || m.product_name || m.name || m.displayName || m['ProductName'];
-            if (name) {
-              // Preserve other useful DB fields if present
-              const obj = Object.assign({}, m);
-              if (!obj['Product Name*']) obj['Product Name*'] = name;
-              normalized.push(obj);
-              continue;
-            }
-          }
-
-          // Fallback: stringify the item into a display name
-          try { normalized.push({ 'Product Name*': String(m) }); } catch (e) { /* ignore */ }
-        }
-
-        // Apply to TagManager if available
-        if (typeof TagManager !== 'undefined' && typeof TagManager.updateSelectedTags === 'function') {
-          TagManager.updateSelectedTags(normalized);
-
-          // Provide a brief success notification
+        const matches = JSON.parse(matchesData);
+        
+        // Update the UI with the accepted matches
+        if (typeof TagManager !== 'undefined') {
+          TagManager.updateSelectedTags(matches);
+          
+          // Show success notification
           const notification = document.createElement('div');
           notification.className = 'alert alert-success alert-dismissible fade show';
-          notification.innerHTML = `\n            <strong>Matches Accepted!</strong> ${normalized.length} high-quality matches have been added to your selected tags.\n            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>\n          `;
+          notification.innerHTML = `
+            <strong>Matches Accepted!</strong> ${matches.length} high-quality matches have been added to your selected tags.
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          `;
+          
           const container = document.querySelector('.container-fluid') || document.querySelector('.container');
           if (container) {
             container.insertBefore(notification, container.firstChild);
-            setTimeout(() => { if (notification.parentNode) notification.remove(); }, 4500);
+            setTimeout(() => {
+              if (notification.parentNode) {
+                notification.remove();
+              }
+            }, 5000);
           }
-        } else {
-          console.warn('TagManager not available to accept matches');
         }
-
-        // Close modals
-        try { const detailedModal = bootstrap.Modal.getInstance(document.getElementById('detailedJsonMatchModal')); if (detailedModal) detailedModal.hide(); } catch (e) {}
-        try { const mainModal = bootstrap.Modal.getInstance(document.getElementById('jsonMatchModal')); if (mainModal) mainModal.hide(); } catch (e) {}
-
-        console.log(`Accepted ${normalized.length} high-quality matches`);
-
+        
+        // Close the detailed modal
+        const detailedModal = bootstrap.Modal.getInstance(document.getElementById('detailedJsonMatchModal'));
+        if (detailedModal) {
+          detailedModal.hide();
+        }
+        
+        // Close the main JSON match modal too
+        const mainModal = bootstrap.Modal.getInstance(document.getElementById('jsonMatchModal'));
+        if (mainModal) {
+          mainModal.hide();
+        }
+        
+        console.log(`Accepted ${matches.length} high-quality matches`);
+        
       } catch (error) {
         console.error('Error accepting matches:', error);
         alert('Error processing matches');

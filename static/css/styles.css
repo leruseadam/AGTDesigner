@@ -280,12 +280,12 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 .tag-list-container {
   overflow-y: auto !important;
   -webkit-overflow-scrolling: touch !important;
-  max-height: calc(100vh - 240px) !important;
+  max-height: calc(100vh - 240px) !important; /* Adjust offset as needed */
 }
 
 /* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
-  font-size: 28px !important; /* +3pt total (previous +1pt, plus +2pt) */
+  font-size: 24px !important; /* Increased from 22px by 2px */
   min-height: 2.5rem !important;
 }
 
@@ -300,7 +300,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 #selectedTags .tag-name,
 #selectedTags .tag-row,
 #selectedTags .tag-item * {
-  font-size: 30px !important; /* +3pt total (previous +1pt, plus +2pt) */
+  font-size: 26px !important; /* Increased from 24px by 2px */
   line-height: 1.5 !important;
 }
 
@@ -327,7 +327,7 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 }
 
 button, .btn {
-  font-size: calc(1rem + 4px) !important; /* +3pt total */
+  font-size: 1rem !important;
   padding: 0.5rem 1rem !important;
   min-height: 38px !important;
 }
@@ -345,12 +345,12 @@ label, .form-label {
 }
 
 /* Normal header scaling */
-h1 { font-size: calc(2rem + 4px) !important; font-weight: 800 !important; }
-h2 { font-size: calc(1.75rem + 4px) !important; font-weight: 700 !important; }
-h3 { font-size: calc(1.5rem + 4px) !important; font-weight: 700 !important; }
-h4 { font-size: calc(1.25rem + 4px) !important; font-weight: 600 !important; }
-h5 { font-size: calc(1.1rem + 4px) !important; font-weight: 600 !important; }
-h6 { font-size: calc(1rem + 4px) !important; font-weight: 600 !important; }
+h1 { font-size: 2rem !important; font-weight: 800 !important; }
+h2 { font-size: 1.75rem !important; font-weight: 700 !important; }
+h3 { font-size: 1.5rem !important; font-weight: 700 !important; }
+h4 { font-size: 1.25rem !important; font-weight: 600 !important; }
+h5 { font-size: 1.1rem !important; font-weight: 600 !important; }
+h6 { font-size: 1rem !important; font-weight: 600 !important; }
 
 /* Larger filter bar and dropdowns */
 .filter-bar, .filters-row {
@@ -400,7 +400,7 @@ p, span, div {
 }
 
 .card-title {
-  font-size: calc(1.4rem + 4px) !important; /* +3pt total */
+  font-size: 1.4rem !important;
   font-weight: 700 !important;
 }
 
@@ -486,7 +486,7 @@ p, span, div {
 }
 
 #jsonMatchModal .btn {
-  font-size: calc(1.125rem + 4px) !important; /* +3pt total */
+  font-size: 1.125rem !important; /* 18px */
   padding: 0.875rem 1.75rem !important; /* Larger buttons */
   min-height: 52px !important;
 }
@@ -543,7 +543,7 @@ p, span, div {
 }
 
 #detailedJsonMatchModal .btn {
-  font-size: calc(1.1rem + 4px) !important; /* +3pt total */
+  font-size: 1.1rem !important;
   padding: 0.65rem 1.2rem !important;
 }
 
@@ -700,7 +700,7 @@ canvas#lava-lamp-canvas {
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
 :root {
   --tag-list-vertical-offset: clamp(3.25rem, 4.5vh, 5rem);
-  --tag-list-min-height: 28rem;  /* Increased min so tag lists are taller by default */
+  --tag-list-min-height: 20rem;  /* Reasonable min so tag lists fill viewport, don't explode layout */
 }
 @supports (height: 100svh) {
   :root {
@@ -2740,10 +2740,8 @@ body.modal-open #mainContent.store-selection-disabled,
     flex-direction: column !important;
     justify-content: space-between !important; /* push actions to align with tag lists */
     gap: 1rem !important; /* increased vertical gaps for breathing room */
-     /* Make center column slightly shorter than tag lists so tag lists visually extend
-       beyond the center card. Subtract 6rem for breathing room; adjust as needed. */
-     max-height: calc(var(--tag-list-height) - 6rem) !important;
-     min-height: calc(var(--tag-list-height) - 6rem) !important;
+    max-height: var(--tag-list-height) !important; /* match tag lists height */
+    min-height: var(--tag-list-height) !important; /* ensure it fills the same vertical space */
     overflow-y: auto !important; /* allow scrolling if content exceeds height */
   }
 
@@ -6991,7 +6989,7 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
-    font-size: 1.77em; /* +2pt (~2.66px) increase */
+    font-size: 1.6em; /* Larger than before, below vendor */
     font-weight: 600;
     margin-bottom: 0.3em;
     margin-left: 1.2em;
@@ -7001,7 +6999,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Product type (third-level) */
   .product-type-section > .product-type-header {
-    font-size: 1.62em; /* +2pt (~2.66px) increase */
+    font-size: 1.45em; /* Larger than before, below brand */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 2.2em;
@@ -7013,7 +7011,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Weight (fourth-level) */
   .weight-section > .weight-header {
-    font-size: 1.27em; /* +2pt (~2.66px) increase */
+    font-size: 1.1em; /* Slightly larger for better readability */
     font-weight: 500;
     margin-bottom: 0.2em;
     margin-left: 3.2em;
@@ -8000,11 +7998,6 @@ body.modal-open #mainContent.store-selection-disabled,
 .main-content-row > [data-container-type] {
   width: 100% !important;
   max-width: 100% !important;
-}
-
-/* Center column should be shorter than the side tag list columns */
-.main-content-row > [data-container-type="center"] {
-  align-self: start !important;
 }
 
 /* DOH dropdown: show muted placeholder until a value is selected */
@@ -10497,12 +10490,12 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .brand-header .text-container {
-    font-size: clamp(13px, 1.05rem, 21px) !important;
+    font-size: clamp(11px, 1rem, 19px) !important;
     font-weight: 500 !important;
   }
   
   .product-type-header .text-container {
-    font-size: clamp(12px, 1.1rem, 20px) !important;
+    font-size: clamp(10px, 1.05rem, 18px) !important;
     font-weight: 500 !important;
   }
   
@@ -10512,34 +10505,8 @@ body.modal-open #mainContent.store-selection-disabled,
   }
   
   .weight-header .text-container {
-    font-size: clamp(12px, 1.1rem, 20px) !important;
+    font-size: clamp(10px, 1.05rem, 18px) !important;
     font-weight: 500 !important;
-  }
-
-  /* Make the price header more prominent */
-  /* Price header styling - apply to header text node as well as text-container */
-  .price-header {
-    font-size: clamp(14px, 1.5rem, 26px) !important;
-    font-weight: 600 !important;
-    padding: 6px 8px !important;
-    align-items: center !important;
-    gap: 8px !important;
-  }
-  .price-header .text-container {
-    font-size: inherit !important;
-    font-weight: inherit !important;
-  }
-  .price-header .collapse-icon {
-    font-size: 1.05em !important;
-    font-weight: 700 !important;
-    margin-left: 8px !important;
-  }
-  /* Slightly enlarge the select-all checkbox inside price header */
-  .price-header input.select-all-checkbox {
-    width: 20px !important;
-    height: 20px !important;
-    transform: scale(1.15) !important;
-    margin-right: 6px !important;
   }
   
   /* Template-specific font sizing */
@@ -10561,8 +10528,8 @@ body.modal-open #mainContent.store-selection-disabled,
   
   /* Price and weight specific sizing */
   .price-text {
-    font-size: clamp(14px, 2.6vw, 28px) !important;
-    font-weight: 700 !important;
+    font-size: clamp(10px, 2.5vw, 20px) !important;
+    font-weight: 600 !important;
   }
   
   .weight-text {
@@ -10762,7 +10729,7 @@ body.modal-open #mainContent.store-selection-disabled,
     border: 1px solid rgba(160, 132, 232, 0.25) !important;
     color: white !important;
     font-weight: 600 !important;
-    font-size: calc(0.85rem + 7px) !important; /* increased so tag list headers are larger */
+    font-size: 0.85rem !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
     letter-spacing: 0.02em !important;
     transition: background 0.2s ease, color 0.2s ease !important;
@@ -12778,90 +12745,3 @@ html, body {
     max-height: calc(var(--tag-list-height) + var(--tag-list-extra-height)) !important;
   }
 }
-
-/* ===== Compact Tag Entries (reduce vertical spacing without changing fonts) ===== */
-/* These overrides prioritize keeping font sizes intact while tightening paddings, gaps, and element sizes. */
-#availableTags .tag-item,
-#selectedTags .tag-item,
-.tag-entry {
-  padding: 4px 6px 4px 28px !important; /* tighter padding */
-  margin-bottom: 4px !important;
-  gap: 6px !important;
-  min-height: 32px !important; /* keep enough room for font */
-  border-radius: 6px !important;
-}
-
-#availableTags .tag-list,
-#selectedTags .tag-list,
-.tag-list {
-  gap: 6px !important;
-  padding: 8px !important;
-}
-
-/* Shrink checkbox container and checkbox visual size while preserving accessibility */
-.tag-item .checkbox-container {
-  width: 34px !important;
-  height: 34px !important;
-  padding: 0 !important;
-  margin-right: 8px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-.tag-item .tag-checkbox {
-  width: 20px !important;
-  height: 20px !important;
-  margin: 0 !important;
-  transform: none !important;
-  flex-shrink: 0 !important;
-}
-
-/* Compact quantity badge and reduce extra spacing */
-.tag-item .quantity-badge {
-  padding: 2px 6px !important;
-  font-size: 0.9em !important;
-  min-width: 28px !important;
-  height: auto !important;
-  margin-right: 6px !important;
-}
-
-.tag-item .tag-info {
-  gap: 6px !important;
-  padding-right: 2px !important;
-}
-
-/* Reduce select and dropdown vertical footprint inside tag items */
-.tag-item .form-select,
-.tag-item .form-select.form-select-sm,
-.tag-item select,
-.tag-item .lineage-dropdown,
-.tag-item .doh-dropdown {
-  padding: 0.15rem 0.35rem !important;
-  min-height: 28px !important;
-  height: auto !important;
-  font-size: 0.9em !important;
-  line-height: 1.1 !important;
-}
-
-/* Tighter tag-name spacing */
-.tag-item .tag-name {
-  margin-right: 6px !important;
-  line-height: 1.1 !important;
-}
-
-/* Ensure compact mode applies to selected list too */
-#selectedTags .tag-item .drag-handle {
-  left: 6px !important;
-  width: 20px !important;
-  height: 20px !important;
-  padding: 2px !important;
-}
-
-/* Minor: reduce hover uplift to keep compact feel */
-.tag-item:hover {
-  transform: translateY(0) !important;
-  box-shadow: 0 6px 12px rgba(160, 132, 232, 0.12) !important;
-}
-
-/* End compact tag entries */

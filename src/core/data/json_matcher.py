@@ -7996,8 +7996,8 @@ class JSONMatcher:
                     score += 3
                 return score
 
-            best_sku_family = max(sku_family_matches, key=score_sku_family_match)
-            best_sku_family = dict(best_sku_family)  # Don't mutate index
+            sku_family_matches.sort(key=score_sku_family_match, reverse=True)
+            best_sku_family = sku_family_matches[0]
             best_sku_family['_match_type'] = 'json_column_sku_family'
             logging.info(f"✅ JSON COLUMN SKU-FAMILY MATCH: '{json_description}' → '{best_sku_family.get('Product Name*', 'Unknown')}'")
             return best_sku_family
@@ -8026,7 +8026,8 @@ class JSONMatcher:
                     score -= 1000
                 return score
 
-            best_match = dict(max(strain_matches, key=score_product_type_match))
+            strain_matches.sort(key=score_product_type_match, reverse=True)
+            best_match = dict(strain_matches[0])
             best_match['_match_type'] = 'json_column_strain'
             logging.info(f"✅ JSON COLUMN STRAIN MATCH: '{extracted_strain}' → '{best_match.get('Product Name*', 'Unknown')}'")
             return best_match

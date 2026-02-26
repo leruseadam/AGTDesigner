@@ -29,39 +29,6 @@
                 padding-left: 8px !important;
             }
         </style>
-        <!-- Emergency visibility override to restore tag list rendering -->
-        <style>
-            /* Ensure containers are visible and can scroll */
-            #availableTags, #selectedTags {
-                display: block !important;
-                height: calc(100vh - 220px) !important;
-                min-height: 28rem !important;
-                max-height: none !important;
-                overflow-y: auto !important;
-                visibility: visible !important;
-            }
-
-            /* Make each tag entry visible and ensure it participates in layout */
-            #availableTags .tag-entry, #availableTags .tag-item, #availableTags .tag-row,
-            #selectedTags .tag-entry, #selectedTags .tag-item, #selectedTags .tag-row {
-                display: block !important;
-                visibility: visible !important;
-                opacity: 1 !important;
-                color: #ffffff !important;
-                background: transparent !important;
-                height: auto !important;
-                flex: 0 0 auto !important;
-                padding: 0.5rem 0.75rem !important;
-            }
-
-            /* Ensure checkboxes and labels show on top */
-            #availableTags .tag-checkbox, #availableTags .form-check-label,
-            #selectedTags .tag-checkbox, #selectedTags .form-check-label {
-                display: inline-block !important;
-                visibility: visible !important;
-                color: #ffffff !important;
-            }
-        </style>
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css">
     
@@ -116,36 +83,5 @@
                 color: #ffffff !important;
             }
         </style>
-        <!-- Immediate strong override to ensure tag lists are taller (cache-proof) -->
-        <style>
-            /* Force taller tag-list containers for troubleshooting and to override cached CSS */
-            #availableTags, #selectedTags {
-                min-height: 28rem !important;
-                max-height: none !important;
-                height: auto !important;
-            }
-        </style>
 </body>
 </html>
-
-<script>
-    // Diagnostic logging (non-intrusive) to help locate missing tags issue
-    window.addEventListener('load', () => {
-        try {
-            const avail = document.getElementById('availableTags');
-            const selected = document.getElementById('selectedTags');
-            console.log('DIAG: #availableTags present?', !!avail);
-            if (avail) {
-                console.log('DIAG: #availableTags children count =', avail.children.length);
-                console.log('DIAG: #availableTags computed height =', window.getComputedStyle(avail).height);
-            }
-            if (selected) {
-                console.log('DIAG: #selectedTags children count =', selected.children.length);
-                console.log('DIAG: #selectedTags computed height =', window.getComputedStyle(selected).height);
-            }
-            const glass = document.querySelector('.glass-card');
-            if (glass) console.log('DIAG: .glass-card computed height =', window.getComputedStyle(glass).height);
-            console.log('DIAG: storeConfirmed variable present?', !!window.storeConfirmed, 'sessionStorage.selected_store=', sessionStorage.getItem('selected_store'));
-        } catch (e) { console.warn('DIAG: logging failed', e); }
-    });
-</script>

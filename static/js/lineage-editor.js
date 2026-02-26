@@ -267,10 +267,7 @@ class StrainLineageEditor {
     createEditorHTML(productCount) {
         return `
             <div class="mb-3">
-                <label for="strainSelect" class="form-label"><strong>Strain:</strong></label>
-                <select class="form-select" id="strainSelect">
-                    <option value="">Loading strains...</option>
-                </select>
+                <label class="form-label"><strong>Strain:</strong> ${this.escapeHtml(this.currentStrain)}</label>
             </div>
             <div class="mb-3">
                 <label class="form-label"><strong>Current Lineage:</strong> ${this.escapeHtml(this.currentLineage || 'None')}</label>
@@ -301,56 +298,6 @@ class StrainLineageEditor {
     }
 
     initializeFormElements() {
-        // Populate and set current strain in the strain select dropdown
-        const strainSelect = document.getElementById('strainSelect');
-        if (strainSelect) {
-            // Fetch list of strains (reuse existing endpoint)
-            fetch('/api/get-all-strains')
-                .then(resp => resp.json())
-                .then(data => {
-                    if (data && data.success && Array.isArray(data.strains)) {
-                        // Build options
-                        strainSelect.innerHTML = '<option value="">-- Select Strain --</option>' +
-                            data.strains.map(s => {
-                                const name = s.strain_name || s.name || '';
-                                const escaped = name.replace(/"/g, '&quot;');
-                                return `<option value="${escaped}">${escaped}</option>`;
-                            }).join('');
-
-                        // Set current strain if provided
-                        if (this.currentStrain) {
-                            // Try to match ignoring case
-                            const match = Array.from(strainSelect.options).find(o => o.value.toLowerCase() === String(this.currentStrain).toLowerCase());
-                            if (match) {
-                                strainSelect.value = match.value;
-                            } else {
-                                // Add current strain as an option if missing
-                                const opt = document.createElement('option');
-                                opt.value = this.currentStrain;
-                                opt.textContent = this.currentStrain;
-                                strainSelect.appendChild(opt);
-                                strainSelect.value = this.currentStrain;
-                            }
-                        }
-
-                        // Update internal currentStrain when user selects a different strain
-                        strainSelect.addEventListener('change', (e) => {
-                            const val = e.target.value;
-                            if (val && val.trim().length > 0) {
-                                this.currentStrain = val;
-                            }
-                        });
-                    } else {
-                        // fallback: show current strain as single option
-                        strainSelect.innerHTML = `<option value=\"${this.escapeHtml(this.currentStrain || '')}\">${this.escapeHtml(this.currentStrain || '-- No strain --')}</option>`;
-                    }
-                })
-                .catch(err => {
-                    console.warn('StrainLineageEditor: Could not load strain list', err);
-                    strainSelect.innerHTML = `<option value=\"${this.escapeHtml(this.currentStrain || '')}\">${this.escapeHtml(this.currentStrain || '-- No strain --')}</option>`;
-                });
-        }
-
         // Set current lineage in select
         const lineageSelect = document.getElementById('lineageSelect');
         if (lineageSelect && this.currentLineage) {
@@ -391,15 +338,13 @@ class StrainLineageEditor {
         
         const lineageSelect = document.getElementById('lineageSelect');
         const customLineage = document.getElementById('customLineage');
-        const strainSelect = document.getElementById('strainSelect');
         
         if (!lineageSelect || !customLineage) {
             this.handleError('Form elements not found');
             return;
         }
 
-        const newLineage = (lineageSelect && lineageSelect.value) || (customLineage && customLineage.value.trim());
-        const strainNameToSave = (strainSelect && strainSelect.value) || this.currentStrain;
+        const newLineage = lineageSelect.value || customLineage.value.trim();
         
         if (!newLineage) {
             this.handleError('Please select or enter a lineage');
@@ -414,8 +359,8 @@ class StrainLineageEditor {
                 saveButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Saving...';
             }
 
-            // Save lineage for the selected strain
-            await this.saveLineage(newLineage, strainNameToSave);
+            // Save lineage
+            await this.saveLineage(newLineage);
             
             // Show success message
             this.showSuccess('Lineage updated successfully!');
@@ -438,16 +383,14 @@ class StrainLineageEditor {
         }
     }
 
-    async saveLineage(newLineage, strainName) {
-        const payload = {
-            strain_name: strainName || this.currentStrain,
-            lineage: newLineage
-        };
-
+    async saveLineage(newLineage) {
         const response = await fetch('/api/set-strain-lineage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                strain_name: this.currentStrain,
+                lineage: newLineage
+            })
         });
         
         if (!response.ok) {

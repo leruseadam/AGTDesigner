@@ -32,11 +32,10 @@ def build_context(record, doc, template_type='vertical'):
     context['ratio_or_thc_cbd'] = record.get('Ratio_or_THC_CBD', '')
     
     # Lineage and DOH
-    # Priority order - sovereign_lineage > canonical_lineage > currentLineage > Lineage
+    # Priority order - canonical_lineage > currentLineage > Lineage
     context['lineage'] = (
-        record.get('sovereign_lineage') or
-        record.get('canonical_lineage') or
-        record.get('currentLineage') or
+        record.get('canonical_lineage') or 
+        record.get('currentLineage') or 
         record.get('Lineage', '')
     )
     context['doh'] = record.get('DOH', '')
