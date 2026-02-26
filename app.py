@@ -12073,6 +12073,36 @@ def get_available_tags():
                 except Exception:
                     pass
 
+        # CRITICAL FIX: If the temp file is gone but we have pre-built tags in the
+        # session-scoped available_tags cache, serve those instead of declaring "no Excel".
+        # This handles PythonAnywhere /tmp cleanup gracefully.
+        if not has_excel_data and session_file_path:
+            # Try the file-specific cache key that was set when tags were built
+            for _ts in (session.get('upload_timestamp', ''), ''):
+                _cb = _get_available_tags_cache_bust()
+                _ck = get_session_cache_key(f'available_tags_{session_file_path}_{_ts}_b{_cb}') if _ts else get_session_cache_key(f'available_tags_{session_file_path}')
+                _cached = cache.get(_ck)
+                if _cached:
+                    logging.info(f"✅ File gone but {len(_cached)} tags in session cache — serving (file-specific fallback)")
+                    safe_fec = make_json_safe(_cached)
+                    response = make_response(jsonify({
+                        'tags': safe_fec,
+                        'total_count': len(safe_fec),
+                        'source': 'excel-cache-fallback'
+                    }))
+                    return compress_response(response)
+            # Also try the generic session available_tags key
+            _generic_cached = cache.get(get_session_cache_key('available_tags'))
+            if _generic_cached:
+                logging.info(f"✅ File gone but {len(_generic_cached)} tags in generic session cache — serving")
+                safe_fec = make_json_safe(_generic_cached)
+                response = make_response(jsonify({
+                    'tags': safe_fec,
+                    'total_count': len(safe_fec),
+                    'source': 'excel-cache-fallback'
+                }))
+                return compress_response(response)
+
         # Prefer Excel uploads for tag lists, but if none is present and a store
         # is selected, attempt a lightweight DB fallback so the UI can still
         # generate labels (useful for quick previews or after server restarts).
