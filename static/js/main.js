@@ -12388,9 +12388,8 @@ const TagManager = {
                     console.warn('Backend returned empty tags with message:', errorMsg);
 
                     // Auto-retry when backend is still loading the file in background
-                    // Also retry for "no excel file" messages — server may just need a moment after restart
                     const lowerMsg = (errorMsg || '').toLowerCase();
-                    const isBackgroundLoading = lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly') || lowerMsg.includes('no excel file');
+                    const isBackgroundLoading = lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly');
                     if (isBackgroundLoading) {
                         this._backgroundProcessingRetries += 1;
                         const maxBgRetries = 12; // ~24s if 2s delay
