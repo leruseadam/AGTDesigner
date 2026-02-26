@@ -1473,13 +1473,7 @@ def _resolve_database_path_for_store(store_name: Optional[str] = None) -> Tuple[
             if normalized_requested and normalized_requested in candidate_normalized:
                 return candidate, candidate_store or store_name
 
-    # 3. Generic database fallback
-    generic_db = os.path.join(uploads_dir, 'product_database.db')
-    if os.path.exists(generic_db):
-        logging.warning(f"Generic product database fallback in use: {generic_db}")
-        return generic_db, store_name
-
-    # 4. Most recent database as final fallback
+    # 3. Most recent database as final fallback
     if candidate_paths:
         newest_path = max(candidate_paths, key=os.path.getmtime)
         inferred_store = os.path.basename(newest_path).replace('product_database_', '').replace('.db', '')
@@ -7577,16 +7571,13 @@ def debug_database():
         # Check which database would be loaded
         db_info = {}
         
-        # Check default database
-        default_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        # Check current store database
+        resolved_db_path, _ = resolve_db_path(session_store, os.path.join(current_dir, 'uploads'))
         db_info['default_db'] = {
-            'path': default_db_path,
-            'exists': os.path.exists(default_db_path),
-            'size': os.path.getsize(default_db_path) if os.path.exists(default_db_path) else 0
+            'path': resolved_db_path,
+            'exists': os.path.exists(resolved_db_path) if resolved_db_path else False,
+            'size': os.path.getsize(resolved_db_path) if resolved_db_path and os.path.exists(resolved_db_path) else 0
         }
-        
-        # Check store-specific database
-        # Store context removed - using single database
         
         # Check global database instance
         global _product_database
@@ -11246,7 +11237,7 @@ def generate_labels():
         
         # Set proper download filename with headers
         response = set_download_filename(response, filename)
-        response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        response.headers['                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
         _total_time = time.time() - _start_time
         logging.info(f"⏱️ PERFORMANCE: Total generation time {_total_time:.2f}s for {len(records)} records ({_total_time/len(records):.3f}s per record)")
@@ -12021,6 +12012,7 @@ def get_available_tags():
         # Read-only fallback: if the session does not have a file_path (cookie may be blocked),
         # use the persisted .last_upload.json value for this request only (do NOT mutate session).
         persisted_fallback_path = None
+        persisted_store = None
         if not session_file_path:
             try:
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
@@ -12030,7 +12022,22 @@ def get_available_tags():
                         candidate = _sanitize_persisted_path(last_upload.get('file_path'))
                         if candidate and os.path.exists(candidate):
                             persisted_fallback_path = os.path.normpath(candidate)
+                            persisted_store = last_upload.get('store')
                             logging.info(f"ℹ️ Using persisted upload file for request (no session): {persisted_fallback_path}")
+                            # CRITICAL FIX: Auto-restore session from persisted upload to prevent DB fallback
+                            # This fixes the issue where lineage updates clear cache but session is lost
+                            session['file_path'] = persisted_fallback_path
+                            session['uploaded_filename'] = last_upload.get('filename', os.path.basename(persisted_fallback_path))
+                            session['upload_timestamp'] = last_upload.get('timestamp', time.time())
+                            session['store_name'] = persisted_store
+                            # CRITICAL: Also restore lineage_update_timestamp to trigger fresh lineage reload
+                            lineage_ts = last_upload.get('lineage_update_timestamp')
+                            if lineage_ts:
+                                session['lineage_update_timestamp'] = lineage_ts
+                                logging.info(f"✅ Restored lineage_update_timestamp from persisted upload: {lineage_ts}")
+                            session.modified = True
+                            session_file_path = persisted_fallback_path  # Update for subsequent checks
+                            logging.info(f"✅ Restored session from persisted upload: {os.path.basename(persisted_fallback_path)}")
             except Exception as _pf_err:
                 logging.debug(f"Could not read persisted fallback upload file: {_pf_err}")
         # Effective file path for this request (prefer session, fall back to persisted file)
@@ -12051,7 +12058,13 @@ def get_available_tags():
         # Only trust file existence and session state to prevent serving wrong user's data
         # The processor is not session-safe and can contain data from other users
         # Treat persisted fallback as valid excel data for this request even if session cookie missing
+        # CRITICAL FIX: If we just restored from persisted, trust that it's valid (we already checked file exists)
         has_excel_data = file_exists and bool(effective_file_path)
+        if not has_excel_data and persisted_fallback_path and persisted_fallback_path == effective_file_path:
+            # We verified the persisted file exists during fallback - trust it
+            has_excel_data = True
+            file_exists = True
+            logging.info(f"✅ Using persisted file as Excel data source (verified exists): {os.path.basename(effective_file_path)}")
         logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)}, persisted_fallback={bool(persisted_fallback_path)})")
 
         # DISABLED: Do not automatically load default file - require explicit upload
@@ -12086,27 +12099,52 @@ def get_available_tags():
             except Exception as mem_fallback_err:
                 logging.warning(f"In-memory processor fallback failed: {mem_fallback_err}")
 
-        # CRITICAL: Only clear stale session if we don't have processor data
-        # If file doesn't exist but session says it should, clear the stale session
+        # CRITICAL: If session file path is stale (file missing), fall back to persisted path before clearing session
         if not file_exists and session_file_path and not has_excel_data:
-            logging.warning(f"⚠️ Session file path exists but file missing: {session_file_path}")
-            logging.info("🧹 Clearing stale session file path")
-            session.pop('file_path', None)
-            session.pop('uploaded_filename', None)
-            session.modified = True
-            has_excel_data = False
-        
+            # persisted_fallback_path was only read above when session was empty; re-read it now
+            _recovered_persisted = persisted_fallback_path
+            if not _recovered_persisted:
+                try:
+                    _pf = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                    if os.path.exists(_pf):
+                        _lu = _robust_load_persistent_json(_pf)
+                        if _lu:
+                            _candidate = _sanitize_persisted_path(_lu.get('file_path'))
+                            if _candidate and os.path.exists(_candidate):
+                                _recovered_persisted = os.path.normpath(_candidate)
+                                persisted_store = _lu.get('store')
+                except Exception:
+                    pass
+            if _recovered_persisted and os.path.exists(_recovered_persisted):
+                logging.info(f"⚠️ Session file missing, recovering from persisted fallback: {_recovered_persisted}")
+                effective_file_path = _recovered_persisted
+                file_exists = True
+                has_excel_data = True
+                # Update session to the valid persisted path
+                session['file_path'] = _recovered_persisted
+                session['uploaded_filename'] = os.path.basename(_recovered_persisted)
+                session.modified = True
+            else:
+                logging.warning(f"⚠️ Session file path exists but file missing and no persisted fallback: {session_file_path}")
+                logging.info("🧹 Clearing stale session file path")
+                session.pop('file_path', None)
+                session.pop('uploaded_filename', None)
+                session.modified = True
+                has_excel_data = False
+
         # CRITICAL FIX: If processor was cleared after lineage update, try to reload from the effective file path
         # (session or persisted fallback). This prevents tags from disappearing after lineage updates.
+        # Use persisted_store if available (more reliable than session after cache clears)
+        reload_store_name = persisted_store if persisted_store else store_name
         if not has_excel_data and effective_file_path:
             # Check if file exists
             file_actually_exists = os.path.exists(effective_file_path) if effective_file_path else False
 
             if file_actually_exists:
                 try:
-                    logging.info(f"🔄 Processor was cleared - reloading from file: {effective_file_path}")
+                    logging.info(f"🔄 Processor was cleared - reloading from file: {effective_file_path} (store={reload_store_name})")
                     from src.core.data.excel_processor import ExcelProcessor
-                    reloaded_processor = ExcelProcessor(store_name=store_name)
+                    reloaded_processor = ExcelProcessor(store_name=reload_store_name)
                     if reloaded_processor.load_file(effective_file_path):
                         if reloaded_processor.df is not None and not reloaded_processor.df.empty:
                             has_excel_data = True
@@ -15918,6 +15956,112 @@ def update_strain_lineage():
         logging.error(f"Error updating strain lineage: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/update-lineage-by-vendor', methods=['POST'])
+def update_lineage_by_vendor():
+    """Update lineage for all products from the same vendor/brand."""
+    try:
+        data = request.get_json() if request.is_json else {}
+        tag_name = data.get('tag_name')
+        new_lineage = data.get('lineage')
+        vendor_name = data.get('vendor')  # Product Brand
+        
+        if not tag_name or not new_lineage:
+            return jsonify({'success': False, 'error': 'Missing tag_name or lineage'}), 400
+        
+        if not vendor_name:
+            return jsonify({'success': False, 'error': 'Missing vendor name'}), 400
+        
+        store_name = get_current_store_name()
+        if not store_name:
+            return jsonify({'success': False, 'error': 'No store selected'}), 400
+        
+        # Get the Excel processor to find all products with this vendor
+        excel_processor = get_session_excel_processor()
+        if not excel_processor or excel_processor.df is None:
+            return jsonify({'success': False, 'error': 'No data loaded'}), 400
+        
+        df = excel_processor.df
+        
+        # Find all products with the same Product Brand
+        brand_mask = (
+            (df['Product Brand'].astype(str).str.strip() == str(vendor_name).strip()) |
+            (df.get('ProductBrand', pd.Series()).astype(str).str.strip() == str(vendor_name).strip())
+        )
+        
+        matching_products = df.loc[brand_mask]
+        product_names = matching_products['Product Name*'].tolist()
+        
+        if len(product_names) == 0:
+            return jsonify({'success': False, 'error': f'No products found for vendor: {vendor_name}'}), 404
+        
+        logging.info(f"🔄 Updating lineage to '{new_lineage}' for {len(product_names)} products from vendor '{vendor_name}'")
+        
+        # Get ProductDatabase for updates
+        product_db = get_product_database(store_name)
+        if not product_db:
+            return jsonify({'success': False, 'error': 'Product database not available'}), 500
+        
+        conn = product_db._get_connection()
+        cursor = conn.cursor()
+        
+        # Update each product
+        products_updated = 0
+        failed_updates = []
+        
+        for product_name in product_names:
+            try:
+                # Update using variant matching
+                variant_updated = _update_product_lineage_by_variants(cursor, product_db, product_name, new_lineage)
+                if variant_updated > 0:
+                    products_updated += variant_updated
+                else:
+                    # Try seeding from Excel if not found in DB
+                    product_mask = df['Product Name*'] == product_name
+                    if product_mask.any():
+                        row_dict = df.loc[product_mask].iloc[0].to_dict()
+                        product_db.add_or_update_product(row_dict)
+                        seeded_updated = _update_product_lineage_by_variants(cursor, product_db, product_name, new_lineage)
+                        if seeded_updated > 0:
+                            products_updated += seeded_updated
+                        else:
+                            failed_updates.append(product_name)
+                    else:
+                        failed_updates.append(product_name)
+            except Exception as e:
+                logging.warning(f"Failed to update lineage for product '{product_name}': {e}")
+                failed_updates.append(product_name)
+        
+        # Commit changes
+        try:
+            conn.commit()
+            logging.info(f"✅ Successfully updated lineage for {products_updated} products from vendor '{vendor_name}'")
+        except Exception as commit_err:
+            logging.error(f"Failed to commit vendor lineage changes: {commit_err}")
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Failed to commit changes'}), 500
+        
+        # Clear only the lineage cache — do NOT bust available-tags cache.
+        # The JS already updates all vendor tags in-memory, so a full reload is unnecessary
+        # and causes a slow full-DB fetch on the next available-tags request.
+        try:
+            from src.core.data.product_database import clear_lineage_cache
+            clear_lineage_cache(None)  # Clear lineage cache so fresh values are returned on next DB read
+            logging.info(f"✅ Cleared lineage cache after vendor-wide lineage update")
+        except Exception as cache_err:
+            logging.warning(f"Could not clear lineage cache: {cache_err}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Updated {products_updated} products from vendor {vendor_name}',
+            'products_updated': products_updated,
+            'product_names': product_names,
+            'failed_updates': failed_updates if failed_updates else None
+        })
+        
+    except Exception as e:
+        logging.error(f"Error updating lineage by vendor: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/batch-update-lineage', methods=['POST'])
 def batch_update_lineage():
     """Update lineages for multiple tags in a single operation (more efficient)."""
@@ -18395,33 +18539,14 @@ def database_analytics():
                 'summary': {'total_products': 0}
             }), 500
         
-        # Test database connection and fallback if needed
+        # Test database connection
         try:
             test_conn = create_db_connection(product_db.db_path)
             test_cursor = test_conn.cursor()
             test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
             if not test_cursor.fetchone():
                 logging.error(f"Products table not found in database at {product_db.db_path}")
-                # Fall back to main database
-                logging.info("Falling back to main database for analytics")
-                # Create main database instance directly (don't clear the global variable!)
-                from src.core.data.product_database import ProductDatabase
-                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                product_db = ProductDatabase(main_db_path)
-                if not product_db._initialized:
-                    product_db.init_database()
-                # Update the global reference to use the main database
-                global _product_database
-                _product_database = product_db
-                # Test main database
-                test_conn = create_db_connection(product_db.db_path)
-                test_cursor = test_conn.cursor()
-                test_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                if not test_cursor.fetchone():
-                    logging.error("Products table not found in main database either")
-                    return jsonify({'error': 'Products table not found in any database'}), 500
-                test_conn.close()
-                logging.info(f"Successfully fell back to main database: {product_db.db_path}")
+                return jsonify({'error': 'Products table not found in database'}), 500
             test_conn.close()
         except Exception as test_error:
             logging.error(f"Database connection test failed: {test_error}")
@@ -18751,30 +18876,17 @@ def get_database_products():
         store_name = get_current_store_name()
         product_db = get_product_database(store_name)
         
-        # Ensure we have a usable database; fallback to main DB if products table missing or empty
+        # Validate the store database has a products table
         try:
             import sqlite3
-            needs_fallback = False
             with db_connection(product_db.db_path) as test_conn:
                 cur = test_conn.cursor()
                 cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
                 if not cur.fetchone():
-                    needs_fallback = True
-                else:
-                    cur.execute('SELECT COUNT(*) FROM products')
-                    count = cur.fetchone()[0]
-                    if count == 0:
-                        needs_fallback = True
-            if needs_fallback:
-                # Fallback to main database file co-located with uploads
-                logging.info("[DB EDITOR] Falling back to main product database for /api/database-products")
-                from src.core.data.product_database import ProductDatabase
-                main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-                product_db = ProductDatabase(main_db_path)
-                if not product_db._initialized:
-                    product_db.init_database()
+                    logging.error(f"[DB EDITOR] Products table not found in {product_db.db_path}")
+                    return jsonify({'error': 'Products table not found in database'}), 500
         except Exception as fallback_error:
-            logging.warning(f"[DB EDITOR] Database fallback check failed: {fallback_error}")
+            logging.warning(f"[DB EDITOR] Database validation check failed: {fallback_error}")
         
         # Get query parameters
         page = int(request.args.get('page', 0))
@@ -18961,38 +19073,11 @@ def get_database_products():
 
 def _get_editor_database():
     """
-    Helper to obtain a usable ProductDatabase instance for the editor,
-    applying the same fallback logic used by /api/database-products.
+    Helper to obtain a usable ProductDatabase instance for the editor.
+    Always uses the current store's database — no generic fallback.
     """
     store_name = get_current_store_name()
-    product_db = get_product_database(store_name)
-
-    # Reuse the fallback logic from get_database_products to ensure we are
-    # always talking to a real products table.
-    try:
-        import sqlite3
-        needs_fallback = False
-        with db_connection(product_db.db_path) as test_conn:
-            cur = test_conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-            if not cur.fetchone():
-                needs_fallback = True
-            else:
-                cur.execute('SELECT COUNT(*) FROM products')
-                count = cur.fetchone()[0]
-                if count == 0:
-                    needs_fallback = True
-        if needs_fallback:
-            logging.info("[DB EDITOR] Falling back to main product database for editor write operation")
-            from src.core.data.product_database import ProductDatabase
-            main_db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
-            product_db = ProductDatabase(main_db_path)
-            if not product_db._initialized:
-                product_db.init_database()
-    except Exception as fallback_error:
-        logging.warning(f"[DB EDITOR] Database fallback check (editor helper) failed: {fallback_error}")
-
-    return product_db
+    return get_product_database(store_name)
 
 
 @app.route('/api/database-product/<int:product_id>', methods=['PUT'])
@@ -25031,8 +25116,11 @@ def upload_database_file():
         if file_size > 500 * 1024 * 1024:  # 500MB limit
             return jsonify({'error': 'File too large. Maximum size is 500 MB'}), 400
         
-        # Save the database file directly in uploads directory
-        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        # Save the database file to the current store's database path
+        store_name = get_current_store_name()
+        db_file_path, _ = resolve_db_path(store_name, os.path.join(current_dir, 'uploads'))
+        if not db_file_path:
+            db_file_path = os.path.join(current_dir, 'uploads', f'product_database_{store_name}.db')
         file.save(db_file_path)
         
         # Verify the database file
@@ -25081,8 +25169,11 @@ def setup_database_endpoint():
         import sqlite3
         from datetime import datetime
         
-        # Database file path - save directly in uploads directory
-        db_file_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        # Database file path - use current store's database
+        store_name = get_current_store_name()
+        db_file_path, _ = resolve_db_path(store_name, os.path.join(current_dir, 'uploads'))
+        if not db_file_path:
+            db_file_path = os.path.join(current_dir, 'uploads', f'product_database_{store_name}.db')
         
         # Create a new database with sample data
         conn = create_db_connection(db_file_path)
@@ -26273,8 +26364,10 @@ def upload_database_chunk():
             # Decompress the reconstructed database
             reconstruction_path = os.path.join(UPLOADS_DIR, 'database_reconstruction.gz')
             new_db_path = os.path.join(UPLOADS_DIR, 'product_database_new.db')
-            current_db_path = os.path.join(UPLOADS_DIR, 'product_database.db')
-            backup_db_path = os.path.join(UPLOADS_DIR, 'product_database_backup.db')
+            store_name = get_current_store_name()
+            resolved_db, _ = resolve_db_path(store_name, UPLOADS_DIR)
+            current_db_path = resolved_db or os.path.join(UPLOADS_DIR, f'product_database_{store_name}.db')
+            backup_db_path = current_db_path + '.backup'
 
             with gzip.open(reconstruction_path, 'rb') as f_in:
                 with open(new_db_path, 'wb') as f_out:
@@ -27006,8 +27099,11 @@ def backfill_units():
                 logging.error(f"Error reading Excel file {excel_file_path}: {e}")
                 return {}
         
-        # Get database path - using main database
-        db_path = os.path.join(current_dir, 'uploads', 'product_database.db')
+        # Get database path - using current store's database
+        store_name = get_current_store_name()
+        db_path, _ = resolve_db_path(store_name, os.path.join(current_dir, 'uploads'))
+        if not db_path:
+            db_path = os.path.join(current_dir, 'uploads', f'product_database_{store_name}.db')
         
         if not os.path.exists(db_path):
             return jsonify({'error': 'Database not found'}), 400

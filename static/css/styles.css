@@ -285,8 +285,11 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 
 /* Normal scaling for key UI elements */
 .tag-item, .tag-entry {
-  font-size: 28px !important; /* +3pt total (previous +1pt, plus +2pt) */
-  min-height: 2.5rem !important;
+  font-size: 28px !important;
+  min-height: 0 !important;
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+  margin-bottom: 2px !important;
 }
 
 /* Force larger font size for all tag content globally */
@@ -300,8 +303,23 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 #selectedTags .tag-name,
 #selectedTags .tag-row,
 #selectedTags .tag-item * {
-  font-size: 30px !important; /* +3pt total (previous +1pt, plus +2pt) */
-  line-height: 1.5 !important;
+  font-size: 30px !important;
+  line-height: 1.2 !important;
+}
+
+/* Compact tag item dropdowns — override global 38px min-height */
+.tag-item .lineage-dropdown,
+.tag-item .lineage-dropdown-mini,
+.tag-item .doh-dropdown,
+.tag-item .doh-dropdown-mini,
+.tag-entry .lineage-dropdown,
+.tag-entry .lineage-dropdown-mini,
+.tag-entry .doh-dropdown,
+.tag-entry .doh-dropdown-mini {
+  min-height: 0 !important;
+  height: auto !important;
+  padding-top: 1px !important;
+  padding-bottom: 1px !important;
 }
 
 /* Highlight items with 5 or more units */
@@ -2309,6 +2327,7 @@ body.modal-open #mainContent.store-selection-disabled,
     flex-grow: 1 !important;
     flex-shrink: 0 !important;
     pointer-events: auto !important;
+    font-size: 14px !important; /* Match availableTags base so em units resolve identically */
   }
   
   /* Ensure selected tags container can expand to show all content */
@@ -3877,6 +3896,52 @@ body.modal-open #mainContent.store-selection-disabled,
 .saved-lists-btn .saved-lists-label { display: none !important; }
 .saved-lists-btn { min-width: 34px !important; width: 34px !important; padding: 0 !important; }
 */
+
+/* Collapse All button in tag list headers */
+.btn-collapse-all {
+  padding: 0.35rem 0.6rem !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  line-height: 1 !important;
+  font-size: 0.85rem !important;
+  border-radius: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.4rem !important;
+  box-sizing: border-box !important;
+  flex: 0 0 auto !important;
+  white-space: nowrap !important;
+  background: rgba(108, 117, 125, 0.1) !important;
+  border: 1px solid rgba(108, 117, 125, 0.2) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  transition: all 0.2s ease !important;
+  font-weight: 500 !important;
+}
+
+.btn-collapse-all:hover {
+  background: rgba(108, 117, 125, 0.2) !important;
+  border-color: rgba(108, 117, 125, 0.4) !important;
+  color: rgba(255, 255, 255, 1) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-collapse-all:active {
+  transform: translateY(0) !important;
+  background: rgba(108, 117, 125, 0.3) !important;
+}
+
+.btn-collapse-all svg {
+  width: 14px !important;
+  height: 14px !important;
+  flex-shrink: 0 !important;
+}
+
+.btn-collapse-all span {
+  font-size: 0.85rem !important;
+  line-height: 1 !important;
+}
+
   /* Tag items with dropdowns */
   .tag-row {
     margin-bottom: 0 !important;
@@ -4915,19 +4980,35 @@ body.modal-open #mainContent.store-selection-disabled,
   gap: 0.6rem !important;
 }
   /* Select All checkbox styling - no extra scaling needed, already 32px */
-  #selectAllAvailable {
+  #selectAllAvailable,
+  #selectAllSelected {
     margin-right: 8px;
     opacity: 1 !important;
     visibility: visible !important;
   }
 
-  #selectAllAvailable + span {
+  #selectAllAvailable + span,
+  #selectAllSelected + span {
     font-weight: 600;
     color: #fff !important;
     text-shadow: 0 1px 3px rgba(0,0,0,0.3);
     opacity: 1 !important;
     visibility: visible !important;
     font-size: 1.15rem;
+  }
+
+  /* Sticky SELECT ALL row — stays at top of scroll container */
+  .select-all-sticky-row {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 20 !important;
+    background: rgba(45, 34, 58, 0.97) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+    backdrop-filter: blur(8px) !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    margin-bottom: 8px !important;
+    border-bottom: 1px solid rgba(160, 132, 232, 0.25) !important;
   }
 
   /* Select All container styling - Enhanced visibility */
@@ -6982,15 +7063,6 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: 700 !important;
   }
 
-  /* Reduce vendor header font size in selected tags list */
-  #selectedTags .vendor-section > .vendor-header,
-  #selectedTags .vendor-section > .vendor-header h5,
-  #selectedTags .vendor-section > .vendor-header.d-flex,
-  #selectedTags .vendor-section > .vendor-header.mb-2,
-  #selectedTags .vendor-section > .vendor-header.cursor-pointer {
-    font-size: 1.225em !important; /* Increased by 0.125em (~2px) */
-    font-weight: 700 !important;
-  }
 
   /* Brand (second-level) */
   .brand-section > .brand-header {
@@ -10295,6 +10367,7 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Select All checkbox 3D styling - BIGGER */
   .select-all-checkbox,
   #selectAllAvailable,
+  #selectAllSelected,
   input[type="checkbox"].brand-select-all {
     width: 32px !important;
     height: 32px !important;
@@ -10318,6 +10391,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   .select-all-checkbox:hover,
   #selectAllAvailable:hover,
+  #selectAllSelected:hover,
   input[type="checkbox"].brand-select-all:hover {
     background: linear-gradient(145deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.2)) !important;
     border-color: rgba(160, 132, 232, 1) !important;
@@ -10331,6 +10405,7 @@ body.modal-open #mainContent.store-selection-disabled,
   
   .select-all-checkbox:checked,
   #selectAllAvailable:checked,
+  #selectAllSelected:checked,
   input[type="checkbox"].brand-select-all:checked {
     background: linear-gradient(135deg, #a084e8 0%, #8b5cf6 100%) !important;
     border-color: rgba(160, 132, 232, 1) !important;
@@ -10404,12 +10479,6 @@ body.modal-open #mainContent.store-selection-disabled,
     font-weight: 700 !important;
   }
 
-  /* Reduce vendor font size in selected tags list */
-  #selectedTags .vendor-section > .vendor-header .vendor-title,
-  #selectedTags .vendor-header .vendor-title {
-    font-size: 1.225em !important; /* Increased by 0.125em (~2px) */
-    font-weight: 700 !important;
-  }
 
   /* Unified Font Sizing System - Prevents Word Splitting */
   
@@ -12924,7 +12993,17 @@ html, body {
 #availableTags .vendor-title,
 #availableTags .brand-title,
 #availableTags .product-type-title,
-#availableTags .weight-title {
+#availableTags .weight-title,
+#selectedTags .vendor-header,
+#selectedTags .brand-header,
+#selectedTags .product-type-header,
+#selectedTags .subcategory-header,
+#selectedTags .weight-header,
+#selectedTags .container-label,
+#selectedTags .vendor-title,
+#selectedTags .brand-title,
+#selectedTags .product-type-title,
+#selectedTags .weight-title {
   text-transform: none !important;
 }
 /* ── END NO ALL-CAPS ─────────────────────────────────────────────────────── */

@@ -4611,8 +4611,11 @@ const TagManager = {
             
             // COMBINE subcategory with weight to save space (e.g., "1g - 510" instead of separate levels)
             // For vape products with subcategory, combine subcategory with weight
-            let combinedWeightKey = normalizedTag.weightWithUnits;
-            if (normalizedTag.subcategory) {
+            // For pre-rolls, use JointRatio (e.g., "1g x 5 Pack") instead of plain weight
+            const isPreRoll = normalizedTag.productType && normalizedTag.productType.toLowerCase().replace(/[\s-]/g, '').includes('preroll');
+            const jointRatio = (tag.JointRatio || tag['Joint Ratio'] || '').toString().trim();
+            let combinedWeightKey = (isPreRoll && jointRatio) ? jointRatio : normalizedTag.weightWithUnits;
+            if (!isPreRoll && normalizedTag.subcategory) {
                 // Format: "weight - subcategory" (e.g., "1g - 510", "1g - Disposable")
                 combinedWeightKey = `${normalizedTag.weightWithUnits} - ${normalizedTag.subcategory}`;
             }
@@ -6338,7 +6341,7 @@ const TagManager = {
 
         // Add "Select All" checkbox
         const selectAllContainer = document.createElement('div');
-        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3';
+        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3 select-all-sticky-row';
         selectAllContainer.innerHTML = `
             <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
                 <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
@@ -7235,7 +7238,7 @@ const TagManager = {
         availableTagsContainer.appendChild(listWrapper);
 
         const selectAllContainer = document.createElement('div');
-        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3';
+        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3 select-all-sticky-row';
         selectAllContainer.innerHTML = `
             <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
                 <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
@@ -7770,9 +7773,12 @@ const TagManager = {
 
         const hasCbdIndicator = () => {
             // Check for all CBD family cannabinoids: CBD, CBG, CBN, CBC
+            // Use word boundaries to avoid false matches (e.g. "abc" containing "bc")
+            // Do NOT include lineageStr — lineage is already resolved above and checked separately
             const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
-            const sources = [nameStr, descStr, brandStr, ratioStr, lineageStr];
-            if (tokens.some(token => sources.some(text => text && text.includes(token)))) {
+            const sources = [nameStr, descStr, brandStr, ratioStr];
+            const tokenRegex = new RegExp(`\\b(${tokens.join('|')})\\b`);
+            if (sources.some(text => text && tokenRegex.test(text))) {
                 return true;
             }
             // Ratio patterns (1:1, 2:1, 1:1:1, etc.) in name or ratio mean CBD
@@ -10602,7 +10608,7 @@ const TagManager = {
         } else {
             // Create select all container if it doesn't exist
             const selectAllContainer = document.createElement('div');
-            selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3';
+            selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3 select-all-sticky-row';
             selectAllContainer.innerHTML = `
                 <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
                     <input type="checkbox" id="selectAllSelected" class="custom-checkbox">

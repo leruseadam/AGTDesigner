@@ -136,24 +136,20 @@ function createTagRow(tag) {
   const productNameForCbd = tag['Product Name*'] || tag.ProductName || '';
   const productStrainForCbd = tag['Product Strain'] || tag.productStrain || '';
   const nameAndStrainLower = (productNameForCbd + ' ' + productStrainForCbd).toLowerCase();
-  const hasCbdIndicator = ['cbd', 'cbn', 'cbg', 'cbc'].some(token => nameAndStrainLower.includes(token));
+  const hasCbdIndicator = ['cbd', 'cbn', 'cbg', 'cbc'].some(token => new RegExp('\\b' + token + '\\b').test(nameAndStrainLower));
 
-  // CBD indicators override lineage for all product types unless an explicit classic lineage is set
-  // Classic types: CBD in name → 'CBD' (yellow), unless DB already has SATIVA/INDICA/HYBRID/etc.
-  // Non-classic types: CBD in name → 'CBD_BLEND' (yellow), regardless of DB value
+  // CBD indicators override lineage only when no explicit classic lineage is already set
   if (hasCbdIndicator) {
     if (isClassicType) {
       // Only override if DB doesn't have an explicit non-CBD classic lineage
       if (!lineage || lineage === 'MIXED' || lineage === 'THC' || lineage === 'CBD_BLEND') {
         lineage = 'CBD';
       }
-      // If DB has SATIVA/INDICA/HYBRID, respect it — user set it intentionally
+      // If DB has SATIVA/INDICA/HYBRID/HYBRID_SATIVA/HYBRID_INDICA, respect it
     } else {
-      // Non-classic types with CBD indicators always show CBD_BLEND (yellow)
       lineage = 'CBD_BLEND';
     }
   } else if (!lineage) {
-    // Only set default if lineage is completely missing
     lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
     // CRITICAL FIX: Extract DOH status and normalize it consistently (same as TagsTable.createTagRow)
@@ -595,24 +591,24 @@ class TagsTable {
     }
 
     return `
-      <div class="tag-item d-flex align-items-center p-2 mb-2" 
+      <div class="tag-item d-flex align-items-center px-2 mb-0"
            data-tag-name="${safeTagName}" 
            data-lineage="${lineage}"
            data-doh="${dohStatus}"
            style="background: ${color}; cursor: pointer;">
-        <div class="checkbox-container me-2">
-          <input type="checkbox" 
-                 class="tag-checkbox" 
+        <div class="checkbox-container me-1">
+          <input type="checkbox"
+                 class="tag-checkbox"
                  id="${safeId}"
                  data-tag-name="${safeTagName}"
                  value="${safeTagName}"
                  ${isSelected ? 'checked' : ''}>
         </div>
-        <div class="quantity-badge me-2">${tag.Quantity || tag.quantity || ''}</div>
+        <div class="quantity-badge me-1">${tag.Quantity || tag.quantity || ''}</div>
         <div class="tag-info flex-grow-1">
           <div class="d-flex align-items-center">
-            <label class="tag-name me-3" for="${safeId}">${tagName}${dohImageHtml}</label>
-            <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini" 
+            <label class="tag-name me-2" for="${safeId}">${tagName}${dohImageHtml}</label>
+            <select class="form-select form-select-sm lineage-dropdown lineage-dropdown-mini"
                     onchange="TagsTable.handleLineageChange(this, '${safeTagName}')">
               ${dropdownOptions}
             </select>
@@ -664,47 +660,75 @@ class TagsTable {
     const tagRow = selectElement.closest(".tag-item") || selectElement.closest(".tag-row");
     const oldLineage = tagRow?.dataset.lineage || 'MIXED';
 
-    console.log(`🔄 Updating lineage for ${tagName}: ${oldLineage} → ${newLineage}`);
+    // Get vendor from state for vendor-wide update
+    let vendorName = null;
+    if (window.TagManager && window.TagManager.state) {
+      const tag = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName);
+      if (tag) {
+        vendorName = tag['Product Brand'] || tag['ProductBrand'] || tag['productBrand'] || tag['Brand'] || tag['brand'];
+      }
+    }
+
+    const endpoint = vendorName ? "/api/update-lineage-by-vendor" : "/api/update-lineage";
+    const payload = vendorName
+      ? { tag_name: tagName, lineage: newLineage, vendor: vendorName }
+      : { tag_name: tagName, lineage: newLineage };
+
+    if (vendorName) {
+      console.log(`🔄 Updating lineage for ALL products from vendor "${vendorName}": ${oldLineage} → ${newLineage}`);
+    } else {
+      console.log(`🔄 Updating lineage for "${tagName}": ${oldLineage} → ${newLineage}`);
+    }
 
     try {
-      const response = await fetch("/api/update-lineage", {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tag_name: tagName, lineage: newLineage })
+        body: JSON.stringify(payload)
       });
-      
+
       const data = await response.json();
-      
-      if (!response.ok) {
-        console.error(`❌ API Error: ${data.error || "Failed to update lineage"}`);
-        throw new Error(data.error || "Failed to update lineage");
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || data.message || "Failed to update lineage");
       }
-      
-      if (!data.success) {
-        console.error(`❌ Update failed: ${data.message || data.error || "Unknown error"}`);
-        throw new Error(data.message || data.error || "Failed to update lineage");
-      }
-      
-      // Update the local UI dataset
-      if (tagRow) {
-        tagRow.dataset.lineage = newLineage;
-      }
-      
-      // Update the tag in the main state
-      if (window.TagManager && window.TagManager.state) {
-        const tag = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName);
-        if (tag) {
+
+      // Update UI state — all vendor tags if vendor-wide, otherwise just this tag
+      if (vendorName && window.TagManager && window.TagManager.state) {
+        const allTagRows = document.querySelectorAll('.tag-item, .tag-row');
+        for (const tag of window.TagManager.state.tags) {
+          const tagVendor = tag['Product Brand'] || tag['ProductBrand'] || tag['productBrand'] || tag['Brand'] || tag['brand'];
+          if (tagVendor !== vendorName) continue;
           tag.sovereign_lineage = newLineage;
           tag.currentLineage = newLineage;
           tag.canonical_lineage = newLineage;
           tag.Lineage = newLineage;
+          const productName = tag['Product Name*'];
+          for (const row of allTagRows) {
+            const rowName = row.dataset.productName || row.querySelector('.tag-name')?.textContent?.trim();
+            if (rowName === productName) {
+              row.dataset.lineage = newLineage;
+              const sel = row.querySelector('select.lineage-dropdown');
+              if (sel && sel.value !== newLineage) sel.value = newLineage;
+            }
+          }
         }
+        console.log(`✅ Updated ${data.products_updated} products from vendor "${vendorName}"`);
+      } else {
+        if (tagRow) tagRow.dataset.lineage = newLineage;
+        if (window.TagManager && window.TagManager.state) {
+          const tag = window.TagManager.state.tags.find(t => t['Product Name*'] === tagName);
+          if (tag) {
+            tag.sovereign_lineage = newLineage;
+            tag.currentLineage = newLineage;
+            tag.canonical_lineage = newLineage;
+            tag.Lineage = newLineage;
+          }
+        }
+        console.log(`✅ Lineage updated for "${tagName}"`);
       }
-      
-      console.log(`✅ Lineage updated successfully for "${tagName}"`);
     } catch (error) {
-      console.error(`❌ Error updating lineage for ${tagName}:`, error);
-      // Revert the dropdown selection on error
+      console.error(`❌ Error updating lineage for "${tagName}":`, error);
       selectElement.value = oldLineage;
     }
   }

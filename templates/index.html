@@ -6661,7 +6661,15 @@
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">CURRENT INVENTORY</h5>
-                  <span class="badge badge-modern" id="availableTagsCount">(0)</span>
+                  <div class="d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-sm btn-collapse-all" onclick="collapseAllDropdowns('available')" title="Collapse all category dropdowns">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="18 15 12 9 6 15"></polyline>
+                      </svg>
+                      <span>Collapse All</span>
+                    </button>
+                    <span class="badge badge-modern" id="availableTagsCount">(0)</span>
+                  </div>
                 </div>
                 <div class="search-input-container">
                   <input type="text" id="availableTagsSearch" class="form-control form-control-modern" placeholder="Search available tags...">
@@ -6670,7 +6678,7 @@
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
                 <div id="availableTags" class="tag-list-container">
                   <div class="tag-list">
-                    <div class="d-flex align-items-center gap-3 mb-2">
+                    <div class="d-flex align-items-center gap-3 mb-2 select-all-sticky-row">
                       <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
                         <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
                         <span class="filter-subcategory-label mb-0">SELECT ALL</span>
@@ -6859,6 +6867,12 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">SELECTED TAGS</h5>
                   <div class="d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-sm btn-collapse-all" onclick="collapseAllDropdowns('selected')" title="Collapse all category dropdowns">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="18 15 12 9 6 15"></polyline>
+                      </svg>
+                      <span>Collapse All</span>
+                    </button>
                     <span class="badge badge-modern" id="selectedTagsCount">(0)</span>
                     <button type="button" class="btn btn-sm saved-lists-btn" onclick="openSavedListsModal()" title="Save/Load Tag Lists">
                       <i class="bi bi-bookmark-star-fill me-1"></i><span class="saved-lists-label">Save</span>
@@ -8716,6 +8730,44 @@
       loadSavedLists();
 
       savedListsModal.show();
+    };
+
+    // Collapse all dropdown filters in a tag list
+    window.collapseAllDropdowns = function(listType) {
+      const containerSelector = listType === 'available' ? '#availableTags' : '#selectedTags';
+      const container = document.querySelector(containerSelector);
+      
+      if (!container) {
+        console.warn(`Tag list container not found: ${containerSelector}`);
+        return;
+      }
+
+      // Collapse vendor/brand sections — available list uses .vendor-content/.brand-content,
+      // selected list uses .collapsible-content (direct child of .vendor-section)
+      const collapsibleSections = container.querySelectorAll(
+        '.vendor-content, .brand-content, .vendor-section > .collapsible-content'
+      );
+
+      let collapsedCount = 0;
+      
+      collapsibleSections.forEach(section => {
+        // Only collapse if not already collapsed
+        if (!section.classList.contains('collapsed')) {
+          section.classList.add('collapsed');
+          collapsedCount++;
+          
+          // Update the collapse icon for the parent header
+          const parentSection = section.closest('.vendor-section, .brand-section');
+          if (parentSection) {
+            const collapseIcon = parentSection.querySelector('.collapse-icon');
+            if (collapseIcon) {
+              collapseIcon.textContent = '▶';
+            }
+          }
+        }
+      });
+
+      console.log(`✅ Collapsed ${collapsedCount} vendor/brand sections in ${listType} tags`);
     };
 
     // Update the count of currently selected tags
@@ -10817,9 +10869,18 @@
         }
         
         resultsDiv.classList.remove('d-none');
-        
-        // Successfully matched products from JSON URL
-        
+
+        // Cache results so they can be restored when user re-opens modal
+        try {
+          sessionStorage.setItem('agt_json_main_cache', JSON.stringify({
+            url: jsonUrl,
+            matchResult: matchResult,
+            timestamp: Date.now()
+          }));
+        } catch (e) {
+          console.warn('Could not cache main JSON match results:', e);
+        }
+
         // Clear the input
         jsonUrlInput.value = '';
         
@@ -11343,6 +11404,7 @@
     window.resetJsonMatchResults = function() {
       try {
         sessionStorage.removeItem('agt_json_match_cache');
+        sessionStorage.removeItem('agt_json_main_cache');
         const resultsDiv = document.getElementById('jsonMatchResults');
         if (resultsDiv) {
           resultsDiv.classList.add('d-none');
@@ -11398,30 +11460,68 @@
       }
     };
 
-    // Clear stale JSON match cache on page load so old URLs don't persist across restarts
-    document.addEventListener('DOMContentLoaded', function() {
-      sessionStorage.removeItem('agt_json_match_cache');
-    });
+    // Note: JSON match cache is intentionally preserved across modal open/close.
+    // Use the Reset button inside the modal to clear cached results.
 
-    // Reset JSON modal to clean state when it opens (no old URLs or results)
+    // On modal open: restore cached results if available, otherwise show clean state
     document.addEventListener('DOMContentLoaded', function() {
       const jsonMatchModal = document.getElementById('jsonMatchModal');
       if (jsonMatchModal) {
         jsonMatchModal.addEventListener('show.bs.modal', function() {
-          // Always start with a clean URL input — never restore old URLs
+          // Always clear the URL input — don't re-populate old URLs
           const urlInput = document.getElementById('jsonUrlInput');
-          if (urlInput) {
-            urlInput.value = '';
-          }
-          // Hide previous results
+          if (urlInput) urlInput.value = '';
+
           const resultsDiv = document.getElementById('jsonMatchResults');
-          if (resultsDiv) {
-            resultsDiv.classList.add('d-none');
-          }
+          const matchCount = document.getElementById('matchCount');
+          const matchedProductsList = document.getElementById('matchedProductsList');
           const viewDetailedWrap = document.getElementById('jsonMatchViewDetailedWrap');
-          if (viewDetailedWrap) {
-            viewDetailedWrap.classList.add('d-none');
+
+          // Try to restore previous results from cache
+          try {
+            const cached = sessionStorage.getItem('agt_json_main_cache');
+            if (cached && resultsDiv && matchCount && matchedProductsList) {
+              const { matchResult } = JSON.parse(cached);
+              // Rebuild the results UI from cached data
+              matchCount.textContent = matchResult.matched_count || 0;
+              const matchedTags = matchResult.json_matched_tags || [];
+              if (matchedTags.length > 0) {
+                matchedProductsList.innerHTML = `
+                  <div class="alert alert-success mb-3">
+                    <strong>Previous match:</strong> ${matchResult.matched_count} products were matched.
+                    <br>Results shown below — click <strong>Reset</strong> to start a new match.
+                  </div>
+                  <div class="mb-2"><strong>Matched Products:</strong></div>
+                  ${matchedTags.map(tag => {
+                    const productName = tag['Product Name*'] || tag.ProductName || tag.displayName || 'Unknown Product';
+                    return `<div class="mb-1">• ${productName}</div>`;
+                  }).join('')}
+                `;
+              } else if (matchResult.matched_names && matchResult.matched_names.length > 0) {
+                matchedProductsList.innerHTML = `
+                  <div class="alert alert-success mb-3">
+                    <strong>Previous match:</strong> ${matchResult.matched_count} products were matched.
+                    <br>Results shown below — click <strong>Reset</strong> to start a new match.
+                  </div>
+                  <div class="mb-2"><strong>Matched Products:</strong></div>
+                  ${matchResult.matched_names.map(p => `<div class="mb-1">• ${p}</div>`).join('')}
+                `;
+              }
+              resultsDiv.classList.remove('d-none');
+              // Show "View Detailed" button if detailed cache also exists
+              const detailedCached = sessionStorage.getItem('agt_json_match_cache');
+              if (viewDetailedWrap) {
+                viewDetailedWrap.classList.toggle('d-none', !detailedCached);
+              }
+              return; // Skip the hide-all path below
+            }
+          } catch (e) {
+            console.warn('Could not restore JSON match cache:', e);
           }
+
+          // No cache — show clean state
+          if (resultsDiv) resultsDiv.classList.add('d-none');
+          if (viewDetailedWrap) viewDetailedWrap.classList.add('d-none');
         });
       }
     });
@@ -12052,7 +12152,7 @@
           <div class="d-flex align-items-center gap-2 ms-auto flex-wrap">
             <button type="button" class="btn btn-sm btn-outline-warning" onclick="resetJsonMatchResults()" title="Clear cached results and start fresh" id="jsonMatchResetBtn"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
             <button type="button" class="btn btn-sm btn-outline-info" onclick="testStrainSearch()" title="Test strain search API"><i class="bi bi-bug me-1"></i>Test API</button>
-            <button type="button" class="btn btn-sm btn-glass" data-bs-dismiss="modal">Close</button>
+            <button type="button" class="btn btn-sm btn-glass" data-bs-dismiss="modal" style="min-width:60px;">Close</button>
           </div>
         </div>
         <div class="modal-body p-4">
