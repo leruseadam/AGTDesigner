@@ -931,9 +931,9 @@ const AppLoadingSplash = {
             clearTimeout(this._emergencyTimer);
         }
         this._emergencyTimer = setTimeout(() => {
-            console.log('⚡ Emergency hide splash - 5 second timeout');
+            console.log('⚡ Emergency hide splash - 3 second timeout');
             this.emergencyHide();
-        }, 5000); // Reduced from 7000 to 5000 for faster recovery
+        }, 3000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -994,10 +994,8 @@ const AppLoadingSplash = {
     },
 
     complete() {
-        this.updateProgress(100, 'Welcome to Auto Generating Tag Designer!');
-        setTimeout(() => {
-            this.hide();
-        }, 1000);
+        // Skip the "Welcome" delay — just hide immediately
+        this.hide();
     },
 
     hide() {
@@ -1007,35 +1005,31 @@ const AppLoadingSplash = {
             clearTimeout(this._emergencyTimer);
             this._emergencyTimer = null;
         }
-        
+
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
-        
+
         if (splash) {
             splash.classList.add('fade-out');
             setTimeout(() => {
                 splash.style.display = 'none';
-            }, 500);
+            }, 200);
         }
-        
+
         if (mainContent) {
-            setTimeout(() => {
-                mainContent.classList.add('loaded');
-                mainContent.style.opacity = '1';
-                // CRITICAL FIX: Delay scaleAppToFit after splash hide to prevent glitchiness
-                // Use double RAF to ensure DOM is stable before applying transforms
-                if (window.scaleAppToFit) {
+            mainContent.classList.add('loaded');
+            mainContent.style.opacity = '1';
+            if (window.scaleAppToFit) {
+                requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
-                        requestAnimationFrame(() => {
-                            try {
-                                window.scaleAppToFit();
-                            } catch (e) {
-                                console.warn('scaleAppToFit error', e);
-                            }
-                        });
+                        try {
+                            window.scaleAppToFit();
+                        } catch (e) {
+                            console.warn('scaleAppToFit error', e);
+                        }
                     });
-                }
-            }, 200); // Increased delay to allow DOM to stabilize
+                });
+            }
         }
         
         verboseLog('Splash screen hidden');
@@ -11862,7 +11856,7 @@ const TagManager = {
                     }
                 }
             }
-        }, 60000); // 60 second safety timeout
+        }, 15000); // 15 second safety timeout — reset stuck loading state
         
         // CRITICAL FIX: Immediately show loading state if container is empty
         // This prevents upload prompt from flashing while tags are being fetched
@@ -11898,16 +11892,15 @@ const TagManager = {
         // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
         // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
         if (storeConfirmed && !hasExistingTags && !hasCache) {
-            // Initial load - show full loading UI with better message
-            this.showActionSplash('Loading tags from server...');
+            // Initial load - show spinner without alarming time estimate
+            this.showActionSplash('Loading tags...');
             if (availableTagsContainer) {
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-4">
                         <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
                             <span class="visually-hidden">Loading...</span>
                         </div>
-                        <p class="mt-2 text-white">Loading tags from server...</p>
-                        <p class="mt-1 text-white-50 small">This may take up to 30 seconds for large datasets</p>
+                        <p class="mt-2 text-white">Loading tags...</p>
                     </div>
                 `;
             }
@@ -12408,7 +12401,16 @@ const TagManager = {
                     console.log('📋 availableTagsContainer found:', !!availableTagsContainer);
                     if (availableTagsContainer && errorMsg) {
                         console.log('📋 Updating availableTagsContainer with message');
-                        availableTagsContainer.innerHTML = `
+                        const isNoExcel = errorMsg.toLowerCase().includes('no excel') || errorMsg.toLowerCase().includes('upload');
+                        availableTagsContainer.innerHTML = isNoExcel ? `
+                            <div class="text-center py-5">
+                                <div class="upload-prompt">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No product data loaded</h5>
+                                    <p class="text-muted small">Upload an Excel file or use Match JSON to load products</p>
+                                </div>
+                            </div>
+                        ` : `
                             <div class="text-center py-4">
                                 <div class="alert alert-info mx-3">
                                     <p class="mb-2">${errorMsg}</p>
@@ -12423,14 +12425,15 @@ const TagManager = {
                     // CRITICAL: Reset flag when no tags returned
                     this._fetchingAvailableTags = false;
                     console.warn('Backend returned empty tags array - no Excel file loaded');
-                    // Show message to user when no Excel file is uploaded
+                    // Show a clean upload prompt (not an alarming alert-style message)
                     const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
                         availableTagsContainer.innerHTML = `
-                            <div class="text-center py-4">
-                                <div class="alert alert-info mx-3">
-                                    <i class="fas fa-info-circle"></i>
-                                    <p class="mb-0 mt-2">No Excel file uploaded. Please upload an Excel file to see available tags.</p>
+                            <div class="text-center py-5">
+                                <div class="upload-prompt">
+                                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
+                                    <h5 class="text-muted">No product data loaded</h5>
+                                    <p class="text-muted small">Upload an Excel file or use Match JSON to load products</p>
                                 </div>
                             </div>
                         `;
@@ -14811,7 +14814,7 @@ const TagManager = {
             
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
-        }, 60000); // 60 second safety net - increased for large files
+        }, 15000); // 15 second safety net
 
         try {
             const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
