@@ -383,10 +383,16 @@ class ProductTypeSpecificMatcher:
             score += type_score * 0.35
             
             # Strain matching (30% weight)
-            strain_score = self._extract_strain_similarity(json_name, db_name)
+            # Prefer explicit strain_name field (Bamboo/Cultivera manifests) for precision
+            json_strain_explicit = (json_product.get('strain_name') or '').strip().lower()
+            json_strain_explicit = re.sub(r'\s+\bLR\b\s*$', '', json_strain_explicit, flags=re.IGNORECASE).strip()
+            if json_strain_explicit and json_strain_explicit not in ('mixed', 'n/a', ''):
+                strain_score = fuzz.token_sort_ratio(json_strain_explicit, db_name) / 100.0
+            else:
+                strain_score = self._extract_strain_similarity(json_name, db_name)
             factors['strain_match'] = strain_score
             score += strain_score * 0.3
-            
+
             # Potency matching (20% weight)
             potency_score = self._compare_potency(json_product, db_product)
             factors['potency_match'] = potency_score
@@ -452,25 +458,32 @@ class ProductTypeSpecificMatcher:
             score += vape_type_score * 0.25
             
             # Strain matching (30% weight)
-            strain_score = self._extract_strain_similarity(json_name, db_name)
+            # Prefer explicit strain_name field (Bamboo/Cultivera manifests) for precision
+            json_strain_explicit = (json_product.get('strain_name') or '').strip().lower()
+            # Strip common suffixes like "LR" (Live Resin abbreviation) from strain name
+            json_strain_explicit = re.sub(r'\s+\bLR\b\s*$', '', json_strain_explicit, flags=re.IGNORECASE).strip()
+            if json_strain_explicit and json_strain_explicit not in ('mixed', 'n/a', ''):
+                strain_score = fuzz.token_sort_ratio(json_strain_explicit, db_name) / 100.0
+            else:
+                strain_score = self._extract_strain_similarity(json_name, db_name)
             factors['strain_match'] = strain_score
             score += strain_score * 0.3
-            
+
             # Volume/size matching (20% weight)
             volume_score = self._compare_volumes(json_product, db_product)
             factors['volume_match'] = volume_score
             score += volume_score * 0.2
-            
+
             # THC potency (15% weight)
             thc_score = self._compare_thc_content(json_product, db_product)
             factors['thc_match'] = thc_score
             score += thc_score * 0.15
-            
+
             # Brand/vendor matching (10% weight)
             vendor_score = self._compare_vendors(json_product, db_product)
             factors['vendor_match'] = vendor_score
             score += vendor_score * 0.1
-            
+
             if score > 0.3:
                 matches.append(MatchResult(
                     score=score,
