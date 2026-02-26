@@ -14424,8 +14424,8 @@ const TagManager = {
             return false; // Don't show anything, tags should be displayed
         }
         
-        // Check if tags are being fetched - show loading instead of upload prompt
-        const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData;
+        // Check if tags are being fetched OR a retry is pending - show loading instead of upload prompt
+        const isFetchingTags = this._fetchingAvailableTags || this._checkingExistingData || !!this.state.initialDataRetryTimer;
         
         if (isFetchingTags) {
             // Show loading indicator while tags are being fetched
@@ -15067,18 +15067,17 @@ const TagManager = {
                         this.hideActionSplash();
                     }
                     
-                    // Show loading or upload prompt based on fetch status
+                    // Show spinner while retrying — never show "No product data loaded" mid-retry
                     const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
-                        const showingLoading = this._showLoadingOrUploadPrompt(availableTagsContainer);
-                        // If showing loading, don't initialize empty state yet - wait for tags
-                        if (showingLoading) {
-                            // Continue waiting for tags to load
-                            return;
-                        }
+                        availableTagsContainer.innerHTML = `
+                            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;padding:3rem 2rem;">
+                                <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;margin-bottom:1.5rem;"></div>
+                                <h5 style="color:#ffffff;margin-bottom:0.5rem;">Loading tags...</h5>
+                                <p style="color:rgba(255,255,255,0.7);font-size:0.95rem;">Please wait while we load your product data</p>
+                            </div>`;
                     }
-                    
-                    // FIXED: Initialize empty state instead of loading test data
+
                     this.initializeEmptyState();
                     this._checkingExistingData = false;
                     this.scheduleInitialDataRetry('Empty initial data response');
@@ -15086,23 +15085,25 @@ const TagManager = {
                 }
             } else {
                 verboseLog('Initial data endpoint returned error:', response.status);
-                // Complete splash loading on error
                 AppLoadingSplash.stopAutoAdvance();
                 AppLoadingSplash.complete();
                 clearTimeout(splashSafetyTimeout);
-                
-                // Hide action splash on error
+
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
-                
-                // Show loading or upload prompt based on fetch status
+
+                // Show spinner while retrying — never show "No product data loaded" mid-retry
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
-                    this._showLoadingOrUploadPrompt(availableTagsContainer);
+                    availableTagsContainer.innerHTML = `
+                        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;padding:3rem 2rem;">
+                            <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;margin-bottom:1.5rem;"></div>
+                            <h5 style="color:#ffffff;margin-bottom:0.5rem;">Loading tags...</h5>
+                            <p style="color:rgba(255,255,255,0.7);font-size:0.95rem;">Please wait while we load your product data</p>
+                        </div>`;
                 }
-                
-                // FIXED: Initialize empty state instead of loading test data
+
                 this.initializeEmptyState();
                 this._checkingExistingData = false;
                 this.scheduleInitialDataRetry(`HTTP ${response.status}`);
@@ -15147,24 +15148,18 @@ const TagManager = {
             if (!fallbackSucceeded) {
                 const availableTagsContainer = document.getElementById('availableTags');
                 if (availableTagsContainer) {
+                    // Show spinner while retrying — never show "No product data loaded" mid-retry
                     availableTagsContainer.innerHTML = `
-                        <div class="text-center py-5">
-                            <div class="upload-prompt">
-                                <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                                <h5 class="text-muted">No product data loaded</h5>
-                                <p class="text-muted">Upload an Excel file to get started</p>
-                                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                    <i class="fas fa-upload me-2"></i>Upload Excel File
-                                </button>
-                            </div>
-                        </div>
-                    `;
+                        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;padding:3rem 2rem;">
+                            <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;margin-bottom:1.5rem;"></div>
+                            <h5 style="color:#ffffff;margin-bottom:0.5rem;">Loading tags...</h5>
+                            <p style="color:rgba(255,255,255,0.7);font-size:0.95rem;">Please wait while we load your product data</p>
+                        </div>`;
                 }
-                
-                // FIXED: Initialize empty state instead of loading test data
+
                 this.initializeEmptyState();
             }
-            
+
             this._checkingExistingData = false;
             this.scheduleInitialDataRetry(error.message || 'initial data fetch error');
             return;
