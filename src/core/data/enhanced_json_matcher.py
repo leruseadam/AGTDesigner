@@ -2726,18 +2726,26 @@ class EnhancedJSONMatcher:
                                 normalized_item['vendor'] = extracted_vendor
                                 logging.debug(f"🔍 EXTRACTED VENDOR: '{product_name}' -> vendor: '{extracted_vendor}'")
 
-                    # Extract product brand from name (Cultivera format: "Brand - Type - Strain - ...")
+                    # Extract product brand from product name using strain_name to isolate it.
+                    # Bamboo/Cultivera format: "STRAIN Brand WEIGHT HARDWARE - (LINEAGE)"
+                    # The brand is what remains after removing strain_name and weight/hardware tokens.
                     # brand_name is separate from vendor (which is the grower/transfer license holder).
-                    # Only extract if not already set from a manifest field.
                     if not normalized_item.get('brand_name'):
                         raw_name = normalized_item.get('inventory_name', '') or normalized_item.get('product_name', '')
-                        if raw_name and ' - ' in raw_name:
-                            # First segment before the first ' - ' is the brand in Cultivera format
-                            first_seg = raw_name.split(' - ')[0].strip()
-                            # Reject if the first segment is too long (>5 words) — it's not a brand
-                            if first_seg and len(first_seg.split()) <= 5:
-                                normalized_item['brand_name'] = first_seg
-                                logging.debug(f"🏷️ EXTRACTED BRAND: '{raw_name}' -> brand: '{first_seg}'")
+                        strain_name = (normalized_item.get('strain_name', '') or '').strip()
+                        if raw_name and strain_name:
+                            # Remove strain from the product name to find what remains (brand + hardware)
+                            name_no_strain = raw_name.replace(strain_name, '').strip(' -')
+                            # Strip trailing lineage code like " - (H)", " - (I)"
+                            name_no_strain = re.sub(r'\s*-\s*\([A-Z]\)\s*$', '', name_no_strain).strip()
+                            # Strip weight tokens like "1g", "0.5g"
+                            name_no_strain = re.sub(r'\b\d+(?:\.\d+)?\s*(?:g|mg|ml|mL)\b', '', name_no_strain, flags=re.IGNORECASE).strip()
+                            # Strip hardware tokens (AIO, C-Cell, 510, etc.)
+                            name_no_strain = re.sub(r'\b(AIO|C-Cell|510|cart|cartridge|disposable|vaporizer)\b', '', name_no_strain, flags=re.IGNORECASE).strip()
+                            name_no_strain = name_no_strain.strip(' -').strip()
+                            if name_no_strain and 1 <= len(name_no_strain.split()) <= 4:
+                                normalized_item['brand_name'] = name_no_strain
+                                logging.info(f"🏷️ EXTRACTED BRAND from strain subtraction: '{raw_name}' (strain='{strain_name}') -> brand='{name_no_strain}'")
                     
                     json_data.append(normalized_item)
                     
