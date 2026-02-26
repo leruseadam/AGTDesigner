@@ -1907,7 +1907,28 @@ class EnhancedJSONMatcher:
 
                 if use_vendor_filter:
                     database_products = vendor_filtered_products
-        
+
+        # BRAND PRE-FILTER: If the JSON item has a brand_name (extracted from Cultivera format),
+        # only match against DB products whose 'Product Brand' contains that brand.
+        # This prevents cross-brand matches (e.g., Dabstract matching Hustler's Ambition).
+        json_brand_name = (json_product.get('brand_name') or '').strip().lower()
+        if json_brand_name and len(json_brand_name) > 2:
+            brand_cache_key = f"brand_filter_{json_brand_name}"
+            brand_filtered = self.cache.get(brand_cache_key)
+            if brand_filtered is None:
+                brand_filtered = [
+                    db for db in database_products
+                    if json_brand_name in str(db.get('Product Brand', '') or '').lower()
+                    or json_brand_name in str(db.get('Product Name*', '') or '').lower()
+                ]
+                self.cache.set(brand_cache_key, brand_filtered, ttl=300)
+            # Only apply if the filtered set is non-empty — avoids cutting everything out for unknown brands
+            if brand_filtered:
+                logging.debug(f"🏷️ BRAND FILTER: '{json_brand_name}' → {len(brand_filtered)} of {len(database_products)} DB products")
+                database_products = brand_filtered
+            else:
+                logging.debug(f"🏷️ BRAND FILTER: '{json_brand_name}' → no DB products matched, keeping full set")
+
         matches = []
         
         # PERFORMANCE: Use fast hybrid for HYBRID strategy (skips expensive ML/semantic)
@@ -2704,6 +2725,19 @@ class EnhancedJSONMatcher:
                             if extracted_vendor and len(extracted_vendor) > 2:  # Avoid very short vendor names
                                 normalized_item['vendor'] = extracted_vendor
                                 logging.debug(f"🔍 EXTRACTED VENDOR: '{product_name}' -> vendor: '{extracted_vendor}'")
+
+                    # Extract product brand from name (Cultivera format: "Brand - Type - Strain - ...")
+                    # brand_name is separate from vendor (which is the grower/transfer license holder).
+                    # Only extract if not already set from a manifest field.
+                    if not normalized_item.get('brand_name'):
+                        raw_name = normalized_item.get('inventory_name', '') or normalized_item.get('product_name', '')
+                        if raw_name and ' - ' in raw_name:
+                            # First segment before the first ' - ' is the brand in Cultivera format
+                            first_seg = raw_name.split(' - ')[0].strip()
+                            # Reject if the first segment is too long (>5 words) — it's not a brand
+                            if first_seg and len(first_seg.split()) <= 5:
+                                normalized_item['brand_name'] = first_seg
+                                logging.debug(f"🏷️ EXTRACTED BRAND: '{raw_name}' -> brand: '{first_seg}'")
                     
                     json_data.append(normalized_item)
                     
