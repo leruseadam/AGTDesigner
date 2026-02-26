@@ -7424,19 +7424,26 @@
   <!-- User Templates Modal: add, replace, view custom .docx designs (same sizes as Classic) -->
   <div class="modal fade" id="userTemplatesModal" tabindex="-1" aria-labelledby="userTemplatesModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
-      <div class="modal-content glass-card">
-        <div class="modal-header border-0">
-          <h5 class="modal-title text-white" id="userTemplatesModalLabel">User template designs</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      <div class="modal-content" style="background: linear-gradient(145deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,0.6);">
+        <div class="modal-header border-0 pb-0 pt-4 px-4">
+          <div class="d-flex align-items-center gap-3">
+            <div style="width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(99,102,241,0.4);">
+              <i class="fas fa-palette" style="color:#fff;font-size:18px;"></i>
+            </div>
+            <div>
+              <h5 class="modal-title text-white mb-0 fw-bold" id="userTemplatesModalLabel" style="font-size:1.15rem;letter-spacing:0.01em;">Custom Template Designs</h5>
+              <p class="text-white-50 mb-0" style="font-size:0.78rem;">Upload .docx layouts &mdash; sizes stay fixed, only the design changes</p>
+            </div>
+          </div>
+          <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal" aria-label="Close" style="opacity:0.6;"></button>
         </div>
-        <div class="modal-body">
-          <p class="text-white-50 small mb-3">Upload your own .docx design for each template type. Sizes and options stay the same; only the layout/design changes. Choose &quot;User&quot; in the Design set dropdown to use these when generating.</p>
-          <div id="userTemplatesList" class="list-group list-group-flush">
+        <div class="modal-body px-4 pt-3 pb-2">
+          <div id="userTemplatesList" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <!-- Rows filled by JS: Horizontal, Vertical, Mini, Double, Preroll, Inventory -->
           </div>
         </div>
-        <div class="modal-footer border-0">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <div class="modal-footer border-0 px-4 pb-4 pt-2">
+          <button type="button" class="btn btn-sm px-4" data-bs-dismiss="modal" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;">Done</button>
         </div>
       </div>
     </div>
