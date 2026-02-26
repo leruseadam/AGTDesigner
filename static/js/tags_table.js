@@ -378,33 +378,27 @@ class TagsTable {
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
   
-  // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
-  // This ensures UI displays correct lineage even if database/Excel has wrong value
   const productType = tag['Product Type*'] || tag.Type || '';
   const isClassicType = productType && getUniqueLineages(productType).length === 6;
-  if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
-    lineage = 'HYBRID';
-  }
-  
-  // CRITICAL FIX: For non-classic types, detect CBD indicators in product name/strain
-  // Products with CBD/CBN/CBG/CBC in the name should show CBD lineage, not MIXED
+
+  // Detect CBD indicators in product name/strain — applies to ALL product types
   const productNameForCbd = tag['Product Name*'] || tag.ProductName || '';
   const productStrainForCbd = tag['Product Strain'] || tag.productStrain || '';
   const nameAndStrainLower = (productNameForCbd + ' ' + productStrainForCbd).toLowerCase();
   const hasCbdIndicator = ['cbd', 'cbn', 'cbg', 'cbc'].some(token => nameAndStrainLower.includes(token));
 
-  // CRITICAL FIX: For non-classic types, CBD indicators ALWAYS override other lineages
-  // Check CBD indicators FIRST before applying defaults
-  if (!isClassicType && hasCbdIndicator) {
-    // Non-classic types with CBD indicators should show CBD_BLEND (yellow), regardless of database value
-    lineage = 'CBD_BLEND';
+  if (hasCbdIndicator && (!lineage || lineage === 'MIXED' || lineage === 'HYBRID' || lineage === 'THC')) {
+    // Any product with CBD/CBN/CBG/CBC in name that doesn't already have an explicit lineage
+    // should show CBD (classic) or CBD_BLEND (non-classic)
+    lineage = isClassicType ? 'CBD' : 'CBD_BLEND';
+  } else if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+    // Classic types with MIXED/THC stored value → HYBRID
+    lineage = 'HYBRID';
+  } else if (!isClassicType && lineage === 'HYBRID') {
+    // Non-classic types should never be HYBRID — fall back to MIXED
+    lineage = 'MIXED';
   } else if (!lineage) {
-    // Only set default if lineage is completely missing
-    if (isClassicType) {
-      lineage = 'HYBRID';
-    } else {
-      lineage = 'MIXED';
-    }
+    lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
   
     // CRITICAL FIX: Extract DOH status and normalize it consistently
@@ -533,14 +527,8 @@ class TagsTable {
     // Note: productType already declared above (line 233), reusing it here
     const uniqueLineages = getUniqueLineages(productType);
     
-    // CRITICAL FIX: Ensure lineage is converted from MIXED/THC to HYBRID for classic types before dropdown creation
-    // This ensures the dropdown shows the correct selected value
+    // lineage is already normalized above; use it directly for the dropdown
     let dropdownLineage = lineage;
-    const isClassicTypeForDropdown = productType && getUniqueLineages(productType).length === 6;
-    if (isClassicTypeForDropdown && (dropdownLineage === 'MIXED' || dropdownLineage === 'THC')) {
-      dropdownLineage = 'HYBRID';
-      console.log(`🔄 TAGS_TABLE DROPDOWN FIX: Converting ${lineage} to HYBRID for classic type "${tagName}" (${productType})`);
-    }
     
     const dropdownOptions = uniqueLineages.map(lin => {
       // Both values are already normalized - direct comparison
