@@ -1963,11 +1963,12 @@ const TagManager = {
                     : null;
 
                 if (tag) {
-                    // Get updated lineage and abbreviate for display
-                    let lineageValue = tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED';
-                    const lineageAbbr = abbreviateLineage(lineageValue);
-                    // Update data-lineage attribute (CSS will handle color change)
-                    tagItem.setAttribute('data-lineage', lineageAbbr);
+                    // Use full lineage name for data-lineage — CSS rules key on the full value
+                    let lineageValue = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED').toString().trim().toUpperCase();
+                    // Normalize non-standard values (NON E, THC, etc.) to standard ones
+                    const _validL = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','CBD_BLEND','MIXED','PARA','PARAPHERNALIA'];
+                    if (!_validL.includes(lineageValue)) lineageValue = 'HYBRID';
+                    tagItem.setAttribute('data-lineage', lineageValue);
                 }
             });
 
@@ -7726,7 +7727,10 @@ const TagManager = {
         const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
         const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
         const isParaphernaliaType = (productTypeCheck || '').toString().toLowerCase() === 'paraphernalia';
-        if (isClassicType && (lineage === 'MIXED' || lineage === 'THC')) {
+        // Classic types: any lineage that isn't a standard value (SATIVA/INDICA/HYBRID/CBD variants)
+        // gets normalized to HYBRID. This covers MIXED, THC, NON E, NON_E, and other Cultivera codes.
+        const _classicValidLineages = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','CBD_BLEND'];
+        if (isClassicType && !_classicValidLineages.includes(lineage)) {
             lineage = 'HYBRID';
         }
         
