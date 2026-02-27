@@ -7155,11 +7155,19 @@ def set_store():
                 pass
 
         if is_store_switch:
+            # Extra guard: never clear if session store already matches target
+            if current_store == store_value:
+                is_store_switch = False
+                logging.info(f"Store switch suppressed: session store already matches {store_value}")
+
+        if is_store_switch:
             session.pop('file_path', None)
             session.pop('uploaded_filename', None)
             session.pop('upload_timestamp', None)
             session.pop('selected_tags', None)
             logging.info(f"Cleared file data for store switch {effective_current_store} → {store_value}: file_path={old_file_path}")
+        else:
+            logging.info(f"Store set to {store_value} (no file clear): session_store={current_store}, ip_store={_ip_current_store_before}")
 
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
