@@ -7070,6 +7070,9 @@ def set_store():
         
         # CHECK: Warn if switching stores
         current_store = session.get('selected_store')
+        # Also capture IP-based store BEFORE we overwrite it below
+        with _ip_store_lock:
+            _ip_current_store_before = _ip_store_selections.get(ip_address, {}).get('store')
         if current_store and current_store != store_value:
             logging.warning(f"⚠️ STORE SWITCH DETECTED: {current_store} → {store_value}")
             logging.warning(f"⚠️ Request from: {request.referrer or 'unknown'}")
@@ -7131,20 +7134,20 @@ def set_store():
             # If threading fails, just skip cache clearing
             pass
 
-        # CRITICAL: Clear other session data from previous store (but keep selected_store!)
-        # NOTE: We clear file_path and uploaded_filename to force reload with new store's database
-        # However, if the same file is valid for the new store, it will be reloaded automatically
+        # Only clear file data when actually switching to a different store.
+        # Re-setting the same store (e.g. on every page load) must NOT wipe the upload.
         old_file_path = session.get('file_path')
         old_filename = session.get('uploaded_filename')
-        
-        session.pop('file_path', None)
-        session.pop('uploaded_filename', None)
-        session.pop('upload_timestamp', None)
-        session.pop('selected_tags', None)
-        
-        # Log what was cleared for debugging
-        if old_file_path or old_filename:
-            logging.info(f"Cleared file data for store switch: file_path={old_file_path}, filename={old_filename}")
+        # Use IP-based store as fallback if session store is missing (avoids false positives)
+        effective_current_store = current_store or _ip_current_store_before
+        is_store_switch = effective_current_store and effective_current_store != store_value
+
+        if is_store_switch:
+            session.pop('file_path', None)
+            session.pop('uploaded_filename', None)
+            session.pop('upload_timestamp', None)
+            session.pop('selected_tags', None)
+            logging.info(f"Cleared file data for store switch {current_store} → {store_value}: file_path={old_file_path}")
 
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
