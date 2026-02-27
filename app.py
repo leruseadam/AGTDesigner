@@ -7142,12 +7142,24 @@ def set_store():
         effective_current_store = current_store or _ip_current_store_before
         is_store_switch = effective_current_store and effective_current_store != store_value
 
+        # Additional guard: if the persisted upload already belongs to the target store, never clear
+        if is_store_switch and old_file_path:
+            try:
+                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                if os.path.exists(persistence_file):
+                    last_upload = _robust_load_persistent_json(persistence_file)
+                    if last_upload and last_upload.get('store') == store_value:
+                        is_store_switch = False
+                        logging.info(f"Store switch suppressed: persisted file already belongs to {store_value}")
+            except Exception:
+                pass
+
         if is_store_switch:
             session.pop('file_path', None)
             session.pop('uploaded_filename', None)
             session.pop('upload_timestamp', None)
             session.pop('selected_tags', None)
-            logging.info(f"Cleared file data for store switch {current_store} → {store_value}: file_path={old_file_path}")
+            logging.info(f"Cleared file data for store switch {effective_current_store} → {store_value}: file_path={old_file_path}")
 
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
