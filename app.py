@@ -11245,8 +11245,14 @@ def generate_labels():
         return response
 
     except Exception as e:
-        logging.error(f"Error during label generation: {str(e)}")
-        logging.error(traceback.format_exc())
+        # Safe logging - don't let logging errors prevent error response
+        try:
+            logging.error(f"Error during label generation: {str(e)}")
+            logging.error(traceback.format_exc())
+        except Exception as log_error:
+            # If logging fails, at least print to stderr
+            print(f"CRITICAL: Logging failed during label generation error: {log_error}", file=sys.stderr)
+            print(f"Original error: {str(e)}", file=sys.stderr)
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
     
     finally:
