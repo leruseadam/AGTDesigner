@@ -1388,17 +1388,12 @@ def update_processing_status(filename, status):
         logging.info(f"Updated processing status for {filename}: {status}")
         logging.debug(f"Current processing statuses: {dict(processing_status)}")
 
-# Cache: (file_path, store_name) -> ExcelProcessor to avoid reloading on every request
-_processor_cache = {}
-_processor_cache_lock = threading.Lock()
-
 def get_excel_processor():
-    """Return a cached ExcelProcessor for the current store/session.
+    """Return a fresh ExcelProcessor for the current store/session.
 
-    Caches by file path so load_file and DB sync only fire once per file.
+    Avoids sharing processors across requests while keeping callers intact.
     """
     from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
-    from flask import has_request_context, session
 
     # Resolve store context
     store_name = None
@@ -1407,61 +1402,44 @@ def get_excel_processor():
     except Exception:
         store_name = None
 
-    # PERFORMANCE FIX: Check if caller wants to skip file loading (for tag-based generation)
-    skip_file_load = False
-    if has_request_context():
-        skip_file_load = session.get('_skip_file_load_for_generation', False)
-
-    if skip_file_load:
-        logging.info("⚡ PERFORMANCE: Skipping file load in get_excel_processor (bypass flag set)")
-        processor = ExcelProcessor(store_name=store_name)
-        return processor
-
-    # Determine which file to load
-    target_file = None
-    try:
-        if has_request_context():
-            session_file = session.get('file_path')
-            if session_file and os.path.exists(session_file):
-                target_file = session_file
-    except Exception:
-        pass
-
-    if not target_file:
-        try:
-            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
-            if default_file and os.path.exists(default_file):
-                target_file = default_file
-        except Exception:
-            pass
-
-    # Return cached processor if file hasn't changed
-    cache_key = (target_file, store_name)
-    with _processor_cache_lock:
-        if target_file and cache_key in _processor_cache:
-            cached = _processor_cache[cache_key]
-            if getattr(cached, '_last_loaded_file', None) == target_file:
-                logging.debug(f"⚡ CACHE HIT: Returning cached processor for {os.path.basename(target_file)}")
-                return cached
-
-    # Create and load new processor
     processor = ExcelProcessor(store_name=store_name)
+
+    # Enable product DB integration by default for lineage lookups
     if hasattr(processor, 'enable_product_db_integration'):
         try:
             processor.enable_product_db_integration(True)
         except Exception:
             pass
 
-    if target_file:
-        processor.load_file(target_file)
-        processor._last_loaded_file = target_file
-        with _processor_cache_lock:
-            # Evict old entries for same store to avoid stale data
-            keys_to_remove = [k for k in _processor_cache if k[1] == store_name]
-            for k in keys_to_remove:
-                del _processor_cache[k]
-            _processor_cache[cache_key] = processor
-        logging.info(f"⚡ CACHE STORE: Cached processor for {os.path.basename(target_file)}")
+    # PERFORMANCE FIX: Check if caller wants to skip file loading (for tag-based generation)
+    from flask import has_request_context, session
+    skip_file_load = False
+    if has_request_context():
+        skip_file_load = session.get('_skip_file_load_for_generation', False)
+    
+    if skip_file_load:
+        logging.info("⚡ PERFORMANCE: Skipping file load in get_excel_processor (bypass flag set)")
+        return processor
+
+    # Try to load session file if present
+    try:
+        if has_request_context():
+            session_file = session.get('file_path')
+            if session_file and os.path.exists(session_file):
+                processor.load_file(session_file)
+                processor._last_loaded_file = session_file
+    except Exception:
+        pass
+
+    # If nothing loaded, optionally load default file for the store
+    if not getattr(processor, '_last_loaded_file', None):
+        try:
+            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
+            if default_file and os.path.exists(default_file):
+                if processor.load_file(default_file):
+                    processor._last_loaded_file = default_file
+        except Exception:
+            pass
 
     return processor
 
@@ -3638,8 +3616,6 @@ def upload_file():
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
             # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
             _excel_processor = None
-            with _processor_cache_lock:
-                _processor_cache.clear()
             logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
             
             # CRITICAL: Clear cache again after marking as ready to ensure old data is gone
@@ -7094,9 +7070,6 @@ def set_store():
         
         # CHECK: Warn if switching stores
         current_store = session.get('selected_store')
-        # Also capture IP-based store BEFORE we overwrite it below
-        with _ip_store_lock:
-            _ip_current_store_before = _ip_store_selections.get(ip_address, {}).get('store')
         if current_store and current_store != store_value:
             logging.warning(f"⚠️ STORE SWITCH DETECTED: {current_store} → {store_value}")
             logging.warning(f"⚠️ Request from: {request.referrer or 'unknown'}")
@@ -7158,47 +7131,25 @@ def set_store():
             # If threading fails, just skip cache clearing
             pass
 
-        # Only clear file data when actually switching to a different store.
-        # Re-setting the same store (e.g. on every page load) must NOT wipe the upload.
+        # CRITICAL: Clear other session data from previous store (but keep selected_store!)
+        # NOTE: We clear file_path and uploaded_filename to force reload with new store's database
+        # However, if the same file is valid for the new store, it will be reloaded automatically
         old_file_path = session.get('file_path')
         old_filename = session.get('uploaded_filename')
-        # Use IP-based store as fallback if session store is missing (avoids false positives)
-        effective_current_store = current_store or _ip_current_store_before
-        is_store_switch = effective_current_store and effective_current_store != store_value
-
-        # Additional guard: if the persisted upload already belongs to the target store, never clear
-        if is_store_switch and old_file_path:
-            try:
-                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-                if os.path.exists(persistence_file):
-                    last_upload = _robust_load_persistent_json(persistence_file)
-                    if last_upload and last_upload.get('store') == store_value:
-                        is_store_switch = False
-                        logging.info(f"Store switch suppressed: persisted file already belongs to {store_value}")
-            except Exception:
-                pass
-
-        if is_store_switch:
-            # Extra guard: never clear if session store already matches target
-            if current_store == store_value:
-                is_store_switch = False
-                logging.info(f"Store switch suppressed: session store already matches {store_value}")
-
-        if is_store_switch:
-            session.pop('file_path', None)
-            session.pop('uploaded_filename', None)
-            session.pop('upload_timestamp', None)
-            session.pop('selected_tags', None)
-            logging.info(f"Cleared file data for store switch {effective_current_store} → {store_value}: file_path={old_file_path}")
-        else:
-            logging.info(f"Store set to {store_value} (no file clear): session_store={current_store}, ip_store={_ip_current_store_before}")
+        
+        session.pop('file_path', None)
+        session.pop('uploaded_filename', None)
+        session.pop('upload_timestamp', None)
+        session.pop('selected_tags', None)
+        
+        # Log what was cleared for debugging
+        if old_file_path or old_filename:
+            logging.info(f"Cleared file data for store switch: file_path={old_file_path}, filename={old_filename}")
 
         # Clear the global product database instance to force reload with new store
         global _product_database, _excel_processor
         _product_database = None
         _excel_processor = None
-        with _processor_cache_lock:
-            _processor_cache.clear()
 
         # OPTIMIZATION: File loading deferred to page reload for instant response
         # Don't call get_product_database here - it's slow and can cause timeout
@@ -9335,8 +9286,7 @@ def generate_labels():
         
         # Get processor instance (will skip file loading if bypass flag set)
         excel_processor = get_excel_processor()
-        # Only enable DB integration if we need to load from file (tags already have all needed data)
-        excel_processor.enable_product_db_integration(not has_request_selected_tags)
+        excel_processor.enable_product_db_integration(True)
         
         # Clear bypass flag after get_excel_processor
         if '_skip_file_load_for_generation' in session:

@@ -1029,17 +1029,13 @@ def group_similar_strains(strains, similarity_threshold=0.8):
 class ExcelProcessor:
     """Processes Excel files containing product data."""
 
-    # Class-level file cache shared across all instances (survives per-request object creation)
-    _shared_file_cache: Dict = {}
-    _shared_file_cache_lock = threading.Lock()
-
     def __init__(self, store_name='AGT_Bothell'):
         self.df = None
         self.dropdown_cache = {}
         self.selected_tags = []
         self.logger = logger
         self._last_loaded_file = None
-        self._file_cache = ExcelProcessor._shared_file_cache  # Point to shared cache
+        self._file_cache = {}
         self._max_cache_size = 3  # Reduced cache size for memory efficiency
         self._product_db_enabled = True
         self._debug_count = 0
