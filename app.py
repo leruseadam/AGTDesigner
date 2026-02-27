@@ -11268,11 +11268,20 @@ def generate_labels():
                             excel_processor.df = original_df.copy()  # Use fresh copy to avoid any references
                             if 'original_file_path' in locals() and original_file_path:
                                 excel_processor._last_loaded_file = original_file_path
-                            logging.debug(f"⚡ INSTANT: Restored original DataFrame ({len(excel_processor.df)} rows)")
+                            try:
+                                logging.debug(f"⚡ INSTANT: Restored original DataFrame ({len(excel_processor.df)} rows)")
+                            except Exception:
+                                pass  # Logging failed, but don't let it break cleanup
                         except Exception as restore_error:
-                            logging.warning(f"Could not restore original DataFrame: {restore_error}")
+                            try:
+                                logging.warning(f"Could not restore original DataFrame: {restore_error}")
+                            except Exception:
+                                pass  # Logging failed
         except Exception as restore_err:
-            logging.warning(f"Error during Excel DataFrame restoration: {restore_err}")
+            try:
+                logging.warning(f"Error during Excel DataFrame restoration: {restore_err}")
+            except Exception:
+                pass  # Logging failed
         
         # Clean up request fingerprint to allow future requests
         # Always try to clean up, even if an exception occurred early
@@ -11284,27 +11293,42 @@ def generate_labels():
                     fingerprint_to_clean = request_fingerprint if 'request_fingerprint' in locals() else None
                     if fingerprint_to_clean:
                         generate_labels._processing_requests.discard(fingerprint_to_clean)
-                        logging.debug(f"Cleaned up request fingerprint: {fingerprint_to_clean}")
+                        try:
+                            logging.debug(f"Cleaned up request fingerprint: {fingerprint_to_clean}")
+                        except Exception:
+                            pass  # Logging failed
                     else:
                         # If we can't find the fingerprint, clear all old entries (safety measure)
                         # This prevents permanent hangs if cleanup fails
                         current_size = len(generate_labels._processing_requests)
                         if current_size > 10:  # Only clear if there are many stuck entries
-                            logging.warning(f"Clearing {current_size} stuck request fingerprints to prevent hangs")
+                            try:
+                                logging.warning(f"Clearing {current_size} stuck request fingerprints to prevent hangs")
+                            except Exception:
+                                pass  # Logging failed
                             generate_labels._processing_requests.clear()
                 except NameError:
                     # Variable doesn't exist in this scope, which is fine if exception occurred early
-                    logging.debug("Request fingerprint variable not in scope (likely early exception)")
+                    try:
+                        logging.debug("Request fingerprint variable not in scope (likely early exception)")
+                    except Exception:
+                        pass  # Logging failed
         except Exception as cleanup_error:
             # Don't let cleanup errors prevent the function from completing
-            logging.warning(f"Error cleaning up request fingerprint: {cleanup_error}")
+            try:
+                logging.warning(f"Error cleaning up request fingerprint: {cleanup_error}")
+            except Exception:
+                pass  # Logging failed
             # Last resort: clear all if cleanup consistently fails
             try:
                 if hasattr(generate_labels, '_processing_requests'):
                     generate_labels._processing_requests.clear()
-                    logging.warning("Cleared all processing requests as last resort cleanup")
-            except:
-                pass
+                    try:
+                        logging.warning("Cleared all processing requests as last resort cleanup")
+                    except Exception:
+                        pass  # Logging failed
+            except Exception:
+                pass  # Everything failed, but don't raise
 
 
 
