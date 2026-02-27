@@ -11244,7 +11244,7 @@ def generate_labels():
         logging.info(f"🔍 TRACE: Returning file, final store = {get_current_store_name()}")
         return response
 
-    except Exception as e:
+    except BaseException as e:
         # Safe logging - don't let logging errors prevent error response
         try:
             logging.error(f"Error during label generation: {str(e)}")
