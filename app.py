@@ -9309,7 +9309,8 @@ def generate_labels():
         
         # Get processor instance (will skip file loading if bypass flag set)
         excel_processor = get_excel_processor()
-        excel_processor.enable_product_db_integration(True)
+        # Only enable DB integration if we need to load from file (tags already have all needed data)
+        excel_processor.enable_product_db_integration(not has_request_selected_tags)
         
         # Clear bypass flag after get_excel_processor
         if '_skip_file_load_for_generation' in session:
