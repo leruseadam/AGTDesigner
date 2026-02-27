@@ -11253,7 +11253,16 @@ def generate_labels():
             # If logging fails, at least print to stderr
             print(f"CRITICAL: Logging failed during label generation error: {log_error}", file=sys.stderr)
             print(f"Original error: {str(e)}", file=sys.stderr)
-        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+        # Safe JSON response - don't let jsonify errors prevent response
+        try:
+            return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
+        except Exception as json_error:
+            # If jsonify fails, return plain text response
+            try:
+                return f'An unexpected error occurred: {str(e)}', 500, {'Content-Type': 'text/plain'}
+            except Exception:
+                # Last resort: return minimal response
+                return 'Internal Server Error', 500
     
     finally:
         # CRITICAL FIX: Restore original Excel DataFrame INSTANTLY after generation to prevent filtering by vendor
