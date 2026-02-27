@@ -1388,12 +1388,17 @@ def update_processing_status(filename, status):
         logging.info(f"Updated processing status for {filename}: {status}")
         logging.debug(f"Current processing statuses: {dict(processing_status)}")
 
-def get_excel_processor():
-    """Return a fresh ExcelProcessor for the current store/session.
+# Cache: (file_path, store_name) -> ExcelProcessor to avoid reloading on every request
+_processor_cache = {}
+_processor_cache_lock = threading.Lock()
 
-    Avoids sharing processors across requests while keeping callers intact.
+def get_excel_processor():
+    """Return a cached ExcelProcessor for the current store/session.
+
+    Caches by file path so load_file and DB sync only fire once per file.
     """
     from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
+    from flask import has_request_context, session
 
     # Resolve store context
     store_name = None
@@ -1402,44 +1407,61 @@ def get_excel_processor():
     except Exception:
         store_name = None
 
-    processor = ExcelProcessor(store_name=store_name)
+    # PERFORMANCE FIX: Check if caller wants to skip file loading (for tag-based generation)
+    skip_file_load = False
+    if has_request_context():
+        skip_file_load = session.get('_skip_file_load_for_generation', False)
 
-    # Enable product DB integration by default for lineage lookups
+    if skip_file_load:
+        logging.info("⚡ PERFORMANCE: Skipping file load in get_excel_processor (bypass flag set)")
+        processor = ExcelProcessor(store_name=store_name)
+        return processor
+
+    # Determine which file to load
+    target_file = None
+    try:
+        if has_request_context():
+            session_file = session.get('file_path')
+            if session_file and os.path.exists(session_file):
+                target_file = session_file
+    except Exception:
+        pass
+
+    if not target_file:
+        try:
+            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
+            if default_file and os.path.exists(default_file):
+                target_file = default_file
+        except Exception:
+            pass
+
+    # Return cached processor if file hasn't changed
+    cache_key = (target_file, store_name)
+    with _processor_cache_lock:
+        if target_file and cache_key in _processor_cache:
+            cached = _processor_cache[cache_key]
+            if getattr(cached, '_last_loaded_file', None) == target_file:
+                logging.debug(f"⚡ CACHE HIT: Returning cached processor for {os.path.basename(target_file)}")
+                return cached
+
+    # Create and load new processor
+    processor = ExcelProcessor(store_name=store_name)
     if hasattr(processor, 'enable_product_db_integration'):
         try:
             processor.enable_product_db_integration(True)
         except Exception:
             pass
 
-    # PERFORMANCE FIX: Check if caller wants to skip file loading (for tag-based generation)
-    from flask import has_request_context, session
-    skip_file_load = False
-    if has_request_context():
-        skip_file_load = session.get('_skip_file_load_for_generation', False)
-    
-    if skip_file_load:
-        logging.info("⚡ PERFORMANCE: Skipping file load in get_excel_processor (bypass flag set)")
-        return processor
-
-    # Try to load session file if present
-    try:
-        if has_request_context():
-            session_file = session.get('file_path')
-            if session_file and os.path.exists(session_file):
-                processor.load_file(session_file)
-                processor._last_loaded_file = session_file
-    except Exception:
-        pass
-
-    # If nothing loaded, optionally load default file for the store
-    if not getattr(processor, '_last_loaded_file', None):
-        try:
-            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
-            if default_file and os.path.exists(default_file):
-                if processor.load_file(default_file):
-                    processor._last_loaded_file = default_file
-        except Exception:
-            pass
+    if target_file:
+        processor.load_file(target_file)
+        processor._last_loaded_file = target_file
+        with _processor_cache_lock:
+            # Evict old entries for same store to avoid stale data
+            keys_to_remove = [k for k in _processor_cache if k[1] == store_name]
+            for k in keys_to_remove:
+                del _processor_cache[k]
+            _processor_cache[cache_key] = processor
+        logging.info(f"⚡ CACHE STORE: Cached processor for {os.path.basename(target_file)}")
 
     return processor
 
@@ -3616,6 +3638,8 @@ def upload_file():
             # PERFORMANCE FIX: Clear global processor immediately so frontend can load the file
             # CRITICAL: Also clear cache to ensure old Excel data doesn't persist
             _excel_processor = None
+            with _processor_cache_lock:
+                _processor_cache.clear()
             logging.info("✅ Cleared Excel processor cache immediately for fast frontend access")
             
             # CRITICAL: Clear cache again after marking as ready to ensure old data is gone
@@ -7173,6 +7197,8 @@ def set_store():
         global _product_database, _excel_processor
         _product_database = None
         _excel_processor = None
+        with _processor_cache_lock:
+            _processor_cache.clear()
 
         # OPTIMIZATION: File loading deferred to page reload for instant response
         # Don't call get_product_database here - it's slow and can cause timeout
