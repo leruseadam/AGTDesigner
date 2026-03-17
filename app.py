@@ -9666,47 +9666,16 @@ def generate_labels():
                     if not isinstance(tag, dict):
                         continue
                     product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
-                    # Use saved lineage first so manual edits are never lost.
-                    # Priority: sovereign_lineage > currentLineage > canonical_lineage > Lineage
-                    ui_lineage = (
-                        tag.get('sovereign_lineage')
-                        or tag.get('currentLineage')
-                        or tag.get('canonical_lineage')
-                        or tag.get('Lineage')
-                        or tag.get('lineage')
-                    )
-                    if not product_name or not ui_lineage:
+                    # Only treat sovereign_lineage as a true user override — it is the only field
+                    # that represents a manual edit. currentLineage, canonical_lineage, and Lineage
+                    # are all derived from the DB or Excel and should not block the DB lookup.
+                    sovereign = tag.get('sovereign_lineage')
+                    if not sovereign or str(sovereign).strip().upper() in ('', 'NONE', 'NULL', 'NAN'):
+                        continue
+                    if not product_name:
                         continue
 
-                    ui_lineage_clean = str(ui_lineage).strip().upper()
-
-                    # If we have the original Excel DF, compare the value in the sheet.
-                    # If the UI lineage equals the Excel sheet's lineage for that product,
-                    # it likely wasn't changed by the user and should not be treated as
-                    # a user override that trumps the database.
-                    treat_as_override = True
-                    try:
-                        if df is not None and 'Product Name*' in df.columns:
-                            # Find matching Excel rows by Product Name* (case-insensitive)
-                            matches = df[df['Product Name*'].astype(str).str.strip().str.lower() == str(product_name).strip().lower()]
-                            if matches is not None and len(matches) > 0:
-                                # Inspect the first matching row's lineage-like columns
-                                row = matches.iloc[0]
-                                excel_lineage = None
-                                for c in ['canonical_lineage', 'currentLineage', 'Lineage', 'lineage']:
-                                    if c in row and pd.notna(row[c]) and str(row[c]).strip() not in ['', 'None', 'nan']:
-                                        excel_lineage = str(row[c]).strip().upper()
-                                        break
-                                # If the Excel lineage is present and exactly equals the UI value,
-                                # then the UI did not change it and we should NOT treat it as an override.
-                                if excel_lineage and excel_lineage == ui_lineage_clean:
-                                    treat_as_override = False
-                    except Exception:
-                        # On any error, default to treating as override to avoid hiding explicit UI edits
-                        treat_as_override = True
-
-                    if treat_as_override:
-                        ui_lineage_map[str(product_name).strip()] = ui_lineage_clean
+                    ui_lineage_map[str(product_name).strip()] = str(sovereign).strip().upper()
                 
                 # Apply UI lineage values - ALWAYS override database lineage with user's UI changes
                 # PERFORMANCE: Build case-insensitive map once for O(1) lookups
@@ -9768,6 +9737,7 @@ def generate_labels():
                             for db_record in db_records:
                                 pname = db_record.get('Product Name*', '')
                                 db_lineage = (
+                                    db_record.get('sovereign_lineage') or
                                     db_record.get('currentLineage') or
                                     db_record.get('canonical_lineage') or
                                     db_record.get('Lineage')
