@@ -94,7 +94,7 @@ class FastGenerationEngine:
         parts.append(f"SCALE||{scale_factor}")
         # IMPORTANT: Bump cache version whenever lineage/coloring logic changes
         # so stale DOCX generations (old CBD coloring rules) are not reused.
-        parts.append("CACHE_VERSION||CBD_FIX_V7_PREROLL_DOUBLE_LAYOUT")
+        parts.append("CACHE_VERSION||CBD_FIX_V8_LINEAGE_COLOR_ALWAYS")
         cache_str = '\n'.join(parts)
         return hashlib.md5(cache_str.encode('utf-8')).hexdigest()
     

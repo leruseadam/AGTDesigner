@@ -6,13 +6,21 @@ This module replaces the repetitive font sizing functions across the codebase.
 
 from __future__ import annotations
 
+import os
+import sys
+
+# When run as __main__, project root may not be on path; add it so "src" imports work.
+if __name__ == "__main__":
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+
+import json
 import logging
 from docx.shared import Pt
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from src.core.utils.common import calculate_text_complexity
-import json
-import os
 
 logger = logging.getLogger(__name__)
 

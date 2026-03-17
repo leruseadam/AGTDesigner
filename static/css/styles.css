@@ -27,17 +27,16 @@
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
   
-  --tag-list-height: max(var(--tag-list-min-height), calc(110vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
+  --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: 64rem;   /* Center column - natural content height */
+  --center-panel-height: 52rem;   /* Center column - natural content height */
   --tag-list-scroll-padding: 1rem;
 }
 
-/* On wide screens make the tag lists slightly taller than the center column
-   so they visually extend beyond the center card without changing aspect ratio. */
+/* On wide screens tag lists use viewport height to avoid overflowing */
 @media (min-width: 1000px) {
   :root {
-    --tag-list-height: calc(var(--center-panel-height) + 2rem);
+    --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));
   }
 }
 
@@ -723,13 +722,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
 }
 
@@ -737,7 +736,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
   #availableTags,
   #selectedTags {
@@ -748,7 +747,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
   #availableTags,
   #selectedTags {
@@ -793,10 +792,10 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 74vh);
-    --center-panel-height: 57rem;
+    --center-panel-height: 46rem;
   }
   @supports (height: 100dvh) {
-  :root { --tag-list-height: max(var(--tag-list-min-height), 74dvh); --center-panel-height: 64rem; }
+  :root { --tag-list-height: max(var(--tag-list-min-height), 74dvh); --center-panel-height: 52rem; }
   }
   .control-panel,
   .center-panel,
@@ -971,7 +970,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: 64rem;     /* Height of center control panel */
+    --center-panel-height: 52rem;     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
 
     /* Dynamic filter border sizing */
@@ -5595,13 +5594,13 @@ body.modal-open #mainContent.store-selection-disabled,
 
 /* Filter Action Buttons */
 .filter-action-button {
-  min-width: 168px;
-  width: 168px;
-  min-height: 46px;
-  padding: 0.6rem 1rem;
-  border-radius: 8px;
-  font-weight: 700;
-  font-size: 13px;
+  min-width: 130px;
+  width: auto;
+  min-height: 38px;
+  padding: 0.45rem 0.8rem;
+  border-radius: 7px;
+  font-weight: 600;
+  font-size: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6852,6 +6851,12 @@ body.modal-open #mainContent.store-selection-disabled,
   padding: 0.75rem;
 }
 
+/* Brief highlight when scrolling to POSaBit Integration Settings */
+#databaseModal .posabit-highlight {
+  box-shadow: 0 0 0 2px rgba(0, 212, 170, 0.9), 0 0 20px rgba(0, 212, 170, 0.4);
+  transition: box-shadow 0.3s ease;
+}
+
 #databaseModal .card {
   margin-bottom: 0.75rem;
 }
@@ -7729,183 +7734,116 @@ body.modal-open #mainContent.store-selection-disabled,
     pointer-events: none !important; /* Disable click blocking */
   }
 
-  /* Excel Loading Splash Screen - CRITICAL FIX: Use lava background */
+  /* Excel Loading Splash - gentle, non-scary overlay */
   .excel-loading-splash {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background: transparent; /* CRITICAL FIX: Transparent to show lava background */
-    backdrop-filter: blur(5px);
-    -webkit-backdrop-filter: blur(5px);
+    background: rgba(28, 25, 42, 0.82);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     z-index: 9999;
     display: flex;
     justify-content: center;
     align-items: center;
-    animation: fadeIn 0.3s ease-in-out;
-  }
-  
-  /* CRITICAL FIX: Add lava background canvas behind splash screen */
-  .excel-loading-splash::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: -1;
-    background: linear-gradient(135deg, #23192b 0%, #8b5cf6 25%, #43e97b 50%, #a084e8 75%, #23192b 100%);
-    background-size: 400% 400%;
-    animation: lava-placeholder-fade 3s ease-in-out infinite;
-    pointer-events: none;
+    animation: fadeIn 0.25s ease-out;
   }
 
   .excel-loading-container {
-    background: 
-      radial-gradient(circle at 20% 20%, rgba(255, 0, 102, 0.2) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, rgba(0, 255, 136, 0.2) 0%, transparent 50%),
-      radial-gradient(circle at 40% 60%, rgba(255, 102, 0, 0.2) 0%, transparent 50%),
-      radial-gradient(circle at 60% 40%, rgba(102, 0, 255, 0.2) 0%, transparent 50%),
-      linear-gradient(45deg, rgba(26, 0, 51, 0.9), rgba(51, 0, 102, 0.9), rgba(102, 0, 204, 0.9), rgba(153, 0, 255, 0.9));
-    background-size: 200% 200%, 150% 150%, 180% 180%, 220% 220%, 100% 100%;
-    animation: excelLoadingBackground 30s ease-in-out infinite;
-    padding: 80px 100px; /* Increased for BIGGER splash */
-    max-width: 900px; /* Increased container size */
-    border: 1px solid rgba(160, 132, 232, 0.5);
-    border-radius: 24px; /* Increased from 20px */
+    background: rgba(45, 38, 65, 0.95);
+    border: 1px solid rgba(0, 212, 170, 0.25);
+    border-radius: 16px;
+    padding: 40px 48px;
+    max-width: 380px;
     text-align: center;
-    width: 90%;
-    box-shadow: 
-      0 20px 40px rgba(0, 0, 0, 0.4),
-      0 0 0 1px rgba(160, 132, 232, 0.2),
-      inset 0 0 20px rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
 
   .excel-loading-content {
-    color: white;
+    color: rgba(255, 255, 255, 0.95);
   }
 
   .excel-loading-icon {
-    margin-bottom: 40px; /* Increased for bigger spacing */
-    animation: excelIconPulse 4s ease-in-out infinite;
+    margin-bottom: 20px;
+    animation: excelIconPulse 2.5s ease-in-out infinite;
   }
 
   .excel-loading-icon svg {
-    width: 100px !important; /* Increased from 80px */
-    height: 100px !important; /* Increased from 80px */
+    width: 48px !important;
+    height: 48px !important;
     color: #00d4aa;
-    filter: drop-shadow(0 0 15px rgba(0, 212, 170, 0.6)); /* Enhanced glow */
+    opacity: 0.95;
   }
 
   @keyframes excelIconPulse {
-    0%, 100% { 
-      transform: scale(1);
-      opacity: 1;
-    }
-    50% { 
-      transform: scale(1.1);
-      opacity: 0.8;
-    }
-  }
-
-  @keyframes excelLoadingBackground {
-    0% { 
-      background-position: 0% 0%, 100% 100%, 50% 50%, 25% 75%, 0% 0%;
-      filter: hue-rotate(0deg) saturate(1.1) brightness(1.0);
-    }
-    25% { 
-      background-position: 25% 25%, 75% 75%, 75% 25%, 50% 50%, 25% 25%;
-      filter: hue-rotate(45deg) saturate(1.15) brightness(1.05);
-    }
-    50% { 
-      background-position: 50% 50%, 50% 50%, 0% 100%, 75% 25%, 50% 50%;
-      filter: hue-rotate(90deg) saturate(1.2) brightness(1.1);
-    }
-    75% { 
-      background-position: 75% 75%, 25% 25%, 25% 75%, 0% 100%, 75% 75%;
-      filter: hue-rotate(135deg) saturate(1.15) brightness(1.05);
-    }
-    100% { 
-      background-position: 100% 100%, 0% 0%, 50% 50%, 25% 75%, 100% 100%;
-      filter: hue-rotate(180deg) saturate(1.1) brightness(1.0);
-    }
+    0%, 100% { opacity: 0.9; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.05); }
   }
 
   .excel-loading-title {
-    font-size: 42px; /* Increased for better visibility */
-    font-weight: 700;
-    margin-bottom: 28px; /* Increased spacing */
-    background: linear-gradient(135deg, #00d4aa, #ffffff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: -0.02em;
   }
 
   .excel-loading-subtitle {
-    font-size: 18px; /* Normal size */
-    color: rgba(255, 255, 255, 0.8);
-    margin-bottom: 28px; /* Increased spacing */
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.75);
+    margin-bottom: 6px;
     font-weight: 500;
   }
 
-
   .excel-loading-status {
-    font-size: 16px; /* Normal size */
-    color: rgba(255, 255, 255, 0.7);
-    margin-bottom: 28px; /* Increased spacing */
-    font-weight: 500;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 20px;
+    font-weight: 400;
   }
 
   .excel-loading-dots {
     display: flex;
-    gap: 16px; /* Increased for bigger dots */
+    gap: 8px;
     justify-content: center;
   }
 
   .excel-loading-dots span {
-    width: 16px; /* Increased from 12px */
-    height: 16px; /* Increased from 12px */
-    background: #00d4aa;
+    width: 8px;
+    height: 8px;
+    background: rgba(0, 212, 170, 0.7);
     border-radius: 50%;
-    animation: excelDotPulse 2.5s ease-in-out infinite;
+    animation: excelDotPulse 1.8s ease-in-out infinite;
   }
 
   .excel-loading-dots span:nth-child(1) { animation-delay: 0s; }
-  .excel-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
-  .excel-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+  .excel-loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+  .excel-loading-dots span:nth-child(3) { animation-delay: 0.3s; }
 
   @keyframes excelDotPulse {
-    0%, 80%, 100% { 
-      transform: scale(0.8);
-      opacity: 0.5;
-    }
-    40% { 
-      transform: scale(1.2);
-      opacity: 1;
-    }
+    0%, 80%, 100% { transform: scale(0.85); opacity: 0.5; }
+    40% { transform: scale(1.1); opacity: 1; }
   }
 
   /* Responsive adjustments */
   @media (max-width: 768px) {
     .excel-loading-container {
-      padding: 50px 40px; /* Increased for mobile */
+      padding: 32px 24px;
       margin: 20px;
-      max-width: 90vw; /* Ensure it fits on mobile */
+      max-width: 90vw;
     }
     
     .excel-loading-title {
-      font-size: 34px; /* Increased for mobile */
-    }
-    
-    .excel-loading-subtitle {
-      font-size: 16px; /* Normal size for mobile */
-    }
-    
-    .excel-loading-status {
       font-size: 20px;
+    }
+    
+    .excel-loading-subtitle,
+    .excel-loading-status {
+      font-size: 14px;
     }
     
     .generation-splash-popup {
@@ -8075,6 +8013,32 @@ body.modal-open #mainContent.store-selection-disabled,
 .main-content-row > [data-container-type] {
   width: 100% !important;
   max-width: 100% !important;
+}
+
+/* Ensure top filter bar never overflows horizontally on main page */
+.enhanced-filter-bar {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.enhanced-filter-bar .filter-row {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.enhanced-filter-bar .filter-group {
+  flex: 1 1 140px;
+  min-width: 120px;
+}
+
+/* On narrower screens, allow the bar to wrap so it doesn't overflow */
+@media (max-width: 1200px) {
+  .enhanced-filter-bar {
+    flex-wrap: wrap;
+  }
 }
 
 /* Center column should be shorter than the side tag list columns */
@@ -11761,22 +11725,22 @@ html, body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(10px);
+    background: rgba(28, 25, 42, 0.82);
+    backdrop-filter: blur(8px);
     z-index: 999999 !important;
     align-items: center;
     justify-content: center;
-    animation: fadeIn 0.3s ease-in;
+    animation: fadeIn 0.25s ease-out;
 }
 
 .excel-loading-container {
-    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-    border-radius: 20px;
-    padding: 40px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    background: rgba(45, 38, 65, 0.95);
+    border: 1px solid rgba(0, 212, 170, 0.25);
+    border-radius: 16px;
+    padding: 40px 48px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
     text-align: center;
-    max-width: 500px;
-    animation: slideUp 0.4s ease-out;
+    max-width: 380px;
 }
 
 .excel-loading-content {

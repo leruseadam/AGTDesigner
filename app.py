@@ -23,6 +23,13 @@ from decimal import Decimal
 import pandas as pd  # Add this import
 import json
 
+# Load .env for local development (POSaBit, etc.). Safe: .env is in .gitignore.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Optional NumPy dependency: try to import and expose a flag so code
 # checks like `if NUMPY_AVAILABLE and np is not None:` are safe.
 NUMPY_AVAILABLE = False
@@ -115,7 +122,6 @@ else:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
-VALID_STORES = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla', 'Test']
 CACHE_DIR = os.path.join(UPLOADS_DIR, 'cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -680,13 +686,6 @@ CACHE_DURATION = 300  # Cache for 5 minutes
 _excel_processor = None
 _excel_processor_reset_flag = False  # Flag to track when processor has been explicitly reset
 
-# Unique identifier for this Flask server instance (changes on restart)
-SERVER_INSTANCE_ID = str(uuid.uuid4())
-
-# Global ProductDatabase instances (one per store)
-_product_databases = {}  # store_name -> ProductDatabase instance
-_product_database_lock = threading.Lock()
-
 # Global JSONMatcher instance
 _json_matcher = None
 
@@ -763,127 +762,6 @@ RATE_LIMIT_MAX_REQUESTS = 100  # Max requests per minute per IP (increased for l
 # Simple in-memory rate limiter
 rate_limit_data = defaultdict(list)
 
-# ============================================================================
-# IP-based Store Selection System
-# ============================================================================
-
-# In-memory store for IP-based store selections (12-hour expiration)
-_ip_store_selections = {}
-_ip_store_lock = threading.Lock()
-_store_selections_file = 'sessions/store_selections.pkl'
-
-def is_store_selection_valid(ip_address, store_selection):
-    """Check if store selection is still valid (within 12 hours)."""
-    if not store_selection:
-        return False
-
-    # Store selections persist across server restarts for 12 hours
-    # No need to invalidate based on server_id - time-based expiration is sufficient
-
-    selection_time = store_selection.get('timestamp')
-    if not selection_time:
-        return False
-
-    try:
-        selection_datetime = datetime.fromisoformat(selection_time)
-        expiration_time = selection_datetime + timedelta(hours=12)
-        return datetime.now() < expiration_time
-    except (ValueError, TypeError):
-        return False
-
-def save_store_selections():
-    """Save store selections to disk for persistence across restarts."""
-    try:
-        with _ip_store_lock:
-            os.makedirs('sessions', exist_ok=True)
-            with open(_store_selections_file, 'wb') as f:
-                pickle.dump(_ip_store_selections, f)
-            logging.debug(f"Saved {len(_ip_store_selections)} store selections to disk")
-    except Exception as e:
-        logging.warning(f"Failed to save store selections: {e}")
-
-def load_store_selections():
-    """Load store selections from disk."""
-    global _ip_store_selections
-    try:
-        if os.path.exists(_store_selections_file):
-            with open(_store_selections_file, 'rb') as f:
-                loaded = pickle.load(f)
-                # Only load non-expired selections
-                valid_selections = {}
-                for ip, data in loaded.items():
-                    if is_store_selection_valid(ip, data):
-                        valid_selections[ip] = data
-                _ip_store_selections = valid_selections
-                logging.info(f"Loaded {len(_ip_store_selections)} valid store selections from disk")
-                return True
-    except Exception as e:
-        logging.warning(f"Failed to load store selections: {e}")
-    return False
-
-# OPTION 1: Clear ALL store selections on server restart (uncomment to force selection every restart)
-def clear_all_on_startup():
-    """Clear all store selections when server restarts - forces users to select store every time."""
-    global _ip_store_selections
-    with _ip_store_lock:
-        count = len(_ip_store_selections)
-        _ip_store_selections.clear()
-
-    # Delete the persistence file to prevent reload
-    try:
-        if os.path.exists(_store_selections_file):
-            os.remove(_store_selections_file)
-            logging.warning(f"🔥 STARTUP: Deleted store selections file - {_store_selections_file}")
-    except Exception as e:
-        logging.warning(f"Failed to delete store selections file: {e}")
-
-    # CRITICAL: Also clear all caches to prevent wrong tags from previous session
-    try:
-        cache.clear()
-        logging.warning(f"🔥 STARTUP: Cleared all Flask caches - fresh start for all users")
-    except Exception as e:
-        logging.warning(f"Failed to clear cache on startup: {e}")
-
-    logging.warning(f"🔥 STARTUP: Cleared all {count} store selections - STORE MODAL WILL SHOW FOR ALL USERS")
-
-# OPTION 2: Load persisted selections and only clear expired ones (12-hour persistence)
-def load_and_cleanup_on_startup():
-    """Load persisted store selections and clear only expired ones."""
-    global _ip_store_selections
-    
-    # Load from disk
-    load_store_selections()
-    
-    # Clear expired ones
-    expired_count = 0
-    with _ip_store_lock:
-        expired_ips = []
-        for ip_address, store_selection in _ip_store_selections.items():
-            if not is_store_selection_valid(ip_address, store_selection):
-                expired_ips.append(ip_address)
-        
-        for ip_address in expired_ips:
-            del _ip_store_selections[ip_address]
-            expired_count += 1
-    
-    if expired_count > 0:
-        logging.info(f"Cleared {expired_count} expired store selection(s) on startup")
-        save_store_selections()  # Save after cleanup
-    else:
-        logging.info(f"Loaded {len(_ip_store_selections)} valid store selections from disk")
-
-# Choose which startup behavior you want:
-# Uncomment ONE of the following:
-
-# Force store selection on every server restart:
-clear_all_on_startup()
-
-# OR keep 12-hour persistence across restarts:
-# load_and_cleanup_on_startup()
-
-# ------------------------------------------------------------------------------
-# Storage cleanup (uploads + stray DB files)
-# ------------------------------------------------------------------------------
 def cleanup_old_uploads(max_age_hours: int = 12):
     """Remove Excel uploads older than max_age_hours to keep PythonAnywhere tidy."""
     try:
@@ -911,48 +789,6 @@ def cleanup_old_uploads(max_age_hours: int = 12):
         logging.warning(f"Cleanup: error pruning old uploads: {e}")
 
 
-def cleanup_non_store_databases():
-    """Delete product_database_*.db files that are not tied to known stores."""
-    try:
-        upload_folder = app.config.get('UPLOAD_FOLDER', UPLOADS_DIR)
-        if not os.path.exists(upload_folder):
-            return
-        allowed_filenames = {f"product_database_{store}.db" for store in VALID_STORES}
-        allowed_filenames.update({'product_database.db', 'product_database_backup.db'})
-        removed = 0
-        for fname in os.listdir(upload_folder):
-            path = os.path.join(upload_folder, fname)
-            if not os.path.isfile(path):
-                continue
-            if fname.startswith('product_database_') and fname.endswith('.db') and fname not in allowed_filenames:
-                try:
-                    os.remove(path)
-                    removed += 1
-                    logging.info(f"Cleanup: removed stray DB {fname}")
-                except Exception as db_err:
-                    logging.warning(f"Cleanup: failed to remove {path}: {db_err}")
-        if removed:
-            logging.info(f"Cleanup: removed {removed} non-store database file(s)")
-    except Exception as e:
-        logging.warning(f"Cleanup: error pruning non-store databases: {e}")
-
-
-def start_storage_cleanup_scheduler():
-    """Run periodic cleanup (hourly) to prune stray DBs."""
-    def _worker():
-        while True:
-            try:
-                cleanup_non_store_databases()
-            except Exception as e:
-                logging.warning(f"Cleanup scheduler error: {e}")
-            # Run hourly
-            time.sleep(3600)
-    try:
-        t = threading.Thread(target=_worker, daemon=True)
-        t.start()
-        logging.info("Cleanup scheduler started (non-store DBs hourly)")
-    except Exception as e:
-        logging.warning(f"Failed to start cleanup scheduler: {e}")
 
 
 def start_daily_upload_cleanup_scheduler(run_hour: int = 0, run_minute: int = 0):
@@ -981,200 +817,13 @@ def start_daily_upload_cleanup_scheduler(run_hour: int = 0, run_minute: int = 0)
     except Exception as e:
         logging.warning(f"Failed to start daily upload cleanup scheduler: {e}")
 
-def get_client_ip():
-    """Get the client's IP address."""
-    from flask import has_request_context
-    if not has_request_context():
-        return None
-    if request.headers.get('X-Forwarded-For'):
-        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
-    elif request.headers.get('X-Real-IP'):
-        return request.headers.get('X-Real-IP')
-    else:
-        return request.remote_addr
-
 def get_current_store_name(allow_fallback=True):
-    """Get the current store name for the requesting client. Returns None if no valid selection."""
-    try:
-        # Check if we have a request context before accessing session/request
-        from flask import has_request_context
-        if not has_request_context():
-            # Outside request context - return None or fallback store
-            if allow_fallback:
-                return 'AGT_Bothell'  # Default fallback
-            return None
-        
-        # CRITICAL FIX: Check Flask session first (most reliable). Keep the value even if server instance changed.
-        if session.get('selected_store'):
-            return session.get('selected_store')
-        
-        # Fallback to IP-based selection
-        ip_address = get_client_ip()
-        if ip_address is not None:
-            with _ip_store_lock:
-                if ip_address in _ip_store_selections:
-                    store_data = _ip_store_selections[ip_address]
-                    # Check if the selection is still valid (not expired)
-                    if is_store_selection_valid(ip_address, store_data):
-                        # Store selection is valid - use it regardless of server instance
-                        # Also save to session for consistency
-                        session['selected_store'] = store_data['store']
-                        session['store_server_id'] = SERVER_INSTANCE_ID
-                        return store_data['store']
-                    else:
-                        # Remove expired selection
-                        del _ip_store_selections[ip_address]
-        
-        if allow_fallback:
-            # Simpler fallback: default to Bothell instead of auto-picking largest DB (avoids surprise switches)
-            return 'AGT_Bothell'
-    except Exception as e:
-        logging.warning(f"Error getting current store name: {e}")
-        return None
+    """Always returns AGT_Bothell — single-store deployment."""
+    return 'AGT_Bothell'
 
 def has_store_selection():
-    """Check if current IP has a valid store selection."""
-    try:
-        # Quick check: if we're outside request context, return False immediately
-        from flask import has_request_context
-        if not has_request_context():
-            return False
-        
-        # CRITICAL FIX: Check Flask session FIRST (most reliable) and keep value even if server instance changed
-        if session.get('selected_store'):
-            return True
-        
-        # Fallback to IP-based selection
-        ip_address = get_client_ip()
-        
-        # Fast path: check without lock first
-        if ip_address not in _ip_store_selections:
-            return False
-        
-        # Only acquire lock if we found a potential match
-        with _ip_store_lock:
-            if ip_address in _ip_store_selections:
-                store_data = _ip_store_selections[ip_address]
-                is_valid = is_store_selection_valid(ip_address, store_data)
-                if is_valid:
-                    # Also save to session for consistency
-                    session['selected_store'] = store_data['store']
-                    session['store_server_id'] = SERVER_INSTANCE_ID
-                return is_valid
-        
-        return False
-    except Exception as e:
-        # Silently fail outside request context
-        return False
-
-def cleanup_expired_store_selections():
-    """Remove expired store selections."""
-    current_time = datetime.now()
-    expired_ips = []
-    
-    with _ip_store_lock:
-        for ip_address, store_selection in _ip_store_selections.items():
-            if not is_store_selection_valid(ip_address, store_selection):
-                expired_ips.append(ip_address)
-        
-        for ip_address in expired_ips:
-            del _ip_store_selections[ip_address]
-    
-    # Save to disk after cleanup if any were removed
-    if expired_ips:
-        save_store_selections()
-
-def extract_store_from_filename(filename):
-    """Extract store name from filename if present. Handles variations like spaces, underscores, case."""
-    if not filename:
-        return None
-    
-    filename_upper = filename.upper()
-    # Normalize filename by replacing underscores and spaces for matching
-    filename_normalized = filename_upper.replace('_', ' ').replace('-', ' ')
-    
-    # Store mappings: (search_pattern, proper_store_name)
-    # Check both with "AGT" prefix and without (just store name)
-    store_patterns = [
-        # With AGT prefix
-        ('AGT BOTHELL', 'AGT_Bothell'),
-        ('AGT_BOTHELL', 'AGT_Bothell'),
-        ('AGT BURIEN', 'AGT_Burien'),
-        ('AGT_BURIEN', 'AGT_Burien'),
-        ('AGT GOLDBAR', 'AGT_Goldbar'),
-        ('AGT_GOLDBAR', 'AGT_Goldbar'),
-        ('AGT LYNNWOOD', 'AGT_Lynnwood'),
-        ('AGT_LYNNWOOD', 'AGT_Lynnwood'),
-        ('AGT SEATTLE', 'AGT_Seattle'),
-        ('AGT_SEATTLE', 'AGT_Seattle'),
-        ('AGT SHORELINE', 'AGT_Shoreline'),
-        ('AGT_SHORELINE', 'AGT_Shoreline'),
-        ('AGT WALLA WALLA', 'AGT_Walla_Walla'),
-        ('AGT_WALLA_WALLA', 'AGT_Walla_Walla'),
-        ('AGT WALLAWALLA', 'AGT_Walla_Walla'),
-        # Without AGT prefix (just store name) - check these after AGT versions
-        ('BOTHELL', 'AGT_Bothell'),
-        ('BURIEN', 'AGT_Burien'),
-        ('GOLDBAR', 'AGT_Goldbar'),
-        ('LYNNWOOD', 'AGT_Lynnwood'),
-        ('SEATTLE', 'AGT_Seattle'),
-        ('SHORELINE', 'AGT_Shoreline'),
-        ('WALLA WALLA', 'AGT_Walla_Walla'),
-        ('WALLAWALLA', 'AGT_Walla_Walla'),
-    ]
-    
-    # Check for store name in filename (case insensitive, handles spaces/underscores)
-    for pattern, store_name in store_patterns:
-        pattern_normalized = pattern.replace('_', ' ').replace('-', ' ')
-        if pattern_normalized in filename_normalized or pattern in filename_upper:
-            return store_name
-    
-    return None
-
-def validate_excel_filename_for_store(filename, selected_store):
-    """
-    Validate that Excel filename contains store name and matches selected store.
-    Returns (is_valid, warning_message, detected_store)
-    """
-    if not filename:
-        return False, "Filename is required", None
-    
-    detected_store = extract_store_from_filename(filename)
-    
-    if not detected_store:
-        return False, f"Excel filename must contain a store name (e.g., 'AGT_Bothell', 'AGT_Burien', etc.). Found filename: {filename}", None
-    
-    if detected_store != selected_store:
-        # CRITICAL FIX: Add diagnostic information to help debug store mismatch
-        from flask import session, has_request_context
-        session_store = None
-        ip_store = None
-        if has_request_context():
-            session_store = session.get('selected_store')
-            ip_address = get_client_ip()
-            with _ip_store_lock:
-                if ip_address in _ip_store_selections:
-                    ip_store = _ip_store_selections[ip_address].get('store')
-        
-        diagnostic_info = f"Detected store in filename: {detected_store}, Selected store: {selected_store}"
-        if session_store:
-            diagnostic_info += f", Session store: {session_store}"
-        if ip_store:
-            diagnostic_info += f", IP-based store: {ip_store}"
-        
-        logging.error(f"Store mismatch detected: {diagnostic_info}")
-        
-        # CRITICAL FIX: If session has the correct store but selected_store is wrong, suggest refreshing
-        if session_store == detected_store and selected_store != detected_store:
-            return False, f"Store mismatch: Your session shows '{session_store}' but the system selected '{selected_store}'. Please refresh the page and try again, or manually select '{detected_store}' store.", detected_store
-        
-        return False, f"Store mismatch: Cannot upload {detected_store} Excel file to {selected_store}. Please select the correct store or use the correct Excel file. (Session: {session_store}, IP: {ip_store})", detected_store
-    
-    return True, None, detected_store
-
-# ============================================================================
-# End of IP-based Store Selection System
-# ============================================================================
+    """Always True — single-store deployment."""
+    return True
 
 def reset_excel_processor():
     """Reset the global ExcelProcessor to force reloading of the default file."""
@@ -1316,42 +965,11 @@ def force_reload_excel_processor(new_file_path):
             logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
     else:
         logging.error(f"Failed to load new file in Excel processor: {new_file_path}")
-        # CRITICAL FIX: Don't create empty DataFrame - this causes the "no strains" issue
-        # Instead, try to load a default file as fallback
-        from src.core.data.excel_processor import get_default_upload_file
-        # Get store-specific default file
-        selected_store = get_current_store_name() if has_store_selection() else None
-        default_file = get_default_upload_file(selected_store)
-        if default_file and os.path.exists(default_file):
-            logging.info(f"Attempting to load default file as fallback: {default_file}")
-            fallback_success = _excel_processor.load_file(default_file)
-            if fallback_success:
-                _excel_processor._last_loaded_file = default_file
-                logging.info(f"Successfully loaded default file as fallback: {default_file}")
-                # Populate dropdown cache for fallback file
-                if hasattr(_excel_processor, '_cache_dropdown_values'):
-                    try:
-                        _excel_processor._cache_dropdown_values()
-                        logging.info(f"Successfully populated dropdown cache from fallback file")
-                    except Exception as e:
-                        logging.error(f"Failed to populate dropdown cache from fallback: {e}")
-            else:
-                logging.error(f"Failed to load default file as fallback: {default_file}")
-                if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
-                    logging.warning("Preserving existing DataFrame to avoid wiping loaded data")
-                else:
-                    # Only create empty DataFrame if there truly is no data loaded
-                    _excel_processor.df = pd.DataFrame()
-                    _excel_processor.selected_tags = []
-                    logging.warning("Created empty DataFrame as last resort - no prior data available")
-        else:
-            logging.error("No default file available as fallback")
-            if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
-                logging.warning("Preserving existing DataFrame despite missing fallback file")
-            else:
-                _excel_processor.df = pd.DataFrame()
-                _excel_processor.selected_tags = []
-                logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
+        # Do not fall back to default Excel; leave empty if load failed
+        if not hasattr(_excel_processor, 'df') or _excel_processor.df is None or _excel_processor.df.empty:
+            _excel_processor.df = pd.DataFrame()
+            _excel_processor.selected_tags = []
+            logging.warning("New file load failed; no default fallback (Excel optional). Tags empty until upload or POSaBit.")
 
 def cleanup_old_processing_status():
     """Clean up old processing status entries to prevent memory leaks."""
@@ -1392,8 +1010,9 @@ def get_excel_processor():
     """Return a fresh ExcelProcessor for the current store/session.
 
     Avoids sharing processors across requests while keeping callers intact.
+    Excel is optional; no default file is loaded.
     """
-    from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
+    from src.core.data.excel_processor import ExcelProcessor
 
     # Resolve store context
     store_name = None
@@ -1431,164 +1050,22 @@ def get_excel_processor():
     except Exception:
         pass
 
-    # If nothing loaded, optionally load default file for the store
-    if not getattr(processor, '_last_loaded_file', None):
-        try:
-            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
-            if default_file and os.path.exists(default_file):
-                if processor.load_file(default_file):
-                    processor._last_loaded_file = default_file
-        except Exception:
-            pass
-
+    # Do not load default/cached Excel; Excel is optional (POSaBit or explicit upload only)
     return processor
 
 # Ensure no stray indentation or orphaned blocks before function definition
-def _resolve_database_path_for_store(store_name: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Resolve the best available database path for a given store.
-    Returns (db_path, resolved_store_name) or (None, None) if no database exists.
-    """
-    uploads_dir = os.path.join(current_dir, 'uploads')
-    if not os.path.isdir(uploads_dir):
-        logging.warning(f"Uploads directory not found when resolving database path: {uploads_dir}")
-        return None, None
-
-    normalized_requested = ''
-    if store_name:
-        normalized_requested = store_name.replace('_', '').replace(' ', '').lower()
-
-    # 1. Exact match: product_database_{store_name}.db
-    if store_name:
-        exact_path = os.path.join(uploads_dir, f'product_database_{store_name}.db')
-        if os.path.exists(exact_path):
-            return exact_path, store_name
-
-    # 2. Fuzzy match: look for any product_database_* file containing the store token
-    candidate_paths = glob.glob(os.path.join(uploads_dir, 'product_database_*.db'))
-    if candidate_paths:
-        for candidate in candidate_paths:
-            candidate_store = os.path.basename(candidate).replace('product_database_', '').replace('.db', '')
-            candidate_normalized = candidate_store.replace('_', '').replace(' ', '').lower()
-            if normalized_requested and normalized_requested in candidate_normalized:
-                return candidate, candidate_store or store_name
-
-    # 3. Most recent database as final fallback
-    if candidate_paths:
-        newest_path = max(candidate_paths, key=os.path.getmtime)
-        inferred_store = os.path.basename(newest_path).replace('product_database_', '').replace('.db', '')
-        logging.warning(f"No database found for store '{store_name}'. Using most recent database: {newest_path}")
-        return newest_path, inferred_store or store_name
-
-    logging.error(f"No product database files found in uploads directory: {uploads_dir}")
-    return None, None
-
+_product_database_instance = None
+_product_database_lock = threading.Lock()
 
 def get_product_database(store_name=None):
-    """Lazy load ProductDatabase per store to avoid startup delay and cross-store leakage.
-
-    Returns a ProductDatabase instance specific to the requested store. Instances are cached
-    in `_product_databases` keyed by resolved store name. A lock protects creation so
-    multiple concurrent requests won't race to initialize the same DB.
-    """
-    global _product_databases, _product_database_lock
-
-    if store_name is None:
-        logging.warning("get_product_database called without store name; attempting fallback resolution.")
-
-    db_path, resolved_store = _resolve_database_path_for_store(store_name)
-    if not db_path:
-        raise FileNotFoundError(f"No product database file available for store '{store_name}'. Upload the database via the admin tools.")
-
-    effective_store = resolved_store or (store_name or '')
-
-    # Use a per-store cached ProductDatabase
+    """Lazy load the single ProductDatabase instance."""
+    global _product_database_instance, _product_database_lock
     with _product_database_lock:
-        product_db = _product_databases.get(effective_store)
-        current_db_path = getattr(product_db, 'db_path', None) if product_db else None
-
-        # If missing or points to a different file, (re)create
-        if product_db is None or current_db_path != db_path:
+        if _product_database_instance is None:
             from src.core.data.product_database import ProductDatabase
-            product_db = ProductDatabase(db_path)
-            product_db._store_name = effective_store
-            # Ensure db_path attribute is set for future comparisons
-            try:
-                product_db.db_path = db_path
-            except Exception:
-                pass
-
-            if getattr(product_db, 'db_path', db_path) != db_path:
-                logging.warning(f"ProductDatabase db_path mismatch: {getattr(product_db,'db_path',None)} != {db_path}")
-
-            # Initialize DB (build indices/caches as needed)
-            product_db.init_database()
-            _product_databases[effective_store] = product_db
-
-    return _product_databases[effective_store]
-
-# Local override: always try to use the Bothell DB file if present
-def _get_bothell_product_db():
-    try:
-        from src.core.data.product_database import ProductDatabase
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        # Helper: find most recent valid Bothell DB in uploads
-        def _find_best_bothell_db(base_dir: str) -> str:
-            import glob, os, sqlite3
-            candidates = []
-            # Prefer explicit AGT_Bothell naming
-            patterns = [
-                os.path.join(base_dir, 'uploads', 'product_database_AGT_Bothell*.db'),
-                os.path.join(base_dir, 'uploads', 'product_database*.db'),
-                os.path.join(base_dir, 'bothell_products.db')
-            ]
-            for pattern in patterns:
-                for path in glob.glob(pattern):
-                    try:
-                        with db_connection(path) as conn:
-                            cur = conn.cursor()
-                            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                            has_products = cur.fetchone() is not None
-                            if has_products:
-                                mtime = os.path.getmtime(path)
-                                candidates.append((mtime, path))
-                    except Exception:
-                        continue
-            if not candidates:
-                return ''
-            candidates.sort(reverse=True)
-            return candidates[0][1]
-        def has_required_tables(db_path: str) -> bool:
-            import sqlite3
-            try:
-                with db_connection(db_path) as conn:
-                    cur = conn.cursor()
-                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
-                    has_products = cur.fetchone() is not None
-                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
-                    has_strains = cur.fetchone() is not None
-                    return has_products or has_strains
-            except Exception:
-                return False
-        # Preferred: best (most recent) valid Bothell DB
-        best = _find_best_bothell_db(current_dir)
-        if best:
-            from src.core.data.product_database import ProductDatabase
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            # Always use Bothell store-specific database
-            db_filename = 'product_database_AGT_Bothell.db'
-            db_path = os.path.join(current_dir, 'uploads', db_filename)
-            if not os.path.exists(db_path):
-                logging.warning(f"Bothell store database not found: {db_path}")
-                return None
-            product_db = ProductDatabase(db_path)
-            product_db._store_name = 'AGT_Bothell'
-            product_db.init_database()
-            return product_db
-        return None
-    except Exception as e:
-        logging.error(f"Error in _get_bothell_product_db: {e}")
-        return None
+            _product_database_instance = ProductDatabase()
+            _product_database_instance.init_database()
+    return _product_database_instance
 
 def get_enhanced_ai_matcher():
     """Lazy load Enhanced AI Product Matcher."""
@@ -1968,16 +1445,12 @@ def add_performance_headers(response):
         response.headers['X-Response-Time'] = f"{elapsed:.1f}ms"
     return response
 
-# Start periodic storage cleanup (uploads + stray DBs)
-# CRITICAL FIX: Disable background schedulers on PythonAnywhere to prevent startup timeout
-# Background schedulers cause the WSGI app to timeout during initialization (120s limit)
+# Start periodic upload cleanup scheduler
 if not PYTHONANYWHERE_OPTIMIZATION:
-    start_storage_cleanup_scheduler()
     start_daily_upload_cleanup_scheduler(run_hour=0, run_minute=0)
-    logging.info("Background cleanup schedulers started")
+    logging.info("Background cleanup scheduler started")
 else:
-    logging.info("⚠️  Background schedulers DISABLED on PythonAnywhere to prevent startup timeout")
-    logging.info("   Run manual cleanup via /api/cleanup endpoint if needed")
+    logging.info("⚠️  Background scheduler DISABLED on PythonAnywhere to prevent startup timeout")
 
 @app.before_request
 def start_request_timer():
@@ -2038,8 +1511,6 @@ def check_session_size():
             # Restore essential data after clearing
             if selected_tags:
                 session['selected_tags'] = selected_tags
-            if selected_store:
-                session['selected_store'] = selected_store
             if file_path:
                 session['file_path'] = file_path
             if uploaded_filename:
@@ -2107,8 +1578,6 @@ def optimize_session_data():
             # Restore essential data if they weren't in the optimized data
             if selected_tags and 'selected_tags' not in session_copy:
                 session['selected_tags'] = selected_tags
-            if selected_store and 'selected_store' not in session_copy:
-                session['selected_store'] = selected_store
             if file_path and 'file_path' not in session_copy:
                 session['file_path'] = file_path
             if uploaded_filename and 'uploaded_filename' not in session_copy:
@@ -2228,40 +1697,8 @@ def initialize_excel_processor():
         except Exception as session_check_error:
             logging.debug(f"Could not check session in initialize_excel_processor: {session_check_error}")
         
-        # Only load default file if no session file was found/loaded
-        from src.core.data.excel_processor import get_default_upload_file
-        # CRITICAL FIX: Use allow_fallback=True for default file loading on startup
-        # This ensures default file loads even if store hasn't been selected yet
-        selected_store = get_current_store_name(allow_fallback=True)
-        default_file = get_default_upload_file(selected_store)
-        
-        if default_file and os.path.exists(default_file):
-            logging.info(f"Loading default file on startup: {default_file}")
-            try:
-                # CRITICAL FIX: Use safe_load_file_with_timeout for Windows compatibility
-                success = safe_load_file_with_timeout(excel_processor, default_file, timeout_seconds=30)
-                
-                if success:
-                    excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
-                else:
-                    logging.warning("Failed to load default file")
-                    # Try to move corrupted file if timeout occurred
-                    try:
-                        corrupted_path = default_file + '.corrupted'
-                        if os.path.exists(default_file):
-                            os.rename(default_file, corrupted_path)
-                            logging.info(f"Moved potentially corrupted file to: {corrupted_path}")
-                    except Exception as move_err:
-                        logging.error(f"Could not move corrupted file: {move_err}")
-                        
-            except Exception as load_error:
-                logging.error(f"Error loading default file: {load_error}")
-                logging.error(f"Traceback: {traceback.format_exc()}")
-        else:
-            logging.info("No default file found, waiting for user upload")
-            if default_file:
-                logging.info(f"Default file path was found but file doesn't exist: {default_file}")
+        # Do not load default/cached Excel on startup; Excel is optional. Use POSaBit or upload.
+        logging.info("Skipping default file load on startup; tags from POSaBit or explicit Excel upload only")
             
     except Exception as e:
         logging.error(f"Error initializing Excel processor: {e}")
@@ -2294,7 +1731,7 @@ def save_template_settings(template_type, font_settings):
         raise
 
 # --- User template uploads (designs per template type, per store) ---
-USER_TEMPLATE_TYPES = ['horizontal', 'vertical', 'mini', 'miniroll', 'double', 'preroll', 'inventory']
+USER_TEMPLATE_TYPES = ['horizontal', 'vertical', 'mini', 'miniroll', 'double', 'new', 'preroll', 'inventory']
 
 def _sanitize_store_for_path(store_name):
     """Return a filesystem-safe subdir name for the store (no slashes, no parent path)."""
@@ -2606,34 +2043,39 @@ def get_session_excel_processor():
             skip_default_load = getattr(g, '_skip_default_file_load', False)
             if not session_file_path and not skip_default_load:
                 if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                    logging.info("CRITICAL FIX: No session file and DataFrame is empty, loading default file")
-                    from src.core.data.excel_processor import get_default_upload_file
-                    # CRITICAL FIX: Use allow_fallback=True for default file loading
-                    selected_store = get_current_store_name(allow_fallback=True)
-                    default_file = get_default_upload_file(selected_store)
-                    if default_file and os.path.exists(default_file):
-                        logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
-                        # Load file (fast_mode removed - not available on PythonAnywhere)
-                        success = g.excel_processor.load_file(default_file)
-                        if success:
-                            logging.info(f"CRITICAL FIX: Successfully loaded default file")
-                            # Mark that we loaded a fallback default file - UI should require explicit upload
-                            try:
-                                session['default_file_loaded'] = True
-                                logging.info("Marked session as having loaded a default fallback file")
-                            except Exception:
-                                logging.debug("Could not mark default_file_loaded in session")
-                            # Populate dropdown cache
-                            if hasattr(g.excel_processor, '_cache_dropdown_values'):
-                                try:
-                                    g.excel_processor._cache_dropdown_values()
-                                    logging.info(f"Successfully populated dropdown cache from default file")
-                                except Exception as e:
-                                    logging.error(f"Failed to populate dropdown cache from default file: {e}")
+                    # POSaBit: use menu feed when session prefers POSaBit and it's configured (or env override)
+                    try:
+                        from src.core.data.posabit_client import (
+                            is_posabit_configured,
+                            is_posabit_products_enabled,
+                            get_menu_feed_as_product_rows,
+                        )
+                        effective_source = session.get('data_source') or (
+                            'posabit' if is_posabit_configured() else 'excel'
+                        )
+                        use_posabit = (
+                            effective_source == 'posabit' and is_posabit_configured()
+                        ) or is_posabit_products_enabled()
+                        if use_posabit:
+                            rows = get_menu_feed_as_product_rows()
+                            if rows:
+                                g.excel_processor.df = pd.DataFrame(rows)
+                                normalize_product_name_columns(g.excel_processor.df)
+                                g.excel_processor._last_loaded_file = None
+                                g.excel_processor._store_context = 'posabit'
+                                logging.info(f"POSaBit: loaded {len(g.excel_processor.df)} products from menu feed")
+                            else:
+                                logging.warning("POSaBit products enabled but menu feed returned no rows; not showing tags")
                         else:
-                            logging.error(f"CRITICAL FIX: Failed to load default file: {default_file}")
-                    else:
-                        logging.warning("CRITICAL FIX: No default file available")
+                            # Excel source but no session file: leave empty (Excel is optional)
+                            pass
+                    except Exception as posabit_err:
+                        logging.warning(f"POSaBit product load failed: {posabit_err}; not falling back to Excel")
+                    # Do not load default/cached Excel: Excel is optional. Tags only from POSaBit or explicit upload.
+                    if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
+                        logging.info("No session file and no POSaBit data; leaving tags empty (upload Excel or fix POSaBit)")
+                        if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None:
+                            g.excel_processor.df = pd.DataFrame()
             elif skip_default_load:
                 logging.info("⚡ Fast load: Skipping default file loading in get_session_excel_processor")
         
@@ -2757,34 +2199,22 @@ def get_session_excel_processor():
 
 def get_session_json_matcher():
     try:
-        from src.core.data.json_matcher import JSONMatcher
+        print("🔍 get_session_json_matcher: Importing EnhancedJSONMatcher")  # Debug print
+        from src.core.data.enhanced_json_matcher import EnhancedJSONMatcher
         excel_processor = get_session_excel_processor()
-        if excel_processor is None:
-            logging.error("Cannot create JSONMatcher: ExcelProcessor is None")
-            return None
+        # Allow None excel_processor for EnhancedJSONMatcher since it uses database
+        print(f"🔍 get_session_json_matcher: excel_processor is {excel_processor}")  # Debug print
         
-        # Use a global JSON matcher instance to persist the cache
-        if not hasattr(app, '_json_matcher'):
-            app._json_matcher = JSONMatcher(excel_processor)
-            
-            # CRITICAL FIX: Build cache from database to ensure JSON matching works
-            try:
-                # Build the sheet cache from database - this will auto-select the best database
-                app._json_matcher._build_cache_from_database()
-                if app._json_matcher._sheet_cache and len(app._json_matcher._sheet_cache) > 0:
-                    logging.info(f"JSON matcher loaded {len(app._json_matcher._sheet_cache)} products from database cache")
-                else:
-                    logging.warning("No products found in JSON matcher cache - JSON matching may not work")
-            except Exception as e:
-                logging.error(f"Error building JSON matcher cache from database: {e}")
-            
-            logging.info("Created new JSONMatcher instance")
-        else:
-            # Update the Excel processor reference in case it changed
-            app._json_matcher.excel_processor = excel_processor
-        
-        return app._json_matcher
+        print("🔍 get_session_json_matcher: Creating EnhancedJSONMatcher instance")  # Debug print
+        # Always create a fresh instance — match results must never be cached between requests
+        # (each JSON match fetches a live URL and must re-run the full vendor-filtered match)
+        if hasattr(app, '_json_matcher'):
+            del app._json_matcher
+        matcher = EnhancedJSONMatcher(excel_processor)
+        logging.info("Created new EnhancedJSONMatcher instance (no caching)")
+        return matcher
     except Exception as e:
+        print(f"🔍 get_session_json_matcher: ERROR creating EnhancedJSONMatcher: {e}")  # Debug print
         logging.warning(f"Enhanced JSON matcher unavailable, falling back to basic matcher: {e}")
         try:
             from src.core.data.json_matcher import JSONMatcher
@@ -2817,7 +2247,17 @@ def refresh_json_match_runtime_state(reason: str = "json_match_request", force_r
             except Exception:
                 pass
 
-        # Reset matcher in-memory state. Full cache rebuild is optional and expensive.
+        # Reset matcher in-memory state — drop the singleton so the next match
+        # creates a fresh instance (picks up any code changes and clears all caches).
+        try:
+            if hasattr(app, '_json_matcher'):
+                try:
+                    app._json_matcher.clear_matches()
+                except Exception:
+                    pass
+                del app._json_matcher
+        except Exception:
+            pass
         json_matcher = get_session_json_matcher()
         if json_matcher:
             try:
@@ -3106,6 +2546,122 @@ def api_status():
         logging.error(f"Error in status endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/posabit/status', methods=['GET'])
+def api_posabit_status():
+    """Return POSaBit config status and optionally test API connection (product count). No secrets."""
+    try:
+        from src.core.data.posabit_client import (
+            is_posabit_configured,
+            _get_config,
+            get_menu_feed_as_product_rows,
+        )
+        cfg = _get_config()
+        has_token = bool(cfg.get('token'))
+        has_feed_key = bool(cfg.get('feed_key'))
+        configured = is_posabit_configured()
+        out = {
+            'configured': configured,
+            'has_token': has_token,
+            'has_feed_key': has_feed_key,
+            'connection_ok': False,
+            'product_count': None,
+            'message': None,
+        }
+        if not configured:
+            missing = []
+            if not has_token:
+                missing.append('POSABIT_API_TOKEN')
+            if not has_feed_key:
+                missing.append('POSABIT_MENU_FEED_KEY')
+            out['message'] = f"Set in .env or server: {', '.join(missing)}"
+            return jsonify(out)
+        try:
+            rows = get_menu_feed_as_product_rows()
+            out['connection_ok'] = True
+            out['product_count'] = len(rows)
+            if len(rows) > 0:
+                out['message'] = f"OK — {len(rows)} products from menu feed"
+            else:
+                out['message'] = "Connected but feed has 0 products — in app.posabit.com set the menu feed to use the 'Active' product list, ensure POSABIT_MENU_FEED_KEY matches that feed, and that the menu has categories with items"
+        except Exception as e:
+            out['message'] = str(e) or "Connection failed"
+        return jsonify(out)
+    except Exception as e:
+        logging.warning(f"POSaBit status: {e}")
+        return jsonify({
+            'configured': False,
+            'has_token': False,
+            'has_feed_key': False,
+            'connection_ok': False,
+            'product_count': None,
+            'message': str(e) or 'Check server logs',
+        }), 200
+
+
+@app.route('/api/posabit/config', methods=['GET'])
+def api_posabit_config():
+    """Return POSaBit integration status (no secrets). data_source = session preference for product source."""
+    try:
+        from src.core.data.posabit_client import (
+            is_posabit_configured,
+            is_posabit_products_enabled,
+            is_posabit_manifests_enabled,
+            _get_config,
+        )
+        cfg = _get_config()
+        # Session override: data_source = 'posabit' | 'excel'. Default to POSaBit when configured.
+        default_source = 'posabit' if is_posabit_configured() else 'excel'
+        data_source = session.get('data_source') or default_source
+        return jsonify({
+            'data_source': data_source,
+            'use_products': is_posabit_products_enabled(),
+            'use_manifests': is_posabit_manifests_enabled(),
+            'has_token': bool(cfg.get('token')),
+            'has_feed_key': bool(cfg.get('feed_key')),
+            'posabit_configured': is_posabit_configured(),
+            'base_url': cfg.get('base_url') or '',
+        })
+    except Exception as e:
+        logging.warning(f"POSaBit config: {e}")
+        return jsonify({'data_source': 'excel', 'use_products': False, 'use_manifests': False, 'has_token': False, 'has_feed_key': False, 'posabit_configured': False}), 200
+
+
+@app.route('/api/posabit/data-source', methods=['POST'])
+def api_posabit_data_source():
+    """Set product source to POSaBit or Excel. Persists in session; page reload applies it."""
+    try:
+        data = request.get_json() or {}
+        source = (data.get('source') or '').strip().lower()
+        if source not in ('posabit', 'excel'):
+            return jsonify({'error': 'source must be "posabit" or "excel"'}), 400
+        session['data_source'] = source
+        if source == 'posabit':
+            # Clear Excel session so next load uses POSaBit menu feed
+            session.pop('file_path', None)
+            session.pop('uploaded_filename', None)
+            session.pop('upload_timestamp', None)
+            session.pop('file_store', None)
+            session.pop('default_file_loaded', None)
+        session.modified = True
+        return jsonify({'success': True, 'data_source': source})
+    except Exception as e:
+        logging.warning(f"POSaBit data-source: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/posabit/manifest', methods=['GET'])
+def api_posabit_manifest():
+    """Fetch manifest items from POSaBit and return as inventory_transfer_items for matching/labels."""
+    try:
+        from src.core.data.posabit_client import get_manifests_as_inventory_transfer_items
+        items = get_manifests_as_inventory_transfer_items()
+        return jsonify({'inventory_transfer_items': items})
+    except Exception as e:
+        logging.warning(f"POSaBit manifest: {e}")
+        return jsonify({'error': str(e), 'inventory_transfer_items': []}), 200
+
+
 @app.route('/favicon.ico')
 def favicon():
     """Serve the favicon."""
@@ -3179,7 +2735,12 @@ def index():
         
         # Reduced logging to prevent excessive log spam
         logging.info(f"Page load at {datetime.now().strftime('%H:%M:%S')}")
-        
+
+        # Clear JSON match state on every page reload so stale matches don't persist
+        for _k in ('json_matched_cache_key', 'last_json_match_count', 'json_match_timestamp'):
+            session.pop(_k, None)
+        session.modified = True
+
         # Check if store selection is required
         user_has_store = has_store_selection()
         current_store = get_current_store_name() if user_has_store else None
@@ -3393,62 +2954,17 @@ def upload_file():
     try:
         logging.info("=== UPLOAD START ===")
         
-        # DIAGNOSTIC: Log IP and session state
-        ip_address = get_client_ip()
-        session_store = session.get('selected_store')
-        logging.info(f"🔍 Upload diagnostics: IP={ip_address}, Session store={session_store}")
-        logging.info(f"🔍 Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}, Remote-Addr={request.remote_addr}")
-        
-        # CRITICAL: Require store selection before upload
-        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
-        # has_store_selection can be too strict and fail even when store is selected
-        selected_store = get_current_store_name(allow_fallback=True)
-        if not selected_store:
-            logging.error(f"❌ Upload attempted without store selection - IP: {ip_address}, Session: {session_store}")
-            logging.error(f"❌ IP store selections: {list(_ip_store_selections.keys())}")
-            return jsonify({'error': 'Please select a store before uploading files'}), 400
-        
+        selected_store = 'AGT_Bothell'
+
         # Validate request
         if 'file' not in request.files:
             logging.error("No file in request")
             return jsonify({'error': 'No file provided'}), 400
-        
+
         file = request.files['file']
         if not file or file.filename == '':
             logging.error("Empty file or filename")
             return jsonify({'error': 'No file selected'}), 400
-        
-        # Get current store selection
-        selected_store = get_current_store_name()
-        ip_store = None
-        with _ip_store_lock:
-            if ip_address in _ip_store_selections:
-                ip_store = _ip_store_selections[ip_address].get('store')
-        
-        logging.info(f"✅ Store selection found: {selected_store}")
-        logging.info(f"🔍 Store diagnostics - Session: {session_store}, IP-based: {ip_store}, Final: {selected_store}")
-        
-        # CRITICAL FIX: Allow store override from request body if provided (for UI consistency)
-        # CRITICAL FIX: Only try to get JSON if Content-Type is application/json (file uploads use multipart/form-data)
-        request_store = request.form.get('store')
-        if not request_store and request.is_json:
-            try:
-                json_data = request.get_json(silent=True)
-                if json_data:
-                    request_store = json_data.get('store')
-            except Exception:
-                pass  # Ignore JSON parsing errors for file uploads
-        if request_store:
-            logging.info(f"🔍 Request specifies store: {request_store}, current selected: {selected_store}")
-            # If request store matches detected store in filename, use it
-            detected_store_from_filename = extract_store_from_filename(file.filename)
-            if detected_store_from_filename == request_store:
-                logging.info(f"✅ Request store matches filename - using {request_store}")
-                selected_store = request_store
-                # Update session to match
-                session['selected_store'] = request_store
-                session['store_server_id'] = SERVER_INSTANCE_ID
-                session.modified = True
         
         logging.info(f"Uploading: {file.filename} for store: {selected_store}")
         
@@ -3457,7 +2973,7 @@ def upload_file():
             return jsonify({'error': 'Only Excel files allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -4134,7 +3650,7 @@ def upload_file_streaming():
             return jsonify({'error': 'No file selected'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -4378,7 +3894,7 @@ def upload_file_simple_pythonanywhere():
         if not file.filename.lower().endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
 
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
             return jsonify({
@@ -4559,7 +4075,7 @@ def upload_instant():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
 
         # Validate filename
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         if not is_valid:
             return jsonify({
                 'error': warning_msg,
@@ -4679,7 +4195,7 @@ def upload_file_simple():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -5846,7 +5362,7 @@ def upload_lightning():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -7046,399 +6562,6 @@ def get_session_stats():
         logging.error(f"Error getting session stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/set-store', methods=['POST'])
-@invalidate_cache_on_change([
-    '/api/status',
-    '/api/get-store',
-    '/api/check-store-required',
-    '/api/session-stats',
-    '/api/pending-changes'
-])
-def set_store():
-    """Set store selection for the current IP address."""
-    try:
-        data = request.get_json()
-        if not data or 'store' not in data:
-            return jsonify({'success': False, 'error': 'Store selection required'}), 400
-        
-        store_value = data['store']
-        ip_address = get_client_ip()
-        
-        # Validate store selection against global list
-        if store_value not in VALID_STORES:
-            return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
-        
-        # CHECK: Warn if switching stores
-        current_store = session.get('selected_store')
-        if current_store and current_store != store_value:
-            logging.warning(f"⚠️ STORE SWITCH DETECTED: {current_store} → {store_value}")
-            logging.warning(f"⚠️ Request from: {request.referrer or 'unknown'}")
-            logging.warning(f"⚠️ User agent: {request.headers.get('User-Agent', 'unknown')}")
-        
-        # CRITICAL FIX: Save to Flask session first (most reliable on PythonAnywhere)
-        session['selected_store'] = store_value
-        session['store_server_id'] = SERVER_INSTANCE_ID
-        session['store_just_selected'] = True  # Flag to indicate store was just selected
-        session['store_selected_timestamp'] = datetime.now().isoformat()  # Timestamp for validation
-        session.permanent = True  # Mark session as permanent to persist across browser restarts
-        session.modified = True  # Force session to save
-        logging.info(f"✅ Store saved to session: {store_value}")
-        
-        # Also store in IP-based selection (backup method)
-        with _ip_store_lock:
-            _ip_store_selections[ip_address] = {
-                'store': store_value,
-                'timestamp': datetime.now().isoformat(),
-                'ip_address': ip_address,
-                'server_id': SERVER_INSTANCE_ID
-            }
-            # Reduced logging for speed
-            logging.debug(f"Store selection set for IP {ip_address}: {store_value}")
-        
-        # Persist the IP-based selections so future requests (and worker processes)
-        # can honor the remembered store.  Use a lightweight background thread so
-        # the response stays snappy even on PythonAnywhere's slower storage.
-        def _persist_store_selection():
-            try:
-                save_store_selections()
-            except Exception as persist_error:
-                logging.warning(f"Failed to persist store selections: {persist_error}")
-        try:
-            threading.Thread(target=_persist_store_selection, daemon=True).start()
-        except Exception:
-            _persist_store_selection()
-        
-        # CRITICAL FIX: Clear caches BEFORE clearing globals (cache key depends on _last_loaded_file)
-        # OPTIMIZATION: Run cache clearing in background thread to prevent blocking
-        def _clear_caches_async():
-            try:
-                initial_data_cache_key = get_session_cache_key('initial_data')
-                available_tags_cache_key = get_session_cache_key('available_tags')
-
-                # Delete the caches
-                cache.delete(initial_data_cache_key)
-                cache.delete(available_tags_cache_key)
-                logging.debug(f"Cleared initial_data and available_tags cache for new store: {store_value}")
-            except Exception as cache_error:
-                # If cache key generation fails, skip cache clearing
-                # It's not critical - caches will expire naturally
-                logging.warning(f"Cache clearing failed (non-critical): {cache_error}")
-        
-        # Run cache clearing in background to avoid blocking the response
-        try:
-            threading.Thread(target=_clear_caches_async, daemon=True).start()
-        except Exception:
-            # If threading fails, just skip cache clearing
-            pass
-
-        # CRITICAL: Clear other session data from previous store (but keep selected_store!)
-        # NOTE: We clear file_path and uploaded_filename to force reload with new store's database
-        # However, if the same file is valid for the new store, it will be reloaded automatically
-        old_file_path = session.get('file_path')
-        old_filename = session.get('uploaded_filename')
-        
-        session.pop('file_path', None)
-        session.pop('uploaded_filename', None)
-        session.pop('upload_timestamp', None)
-        session.pop('selected_tags', None)
-        
-        # Log what was cleared for debugging
-        if old_file_path or old_filename:
-            logging.info(f"Cleared file data for store switch: file_path={old_file_path}, filename={old_filename}")
-
-        # Clear the global product database instance to force reload with new store
-        global _product_database, _excel_processor
-        _product_database = None
-        _excel_processor = None
-
-        # OPTIMIZATION: File loading deferred to page reload for instant response
-        # Don't call get_product_database here - it's slow and can cause timeout
-        # Database will be loaded on first use after page reload
-        logging.debug(f"Store set to {store_value} - cleared session, globals & caches")
-        
-        return jsonify({
-            'success': True,
-            'store': store_value,
-            'expires_at': (datetime.now() + timedelta(hours=12)).isoformat()
-        })
-        
-    except Exception as e:
-        logging.error(f"Error setting store: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/get-store', methods=['GET'])
-@cached_route(ttl=30, vary_by=['session_id'])
-def get_store():
-    """Get the current store selection for the IP address."""
-    try:
-        ip_address = get_client_ip()
-        logging.info(f"Getting store for IP: {ip_address}")
-        logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
-        
-        # First, check Flask session for a store selection tied to this server instance
-        session_store = session.get('selected_store')
-        session_server_id = session.get('store_server_id')
-        if session_store and session_server_id == SERVER_INSTANCE_ID:
-            logging.info("Returning store from session for get_store endpoint")
-            return jsonify({
-                'success': True,
-                'store': session_store,
-                'source': 'session'
-            })
-        
-        # Check if there's a stored selection for this IP
-        with _ip_store_lock:
-            if ip_address in _ip_store_selections:
-                store_data = _ip_store_selections[ip_address]
-                # Check if the selection is still valid (not expired)
-                if is_store_selection_valid(ip_address, store_data):
-                    logging.info(f"Found valid store selection: {store_data['store']}")
-                    return jsonify({
-                        'success': True,
-                        'store': store_data['store'],
-                        'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
-                    })
-                else:
-                    logging.info(f"Store selection expired for IP {ip_address}; removing")
-                    del _ip_store_selections[ip_address]
-        
-        # No valid selection found, return no store
-        logging.info(f"No store found for IP {ip_address}")
-        return jsonify({
-            'success': True,
-            'store': None
-        })
-        
-    except Exception as e:
-        logging.error(f"Error getting store: {str(e)}")
-        import traceback
-        logging.error(f"Get store error traceback: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/clear-store', methods=['POST'])
-@invalidate_cache_on_change([
-    '/api/status',
-    '/api/get-store',
-    '/api/check-store-required',
-    '/api/session-stats',
-    '/api/pending-changes'
-])
-def clear_store():
-    """Clear store selection for the current IP address AND Flask session."""
-    try:
-        ip_address = get_client_ip()
-        
-        logging.info(f"Attempting to clear store for IP {ip_address}")
-        logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
-        logging.info(f"Session store before clear: {session.get('selected_store')}")
-        
-        # CRITICAL: Clear Flask session FIRST (this is what has_store_selection checks first)
-        if 'selected_store' in session:
-            del session['selected_store']
-            logging.info("Cleared 'selected_store' from Flask session")
-        if 'store_server_id' in session:
-            del session['store_server_id']
-        
-        # Also clear IP-based storage
-        with _ip_store_lock:
-            if ip_address in _ip_store_selections:
-                del _ip_store_selections[ip_address]
-                logging.info(f"Store selection cleared for IP {ip_address}")
-                # Save to disk after clearing
-                save_store_selections()
-            else:
-                logging.info(f"No store selection found for IP {ip_address}")
-        
-        logging.info(f"Store selections after clear: {list(_ip_store_selections.keys())}")
-        logging.info(f"Session store after clear: {session.get('selected_store')}")
-        
-        return jsonify({
-            'success': True,
-            'message': 'Store selection cleared from both session and IP storage',
-            'ip_address': ip_address,
-            'remaining_selections': list(_ip_store_selections.keys())
-        })
-        
-    except Exception as e:
-        logging.error(f"Error clearing store: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/check-store-required', methods=['GET'])
-@cached_route(ttl=15, vary_by=['session_id'])
-def check_store_required():
-    """Check if store selection is required for the current IP address."""
-    try:
-        ip_address = get_client_ip()
-        logging.info(f"Check store required for IP: {ip_address}")
-        logging.info(f"Store selections in memory: {list(_ip_store_selections.keys())}")
-        
-        # CRITICAL DEBUG: Check session data
-        session_store = session.get('selected_store')
-        if session_store and session.get('store_server_id') != SERVER_INSTANCE_ID:
-            logging.warning(f"🔥 Session store from previous server instance detected - CLEARING IT to force store modal: {session_store}")
-            # Clear the session store to force user to select store again after server restart
-            session.pop('selected_store', None)
-            session.pop('store_server_id', None)
-            session.modified = True
-            session_store = None  # Update local variable so logic below works correctly
-        
-        # CRITICAL FIX: Check for force_store_modal parameter to force modal display
-        force_modal = request.args.get('force_store_modal', 'false').lower() == 'true'
-        if force_modal:
-            logging.info("🔧 Force store modal parameter detected - clearing session store")
-            session.pop('selected_store', None)
-            session.pop('store_server_id', None)
-            session.modified = True
-            session_store = None
-        
-        # CRITICAL FIX: Don't log full session - it contains massive preroll_original_records array
-        # that causes "OSError: Message too long" when logging
-        session_keys = list(session.keys())
-        logging.info(f"SESSION DEBUG: selected_store={session_store}")
-        logging.info(f"SESSION DEBUG: session keys={session_keys}")
-        logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
-        logging.info(f"SESSION DEBUG: force_modal={force_modal}")
-        
-        # CRITICAL FIX: Use store if it exists in session (more lenient check)
-        # If store exists, use it unless explicitly expired or from different server instance
-        store_just_selected = session.get('store_just_selected', False)
-        current_store = None
-        
-        # Use session store if it exists and:
-        # 1. Has valid flags (store_just_selected + timestamp), OR
-        # 2. Store exists and session is permanent (persisted across restarts)
-        if session_store:
-            store_timestamp = session.get('store_selected_timestamp')
-            
-            # If we have both flags, validate timestamp
-            if store_just_selected and store_timestamp:
-                try:
-                    from datetime import datetime, timedelta
-                    timestamp = datetime.fromisoformat(store_timestamp)
-                    # CRITICAL FIX: Increased from 10 minutes to 6 hours to match session lifetime
-                    # This prevents the modal from reappearing while user is actively using the app
-                    if datetime.now() - timestamp < timedelta(hours=6):
-                        current_store = session_store
-                        logging.info(f"Store found in session with valid flags: {current_store}")
-                    else:
-                        logging.info(f"Store timestamp expired (older than 6 hours), requiring new selection")
-                        # Clear all store-related session data
-                        session.pop('selected_store', None)
-                        session.pop('store_selected_timestamp', None)
-                        session.pop('store_just_selected', None)
-                        session.pop('store_server_id', None)
-                        session.modified = True
-                except Exception as e:
-                    # If timestamp parsing fails but store exists, use it anyway (session persistence)
-                    from datetime import datetime
-                    logging.info(f"Store timestamp invalid ({e}), but store exists - using it")
-                    current_store = session_store
-                    # Set flags to ensure persistence
-                    session['store_just_selected'] = True
-                    session['store_selected_timestamp'] = datetime.now().isoformat()
-                    session.modified = True
-            elif session.permanent:
-                # Session is permanent and store exists - use it (persisted session)
-                logging.info(f"Store found in permanent session (persisted): {session_store}")
-                current_store = session_store
-                # Ensure flags are set for future checks
-                if not store_just_selected:
-                    session['store_just_selected'] = True
-                if not store_timestamp:
-                    from datetime import datetime
-                    session['store_selected_timestamp'] = datetime.now().isoformat()
-                session.modified = True
-            else:
-                # Store exists but no flags and not permanent - might be stale, but use it anyway
-                logging.info(f"Store exists in session without flags - using it (lenient check)")
-                current_store = session_store
-                # Set flags to ensure persistence
-                session['store_just_selected'] = True
-                from datetime import datetime
-                session['store_selected_timestamp'] = datetime.now().isoformat()
-                session.modified = True
-        
-        # Log the low-level selection flag for debugging but do not gate on it
-        has_selection = has_store_selection()
-        logging.info(f"has_store_selection() returned: {has_selection}")
-        logging.info(f"FINAL DECISION: current_store={current_store}, will require_store={current_store is None}")
-        
-        if not current_store:
-            logging.warning(f"⚠️ NO VALID STORE - Requiring store selection for IP {ip_address}")
-            # CRITICAL: Make sure session is completely cleared
-            session.pop('selected_store', None)
-            session.pop('store_just_selected', None)
-            session.pop('store_selected_timestamp', None)
-            session.pop('store_server_id', None)
-            session.modified = True
-            
-            # Double-check session is cleared
-            remaining_store = session.get('selected_store')
-            if remaining_store:
-                logging.error(f"❌ ERROR: Session still has store after clearing: {remaining_store}")
-                # Force clear again
-                session.clear()
-                session.modified = True
-            
-            logging.info(f"✅ Session cleared, returning requires_store=True")
-            return {
-                'success': True,
-                'requires_store': True,  # CRITICAL: Must be True to show modal
-                'store': None,
-                'debug': {
-                    'session_store': session_store,
-                    'ip_address': ip_address,
-                    'has_selection': has_selection,
-                    'cleared_session': True,
-                    'current_store_after_check': current_store
-                }
-            }
-        
-        # If we found a store in session, make sure it is persisted with timestamp
-        # (This should already be set, but ensure it's there)
-        if current_store:
-            session['selected_store'] = current_store
-            if not session.get('store_just_selected'):
-                session['store_just_selected'] = True
-            if not session.get('store_selected_timestamp'):
-                from datetime import datetime
-                session['store_selected_timestamp'] = datetime.now().isoformat()
-            session.modified = True
-            
-            logging.info(f"✅ Store found in session for IP {ip_address}: {current_store}")
-            return {
-                'success': True,
-                'requires_store': False,  # CRITICAL: Must be False when store exists
-                'store': current_store,
-                'debug': {
-                    'session_store': session_store,
-                    'ip_address': ip_address,
-                    'has_selection': has_selection,
-                    'current_store_validated': True
-                }
-            }
-        else:
-            # This should never happen, but safety check
-            logging.error(f"❌ ERROR: current_store is None but we reached this point!")
-            session.pop('selected_store', None)
-            session.pop('store_just_selected', None)
-            session.pop('store_selected_timestamp', None)
-            session.modified = True
-            return {
-                'success': True,
-                'requires_store': True,
-                'store': None,
-                'debug': {
-                    'error': 'Unexpected state - no store found',
-                    'ip_address': ip_address
-                }
-            }
-        
-    except Exception as e:
-        logging.error(f"Error checking store requirement: {str(e)}")
-        logging.error(traceback.format_exc())
-        return {'success': False, 'error': str(e)}, 500
-
 @app.route('/api/clear-session', methods=['POST'])
 def clear_session():
     """Clear the current session."""
@@ -8032,6 +7155,34 @@ def _normalize_weight_string(weight_str):
     s = re.sub(r'(\d+)\.0+(?=\s*[a-zA-Z]|$)', r'\1', s)
     return s
 
+
+def _is_zero_or_empty_weight(weight_str):
+    """
+    Return True when a weight value is effectively "zero" or empty.
+    This treats values like '', '0', '0.0', '0g', '0.0g', '0 gram', '0 grams',
+    '0oz', '0.0oz', '0 ounce', and '0 ounces' as missing so that we can
+    safely rebuild weight information from better sources (Excel or DB).
+    """
+    if weight_str is None:
+        return True
+    s = str(weight_str).strip().lower()
+    if not s:
+        return True
+    zero_like_values = {
+        '0',
+        '0.0',
+        '0.00',
+        '0g',
+        '0.0g',
+        '0 gram',
+        '0 grams',
+        '0oz',
+        '0.0oz',
+        '0 ounce',
+        '0 ounces',
+    }
+    return s in zero_like_values
+
 def _infer_default_units_for_record(record):
     """
     Infer a safe default unit when a record has numeric-only weight.
@@ -8199,12 +7350,27 @@ def _normalize_weight_fields(record):
     
     # If CombinedWeight is still missing, rebuild it from Weight* and Units
     combined_weight = record.get('CombinedWeight')
-    if not combined_weight or str(combined_weight).strip() == '':
-        weight_value = record.get('Weight*') or record.get('Weight')
-        units_value = record.get('Units', '')
-        if weight_value:
-            combined_weight = f"{_normalize_weight_string(weight_value)}{units_value}".strip()
+    # Treat zero/empty weights (e.g. '0g') as missing so we can rebuild them
+    # from Weight* and Units. This prevents UI groups like "0g" for valid products.
+    if _is_zero_or_empty_weight(combined_weight):
+        # PRIORITY: Use WeightWithUnits/WeightUnits if already set with units (e.g. '1.76oz')
+        ww = (record.get('WeightWithUnits') or record.get('weightWithUnits') or record.get('WeightUnits') or '').strip()
+        ww_has_units = bool(re.search(r'[a-zA-Z]', str(ww))) if ww else False
+        if ww and ww_has_units and ww.lower() not in ('nan', 'none', 'null'):
+            combined_weight = ww
             record['CombinedWeight'] = _normalize_weight_string(combined_weight)
+        else:
+            weight_value = record.get('Weight*') or record.get('Weight')
+            units_value = record.get('Units', '')
+            if weight_value:
+                norm_weight = _normalize_weight_string(weight_value)
+                # Guard: if Weight* already contains units (e.g. '1.76oz'), don't append Units again
+                weight_already_has_units = bool(re.search(r'[a-zA-Z]', str(norm_weight)))
+                if weight_already_has_units or not units_value:
+                    combined_weight = str(norm_weight).strip()
+                else:
+                    combined_weight = f"{norm_weight}{units_value}".strip()
+                record['CombinedWeight'] = _normalize_weight_string(combined_weight)
 
     # Ensure CombinedWeight is not left as numeric-only for inhalable products.
     if record.get('CombinedWeight'):
@@ -8550,14 +7716,15 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
             cursor.execute(f'''
-                SELECT p."Product Name*", 
+                SELECT p."Product Name*",
                        COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p.sovereign_lineage as product_sovereign,
                        s.sovereign_lineage as strain_sovereign,
                        s.canonical_lineage as strain_canonical,
                        p."Product Brand" as product_brand,
                        p."DOH" as doh,
-                       p."DOH Compliant (Yes/No)" as doh_compliant
+                       p."DOH Compliant (Yes/No)" as doh_compliant,
+                       p."Vendor/Supplier*" as vendor
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
                 WHERE p."Product Name*" IN ({placeholders})
@@ -8573,6 +7740,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 product_brand_raw = row[5] if len(row) > 5 else None  # CRITICAL FIX: Get Product Brand from database
                 doh_raw = row[6] if len(row) > 6 else None  # CRITICAL FIX: Get DOH from database
                 doh_compliant_raw = row[7] if len(row) > 7 else None  # CRITICAL FIX: Get DOH Compliant from database
+                vendor_raw = row[8] if len(row) > 8 else None  # Get Vendor from database
 
                 def _clean_lineage(val):
                     if val is None:
@@ -8611,9 +7779,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 strain_canonical = _clean_lineage(strain_canonical_raw)
                 product_brand = _clean_brand(product_brand_raw)  # CRITICAL FIX: Clean brand value
                 doh_value = _clean_doh(doh_raw) or _clean_doh(doh_compliant_raw)  # CRITICAL FIX: Clean DOH value (prefer DOH field, fallback to DOH Compliant)
+                vendor_value = _clean_brand(vendor_raw)  # Reuse _clean_brand (same logic: strip whitespace, reject empty/null)
 
-                if db_name and db_lineage:
-                    lineage_clean = db_lineage
+                if db_name and (db_lineage or product_brand or doh_value or vendor_value):
+                    lineage_clean = db_lineage  # may be None for brand/DOH-only entries
                     # Store lineage with source info for proper field assignment
                     # CRITICAL: product_sovereign/strain_sovereign/strain_canonical are already cleaned and uppercased by _clean_lineage
                     # They are either a clean uppercase string or None - do NOT call str() again
@@ -8627,7 +7796,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         'strain_canonical': strain_canonical,    # Already cleaned - don't call str() again
                         'db_lineage': db_lineage,  # Store db_lineage for fallback when strain_canonical is None
                         'product_brand': product_brand,  # CRITICAL FIX: Store Product Brand for enrichment
-                        'doh': doh_value  # CRITICAL FIX: Store DOH for enrichment
+                        'doh': doh_value,  # CRITICAL FIX: Store DOH for enrichment
+                        'vendor': vendor_value  # Store vendor for enrichment
                     }
                     # Map by original name (exact match like docx generation)
                     lineage_map[db_name] = lineage_info
@@ -8747,7 +7917,27 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 continue
             # Try exact match first (like docx generation), then normalized, then lowercase
             lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
-            
+
+            # BRAND ENRICHMENT: Apply Product Brand early from lineage_map, before lineage_info may be replaced
+            # This ensures brand is set even for products with no lineage/DOH (which get default lineage_info dicts)
+            if isinstance(lineage_info, dict) and lineage_info.get('product_brand'):
+                _db_brand_early = lineage_info.get('product_brand')
+                _cur_brand_early = tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or ''
+                _cur_brand_early_clean = str(_cur_brand_early).strip() if _cur_brand_early else ''
+                if not _cur_brand_early_clean or _cur_brand_early_clean.lower() in ['none', 'null', 'nan', 'undefined', '', 'unknown brand', 'unknown']:
+                    tag['Product Brand'] = _db_brand_early
+                    tag['ProductBrand'] = _db_brand_early
+                    tag['productBrand'] = _db_brand_early
+
+            # VENDOR ENRICHMENT: Apply Vendor/Supplier* early from lineage_map
+            if isinstance(lineage_info, dict) and lineage_info.get('vendor'):
+                _db_vendor_early = lineage_info.get('vendor')
+                _cur_vendor_early = tag.get('Vendor/Supplier*') or tag.get('Vendor') or tag.get('vendor') or ''
+                _cur_vendor_early_clean = str(_cur_vendor_early).strip() if _cur_vendor_early else ''
+                if not _cur_vendor_early_clean or _cur_vendor_early_clean.lower() in ['none', 'null', 'nan', 'undefined', '', 'unknown vendor', 'unknown']:
+                    tag['Vendor/Supplier*'] = _db_vendor_early
+                    tag['Vendor'] = _db_vendor_early
+
             # Check if this is a classic product type
             product_type = tag.get('Product Type*', tag.get('ProductType', '')).lower().strip()
             is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
@@ -8928,8 +8118,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     current_brand = tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or ''
                     # Normalize current_brand for comparison
                     current_brand_clean = str(current_brand).strip() if current_brand else ''
-                    # Enrich if brand is missing, empty, or invalid (None, NULL, nan, etc.)
-                    if not current_brand_clean or current_brand_clean.lower() in ['none', 'null', 'nan', 'undefined', '']:
+                    # Enrich if brand is missing, empty, or invalid (None, NULL, nan, placeholder, etc.)
+                    if not current_brand_clean or current_brand_clean.lower() in ['none', 'null', 'nan', 'undefined', '', 'unknown brand', 'unknown']:
                         tag['Product Brand'] = db_brand
                         tag['ProductBrand'] = db_brand
                         tag['productBrand'] = db_brand  # Also set lowercase variant
@@ -9721,6 +8911,9 @@ def generate_labels():
             # redundant DB fetch when selected tags already contain full row data.
             direct_request_records = []
             if direct_request_mode:
+                if selected_tags_from_request:
+                    _s0 = selected_tags_from_request[0] if isinstance(selected_tags_from_request[0], dict) else {}
+                    logging.info(f"⚡ FAST PATH INPUT sample[0]: Name={_s0.get('Product Name*','?')!r} Price={_s0.get('Price','?')!r} Vendor={_s0.get('Vendor','?')!r} Weight={_s0.get('Weight*','?')!r} Keys={list(_s0.keys())[:15]}")
                 for tag in selected_tags_from_request:
                     if not isinstance(tag, dict):
                         continue
@@ -9746,6 +8939,108 @@ def generate_labels():
                     rec = _normalize_weight_fields(rec)
                     direct_request_records.append(rec)
                 logging.info(f"⚡ FAST PATH: Built {len(direct_request_records)} records directly from request")
+
+                # Back-fill missing Price/Vendor/Weight from two sources:
+                # 1. Session JSON match cache (for JSON-only products not in Excel)
+                # 2. Excel DataFrame (for regular Excel products)
+                try:
+                    # Build lookup from session JSON match cache first
+                    _json_cache = session.get('json_matched_products_cache', [])
+                    _json_cache_index = {str(p.get('Product Name*', '')).strip().lower(): p for p in _json_cache if p.get('Product Name*')}
+                    if _json_cache_index:
+                        logging.info(f"⚡ FAST PATH: Session JSON cache has {len(_json_cache_index)} products for back-fill")
+                    for _rec in direct_request_records:
+                        _rname = str(_rec.get('Product Name*') or '').strip()
+                        _cached = _json_cache_index.get(_rname.lower())
+                        if not _cached:
+                            continue
+                        _price_cols = ['Price', 'Price*', 'Price* (Tier Name for Bulk)']
+                        _vendor_cols = ['Vendor', 'Vendor/Supplier*']
+                        _has_price = any(str(_rec.get(c) or '').strip() not in ('', 'nan', 'none', '0', '0.0', '0.00') for c in _price_cols)
+                        if not _has_price and _cached.get('Price'):
+                            _rec['Price'] = _cached['Price']
+                            _rec['Price*'] = _cached['Price']
+                            _rec['Price* (Tier Name for Bulk)'] = _cached['Price']
+                        _has_vendor = any(str(_rec.get(c) or '').strip() not in ('', 'nan', 'none', 'unknown') for c in _vendor_cols)
+                        if not _has_vendor and _cached.get('Vendor'):
+                            _rec['Vendor'] = _cached['Vendor']
+                            _rec['Vendor/Supplier*'] = _cached['Vendor']
+                        if not str(_rec.get('Weight*') or _rec.get('CombinedWeight') or '').strip():
+                            if _cached.get('Weight*'):
+                                _rec['Weight*'] = _cached['Weight*']
+                            if _cached.get('CombinedWeight'):
+                                _rec['CombinedWeight'] = _cached['CombinedWeight']
+                            if _cached.get('Units'):
+                                _rec['Units'] = _cached['Units']
+                        if not str(_rec.get('Product Type*') or '').strip() and _cached.get('Product Type*'):
+                            _rec['Product Type*'] = _cached['Product Type*']
+
+                    _ep = get_session_excel_processor()
+                    _df = getattr(_ep, 'df', None)
+                    if _df is not None and not _df.empty and 'Product Name*' in _df.columns:
+                        _df_index = {str(r).strip().lower(): i for i, r in enumerate(_df['Product Name*'])}
+                        _price_cols = ['Price', 'Price*', 'Price* (Tier Name for Bulk)']
+                        _vendor_cols = ['Vendor', 'Vendor/Supplier*']
+                        _weight_cols = ['Weight*', 'Weight', 'CombinedWeight', 'WeightUnits', 'Units']
+                        _type_col = 'Product Type*'
+                        for _rec in direct_request_records:
+                            _rname = str(_rec.get('Product Name*') or '').strip()
+                            _row_i = _df_index.get(_rname.lower())
+                            if _row_i is None:
+                                continue
+                            _row = _df.iloc[_row_i]
+                            # Price
+                            _has_price = any(str(_rec.get(c) or '').strip() not in ('', 'nan', 'none', '0', '0.0', '0.00') for c in _price_cols)
+                            if not _has_price:
+                                for _pc in _price_cols:
+                                    _pv = str(_row.get(_pc, '') or '').strip()
+                                    if _pv and _pv.lower() not in ('nan', 'none', '0', '0.0', '0.00', ''):
+                                        _rec['Price'] = _pv
+                                        _rec['Price*'] = _pv
+                                        _rec['Price* (Tier Name for Bulk)'] = _pv
+                                        break
+                            # Vendor
+                            _has_vendor = any(str(_rec.get(c) or '').strip() not in ('', 'nan', 'none', 'unknown') for c in _vendor_cols)
+                            if not _has_vendor:
+                                for _vc in _vendor_cols:
+                                    _vv = str(_row.get(_vc, '') or '').strip()
+                                    if _vv and _vv.lower() not in ('nan', 'none', 'unknown', ''):
+                                        _rec['Vendor'] = _vv
+                                        _rec['Vendor/Supplier*'] = _vv
+                                        break
+                            # Weight
+                            _has_weight = str(_rec.get('Weight*') or _rec.get('CombinedWeight') or '').strip() not in ('', 'nan', 'none', '0', '0.0')
+                            if not _has_weight:
+                                for _wc in _weight_cols:
+                                    _wv = str(_row.get(_wc, '') or '').strip()
+                                    if _wv and _wv.lower() not in ('nan', 'none', '0', '0.0', ''):
+                                        if _wc in ('Weight*', 'Weight'):
+                                            _rec['Weight*'] = _wv
+                                        elif _wc in ('CombinedWeight', 'WeightUnits'):
+                                            _rec['CombinedWeight'] = _wv
+                                            _rec['WeightUnits'] = _wv
+                                            if not _rec.get('Weight*'):
+                                                import re as _rew
+                                                _wnum = _rew.match(r'([\d.]+)', _wv)
+                                                if _wnum:
+                                                    _rec['Weight*'] = _wnum.group(1)
+                                        elif _wc == 'Units':
+                                            _rec['Units'] = _wv
+                                        break
+                            # Product Type
+                            if not str(_rec.get('Product Type*') or '').strip():
+                                _tv = str(_row.get(_type_col, '') or '').strip()
+                                if _tv and _tv.lower() not in ('nan', 'none', ''):
+                                    _rec['Product Type*'] = _tv
+                        _bf_hit = sum(1 for _r in direct_request_records if str(_r.get('Price') or '').strip() not in ('', 'nan', 'none', '0', '0.00'))
+                        _bf_miss = [str(_r.get('Product Name*','?')) for _r in direct_request_records if str(_r.get('Price') or '').strip() in ('', 'nan', 'none', '0', '0.00')]
+                        logging.info(f"⚡ FAST PATH: Back-fill complete. {_bf_hit}/{len(direct_request_records)} records have Price. Missing: {_bf_miss[:5]}")
+                except Exception as _bf_err:
+                    logging.warning(f"⚡ FAST PATH: Excel back-fill failed (non-fatal): {_bf_err}")
+
+                if direct_request_records:
+                    _sample = direct_request_records[0]
+                    logging.info(f"⚡ FAST PATH sample[0]: Name={_sample.get('Product Name*','?')!r} Price={_sample.get('Price','?')!r} Vendor={_sample.get('Vendor','?')!r} Weight={_sample.get('Weight*','?')!r} Type={_sample.get('Product Type*','?')!r}")
         else:
             logging.warning("No selected_tags provided in request body or session")
             return jsonify({'error': 'No tags selected. Please select at least one tag before generating labels.'}), 400
@@ -10579,6 +9874,38 @@ def generate_labels():
                     logging.info(f"LINEAGE DEBUG: Record {i+1} - Product: '{product_name}', Lineage: '{lineage}'")
             logging.debug(f"Records returned from get_selected_records: {len(records) if records else 0}")
 
+        # CRITICAL FIX: Restore full DataFrame IMMEDIATELY after building records (before docx generation).
+        # This prevents other requests (e.g. /api/available-tags) from seeing only the selected 32 rows
+        # and overwriting the UI with "lost" data. Restore here so the window of mutation is minimal.
+        if needs_restoration and original_df is not None and not original_df.empty and excel_processor:
+            try:
+                # CRITICAL FIX: Preserve JSON matched products before restoration
+                json_matched_products = None
+                if session.get('has_json_matched_products', False):
+                    if excel_processor.df is not None and not excel_processor.df.empty:
+                        json_matched_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match'].copy()
+                        if not json_matched_products.empty:
+                            logging.info(f"Preserving {len(json_matched_products)} JSON matched products during DataFrame restoration")
+
+                excel_processor.df = original_df.copy()
+                if original_file_path:
+                    excel_processor._last_loaded_file = original_file_path
+
+                # CRITICAL FIX: Re-add JSON matched products after restoration
+                if json_matched_products is not None and not json_matched_products.empty:
+                    # Ensure JSON matched products have all required columns
+                    for col in excel_processor.df.columns:
+                        if col not in json_matched_products.columns:
+                            json_matched_products[col] = None
+                    # Add JSON matched products back to the DataFrame
+                    excel_processor.df = pd.concat([excel_processor.df, json_matched_products], ignore_index=True)
+                    logging.info(f"Re-added {len(json_matched_products)} JSON matched products after DataFrame restoration")
+
+                needs_restoration = False
+                logging.debug("Restored full DataFrame before docx generation (UI data preserved)")
+            except Exception as early_restore_err:
+                logging.warning("Early DataFrame restore failed: %s (finally block will retry)", early_restore_err)
+
         # CRITICAL DEBUG: Log final record count and price data
         logging.info(f"🔍 DEBUG: Final records count: {len(records) if records else 0}")
         if records:
@@ -11242,6 +10569,13 @@ def generate_labels():
         _total_time = time.time() - _start_time
         logging.info(f"⏱️ PERFORMANCE: Total generation time {_total_time:.2f}s for {len(records)} records ({_total_time/len(records):.3f}s per record)")
         logging.info(f"🔍 TRACE: Returning file, final store = {get_current_store_name()}")
+
+        # CRITICAL FIX: Clear JSON matched products flag after successful generation
+        # The products are now preserved in the DataFrame, so we don't need the flag anymore
+        if 'has_json_matched_products' in session:
+            del session['has_json_matched_products']
+            session.modified = True
+
         return response
 
     except BaseException as e:
@@ -11273,10 +10607,36 @@ def generate_labels():
                 if 'original_df' in locals() and original_df is not None and not original_df.empty:
                     if 'excel_processor' in locals() and excel_processor:
                         try:
+                            # CRITICAL FIX: Preserve JSON matched products before restoration
+                            json_matched_products = None
+                            if session.get('has_json_matched_products', False):
+                                if excel_processor.df is not None and not excel_processor.df.empty:
+                                    json_matched_products = excel_processor.df[excel_processor.df['Source'] == 'JSON Match'].copy()
+                                    if not json_matched_products.empty:
+                                        try:
+                                            logging.debug(f"Preserving {len(json_matched_products)} JSON matched products during final DataFrame restoration")
+                                        except Exception:
+                                            pass  # Logging failed
+
                             # INSTANT RESTORE: Restore DataFrame directly from memory (no disk I/O)
                             excel_processor.df = original_df.copy()  # Use fresh copy to avoid any references
                             if 'original_file_path' in locals() and original_file_path:
                                 excel_processor._last_loaded_file = original_file_path
+
+                            # CRITICAL FIX: Re-add JSON matched products after restoration
+                            if json_matched_products is not None and not json_matched_products.empty:
+                                # Ensure JSON matched products have all required columns
+                                for col in excel_processor.df.columns:
+                                    if col not in json_matched_products.columns:
+                                        json_matched_products[col] = None
+                                # Add JSON matched products back to the DataFrame
+                                import pandas as pd
+                                excel_processor.df = pd.concat([excel_processor.df, json_matched_products], ignore_index=True)
+                                try:
+                                    logging.debug(f"Re-added {len(json_matched_products)} JSON matched products after final DataFrame restoration")
+                                except Exception:
+                                    pass  # Logging failed
+
                             try:
                                 logging.debug(f"⚡ INSTANT: Restored original DataFrame ({len(excel_processor.df)} rows)")
                             except Exception:
@@ -11726,7 +11086,9 @@ def process_database_product_for_api(db_product):
     
     # Create CombinedWeight if missing or empty
     combined_weight = _normalize_weight_string(processed_product.get('CombinedWeight', ''))
-    if not combined_weight or combined_weight == '' or str(combined_weight).strip() == '':
+    # Treat zero/empty weights from the database (e.g. '0g') as missing so we can
+    # rebuild a proper CombinedWeight from Weight* and Units or JointRatio.
+    if _is_zero_or_empty_weight(combined_weight):
         weight_value = processed_product.get('Weight*', '')
         units = processed_product.get('Units', '')
         
@@ -12321,7 +11683,7 @@ def get_available_tags():
                 logging.warning(f"Cached tags stale-check failed: {stale_check_err}")
 
         # Respect nocache fully: only use file cache when nocache is not requested
-        if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
+        if not cached_tags and fast_load and session_file_path and not nocache and not has_lineage_updates:
             import hashlib
             cache_version = TAGS_CACHE_VERSION
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
@@ -12781,26 +12143,6 @@ def get_available_tags():
                 'force_frontend_cache_clear': force_frontend_cache_clear
             })
 
-        # CRITICAL: Validate that the session file matches the selected store
-        # This prevents wrong store data from being loaded
-        if session_file_path:
-            session_filename = os.path.basename(session_file_path)
-            detected_store = extract_store_from_filename(session_filename)
-
-            if detected_store and detected_store != store_name:
-                logging.error(f"❌ STORE MISMATCH DETECTED: Session has {detected_store} file but {store_name} store selected")
-                # Clear the bad session file
-                if 'file_path' in session:
-                    del session['file_path']
-                    session.modified = True
-                return jsonify({
-                    'tags': [],
-                    'total_count': 0,
-                    'source': 'store-mismatch-error',
-                    'error': f'Store mismatch detected: {detected_store} file loaded in {store_name} store. Please re-upload the correct file.',
-                    'detected_store': detected_store,
-                    'current_store': store_name
-                }), 400
 
         # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
         # PERFORMANCE: Check fast_load parameter to skip expensive database queries
@@ -12870,15 +12212,8 @@ def get_available_tags():
                 simple_tags = simple_processor.get_available_tags(filters=None)
                 logging.info(f"✅ SIMPLE PATH: Got {len(simple_tags)} tags from Excel file")
 
-                # LIMIT EXCEL TAGS TO PREVENT UI OVERLOAD: Only return first 500 tags for performance
-                # This prevents loading 12,000+ tags which causes performance issues
                 original_excel_count = len(simple_tags)
-                if len(simple_tags) > 500:
-                    simple_tags = simple_tags[:500]
-                    excel_message = f'Excel file contains {original_excel_count} products. Showing first 500 for performance. Use filters to find specific products.'
-                    logging.info(f"⚡ PERFORMANCE: Limited Excel tags from {original_excel_count} to 500")
-                else:
-                    excel_message = f'Loaded {len(simple_tags)} products from Excel file.'
+                excel_message = f'Loaded {len(simple_tags)} products from Excel file.'
 
                 # CRITICAL PERFORMANCE FIX: Skip database enrichment when fast_load=1 UNLESS lineage was manually updated
                 # or the database contains lineage information. If the DB contains lineage (strains.sovereign_lineage)
@@ -15071,11 +14406,20 @@ def get_selected_tags():
             logging.warning("DataFrame is empty when trying to get selected tags, returning empty array")
             return jsonify([])
 
-        # CRITICAL FIX: Restore selected tags from session if excel_processor is empty
-        # This ensures tags persist across page reloads
-        if not excel_processor.selected_tags and session.get('selected_tags'):
-            excel_processor.selected_tags = session.get('selected_tags', [])
-            logging.info(f"✅ Restored {len(excel_processor.selected_tags)} selected tags from session")
+        # Restore selected tags from session only when excel_processor has data
+        # AND there are no JSON-match-sourced tags waiting to be loaded.
+        # Do NOT blindly restore from session — stale JSON match results from a
+        # previous session would otherwise show up on every page load.
+        session_tags = session.get('selected_tags', [])
+        if not excel_processor.selected_tags and session_tags:
+            # Only restore if the session tags actually exist in the current DataFrame
+            # (guards against stale JSON-matched product names from a prior run)
+            if excel_processor.df is not None and not excel_processor.df.empty and 'Product Name*' in excel_processor.df.columns:
+                valid_names = set(excel_processor.df['Product Name*'].astype(str).str.strip().str.lower())
+                restorable = [t for t in session_tags if str(t).strip().lower() in valid_names]
+                if restorable:
+                    excel_processor.selected_tags = restorable
+                    logging.info(f"✅ Restored {len(restorable)} of {len(session_tags)} session tags (validated against DataFrame)")
 
         selected_tags = excel_processor.selected_tags
         selected_tag_objects = []
@@ -20884,7 +20228,12 @@ def json_match():
 
         # Always refresh JSON matching caches/state before running a new match.
         refresh_json_match_runtime_state('api/json-match')
-            
+
+        # Clear any previously selected tags from session so stale results
+        # from a prior match are never shown after the new match runs.
+        session.pop('selected_tags', None)
+        session.modified = True
+
         logging.info(f"Processing URL: {url[:50]}...")
         
         excel_processor = get_session_excel_processor()
@@ -20897,11 +20246,22 @@ def json_match():
         
         logging.info("JSON matcher created successfully")
 
-        # Always use simplified matching — the full DB path is too slow (2+ min per item)
+        # Use simplified matching for speed, then enrich with product DB so vendor/price/lineage come from DB
         logging.info("🚀 Using fast simplified matching for JSON match")
         matched_products = json_matcher.fetch_and_match_with_product_db(url, force_simplified=True, deduplicate=True)
         logging.info(f"JSON matching returned {len(matched_products) if matched_products else 0} products")
-        
+        _doc_vendor_early = ''  # Will be populated after first upgrade pass
+
+        # Enrich JSON-matched products with database data (vendor, price, lineage) so DB is used
+        if matched_products:
+            try:
+                excel_processor = get_session_excel_processor()
+                if excel_processor and hasattr(excel_processor, '_enrich_tags_with_database_values'):
+                    matched_products = excel_processor._enrich_tags_with_database_values(matched_products)
+                    logging.info("✅ Enriched JSON-matched products with database values (vendor, price, lineage)")
+            except Exception as enrich_err:
+                logging.warning(f"DB enrichment of JSON match failed (non-fatal): {enrich_err}")
+
         # Sort matched products alphabetically by product name
         if matched_products:
             def get_sort_key(product):
@@ -20917,7 +20277,15 @@ def json_match():
             matched_products.sort(key=get_sort_key)
             logging.info(f"✅ Sorted {len(matched_products)} matched products alphabetically")
             try:
-                matched_products = json_matcher._upgrade_fallback_products(matched_products, None)
+                # Extract document vendor from matched products before upgrade strips __json_item__
+                _doc_vendor_early = ''
+                for _mp in matched_products:
+                    if isinstance(_mp, dict):
+                        _dv = str(_mp.get('Vendor') or _mp.get('Vendor/Supplier*') or '').strip()
+                        if _dv and _dv.lower() not in ('unknown', 'nan', 'none', ''):
+                            _doc_vendor_early = _dv
+                            break
+                matched_products = json_matcher._upgrade_fallback_products(matched_products, _doc_vendor_early or None)
             except Exception as post_process_error:
                 logging.warning(f"Post-processing upgrade failed: {post_process_error}")
 
@@ -21042,11 +20410,112 @@ def json_match():
             weight_str = re.sub(r'(\d+)\.0+(?=[a-zA-Z\s]|$)', r'\1', weight_str)
             return weight_str
 
-        # Clean weight values in all matched products
+        # Fetch raw JSON items once so we can back-fill missing price/weight/vendor below
+        _raw_json_items = []
+        _raw_doc_vendor = ''
+        try:
+            import requests as _req_lib
+            _raw_resp = _req_lib.get(url, timeout=30)
+            _raw_payload = _raw_resp.json()
+            if isinstance(_raw_payload, list):
+                _raw_json_items = _raw_payload
+            elif isinstance(_raw_payload, dict):
+                _raw_json_items = _raw_payload.get('inventory_transfer_items', [])
+                _raw_doc_vendor = (
+                    _raw_payload.get('from_license_name') or
+                    _raw_payload.get('vendor_name') or ''
+                )
+        except Exception as _raw_err:
+            logging.warning(f"Could not re-fetch JSON for price/weight back-fill: {_raw_err}")
+
+        # Build lookup structures for back-filling.
+        # Cultivera JSON names are dash-segment format (e.g. "Grow Op - Flower - Platinum - MAC Stomper - Hybrid - 3.5g")
+        # so direct name matching against DB product names won't work.
+        # Instead we index each JSON item by:
+        #   1. Its raw product_name (for exact hits)
+        #   2. Each dash-segment token (for partial hits against DB names)
+        _json_item_by_name = {}       # raw product_name -> item
+        _json_item_by_token = {}      # lowercase token -> item (last-segment / strain name)
+        for _ji in _raw_json_items:
+            if not isinstance(_ji, dict):
+                continue
+            _jname = str(_ji.get('product_name') or _ji.get('inventory_name') or _ji.get('name') or '').strip()
+            if _jname and _jname not in _json_item_by_name:
+                _json_item_by_name[_jname] = _ji
+            # Also index by each dash-segment so we can hit "MAC Stomper" in "MAC Stomper Platinum Line"
+            for _seg in _jname.split(' - '):
+                _seg = _seg.strip().lower()
+                if _seg and len(_seg) > 3 and _seg not in _json_item_by_token:
+                    _json_item_by_token[_seg] = _ji
+
+        def _find_json_item_for_product(pname):
+            """Return the best-matching raw JSON item for a DB product name."""
+            if not pname:
+                return None
+            # 1. Exact match
+            if pname in _json_item_by_name:
+                return _json_item_by_name[pname]
+            pname_lower = pname.lower()
+            # 2. DB name contains a JSON segment (e.g. "MAC Stomper Platinum Line" contains "mac stomper")
+            for _tok, _jitem in _json_item_by_token.items():
+                if _tok in pname_lower:
+                    return _jitem
+            # 3. JSON name contains the DB name
+            for _jn, _jitem in _json_item_by_name.items():
+                if pname_lower in _jn.lower():
+                    return _jitem
+            return None
+
+        # Clean weight values in all matched products and normalize price/weight fields
         if matched_products:
             for p in matched_products:
                 if not isinstance(p, dict):
                     continue
+                # Back-fill price/weight/vendor from raw JSON item when DB gave us nothing
+                _pname = str(p.get('Product Name*') or p.get('ProductName') or '').strip()
+                _ji = _find_json_item_for_product(_pname)
+                if _ji:
+                    # Price
+                    _cur_price = str(p.get('Price') or p.get('Price*') or '').strip()
+                    if not _cur_price or _cur_price.lower() in ('0', '0.0', '0.00', 'nan', 'none', ''):
+                        _jp = str(
+                            _ji.get('line_price') or _ji.get('price') or
+                            _ji.get('Price') or _ji.get('retail_price') or
+                            _ji.get('unit_price') or ''
+                        ).strip()
+                        if _jp and _jp.lower() not in ('0', '0.0', '0.00', 'nan', 'none', ''):
+                            try:
+                                _pf = float(_jp)
+                                _jp_fmt = f"${int(_pf)}" if _pf == int(_pf) else f"${_pf}"
+                            except (ValueError, TypeError):
+                                _jp_fmt = _jp
+                            p['Price'] = _jp_fmt
+                            p['Price*'] = _jp_fmt
+                    # Weight
+                    _cur_weight = str(p.get('Weight*') or p.get('Weight') or '').strip()
+                    if not _cur_weight or _cur_weight.lower() in ('0', '0.0', 'nan', 'none', ''):
+                        _jw = str(_ji.get('unit_weight') or _ji.get('weight') or '').strip()
+                        _ju = str(_ji.get('unit_weight_uom') or _ji.get('uom') or _ji.get('units') or 'g').strip()
+                        if _jw and _jw.lower() not in ('0', '0.0', 'nan', 'none', ''):
+                            p['Weight*'] = _jw
+                            p['Units'] = _ju
+                    # Vendor
+                    _cur_vendor = str(p.get('Vendor') or p.get('Vendor/Supplier*') or '').strip()
+                    if not _cur_vendor or _cur_vendor.lower() in ('unknown', 'nan', 'none', ''):
+                        _jv = str(
+                            _ji.get('vendor_name') or _ji.get('vendor') or
+                            _ji.get('from_license_name') or _raw_doc_vendor or ''
+                        ).strip()
+                        if _jv and _jv.lower() not in ('nan', 'none', ''):
+                            p['Vendor'] = _jv
+                            p['Vendor/Supplier*'] = _jv
+                # Apply document-level vendor to any product still missing vendor
+                # (all products in a transfer share the same vendor)
+                if _raw_doc_vendor:
+                    _cv = str(p.get('Vendor') or p.get('Vendor/Supplier*') or '').strip()
+                    if not _cv or _cv.lower() in ('unknown', 'nan', 'none', ''):
+                        p['Vendor'] = _raw_doc_vendor
+                        p['Vendor/Supplier*'] = _raw_doc_vendor
                 # Clean Weight* field
                 if 'Weight*' in p and p['Weight*']:
                     p['Weight*'] = clean_weight(p['Weight*'])
@@ -21056,10 +20525,40 @@ def json_match():
                 # Clean CombinedWeight field
                 if 'CombinedWeight' in p and p['CombinedWeight']:
                     p['CombinedWeight'] = clean_weight(p['CombinedWeight'])
+                # Build WeightUnits/WeightWithUnits/CombinedWeight if missing
+                # (DB products from fetch_and_match_with_product_db don't go through _merge_json_data_hybrid)
+                combined = p.get('CombinedWeight') or p.get('WeightUnits') or p.get('WeightWithUnits') or ''
+                if not combined or str(combined).strip() in ('', 'None', 'nan'):
+                    weight_val = str(p.get('Weight*') or p.get('Weight') or '').strip()
+                    units_val = str(p.get('Units') or '').strip()
+                    if weight_val and weight_val not in ('None', 'nan', '0', '0.0'):
+                        # Guard: if weight_val already contains units, don't append units again
+                        import re as _re
+                        if _re.search(r'[a-zA-Z]', weight_val) or not units_val:
+                            combined = clean_weight(weight_val)
+                        else:
+                            combined = clean_weight(f"{weight_val}{units_val}")
+                        p['CombinedWeight'] = combined
+                        p['WeightUnits'] = combined
+                        p['WeightWithUnits'] = combined
+                # Normalize price: DB stores as 'Price'; ensure Price* is also populated for frontend
+                price = p.get('Price') or p.get('Price*') or p.get('Price* (Tier Name for Bulk)') or ''
+                if price and str(price).strip() not in ('', 'None', 'nan', '0', '0.00'):
+                    price_str = str(price).strip()
+                    p['Price'] = price_str
+                    p['Price*'] = price_str
+                # Log products still missing price after all attempts
+                if not p.get('Price'):
+                    logging.warning(f"⚠️ JSON MATCH: No price for '{_pname}' after all back-fill attempts")
 
         # Initialize matched_names to ensure it's always defined
         # Format: "Product Name - Weight" (e.g., "Biscotti Live Resin Disposable Vape - 1g")
+        def _name_already_has_weight(name: str, w: str) -> bool:
+            """Return True if name already ends with weight string (avoids doubling)."""
+            return bool(w) and name.rstrip().endswith(w.strip())
+
         matched_names = []
+        matched_clean_names = []  # Clean "Product Name*" values for excel_processor.selected_tags lookup
         if matched_products:
             for p in matched_products:
                 if not isinstance(p, dict):
@@ -21074,16 +20573,19 @@ def json_match():
                 combined_weight = p.get('CombinedWeight') or ''
 
                 # Build display name: "Product Name - Weight"
-                if combined_weight:
+                # Guard against doubling the weight when product_name (from DB) already
+                # ends with the weight string (e.g., "Animal Tsunami by Vendor - 3.5g - 3.5g")
+                if combined_weight and not _name_already_has_weight(product_name, combined_weight):
                     display_name = f"{product_name} - {combined_weight}"
-                elif weight and units:
+                elif weight and units and not _name_already_has_weight(product_name, f"{weight}{units}"):
                     display_name = f"{product_name} - {weight}{units}"
-                elif weight:
+                elif weight and not _name_already_has_weight(product_name, str(weight)):
                     display_name = f"{product_name} - {weight}"
                 else:
                     display_name = product_name
 
                 matched_names.append(display_name)
+                matched_clean_names.append(product_name)  # Clean name for DB/DataFrame lookup
         
         # CRITICAL FIX: Add JSON matched products directly to Excel DataFrame
         # This makes them work exactly like regular tags - no special handling needed
@@ -21150,64 +20652,21 @@ def json_match():
                 logging.info(f"Sample matched names: {matched_names[:3]}")
 
                 # Auto-select JSON matched products for label generation
+                # Use clean names (Product Name*) for excel_processor — the /api/selected-tags
+                # lookup matches against Product Name*, not the weight-suffixed display name.
                 if hasattr(excel_processor, 'selected_tags'):
-                    excel_processor.selected_tags = matched_names.copy()
-                session['selected_tags'] = matched_names.copy()
+                    excel_processor.selected_tags = matched_clean_names.copy()
+                session['selected_tags'] = matched_clean_names.copy()
+                session['has_json_matched_products'] = True  # Track that JSON products were added
                 session.modified = True
 
-                logging.info(f"✅ Auto-selected {len(matched_names)} JSON matched products for label generation")
+                logging.info(f"✅ Auto-selected {len(matched_clean_names)} JSON matched products for label generation")
 
         except Exception as persist_error:
             logging.error(f"Error adding JSON matched products to Excel DataFrame: {persist_error}")
             import traceback
             logging.error(f"Full traceback: {traceback.format_exc()}")
         
-        # DEBUG: Log the actual JSON data to understand why only 6 products
-        try:
-            import requests
-            response = requests.get(url, timeout=30)
-            payload = response.json()
-            
-            if isinstance(payload, list):
-                json_items = payload
-            elif isinstance(payload, dict):
-                json_items = payload.get("inventory_transfer_items", [])
-            else:
-                json_items = []
-            
-            logging.info(f"DEBUG: JSON contains {len(json_items)} raw items")
-            if json_items:
-                # Log first few items to see what's in the JSON
-                for i, item in enumerate(json_items[:10]):
-                    if isinstance(item, dict):
-                        logging.info(f"DEBUG: JSON item {i}: {item.get('product_name', 'NO_NAME')} - vendor: {item.get('vendor', 'NO_VENDOR')}")
-                
-                # Log last few items too
-                if len(json_items) > 10:
-                    logging.info(f"DEBUG: ... (showing first 10 of {len(json_items)} items)")
-                    for i, item in enumerate(json_items[-3:], len(json_items)-3):
-                        if isinstance(item, dict):
-                            logging.info(f"DEBUG: JSON item {i}: {item.get('product_name', 'NO_NAME')} - vendor: {item.get('vendor', 'NO_VENDOR')}")
-            
-        except Exception as debug_error:
-            logging.error(f"DEBUG: Could not fetch JSON for analysis: {debug_error}")
-        
-        # DEBUG: Show Excel data availability
-        if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
-            excel_count = len(excel_processor.df)
-            logging.info(f"DEBUG: Excel database contains {excel_count} products available for matching")
-            
-            # Show sample vendors from Excel
-            vendor_cols = ['Vendor/Supplier*', 'Vendor', 'Vendor/Supplier']
-            excel_vendors = set()
-            for col in vendor_cols:
-                if col in excel_processor.df.columns:
-                    vendors = excel_processor.df[col].dropna().unique()
-                    excel_vendors.update([str(v).strip() for v in vendors if str(v).strip()])
-            
-            logging.info(f"DEBUG: Excel has {len(excel_vendors)} unique vendors: {sorted(list(excel_vendors))[:10]}")
-        else:
-            logging.info("DEBUG: No Excel data available for matching")
         
         # Handle empty results gracefully
         if not matched_products:
@@ -21224,6 +20683,58 @@ def json_match():
         # CRITICAL FIX: Return matched products directly as available tags
         # Don't rely on Excel processor since products were just added
         logging.info(f"🔍 Preparing to return {len(matched_products)} matched products as available tags")
+
+        # Enrich matched products with sovereign_lineage / canonical_lineage from the product DB.
+        # The matcher returns Lineage from the raw DB row but sovereign_lineage (user-edited lineage)
+        # is stored separately and must be overlaid so the frontend receives the correct lineage.
+        try:
+            store_name_for_lineage = session.get('selected_store', '')
+            _pdb = get_product_database(store_name_for_lineage)
+            if _pdb and matched_products:
+                _conn = _pdb._get_connection()
+                _cur = _conn.cursor()
+                _pnames = [p.get('Product Name*', '') for p in matched_products if p.get('Product Name*')]
+                if _pnames:
+                    _ph = ','.join(['?' for _ in _pnames])
+                    _cur.execute(f'''
+                        SELECT p."Product Name*",
+                               COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
+                               p.sovereign_lineage as product_sovereign,
+                               s.sovereign_lineage as strain_sovereign,
+                               s.canonical_lineage as strain_canonical
+                        FROM products p
+                        LEFT JOIN strains s ON p.strain_id = s.id
+                        WHERE p."Product Name*" IN ({_ph})
+                        ORDER BY p.id DESC
+                    ''', _pnames)
+                    _lineage_info = {}
+                    for _row in _cur.fetchall():
+                        _db_name, _lin, _sov, _strain_sov, _can = _row
+                        if _db_name and _db_name not in _lineage_info:
+                            _lineage_info[_db_name] = {
+                                'lineage': _lin,
+                                'sovereign_lineage': _sov or _strain_sov,
+                                'canonical_lineage': _can,
+                            }
+                    for _prod in matched_products:
+                        _name = _prod.get('Product Name*', '')
+                        if _name and _name in _lineage_info:
+                            _info = _lineage_info[_name]
+                            # sovereign_lineage is the user's custom lineage — always prefer it
+                            if _info.get('sovereign_lineage'):
+                                _prod['sovereign_lineage'] = _info['sovereign_lineage']
+                                _prod['Lineage'] = _info['sovereign_lineage']
+                                _prod['lineage'] = _info['sovereign_lineage']
+                                _prod['currentLineage'] = _info['sovereign_lineage']
+                                _prod['canonical_lineage'] = _info.get('canonical_lineage') or _info['sovereign_lineage']
+                            elif _info.get('lineage'):
+                                _prod['Lineage'] = _info['lineage']
+                                _prod['lineage'] = _info['lineage']
+                                _prod['currentLineage'] = _info['lineage']
+                                _prod['canonical_lineage'] = _info.get('canonical_lineage') or _info['lineage']
+                    logging.info(f"✅ LINEAGE ENRICHMENT: Enriched {len(_lineage_info)} products with DB lineage")
+        except Exception as _le:
+            logging.warning(f"Could not enrich matched products with DB lineage: {_le}")
 
         # Ensure each matched product has the display fields needed by frontend
         for i, product in enumerate(matched_products):
@@ -21243,23 +20754,118 @@ def json_match():
             logging.info(f"🔍   - All keys: {list(matched_products[0].keys())}")
 
         # Auto-select JSON matched products
+        # Use clean names (Product Name*) so /api/selected-tags can find them in the DataFrame.
         if excel_processor and hasattr(excel_processor, 'selected_tags'):
-            excel_processor.selected_tags = matched_names.copy()
-        session['selected_tags'] = matched_names.copy()
+            excel_processor.selected_tags = matched_clean_names.copy()
+        session['selected_tags'] = matched_clean_names.copy()
         session.modified = True
-        logging.info(f"✅ Auto-selected {len(matched_names)} JSON matched products")
+        logging.info(f"✅ Auto-selected {len(matched_clean_names)} JSON matched products")
 
         # Create response data - Return matched products directly
-        response_products = json_matcher._upgrade_fallback_products(matched_products, None) if matched_products else []
+        response_products = json_matcher._upgrade_fallback_products(matched_products, _raw_doc_vendor or _doc_vendor_early or None) if matched_products else []
+
+        # Final back-fill pass: re-apply price/weight/vendor from raw JSON items after _upgrade_fallback_products
+        # (some products get rebuilt by that function and lose previously back-filled values)
+        for _rp in response_products:
+            if not isinstance(_rp, dict):
+                continue
+            _rpname = str(_rp.get('Product Name*') or _rp.get('ProductName') or '').strip()
+            _rji = _find_json_item_for_product(_rpname)
+            if _rji:
+                # Vendor
+                _rv = str(_rp.get('Vendor') or _rp.get('Vendor/Supplier*') or '').strip()
+                if not _rv or _rv.lower() in ('unknown', 'nan', 'none', ''):
+                    _jv2 = str(
+                        _rji.get('vendor_name') or _rji.get('vendor') or
+                        _rji.get('from_license_name') or _raw_doc_vendor or ''
+                    ).strip()
+                    if _jv2 and _jv2.lower() not in ('nan', 'none', ''):
+                        _rp['Vendor'] = _jv2
+                        _rp['Vendor/Supplier*'] = _jv2
+                # Price
+                _rpr = str(_rp.get('Price') or _rp.get('Price*') or '').strip()
+                if not _rpr or _rpr.lower() in ('0', '0.0', '0.00', 'nan', 'none', ''):
+                    _jp2 = str(
+                        _rji.get('line_price') or _rji.get('price') or
+                        _rji.get('Price') or _rji.get('retail_price') or
+                        _rji.get('unit_price') or ''
+                    ).strip()
+                    if _jp2 and _jp2.lower() not in ('0', '0.0', '0.00', 'nan', 'none', ''):
+                        try:
+                            _pf2 = float(_jp2)
+                            _jp2_fmt = f"${int(_pf2)}" if _pf2 == int(_pf2) else f"${_pf2}"
+                        except (ValueError, TypeError):
+                            _jp2_fmt = _jp2
+                        _rp['Price'] = _jp2_fmt
+                        _rp['Price*'] = _jp2_fmt
+                # Weight
+                _rw = str(_rp.get('Weight*') or _rp.get('Weight') or '').strip()
+                if not _rw or _rw.lower() in ('0', '0.0', 'nan', 'none', ''):
+                    _jw2 = str(_rji.get('unit_weight') or _rji.get('weight') or '').strip()
+                    _ju2 = str(_rji.get('unit_weight_uom') or _rji.get('uom') or _rji.get('units') or 'g').strip()
+                    if _jw2 and _jw2.lower() not in ('0', '0.0', 'nan', 'none', ''):
+                        _rp['Weight*'] = _jw2
+                        _rp['Units'] = _ju2
+                        _rp['CombinedWeight'] = f"{_jw2}{_ju2}"
+                        _rp['WeightUnits'] = _rp['CombinedWeight']
+                        _rp['WeightWithUnits'] = _rp['CombinedWeight']
+            # Apply document-level vendor to any response product still missing vendor
+            if _raw_doc_vendor:
+                _rcv = str(_rp.get('Vendor') or _rp.get('Vendor/Supplier*') or '').strip()
+                if not _rcv or _rcv.lower() in ('unknown', 'nan', 'none', ''):
+                    _rp['Vendor'] = _raw_doc_vendor
+                    _rp['Vendor/Supplier*'] = _raw_doc_vendor
+
+        # Ensure every product has Product Type* so the frontend does not show "Unknown Type"
+        for p in response_products:
+            if not isinstance(p, dict):
+                continue
+            pt = p.get('Product Type*') or p.get('Product Type') or p.get('ProductType') or ''
+            if not pt or str(pt).strip().lower() in ('unknown', 'unknown type', 'nan', ''):
+                from src.core.data.json_matcher import map_inventory_type_to_product_type
+                inv_type = p.get('inventory_type') or p.get('Inventory Type') or ''
+                mapped = map_inventory_type_to_product_type(inv_type, p.get('inventory_category'), p.get('Product Name*') or p.get('Description'))
+                if mapped and str(mapped).strip().lower() not in ('unknown', 'unknown type'):
+                    p['Product Type*'] = mapped
+                    p['Product Type'] = mapped
+                    p['ProductType'] = mapped
+        # Cache matched products in session so /api/generate can back-fill Price/Vendor/Weight
+        # even when JS sends minimal fallback objects (g.excel_processor.df is request-scoped and
+        # won't contain JSON-only products in the generate request).
+        try:
+            _cache_products = []
+            for _cp in response_products:
+                if not isinstance(_cp, dict):
+                    continue
+                _cpn = str(_cp.get('Product Name*') or _cp.get('ProductName') or '').strip()
+                if not _cpn:
+                    continue
+                _cache_products.append({
+                    'Product Name*': _cpn,
+                    'Price': str(_cp.get('Price') or _cp.get('Price*') or '').strip(),
+                    'Vendor': str(_cp.get('Vendor') or _cp.get('Vendor/Supplier*') or '').strip(),
+                    'Weight*': str(_cp.get('Weight*') or _cp.get('Weight') or '').strip(),
+                    'CombinedWeight': str(_cp.get('CombinedWeight') or '').strip(),
+                    'Units': str(_cp.get('Units') or '').strip(),
+                    'Product Type*': str(_cp.get('Product Type*') or _cp.get('Product Type') or '').strip(),
+                    'Lineage': str(_cp.get('canonical_lineage') or _cp.get('Lineage') or '').strip(),
+                })
+            session['json_matched_products_cache'] = _cache_products
+            session.modified = True
+            logging.info(f"✅ Cached {len(_cache_products)} JSON matched products in session for generate back-fill")
+        except Exception as _cache_err:
+            logging.warning(f"Could not cache JSON matched products in session: {_cache_err}")
+
+        # Return selected_tags as full tag objects (not just names) so the UI has Product Type* and does not show "Unknown Type"
         response_data = {
             'success': True,
             'matched_count': len(response_products),
             'matched_names': matched_names,
             'available_tags': response_products,  # Return matched products directly
-            'selected_tags': matched_names,  # Auto-select matched products
+            'selected_tags': response_products,  # Full objects so frontend preserves Product Type*
             'message': f"Successfully matched {len(response_products)} products and automatically selected them for label generation.",
             'auto_selected': True,
-            'selected_count': len(matched_names)
+            'selected_count': len(response_products)
         }
 
         if response_products:
@@ -21329,23 +20935,38 @@ def json_process():
         
 @app.route('/api/json-inventory', methods=['POST'])
 def json_inventory():
-    """Process JSON inventory data and generate inventory slips."""
+    """Process JSON inventory data and generate inventory slips. Accepts url= or posabit=True."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         url = data.get('url', '').strip()
-        
-        if not url:
-            return jsonify({'error': 'URL is required'}), 400
-            
-        if not url.lower().startswith('http'):
-            return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
+        use_posabit = data.get('posabit') is True
 
         # Always refresh JSON matching caches/state before running a new match.
         refresh_json_match_runtime_state('api/json-inventory')
-            
-        # Process JSON inventory data
-        json_matcher = get_session_json_matcher()
-        inventory_df = json_matcher.process_json_inventory(url)
+
+        if use_posabit:
+            from src.core.data.posabit_client import get_manifests_as_inventory_transfer_items
+            items = get_manifests_as_inventory_transfer_items()
+            if not items:
+                return jsonify({'error': 'No manifest items from POSaBit (check token and API)'}), 400
+            raw_date = datetime.now().strftime("%Y-%m-%d")
+            records_for_df = []
+            for itm in items:
+                records_for_df.append({
+                    "Product Name*": str(itm.get("product_name") or ""),
+                    "Barcode*": str(itm.get("inventory_id") or itm.get("Internal Product Identifier") or ""),
+                    "Quantity Received*": str(itm.get("Quantity*") or itm.get("quantity") or ""),
+                    "Accepted Date": raw_date,
+                    "Vendor/Supplier*": str(itm.get("product_brand") or "POSaBit"),
+                })
+            inventory_df = pd.DataFrame(records_for_df)
+        elif url:
+            if not url.lower().startswith('http'):
+                return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
+            json_matcher = get_session_json_matcher()
+            inventory_df = json_matcher.process_json_inventory(url)
+        else:
+            return jsonify({'error': 'URL is required, or set posabit: true to use POSaBit manifest'}), 400
         
         if inventory_df.empty:
             return jsonify({'error': 'No inventory items found in JSON'}), 400
@@ -21371,9 +20992,9 @@ def json_inventory():
             excel_processor = None  # Inventory slips can work without ExcelProcessor
         
         fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '500'))
-        fast_mode = len(records) >= fast_mode_threshold
+        fast_mode = len(inventory_df) >= fast_mode_threshold
         if fast_mode:
-            logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)
+            logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(inventory_df), fast_mode_threshold)
         processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor, fast_mode=fast_mode)
         
         # CRITICAL: For mini, double, and preroll templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
@@ -21501,7 +21122,7 @@ def json_status():
 
 @app.route('/api/json-match-detailed', methods=['POST'])
 def json_match_detailed():
-    """Detailed JSON matching — fast version that reuses /api/json-match results."""
+    """Detailed JSON matching — uses EnhancedJSONMatcher against the product database."""
     try:
         data = request.get_json()
         url = data.get('url', '').strip()
@@ -21518,75 +21139,36 @@ def json_match_detailed():
 
         if isinstance(payload, list):
             json_items = payload
+            document_vendor = None
         elif isinstance(payload, dict):
             json_items = payload.get("inventory_transfer_items", [])
+            document_vendor = (payload.get("from_license_name") or
+                               payload.get("vendor_name") or
+                               payload.get("supplier_name"))
         else:
             json_items = []
+            document_vendor = None
 
-        # Get matched products already in the excel processor (from prior /api/json-match call)
-        excel_processor = get_session_excel_processor()
-        matched_products = []
-        if excel_processor and hasattr(excel_processor, 'df') and excel_processor.df is not None:
-            matched_products = excel_processor.df.to_dict('records')
+        # Use EnhancedJSONMatcher — match each JSON item individually against the product DB
+        json_matcher = get_session_json_matcher()
+        if json_matcher is None:
+            return jsonify({'error': 'JSON matcher not available — please upload an Excel file first'}), 400
 
-        # Build lookup of matched products by normalized name for fast pairing
-        matched_by_name = {}
-        for product in matched_products:
-            name = str(product.get('Product Name*', '') or product.get('ProductName', '') or '').strip().lower()
-            if name and name not in matched_by_name:
-                matched_by_name[name] = product
-            # Also index by Description
-            desc = str(product.get('Description', '') or '').strip().lower()
-            if desc and desc not in matched_by_name:
-                matched_by_name[desc] = product
+        all_database_products = json_matcher._get_database_products()
 
-        def _normalize_for_match(text):
-            return re.sub(r'[^a-z0-9\s]+', ' ', str(text or '').lower()).strip()
-
-        # Type keywords for classifying JSON items and DB products
-        _TYPE_KEYWORDS = {
-            'vape': {'vape', 'cartridge', 'cart', 'c cell', 'ccell', '510', 'aio', 'all in one', 'disposable', 'panda pen', 'dabstract'},
-            'preroll': {'preroll', 'pre roll', 'pre-roll', 'firecracker', 'infused preroll', 'infused pre roll'},
-            'flower': {'flower', 'bong buddies', 'core flower', 'platinum line', 'platinum flower'},
-            'edible': {'edible', 'gummiez', 'gummies', 'fruit drops', 'chocolate', 'candy'},
-            'concentrate': {'sugar', 'batter', 'wax', 'shatter', 'rosin', 'badder', 'diamonds', 'sauce', 'snickle fritz'},
-        }
-
-        def _classify_type(text):
-            """Classify product type from name/description text."""
-            text_lower = text.lower()
-            # Check in priority order: vape before concentrate
-            for ptype in ['edible', 'preroll', 'vape', 'concentrate', 'flower']:
-                for kw in _TYPE_KEYWORDS[ptype]:
-                    if kw in text_lower:
-                        return ptype
-            return 'unknown'
-
-        def _classify_json_item_type(json_item, json_name):
-            """Classify a JSON item's product type using inventory_type and name."""
-            inv_type = str(json_item.get('inventory_type', '')).lower()
-            name_lower = json_name.lower()
-            # Map Bamboo inventory types
-            if 'edible' in inv_type:
-                return 'edible'
-            if 'usable cannabis' in inv_type:
-                # Could be flower or preroll — check name
-                if any(kw in name_lower for kw in ['preroll', 'pre-roll', 'pre roll']):
-                    return 'preroll'
-                if any(kw in name_lower for kw in ['bong buddies', 'flower']):
-                    return 'flower'
-                return 'flower'  # default for usable cannabis
-            if 'cannabis mix infused' in inv_type:
-                return 'preroll'  # infused prerolls
-            if 'concentrate for inhalation' in inv_type:
-                # Could be vape or concentrate — check name
-                if any(kw in name_lower for kw in ['aio', 'c-cell', 'ccell', '510', 'cartridge', 'cart', 'pen', 'disposable', 'dabstract']):
-                    return 'vape'
-                if any(kw in name_lower for kw in ['sugar', 'batter', 'wax', 'shatter', 'rosin', 'badder', 'diamonds', 'sauce']):
-                    return 'concentrate'
-                return 'vape'  # default for concentrate for inhalation
-            # Fallback: classify from name
-            return _classify_type(name_lower)
+        # Restrict matching to the document vendor only
+        if document_vendor:
+            norm_doc_vendor = json_matcher._normalize_vendor(document_vendor)
+            vendor_db = [
+                p for p in all_database_products
+                if json_matcher._normalize_vendor(
+                    str(p.get('Vendor/Supplier*') or p.get('Vendor') or '')
+                ) == norm_doc_vendor
+            ]
+            database_products = vendor_db if vendor_db else all_database_products
+            logging.info(f"json-match-detailed: restricting to vendor '{document_vendor}' → {len(database_products)} products")
+        else:
+            database_products = all_database_products
 
         detailed_matches = []
         high_confidence_matches = []
@@ -21598,110 +21180,70 @@ def json_match_detailed():
                 str(json_item.get('name', '')).strip() or
                 f"JSON Product {i + 1}"
             )
-            json_name_norm = _normalize_for_match(json_name)
-            json_tokens = set(t for t in json_name_norm.split() if len(t) >= 3)
-            json_type = _classify_json_item_type(json_item, json_name)
 
-            # Try to find best match from already-matched products
+            # Normalize the item through the same pipeline as fetch_and_match
+            normalized = dict(json_item)
+            normalized.setdefault('inventory_name', json_name)
+
+            # Match this single item
+            product_type = json_matcher._classify_product_type(normalized)
+            top_matches = json_matcher._hybrid_match_fast(normalized, database_products, product_type)
+
             best_match = None
-            best_score = 0.0
-
-            # 1. Direct name lookup
-            if json_name.lower().strip() in matched_by_name:
-                best_match = matched_by_name[json_name.lower().strip()]
-                best_score = 1.0
-            else:
-                # 2. Type-aware token overlap matching
-                for name_key, product in matched_by_name.items():
-                    prod_name_norm = _normalize_for_match(name_key)
-                    prod_tokens = set(t for t in prod_name_norm.split() if len(t) >= 3)
-                    if not json_tokens or not prod_tokens:
-                        continue
-
-                    # Base token overlap (Jaccard)
-                    raw_overlap = len(json_tokens & prod_tokens) / len(json_tokens | prod_tokens)
-
-                    # CROSS-STRAIN GUARD: "MAC x Trophy Wife" is NOT "Trophy Wife".
-                    # If the JSON name contains " x " (cross indicator), all meaningful strain
-                    # tokens from both sides of the cross must appear in the DB product name.
-                    if ' x ' in json_name_norm:
-                        cross_parts = json_name_norm.split(' x ', 1)
-                        # Extract meaningful tokens (len≥3, skip type/format words) from each side
-                        _skip = {'aio', 'lr', 'the', 'and', 'for', 'by', 'live', 'resin', 'cart',
-                                 'pen', 'oil', 'wax', '1g', '2g', '3g', '7g', '14g', '28g'}
-                        left_tokens = {t for t in cross_parts[0].split() if len(t) >= 3 and t not in _skip}
-                        right_tokens = {t for t in cross_parts[1].split() if len(t) >= 3 and t not in _skip}
-                        # Remove brand/type tokens (they appear in prod_tokens regardless of strain)
-                        # Require at least one token from each side to be in the DB product name
-                        left_covered = bool(left_tokens & prod_tokens)
-                        right_covered = bool(right_tokens & prod_tokens)
-                        if not (left_covered and right_covered):
-                            continue  # DB product only covers one side of the cross — skip
-
-                    # VENDOR GUARD: require that either there is meaningful name overlap, or
-                    # the product's vendor/brand appears somewhere in the JSON item's name.
-                    # This prevents single shared words like "sunset" or "dragon" from
-                    # producing cross-vendor matches (e.g. "Sunset Sherbert LR Dabstract AIO"
-                    # → "Pineapple Sunset Distillate Cartridge by Hustler's Ambition").
-                    if raw_overlap < 0.20:
-                        # Low name overlap — only keep if vendor/brand aligns
-                        prod_vendor_lower = str(
-                            product.get('Vendor/Supplier*') or product.get('Vendor') or
-                            product.get('Product Brand') or ''
-                        ).lower()
-                        prod_brand_lower = str(product.get('Product Brand') or '').lower()
-                        # Check if any vendor/brand word (len≥5) from this product appears
-                        # in the JSON item's normalized name tokens
-                        vendor_words = set(
-                            w for w in re.split(r'\W+', prod_vendor_lower + ' ' + prod_brand_lower)
-                            if len(w) >= 5
-                        )
-                        vendor_in_json = bool(vendor_words & json_tokens)
-                        if not vendor_in_json:
-                            continue  # Skip — no brand alignment and low name overlap
-
-                    overlap = raw_overlap
-
-                    # Product type matching — big bonus/penalty
-                    prod_type_str = str(
-                        product.get('Product Type*') or product.get('Product Type') or
-                        product.get('ProductType') or ''
-                    ).lower()
-                    prod_type = _classify_type(f"{name_key} {prod_type_str}")
-
-                    if json_type != 'unknown' and prod_type != 'unknown':
-                        if json_type == prod_type:
-                            overlap += 0.3  # Big bonus for type match
-                        else:
-                            overlap -= 0.4  # Big penalty for type mismatch
-
-                    if overlap > best_score:
-                        best_score = overlap
-                        best_match = product
-
-            # Only accept matches with reasonable overlap
-            if best_score < 0.35:
-                best_match = None
-                best_score = 0.0
-
-            # Use Match_Confidence from the product if available
-            if best_match:
-                try:
-                    conf = float(best_match.get('Match_Confidence', best_score))
-                except (ValueError, TypeError):
-                    conf = best_score
-                high_confidence_matches.append(best_match)
-            else:
-                conf = 0.0
+            conf = 0.0
+            if top_matches:
+                top = top_matches[0]
+                conf = min(1.0, max(0.0, float(top.score)))
+                if conf >= 0.35:
+                    best_match = dict(top.match_data) if top.match_data else None
+                    if best_match:
+                        best_match['Match_Confidence'] = conf
+                        # Inject price/weight/vendor from JSON item when DB record has none
+                        _db_price = str(best_match.get('Price') or best_match.get('Price*') or '').strip()
+                        if not _db_price or _db_price.lower() in ('0', '0.0', '0.00', 'nan', 'none', ''):
+                            _json_price = str(
+                                json_item.get('line_price') or json_item.get('price') or
+                                json_item.get('Price') or json_item.get('retail_price') or
+                                json_item.get('unit_price') or ''
+                            ).strip()
+                            if _json_price and _json_price.lower() not in ('0', '0.0', '0.00', 'nan', 'none', ''):
+                                try:
+                                    _price_val = float(_json_price)
+                                    best_match['Price'] = f"${int(_price_val)}" if _price_val == int(_price_val) else f"${_price_val}"
+                                except ValueError:
+                                    best_match['Price'] = _json_price
+                                best_match['Price*'] = best_match['Price']
+                        _db_vendor = str(best_match.get('Vendor') or best_match.get('Vendor/Supplier*') or '').strip()
+                        if not _db_vendor or _db_vendor.lower() in ('unknown', 'nan', 'none', ''):
+                            _json_vendor = str(
+                                json_item.get('vendor_name') or json_item.get('vendor') or
+                                json_item.get('from_license_name') or document_vendor or ''
+                            ).strip()
+                            if _json_vendor and _json_vendor.lower() not in ('nan', 'none', ''):
+                                best_match['Vendor'] = _json_vendor
+                                best_match['Vendor/Supplier*'] = _json_vendor
+                        _db_weight = str(best_match.get('Weight*') or best_match.get('Weight') or '').strip()
+                        if not _db_weight or _db_weight.lower() in ('0', '0.0', 'nan', 'none', ''):
+                            _json_weight = str(
+                                json_item.get('unit_weight') or json_item.get('weight') or
+                                json_item.get('Weight*') or ''
+                            ).strip()
+                            _json_uom = str(
+                                json_item.get('unit_weight_uom') or json_item.get('uom') or
+                                json_item.get('units') or 'g'
+                            ).strip()
+                            if _json_weight and _json_weight.lower() not in ('0', '0.0', 'nan', 'none', ''):
+                                best_match['Weight*'] = _json_weight
+                                best_match['Units'] = _json_uom
+                                best_match['WeightUnits'] = f"{_json_weight}{_json_uom}"
+                                best_match['WeightWithUnits'] = best_match['WeightUnits']
+                        high_confidence_matches.append(best_match)
 
             match_display_name = ''
             if best_match:
                 match_display_name = (
                     best_match.get('Product Name*') or
-                    best_match.get('ProductName') or
-                    best_match.get('Description') or
-                    best_match.get('displayName') or
-                    ''
+                    best_match.get('ProductName') or ''
                 )
 
             match_info = {
@@ -21712,7 +21254,7 @@ def json_match_detailed():
                 'top_candidates': [{'excel_name': match_display_name, 'score': conf, 'excel_data': best_match}] if best_match else [],
                 'is_match': best_match is not None,
                 'match_reason': 'Database Match' if best_match else 'No match found',
-                'source': best_match.get('Source', 'Database') if best_match else 'No match',
+                'source': 'Database' if best_match else 'No match',
                 'data_source': 'Database' if best_match else 'None',
                 'match_confidence': f"{conf:.3f}" if best_match else '0.0'
             }
@@ -21725,14 +21267,14 @@ def json_match_detailed():
             'total_json_items': len(json_items),
             'total_matches': len(high_confidence_matches),
             'threshold': 'Database Priority (100% DB)',
-            'approach': 'Fast detailed matching',
+            'approach': 'EnhancedJSONMatcher',
             'data_source': '100% Database-derived information',
             'detailed_matches': detailed_matches,
             'high_confidence_matches': high_confidence_matches,
             'database_info': {
-                'total_database_products': len(matched_products),
+                'total_database_products': len(database_products),
                 'enhanced_matches': len(high_confidence_matches),
-                'match_strategy': 'Database Priority with safe defaults'
+                'match_strategy': 'EnhancedJSONMatcher per-item with type-aware scoring'
             }
         })
 
@@ -21741,6 +21283,7 @@ def json_match_detailed():
         import traceback
         logging.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': f'Detailed matching failed: {str(e)}'}), 500
+
 
 @app.route('/api/match-json-tags', methods=['POST'])
 def match_json_tags():
@@ -24759,7 +24302,7 @@ def upload_file_optimized():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -24937,7 +24480,7 @@ def upload_file_fast():
             return jsonify({'error': 'Only Excel files allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
+        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -27396,6 +26939,16 @@ def clear_cache_route():
             pass
         try:
             _json_matcher = None
+        except Exception:
+            pass
+        # Also clear the app-level JSON matcher singleton (actual location of the instance)
+        try:
+            if hasattr(app, '_json_matcher'):
+                try:
+                    app._json_matcher.clear_matches()
+                except Exception:
+                    pass
+                del app._json_matcher
         except Exception:
             pass
 

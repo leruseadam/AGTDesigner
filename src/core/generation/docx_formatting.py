@@ -8,7 +8,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Define colors for lineage
+# Define colors for lineage (style-icon hex from user assets)
 COLORS = {
     'SATIVA': 'ED4123',
     'INDICA': '9900FF',
@@ -16,10 +16,44 @@ COLORS = {
     'HYBRID_INDICA': '9900FF',
     'HYBRID_SATIVA': 'ED4123',
     'CBD': 'F1C232',
-    'CBD_BLEND': 'F1C232',  # Same color as CBD
+    'CBD_BLEND': 'F1C232',
     'MIXED': '0021F5',
     'PARA': 'C83278'
 }
+
+# Style text icons for lineage placeholder (instead of word "lineage")
+# Maps lineage value to the icon text shown in the label.
+LINEAGE_ICON = {
+    'SATIVA': 'S',
+    'INDICA': 'I',
+    'HYBRID': 'H',
+    'HYBRID/SATIVA': 'S / H',
+    'HYBRID/INDICA': 'I / H',
+    'HYBRID_INDICA': 'I / H',
+    'HYBRID_SATIVA': 'S / H',
+}
+
+def lineage_to_icon_text(lineage_str):
+    """Return style icon text for classic lineage (S, I, H, S / H, I / H); otherwise return original."""
+    if not lineage_str or not isinstance(lineage_str, str):
+        return lineage_str or ''
+    raw = lineage_str.strip().upper()
+    key = raw.replace(' ', '_')
+    # Check exact keys (with slash or underscore)
+    for k, icon in LINEAGE_ICON.items():
+        if raw == k or key == k or raw == k.replace('_', '/') or key == k.replace('/', '_'):
+            return icon
+    if 'HYBRID/SATIVA' in raw or 'HYBRID_SATIVA' in key:
+        return 'S / H'
+    if 'HYBRID/INDICA' in raw or 'HYBRID_INDICA' in key:
+        return 'I / H'
+    if raw == 'SATIVA':
+        return 'S'
+    if raw == 'INDICA':
+        return 'I'
+    if raw == 'HYBRID':
+        return 'H'
+    return lineage_str
 
 def debug_lineage_data(records):
     """Debug function to log lineage data being processed."""
@@ -76,6 +110,9 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
         before_twips, after_twips = '40', '20'
     
     try:
+        if template_type == 'new':
+            logger.info("Skipping lineage color application for 'new' template (no background colors).")
+            return
         logger.info("Starting lineage color application...")
         cells_processed = 0
         colors_applied = 0
@@ -183,39 +220,25 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                                     COLORS.get('CBD_BLEND') if 'CBD' in hint_upper or hint_upper.endswith('_BLEND') or hint_upper == '_BLEND' else None
                                 )
                                 if color_candidate:
-                                    # If placeholder config exists and explicitly disables applying lineage, skip
-                                    if ph_cfg and ph_cfg.get('applyLineage') is False:
-                                        logger.info(f"Skipping lineage hint color for field '{detected_field}' due to placeholder settings")
-                                    else:
-                                        tc = cell._tc
-                                        tcPr = tc.get_or_add_tcPr()
-                                        for old_shd in tcPr.findall(qn('w:shd')):
-                                            tcPr.remove(old_shd)
-                                        shd = OxmlElement('w:shd')
-                                        shd.set(qn('w:fill'), color_candidate)
-                                        shd.set(qn('w:val'), 'clear')
-                                        shd.set(qn('w:color'), 'auto')
-                                        tcPr.append(shd)
-                                        from src.core.generation.unified_font_sizing import get_font_size
-                                        field = 'lineage' if is_classic_type_before_processing else 'brand'
-                                        orient = template_type if template_type in ('horizontal', 'vertical', 'double') else 'vertical'
-                                        bar_font_size = get_font_size(hint_upper or ' ', field, orient, 1.0)
-                                        for paragraph in cell.paragraphs:
-                                            for run in paragraph.runs:
-                                                _set_lineage_run_white(run)
-                                                run.font.bold = True
-                                                # Apply placeholder font/size overrides if provided
-                                                if ph_cfg and ph_cfg.get('font'):
-                                                    run.font.name = ph_cfg.get('font')
-                                                else:
-                                                    run.font.name = "Arial"
-                                                if ph_cfg and ph_cfg.get('size'):
-                                                    try:
-                                                        run.font.size = Pt(int(ph_cfg.get('size')))
-                                                    except Exception:
-                                                        run.font.size = bar_font_size
-                                                else:
-                                                    run.font.size = bar_font_size
+                                    tc = cell._tc
+                                    tcPr = tc.get_or_add_tcPr()
+                                    for old_shd in tcPr.findall(qn('w:shd')):
+                                        tcPr.remove(old_shd)
+                                    shd = OxmlElement('w:shd')
+                                    shd.set(qn('w:fill'), color_candidate)
+                                    shd.set(qn('w:val'), 'clear')
+                                    shd.set(qn('w:color'), 'auto')
+                                    tcPr.append(shd)
+                                    from src.core.generation.unified_font_sizing import get_font_size
+                                    field = 'lineage' if is_classic_type_before_processing else 'brand'
+                                    orient = template_type if template_type in ('horizontal', 'vertical', 'double') else 'vertical'
+                                    bar_font_size = get_font_size(hint_upper or ' ', field, orient, 1.0)
+                                    for paragraph in cell.paragraphs:
+                                        for run in paragraph.runs:
+                                            _set_lineage_run_white(run)
+                                            run.font.bold = True
+                                            run.font.name = "Arial"
+                                            run.font.size = bar_font_size
                                     # Center brand text when markers are used (but only for non-classic types)
                                     if has_productbrand_center_marker and not is_classic_type_before_processing:
                                         for paragraph in cell.paragraphs:
@@ -324,6 +347,22 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                         elif "PARAPHERNALIA" in text:
                             color_hex = COLORS['PARA']
                             lineage_matched = "PARAPHERNALIA"
+                        # Style text icon matching (S, I, H, S / H, I / H) – check before word matching
+                        elif text.strip() in ("S / H", "S/H") or (text.strip().startswith("S") and "H" in text and "/" in text):
+                            color_hex = COLORS['HYBRID_SATIVA']
+                            lineage_matched = "HYBRID/SATIVA (icon)"
+                        elif text.strip() in ("I / H", "I/H") or (text.strip().startswith("I") and "H" in text and "/" in text):
+                            color_hex = COLORS['HYBRID_INDICA']
+                            lineage_matched = "HYBRID/INDICA (icon)"
+                        elif text.strip() == "S":
+                            color_hex = COLORS['SATIVA']
+                            lineage_matched = "SATIVA (icon)"
+                        elif text.strip() == "I":
+                            color_hex = COLORS['INDICA']
+                            lineage_matched = "INDICA (icon)"
+                        elif text.strip() == "H":
+                            color_hex = COLORS['HYBRID']
+                            lineage_matched = "HYBRID (icon)"
                         elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
                             color_hex = COLORS['HYBRID_INDICA']
                             lineage_matched = "HYBRID/INDICA"
@@ -353,21 +392,6 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
     
                         # Apply color if we have one and there's actual content
                         if color_hex and text.strip():
-                            # If placeholder config explicitly disables lineage color for this field, skip applying color
-                            if ph_cfg and ph_cfg.get('applyLineage') is False:
-                                logger.info(f"Skipping lineage color for field '{detected_field}' due to placeholder settings")
-                                # If configured to remove shading, do that and continue
-                                if ph_cfg and ph_cfg.get('removeShading'):
-                                    try:
-                                        tc = cell._tc
-                                        tcPr = tc.find(qn('w:tcPr'))
-                                        if tcPr is not None:
-                                            shd = tcPr.find(qn('w:shd'))
-                                            if shd is not None:
-                                                tcPr.remove(shd)
-                                    except Exception:
-                                        pass
-                                continue
                             # Set cell background color
                             tc = cell._tc
                             tcPr = tc.get_or_add_tcPr()
@@ -431,18 +455,6 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                                     except Exception as e:
                                         logger.warning(f"⚠️ Failed to set alignment/spacing: {e}")
 
-                        # If placeholder config requested shading removal for this field, remove any shading now
-                        if ph_cfg and ph_cfg.get('removeShading'):
-                            try:
-                                tc = cell._tc
-                                tcPr = tc.find(qn('w:tcPr'))
-                                if tcPr is not None:
-                                    shd = tcPr.find(qn('w:shd'))
-                                    if shd is not None:
-                                        tcPr.remove(shd)
-                            except Exception:
-                                pass
-                        
                         # CRITICAL: Center brand text when PRODUCTBRAND_CENTER markers are present (backup path)
                         # BUT only for non-classic types - classic types (INDICA, HYBRID, SATIVA) should remain left-aligned
                         # This ensures brand names like "GRAVITY GUMMIES" are centered, but lineage stays left-aligned

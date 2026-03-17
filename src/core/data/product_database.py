@@ -11,31 +11,12 @@ from functools import lru_cache
 import threading
 import os
 
-def get_database_path(store_name):
-    """Get the correct database path for ProductDatabase instances.
-    
-    Args:
-        store_name: Store name (required) - e.g., 'AGT_Bothell'
-    
-    Returns:
-        Path to store-specific database file
-    
-    Raises:
-        ValueError: If store_name is None or empty
-    """
-    if not store_name:
-        raise ValueError("store_name is required for database path. Store-specific databases are mandatory.")
-    
-    # Get the current directory of this file
+def get_database_path(store_name=None):
+    """Get the path to the single product database."""
     current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     uploads_dir = os.path.join(current_dir, 'uploads')
-    
-    # Create uploads directory if it doesn't exist
     os.makedirs(uploads_dir, exist_ok=True)
-    
-    # Create store-specific database file
-    db_filename = f'product_database_{store_name}.db'
-    return os.path.join(uploads_dir, db_filename)
+    return os.path.join(uploads_dir, 'product_database.db')
 
 logger = logging.getLogger(__name__)
 
@@ -161,14 +142,8 @@ class ProductDatabase:
     """Database for storing and managing product and strain information."""
     
     def __init__(self, db_path: str = None, store_name: str = None):
-        if db_path is None:
-            if store_name is None:
-                raise ValueError("Either db_path or store_name must be provided. Store-specific databases are mandatory.")
-            self.db_path = get_database_path(store_name)
-            self._store_name = store_name
-        else:
-            self.db_path = db_path
-            self._store_name = store_name
+        self.db_path = db_path if db_path is not None else get_database_path()
+        self._store_name = 'AGT_Bothell'
         
         # Enhanced connection pooling
         self._connection_pool = {}
@@ -1849,13 +1824,15 @@ class ProductDatabase:
                             logger.warning(f"⚠️ UNIQUE constraint violation for '{product_name}' (Vendor: {vendor_value}, Brand: {brand_value}) - attempting to find and update existing product")
                             conn.rollback()
                             
-                            # Try to find the existing product by the UNIQUE constraint fields
+                            # Try to find the existing product using only the 4 fields
+                            # that make up the UNIQUE constraint — NOT Product Type*, which
+                            # may differ and would cause the lookup to miss the row.
                             weight_value = product_data.get('Weight*', '')
                             cursor.execute('''
                                 SELECT id, total_occurrences, "Product Name*"
-                                FROM products 
-                                WHERE normalized_name = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ? AND "Product Type*" = ?
-                            ''', (normalized_name, vendor_value, brand_value, weight_value, product_data.get('Product Type*', '')))
+                                FROM products
+                                WHERE "Product Name*" = ? AND "Vendor/Supplier*" = ? AND "Product Brand" = ? AND "Weight*" = ?
+                            ''', (product_name, vendor_value, brand_value, weight_value))
                             
                             existing = cursor.fetchone()
                             if existing:

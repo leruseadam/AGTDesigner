@@ -247,6 +247,7 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
         "infused pre-roll": "Infused Pre-Roll",
         "preroll": "Pre-Roll",
         "joint": "Pre-Roll",
+        "cannabis mix infused": "Infused Pre-Roll",
         
         # Edibles
         "edible": "Edible",
@@ -348,7 +349,7 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
         if mapped.lower() == 'concentrate':
             name = product_name_lower
             disposable_indicators = ['disposable', 'aio', 'all-in-one']
-            cartridge_indicators = ['vaporizer', 'vaporiser', 'vape', 'cartridge', 'cart', '510', 'liquid diamond', 'cured resin vaporizer']
+            cartridge_indicators = ['vaporizer', 'vaporiser', 'vape', 'cartridge', 'cart', '510', 'liquid diamond', 'cured resin vaporizer', 'c-cell', 'ccell', 'panda pen']
             # If product name explicitly mentions disposable hardware, prefer Disposable
             if any(tok in name for tok in disposable_indicators):
                 return _log_and_return('Disposable', 'direct_mapping_disposable_indicator')
@@ -372,7 +373,7 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
     # Handle Washington-style usable marijuana inventory types
     if inventory_type_lower.startswith("usable"):
         if product_name_lower:
-            joint_keywords = ["pre-roll", "pre roll", "joint", "blunt", "cone"]
+            joint_keywords = ["pre-roll", "pre roll", "preroll", "joint", "blunt", "cone", "bong buddies"]
             if any(keyword in product_name_lower for keyword in joint_keywords):
                 return _log_and_return("Pre-Roll", 'usable_name_joint')
             if any(keyword in product_name_lower for keyword in ["shake", "trim"]):
@@ -396,11 +397,11 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
         # RSO/CO2 tankers - check FIRST before other concentrate types
         if any(keyword in product_name_lower for keyword in ["rso", "applicator", "tanker", "syringe", "co2 oil", "co2 extract", "ethanol extract", "alcohol extract"]):
             return _log_and_return("RSO/CO2 Tankers", 'name_rso_co2_keywords')
-        if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "joint", "blunt", "cone"]):
+        if any(keyword in product_name_lower for keyword in ["pre-roll", "pre roll", "preroll", "joint", "blunt", "cone"]):
             return _log_and_return("Pre-Roll", 'name_preroll_keywords')
         if any(keyword in product_name_lower for keyword in ["all-in-one", "aio", "disposable"]):
             return _log_and_return("Disposable", 'name_disposable_keywords')
-        if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "510"]):
+        if any(keyword in product_name_lower for keyword in ["cartridge", "cart", "510", "c-cell", "ccell", "panda pen"]):
             return _log_and_return("Vape Cartridge", 'name_cartridge_keywords')
         if any(keyword in product_name_lower for keyword in ["rosin", "resin", "wax", "shatter", "crumble", "sauce", "badder", "diamonds", "hash", "solventless", "distillate"]):
             return _log_and_return("Concentrate", 'name_concentrate_keywords')
@@ -2044,23 +2045,37 @@ class JSONMatcher:
         
         return candidate_list
     
+    # Known vendor alias groups: vendors in the same group are treated as equivalent.
+    # Use normalized (lowercase, no extra spaces) names.
+    _VENDOR_ALIAS_GROUPS = [
+        # Conscious Cannabis Proc is the Cultivera sending org for Grow Op Farms / Phat N Sticky products.
+        # JSON global vendor = "Conscious Cannabis Proc", per-item vendor = brand like "Dabstract".
+        # DB vendors for these products = "Grow Op Farms" or "Phat N Sticky".
+        {'conscious cannabis proc', 'conscious cannabis', 'grow op farms', 'phat n sticky'},
+    ]
+
     def _is_vendor_match(self, vendor1: str, vendor2: str) -> bool:
         """Check if two vendors match using the same logic as the main matching function."""
         if not vendor1 or not vendor2:
             return False
-            
+
         vendor1_clean = self._normalize_vendor_name(vendor1.lower().strip())
         vendor2_clean = self._normalize_vendor_name(vendor2.lower().strip())
-        
+
         # Exact match
         if vendor1_clean == vendor2_clean:
             return True
-            
+
+        # Alias group match: treat known equivalent vendor names as the same
+        for group in self._VENDOR_ALIAS_GROUPS:
+            if vendor1_clean in group and vendor2_clean in group:
+                return True
+
         # Substring match (with length check)
         if (len(vendor1_clean) > len(vendor2_clean) * 2 and vendor2_clean in vendor1_clean) or \
            (len(vendor2_clean) > len(vendor1_clean) * 2 and vendor1_clean in vendor2_clean):
             return True
-            
+
         # Use the flexible matching logic
         return self._is_vendor_match_flexible(vendor1_clean, vendor2_clean)
         
@@ -2714,14 +2729,20 @@ class JSONMatcher:
                 if vendor_field_value:
                     normalized_vendor_field = vendor_field_value.lower()
                     if current_vendor_filter and not self._is_vendor_match(current_vendor_filter, vendor_field_value):
+                        # Per-item vendor doesn't match the global vendor filter.
+                        # This means the per-item "vendor" is actually a brand name (e.g. "Dabstract"),
+                        # not the distributor in the DB (e.g. "Grow Op Farms" / "Phat N Sticky").
+                        # Keep the global vendor filter so DB candidates are still found.
                         override_key = (current_vendor_filter.lower(), normalized_vendor_field)
                         if override_key not in vendor_override_logged:
-                            logging.info(f"🔁 Vendor override: metadata vendor '{current_vendor_filter}' replaced with item vendor '{vendor_field_value}' for '{raw_product_name}'")
+                            logging.info(f"🔒 Keeping global vendor filter '{current_vendor_filter}' (per-item vendor '{vendor_field_value}' appears to be brand name, not distributor)")
                             vendor_override_logged.add(override_key)
-                    elif not current_vendor_filter and normalized_vendor_field not in per_item_vendor_filters_logged:
-                        logging.info(f"🔒 Using item vendor '{vendor_field_value}' for vendor isolation (no global vendor metadata)")
-                        per_item_vendor_filters_logged.add(normalized_vendor_field)
-                    current_vendor_filter = vendor_field_value
+                        # Do NOT override current_vendor_filter — keep json_vendor_filter
+                    else:
+                        if not current_vendor_filter and normalized_vendor_field not in per_item_vendor_filters_logged:
+                            logging.info(f"🔒 Using item vendor '{vendor_field_value}' for vendor isolation (no global vendor metadata)")
+                            per_item_vendor_filters_logged.add(normalized_vendor_field)
+                        current_vendor_filter = vendor_field_value
 
                 effective_vendor = current_vendor_filter or global_vendor
                 brand = str(item.get("brand", "")).strip()
@@ -2787,20 +2808,25 @@ class JSONMatcher:
                     candidates_to_check = []
                     
                     # First pass: Filter by vendor if available (much faster than checking all items)
+                    vendor_filter_active = False
                     if current_vendor_filter:
                         for cache_item in self._sheet_cache:
                             excel_vendor = cache_item.get('vendor', '').strip()
                             if excel_vendor and self._is_vendor_match(current_vendor_filter, excel_vendor):
                                 candidates_to_check.append(cache_item)
-                        # CRITICAL: Do NOT expand to all candidates when vendor filter yields few results.
-                        # Expanding caused wrong matches (e.g. "Bone Collector 1g Preroll" → "MAC Berry Core").
-                        # Prefer no match → fallback to JSON-only product over wrong DB match.
+                        if candidates_to_check:
+                            vendor_filter_active = True
+                        else:
+                            # Vendor filter produced no candidates — the filter value is likely a brand name
+                            # (e.g. "Dabstract") not a DB distributor (e.g. "Phat N Sticky").
+                            # Fall back to all items; rely on product-name/strain/weight scoring only.
+                            candidates_to_check = self._sheet_cache
                     else:
                         # No vendor filter - check all items
                         candidates_to_check = self._sheet_cache
 
-                    # PERFORMANCE: Limit candidates to check (max 1000 for better coverage)
-                    candidates_to_check = candidates_to_check[:1000]
+                    # PERFORMANCE: Limit candidates to check (cap at 5000 to cover all vendor items)
+                    candidates_to_check = candidates_to_check[:5000]
                     
                     # Match against filtered candidates
                     for cache_item in candidates_to_check:
@@ -2825,7 +2851,7 @@ class JSONMatcher:
                             # 0. VENDOR FILTER: STRICT vendor isolation - reject non-matching vendors
                             excel_vendor = cache_item.get('vendor', '').strip()
                             vendor_match_bonus = 0.0
-                            if current_vendor_filter:
+                            if vendor_filter_active and current_vendor_filter:
                                 if not excel_vendor:
                                     # JSON has vendor but DB product has no vendor - skip to prevent wrong matches
                                     continue
@@ -3165,7 +3191,7 @@ class JSONMatcher:
                                 'ProductName': product_name or f"Item-{i+1}",
                                 'Description': product_name or f"Item-{i+1}",
                                 'displayName': product_name or f"Item-{i+1}",
-                                'Vendor': global_vendor or 'Unknown',
+                                'Vendor': (global_vendor or '').strip() or '',
                                 'Product Brand': str(item.get("brand", global_vendor or "Unknown")),
                                 'Product Type*': 'Mixed',
                                 'Lineage': 'MIXED',
@@ -3322,7 +3348,7 @@ class JSONMatcher:
                 if brand_as_vendor and brand_as_vendor.lower() not in ['', 'unknown', 'n/a', 'none']:
                     vendor = brand_as_vendor
                 else:
-                    vendor = global_vendor if global_vendor else "Unknown Vendor"
+                    vendor = (global_vendor or '').strip() or ''
             brand = str(item.get("brand", "")).strip()
             inventory_type = str(item.get("inventory_type", "")).strip()
             inventory_category = str(item.get("inventory_category", "")).strip()
@@ -3364,7 +3390,7 @@ class JSONMatcher:
             
             # Final safety check: Ensure vendor is NEVER empty
             if not vendor or vendor.strip() == "":
-                vendor = global_vendor if global_vendor else "Unknown Vendor"
+                vendor = (global_vendor or '').strip() or ''
                 logging.warning(f"⚠️ Vendor was empty in _create_product_from_json_item, using fallback: '{vendor}'")
             if brand:
                 brand = self._normalize_vendor_display_name(brand)
@@ -3549,9 +3575,8 @@ class JSONMatcher:
                     # Also remove if there's no dash (weight at very end)
                     desc_clean = re.sub(r'\s+\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', desc_clean, flags=re.IGNORECASE)
                 
-                # Remove "by Brand" suffix if present (but preserve vendor info in the name)
-                # Only remove "by Brand" if it's at the very end, not if there's weight after it
-                desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
+                # Remove "by Brand" suffix if present (handles names with or without dashes after vendor)
+                desc_clean = re.sub(r'\s+by\s+.+$', '', desc_clean, flags=re.IGNORECASE)
                 desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
                 
                 # Add weight if we have one and it's not already in the name
@@ -3578,7 +3603,7 @@ class JSONMatcher:
             
             # ===== STEP 10: Build COMPLETE product with ALL required fields =====
             # Vendor and brand - CRITICAL: Vendor should NEVER be empty
-            vendor_final = vendor if vendor and vendor.strip() else (global_vendor if global_vendor else 'Unknown Vendor')
+            vendor_final = (vendor or global_vendor or '').strip() or ''
             
             product = {
                 # Core identification
@@ -3652,7 +3677,7 @@ class JSONMatcher:
                 return {
                     'Product Name*': emergency_name,
                     'Description': emergency_name,  # Same as Product Name*
-                    'Vendor': global_vendor or 'Unknown',
+                    'Vendor': (global_vendor or '').strip() or '',
                     'Product Brand': str(item.get("brand", global_vendor or "Unknown")),
                     'Product Type*': 'Mixed',
                     'Lineage': 'MIXED',
@@ -3738,7 +3763,7 @@ class JSONMatcher:
             
             # CRITICAL: Ensure vendor is NEVER empty - use global_vendor as absolute fallback
             if not vendor or vendor.strip() == "":
-                vendor = global_vendor if global_vendor else "Unknown Vendor"
+                vendor = (global_vendor or '').strip() or ''
                 logging.warning(f"⚠️ Vendor was empty, using fallback: '{vendor}'")
             
             if vendor:
@@ -3750,7 +3775,7 @@ class JSONMatcher:
             
             # Final safety check: Ensure vendor is NEVER empty after normalization
             if not vendor or vendor.strip() == "":
-                vendor = global_vendor if global_vendor else "Unknown Vendor"
+                vendor = (global_vendor or '').strip() or ''
                 logging.warning(f"⚠️ Vendor became empty after normalization, using fallback: '{vendor}'")
             
             # CRITICAL FIX: Ensure brand, price, and weight are always populated
@@ -3861,8 +3886,9 @@ class JSONMatcher:
                 # Also remove if there's no dash (weight at very end)
                 desc_clean = re.sub(r'\s+\d+\.?\d*\s*[a-zA-Z]{1,4}\s*$', '', desc_clean, flags=re.IGNORECASE)
             
-            # Remove "by Brand" suffix if present (but preserve vendor info in the name)
-            desc_clean = re.sub(r'\s+by\s+[^-]+$', '', desc_clean, flags=re.IGNORECASE)
+            # Remove "by Brand" suffix if present (handles names with or without dashes after vendor)
+            # Pattern: " by VendorName" optionally followed by " - anything"
+            desc_clean = re.sub(r'\s+by\s+.+$', '', desc_clean, flags=re.IGNORECASE)
             desc_clean = re.sub(r'\s+', ' ', desc_clean).strip()
             
             # Add standardized weight suffix if needed
@@ -3893,8 +3919,8 @@ class JSONMatcher:
             product = {
                 'Product Name*': standardized_name,
                 'Description': standardized_name,  # Same as Product Name*, standardized format
-                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
-                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor': (vendor or '').strip() or '',
+                'Vendor/Supplier*': (vendor or '').strip() or '',
                 'Product Brand': excel_brand,  # Use the improved brand extraction
                 'ProductBrand': excel_brand,
                 'Product Type*': safe_row_get(excel_row, 'Product Type*'),
@@ -4140,11 +4166,12 @@ class JSONMatcher:
             if inferred_data.get('lineage'):
                 logging.info(f"🧬 Inferred Lineage '{final_lineage}' from similar database matches for '{cleaned_product_name}'")
             
+            # Normalize weight/units for product type (e.g. edibles in oz)
+            weight, units = self._normalize_weight_for_json_product(
+                weight, units, final_assigned_type, cleaned_product_name
+            )
             # Create weight with units for CombinedWeight
-            try:
-                weight_value = str(round(float(weight or '1')))
-            except (ValueError, TypeError):
-                weight_value = '1'
+            weight_value = weight or '1'
             weight_with_units = f"{weight_value}{units or 'g'}"
             
             # Create DescAndWeight field in the same format as other tags
@@ -4168,8 +4195,8 @@ class JSONMatcher:
                 'Product Strain': strain or 'Unknown Strain',
                 'ProductStrain': strain or 'Unknown Strain',
                 'Lineage': final_lineage,
-                'Vendor': vendor or 'Unknown Vendor',
-                'Vendor/Supplier*': vendor or 'Unknown Vendor',
+                'Vendor': (vendor or '').strip() or '',
+                'Vendor/Supplier*': (vendor or '').strip() or '',
                 'Price': final_price,  # EXCEL PRIORITY: Price from intelligent matching
                 'Price*': final_price,
                 'Weight*': weight_value,
@@ -8928,19 +8955,14 @@ class JSONMatcher:
         if parsed_weight is None:
             return weight_raw, unit or 'g'
 
-        # For nonclassic products, enforce oz output.
+        # For nonclassic products (edible, tincture, topical, etc.), enforce oz output.
         if is_nonclassic:
             if unit == 'oz':
                 value = parsed_weight
             elif unit == 'g':
-                # Heuristic: many DB rows already contain ounce-style numbers but mislabeled as grams
-                # (e.g., 0.22, 2.2, 3.4). Keep value and fix unit when likely pre-converted.
-                looks_like_oz_already = (
-                    'oz' in product_name_lower or
-                    parsed_unit == 'oz' or
-                    parsed_weight in {0.22, 2.2, 3.4, 0.5}
-                )
-                if looks_like_oz_already or parsed_weight <= 5:
+                # Convert grams to oz so edibles display in proper units (oz).
+                # Only treat as already-oz when weight string explicitly had 'oz' (parsed_unit).
+                if parsed_unit == 'oz':
                     value = parsed_weight
                 else:
                     value = parsed_weight / 28.3495
@@ -9052,6 +9074,12 @@ class JSONMatcher:
             product_type = db_info.get("Product Type*", "") or db_info.get("product_type", "")
             strain = db_info.get("Product Strain", "") or db_info.get("product_strain", "")
             lineage = db_info.get("Lineage", "") or db_info.get("lineage", "")
+            # If vendor parameter is empty, fall back to JSON item vendor
+            if (not vendor or not str(vendor).strip()) and json_item and isinstance(json_item, dict):
+                vendor = str(
+                    json_item.get('vendor_name') or json_item.get('vendor') or
+                    json_item.get('from_license_name') or ''
+                ).strip()
             
             # CRITICAL FIX: Extract Price from database - try multiple field name variations
             raw_price = (db_info.get("Price", "") or 
@@ -9221,15 +9249,15 @@ class JSONMatcher:
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type or "Unknown",
                 'Product Type': product_type or "Unknown",
-                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
-                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor': (vendor or '').strip() or '',
+                'Vendor/Supplier*': (vendor or '').strip() or '',
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,
                 'Strain Name': strain,
                 'Lineage': self._determine_lineage_for_product(product_type, lineage, primary_product_name, strain),
-                'Weight*': f"{weight} {units}" if weight and units else (weight or ''),
-                'Weight': f"{weight} {units}" if weight and units else (weight or ''),
+                'Weight*': f"{weight}{units}" if weight and units else (weight or ''),
+                'Weight': f"{weight}{units}" if weight and units else (weight or ''),
                 'Quantity*': "1",
                 'Quantity': "1",
                 'Units': units or "",
@@ -9988,8 +10016,8 @@ class JSONMatcher:
                 'DescAndWeight': desc_and_weight,  # Format: "Description - Weight" like other tags
                 'Product Type*': product_type,
                 'ProductType': product_type,
-                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
-                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor': (vendor or '').strip() or '',
+                'Vendor/Supplier*': (vendor or '').strip() or '',
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,
@@ -10325,8 +10353,8 @@ class JSONMatcher:
                 'Description': product_name,  # Use product_name, not description
                 'Product Type*': product_type,
                 'Product Type': product_type,
-                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
-                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor': (vendor or '').strip() or '',
+                'Vendor/Supplier*': (vendor or '').strip() or '',
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,
@@ -10559,12 +10587,15 @@ class JSONMatcher:
             if not brand and vendor:
                 brand = vendor
             
-            # Normalize units and weight formatting
+            # Normalize weight/units for product type (e.g. edibles in oz)
+            weight, units = self._normalize_weight_for_json_product(
+                weight, units, product_type or '', product_name
+            )
             units = (units or '').strip().lower() or 'g'
             formatted_weight = self._format_weight_label(weight, units) if weight else ''
             if not formatted_weight:
                 formatted_weight = f"{weight}{units}".strip() if weight else ''
-            combined_weight_value = weight
+            combined_weight_value = formatted_weight
             
             # Format price using Excel-style formatting
             if price:
@@ -10581,8 +10612,8 @@ class JSONMatcher:
                 'Description': description,
                 'Product Type*': product_type,
                 'Product Type': product_type,
-                'Vendor': vendor if vendor and vendor.strip() else "Unknown Vendor",
-                'Vendor/Supplier*': vendor if vendor and vendor.strip() else "Unknown Vendor",
+                'Vendor': (vendor or '').strip() or '',
+                'Vendor/Supplier*': (vendor or '').strip() or '',
                 'Product Brand': brand,
                 'ProductBrand': brand,
                 'Product Strain': strain,
@@ -11600,8 +11631,14 @@ class JSONMatcher:
         
         for product in products:
             original_item = product.pop('__json_item__', None)
-            vendor = product.get('Vendor') or global_vendor
-            vendor_norm = self._normalize_vendor_display_name(vendor)
+            vendor = product.get('Vendor') or product.get('Vendor/Supplier*') or global_vendor
+            # If vendor still empty, try to get it from the raw JSON item
+            if not vendor and isinstance(original_item, dict):
+                vendor = str(
+                    original_item.get('vendor_name') or original_item.get('vendor') or
+                    original_item.get('from_license_name') or ''
+                ).strip()
+            vendor_norm = self._normalize_vendor_display_name(vendor) if vendor else ''
             strain = product.get('Product Strain') or (original_item.get('strain_name') if isinstance(original_item, dict) else '')
             product_type = product.get('Product Type*') or ''
             

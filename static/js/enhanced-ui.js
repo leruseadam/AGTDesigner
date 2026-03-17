@@ -1152,172 +1152,65 @@ document.addEventListener('DOMContentLoaded', function() {
   // Welcome animation removed - redundant with splash screen
 });
 
-// Scale the entire app to fit within the viewport
+// Scale the entire app to fit within the viewport using CSS zoom (preserves aspect ratio)
 (function() {
-  // Brute-force global zoom/transform fallback that always shows a change
-  function applyGlobalZoom(scale) {
-    const s = Math.max(0.6, Math.min(1, Number(scale) || 1));
-    const html = document.documentElement;
-    const body = document.body;
-    // Prefer zoom where available (Chrome/Edge)
-    try { html.style.setProperty('zoom', String(s), 'important'); } catch(_) {}
-    try { body.style.setProperty('zoom', String(s), 'important'); } catch(_) {}
-    // Transform fallback (Safari/Firefox)
-    const transformVal = `scale(${s})`;
-    const widthVal = `${(100 / s).toFixed(4)}%`;
-    const heightVal = `${(100 / s).toFixed(4)}%`;
-    body.style.setProperty('transform', transformVal, 'important');
-    body.style.setProperty('-webkit-transform', transformVal, 'important');
-    body.style.setProperty('transform-origin', 'top left', 'important');
-    body.style.setProperty('-webkit-transform-origin', 'top left', 'important');
-    body.style.setProperty('width', widthVal, 'important');
-    body.style.setProperty('height', heightVal, 'important');
-    html.setAttribute('data-app-scale', String(s));
-  }
-
-  const BASELINE_WIDTH = 1920;
-  const BASELINE_HEIGHT = 1080;
-  const LARGE_VIEWPORT_SOFTENING = 0.3;
-  const LARGE_VIEWPORT_MIN_SCALE = 0.7;
-
-  function normalizeLargeViewportScale(scale, viewportWidth, viewportHeight, minScale) {
-    const softenRatio = (ratio) => {
-      const bounded = Math.min(1, Math.max(0, ratio));
-      const softened = bounded + (1 - bounded) * LARGE_VIEWPORT_SOFTENING;
-      return Math.max(LARGE_VIEWPORT_MIN_SCALE, softened);
-    };
-
-    const widthRatio = BASELINE_WIDTH / Math.max(viewportWidth, BASELINE_WIDTH);
-    const heightRatio = BASELINE_HEIGHT / Math.max(viewportHeight, BASELINE_HEIGHT);
-    const normalized = Math.min(scale, softenRatio(widthRatio), softenRatio(heightRatio));
-    return Math.min(scale, Math.max(normalized, minScale));
-  }
-
-  // CRITICAL FIX: Prevent rapid re-renders causing flashing
   let isScaling = false;
   let lastAppliedScale = null;
   let scaleTimeout = null;
 
   function scaleAppToFit() {
-    // Prevent multiple simultaneous calls
     if (isScaling) return;
-    
-    const main = document.getElementById('mainContent');
-    const page = document.body;
-    if (!main || !page) return;
-
     isScaling = true;
 
-    // Temporarily reset transform to measure full, natural page size
-    const prevTransformMain = main.style.transform;
-    const prevTransformBody = page.style.transform;
-    const prevWidthBody = page.style.width;
-    const prevHeightBody = page.style.height;
-    main.style.transform = 'none';
-    page.style.transform = 'none';
-    page.style.width = '';
-    page.style.height = '';
+    const html = document.documentElement;
+    const body = document.body;
 
-    // Compute a visual bounding box of visible, non-fixed children within main content
-    const container = main;
-    const visibleChildren = Array.from(container.querySelectorAll(':scope > *'))
-      .filter(el => el.offsetParent !== null && getComputedStyle(el).position !== 'fixed');
+    // Clear zoom so we measure the natural content size
+    const prevZoom = html.style.zoom || '';
+    html.style.zoom = '';
+    html.removeAttribute('data-app-scale');
 
-    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
-    visibleChildren.forEach(el => {
-      const r = el.getBoundingClientRect();
-      const docLeft = r.left + window.scrollX;
-      const docTop = r.top + window.scrollY;
-      const docRight = r.right + window.scrollX;
-      const docBottom = r.bottom + window.scrollY;
-      left = Math.min(left, docLeft);
-      top = Math.min(top, docTop);
-      right = Math.max(right, docRight);
-      bottom = Math.max(bottom, docBottom);
-    });
+    requestAnimationFrame(() => {
+      const vw = document.documentElement.clientWidth || window.innerWidth;
+      const vh = document.documentElement.clientHeight || window.innerHeight;
 
-    // Fallback if nothing matched
-    if (!isFinite(left) || !isFinite(top) || !isFinite(right) || !isFinite(bottom)) {
-      const r = container.getBoundingClientRect();
-      left = r.left + window.scrollX;
-      top = r.top + window.scrollY;
-      right = r.right + window.scrollX;
-      bottom = r.bottom + window.scrollY;
-    }
+      // Prefer scaling against the main app container so the entire filter section is visible.
+      const main = document.getElementById('mainContent');
+      const mainRect = main ? main.getBoundingClientRect() : null;
+      const contentWidth = mainRect ? mainRect.width : Math.max(html.scrollWidth, body.scrollWidth);
+      const contentHeight = mainRect ? mainRect.height : Math.max(html.scrollHeight, body.scrollHeight);
 
-    const contentWidth = Math.max(1, right - left);
-    const contentHeight = Math.max(1, bottom - top);
-
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    if (!contentWidth || !contentHeight || !vw || !vh) {
-      main.style.transform = prevTransformMain;
-      page.style.transform = prevTransformBody;
-      page.style.width = prevWidthBody;
-      page.style.height = prevHeightBody;
-      isScaling = false;
-      return;
-    }
-
-    let scale = Math.min(vw / contentWidth, vh / contentHeight);
-    if (!isFinite(scale) || scale <= 0) scale = 1;
-    scale = Math.min(scale, 1);
-
-    // Apply to body with width/height compensation so layout reflows to fit
-    const applyScaleToBody = (s) => {
-      page.style.transform = `scale(${s})`;
-      page.style.transformOrigin = 'top left';
-      page.style.width = `${(100 / s).toFixed(4)}%`;
-      page.style.height = `${(100 / s).toFixed(4)}%`;
-    };
-
-    let appliedScale = scale;
-    const minScale = 0.6;
-    const step = 0.05;
-    while (appliedScale >= minScale) {
-      applyScaleToBody(appliedScale);
-      const r = main.getBoundingClientRect();
-      if (r.width <= vw && r.height <= vh) break;
-      appliedScale = Math.max(minScale, +(appliedScale - step).toFixed(3));
-      if (appliedScale === minScale) {
-        applyScaleToBody(appliedScale);
-        break;
+      if (!contentWidth || !contentHeight) {
+        html.style.zoom = prevZoom;
+        isScaling = false;
+        return;
       }
-    }
 
-    const normalizedScale = normalizeLargeViewportScale(appliedScale, vw, vh, minScale);
-    if (normalizedScale !== appliedScale) {
-      appliedScale = normalizedScale;
-      applyScaleToBody(appliedScale);
-    }
+      // Compute a uniform zoom that fits BOTH width and height into the viewport.
+      // Intentionally cap at 0.85 so the app always appears a bit smaller than 1:1
+      // (avoids the “everything is huge” look on desktops), and allow shrinking
+      // aggressively so the entire filter column + content can fit.
+      const scaleW = vw / contentWidth;
+      const scaleH = vh / contentHeight;
+      let zoom = Math.min(scaleW, scaleH, 0.85);
+      zoom = Math.max(zoom, 0.2); // allow more shrink so full height fits
 
-    // Only update if scale actually changed to prevent unnecessary re-renders
-    if (lastAppliedScale !== null && Math.abs(lastAppliedScale - appliedScale) < 0.001) {
-      main.style.transform = prevTransformMain;
-      page.style.transform = prevTransformBody;
-      page.style.width = prevWidthBody;
-      page.style.height = prevHeightBody;
+      // Avoid meaningless tiny adjustments
+      if (lastAppliedScale !== null && Math.abs(lastAppliedScale - zoom) < 0.005) {
+        html.style.zoom = String(lastAppliedScale);
+        html.setAttribute('data-app-scale', String(lastAppliedScale));
+        isScaling = false;
+        return;
+      }
+
+      html.style.zoom = String(zoom);
+      html.setAttribute('data-app-scale', String(zoom));
+      lastAppliedScale = zoom;
       isScaling = false;
-      return;
-    }
-
-    lastAppliedScale = appliedScale;
-
-    // Hide scrollbars for a cleaner fit
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-
-    // Expose current scale for quick verification in DevTools
-    document.documentElement.setAttribute('data-app-scale', String(appliedScale));
-    
-    // Reset flag after a short delay to allow rendering to complete
-    setTimeout(() => {
-      isScaling = false;
-    }, 50);
+    });
   }
 
-  // Expose for other scripts
+  // Expose scaler for other scripts
   window.scaleAppToFit = scaleAppToFit;
 
   // Apply on ready (after content becomes visible), and on resize/orientation
@@ -1346,7 +1239,7 @@ document.addEventListener('DOMContentLoaded', function() {
     tryApply();
   });
 
-  // Ensure after full load (fonts/images) we re-calc - CRITICAL FIX: Only call once
+  // Ensure after full load (fonts/images) we clear any residual zoom once
   window.addEventListener('load', () => {
     if (scaleTimeout) clearTimeout(scaleTimeout);
     scaleTimeout = setTimeout(() => {
@@ -1364,25 +1257,19 @@ document.addEventListener('DOMContentLoaded', function() {
       cancelAnimationFrame(resizeTimer);
       resizeTimer = requestAnimationFrame(() => {
         if (scaleTimeout) clearTimeout(scaleTimeout);
-        scaleTimeout = setTimeout(() => {
-          scaleAppToFit();
-        }, 150);
+        scaleTimeout = setTimeout(scaleAppToFit, 150);
       });
       return;
     }
     lastResizeTime = now;
     cancelAnimationFrame(resizeTimer);
     if (scaleTimeout) clearTimeout(scaleTimeout);
-    scaleTimeout = setTimeout(() => {
-      scaleAppToFit();
-    }, 150);
+    scaleTimeout = setTimeout(scaleAppToFit, 150);
   });
   
   window.addEventListener('orientationchange', () => {
     if (scaleTimeout) clearTimeout(scaleTimeout);
-    scaleTimeout = setTimeout(() => {
-      scaleAppToFit();
-    }, 300); // Longer delay for orientation change
+    scaleTimeout = setTimeout(scaleAppToFit, 300); // Longer delay for orientation change
   });
 })();
 
@@ -1390,22 +1277,8 @@ document.addEventListener('DOMContentLoaded', function() {
 window.setAppScale = function(s) {
   const n = Number(s);
   if (!isFinite(n)) return;
-  (function(){
-    const html = document.documentElement;
-    const body = document.body;
-    try { html.style.setProperty('zoom', String(n), 'important'); } catch(_) {}
-    try { body.style.setProperty('zoom', String(n), 'important'); } catch(_) {}
-    const t = `scale(${n})`;
-    const w = `${(100 / n).toFixed(4)}%`;
-    const h = `${(100 / n).toFixed(4)}%`;
-    body.style.setProperty('transform', t, 'important');
-    body.style.setProperty('-webkit-transform', t, 'important');
-    body.style.setProperty('transform-origin', 'top left', 'important');
-    body.style.setProperty('-webkit-transform-origin', 'top left', 'important');
-    body.style.setProperty('width', w, 'important');
-    body.style.setProperty('height', h, 'important');
-    html.setAttribute('data-app-scale', String(n));
-  })();
+  document.documentElement.style.zoom = String(n);
+  document.documentElement.setAttribute('data-app-scale', String(n));
 };
 
 // Toast notification function

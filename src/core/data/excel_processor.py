@@ -3924,23 +3924,8 @@ class ExcelProcessor:
                 logger.debug("No product database available for tag enrichment")
                 return tags
             
-            # PERFORMANCE: Only enrich tags that don't already have database lineage
-            # Skip tags that already have canonical_lineage/currentLineage to speed up loading
-            tags_to_enrich = []
-            tags_with_lineage = 0
-            for tag in tags:
-                if tag.get('canonical_lineage') or tag.get('currentLineage'):
-                    tags_with_lineage += 1
-                else:
-                    tags_to_enrich.append(tag)
-            
-            # If most tags already have lineage, skip enrichment for speed
-            if tags_with_lineage >= len(tags) * 0.9:  # 90%+ already have lineage
-                logger.info(f"⚡ Skipping enrichment - {tags_with_lineage}/{len(tags)} tags already have lineage")
-                return tags
-            
-            # Batch lookup products from database (only for tags missing lineage)
-            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags_to_enrich if tag.get('Product Name*') or tag.get('ProductName')]
+            # Batch lookup ALL tags by product name so we can fill missing Vendor/Price (and lineage)
+            product_names = [tag.get('Product Name*', tag.get('ProductName', '')) for tag in tags if tag.get('Product Name*') or tag.get('ProductName')]
             if not product_names:
                 logger.debug("No product names to enrich")
                 return tags
@@ -3959,16 +3944,10 @@ class ExcelProcessor:
                     normalized_name = product_db._normalize_product_name(product_name)
                     db_lookup[normalized_name] = db_record
             
-            # Enrich each tag with database values
-            # PERFORMANCE: Only enrich tags that don't already have lineage
+            # Enrich each tag with database values (Vendor, Price, and lineage when missing)
             enriched_tags = []
             enriched_count = 0
             for tag in tags:
-                # Skip enrichment if tag already has lineage (performance optimization)
-                if tag.get('canonical_lineage') or tag.get('currentLineage'):
-                    enriched_tags.append(tag)
-                    continue
-                
                 product_name = tag.get('Product Name*', tag.get('ProductName', ''))
                 if not product_name:
                     enriched_tags.append(tag)
@@ -3978,64 +3957,72 @@ class ExcelProcessor:
                 db_record = db_lookup.get(normalized_name)
                 
                 if db_record:
-                    # CBD detection: Check product name/description for ratios/CBD tokens
-                    # Override database values if CBD indicators are found (for nonclassic types)
-                    import re
-                    from src.core.constants import CLASSIC_TYPES
-                    product_type_for_cbd = (tag.get('Product Type*') or db_record.get('Product Type*') or '').strip().lower()
-                    is_classic_type = product_type_for_cbd in CLASSIC_TYPES or any(ct in product_type_for_cbd for ct in CLASSIC_TYPES)
-                    
-                    product_name_upper = (product_name or '').upper()
-                    description_upper = (tag.get('Description') or db_record.get('Description') or '').upper()
-                    has_ratio = bool(re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', product_name_upper) or re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', description_upper))
-                    has_cbd_token = any(token in product_name_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']) or any(token in description_upper for token in ['CBD', 'CBG', 'CBN', 'CBC'])
-                    
-                    # For nonclassic types with CBD indicators: override database values
-                    if not is_classic_type and (has_ratio or has_cbd_token):
-                        tag['Product Strain'] = 'CBD Blend'
-                        tag['Product Strain*'] = 'CBD Blend'
-                        tag['Lineage'] = 'CBD'
-                        tag['lineage'] = 'CBD'
-                        # CRITICAL: Do NOT set canonical_lineage here - it must come from strains table only
-                        # tag['canonical_lineage'] = 'CBD'  # REMOVED
-                        tag['currentLineage'] = 'CBD'
-                        # Also update database immediately
-                        try:
-                            conn = product_db._get_connection()
-                            cursor = conn.cursor()
-                            cursor.execute('''
-                                UPDATE products 
-                                SET "Product Strain" = ?,
-                                    "Lineage" = ?,
-                                    sovereign_lineage = ?,
-                                    updated_at = CURRENT_TIMESTAMP
-                                WHERE "Product Name*" = ? OR ProductName = ?
-                            ''', ('CBD Blend', 'CBD', 'CBD', product_name, product_name))
-                            conn.commit()
-                            logger.info(f"✅ ENRICHMENT CBD FIX: Updated database for '{product_name}' -> Product Strain='CBD Blend', Lineage='CBD'")
-                        except Exception as db_err:
-                            logger.warning(f"Failed to update database during enrichment for '{product_name}': {db_err}")
-                        enriched_count += 1
-                    elif db_record.get('canonical_lineage'):
-                        # CRITICAL FIX: Only use canonical_lineage from database (strains table), never products.Lineage
-                        db_canonical = str(db_record.get('canonical_lineage', '')).strip().upper()
-                        if db_canonical and db_canonical not in ['', 'NONE', 'NULL', 'NAN']:
-                            tag['canonical_lineage'] = db_canonical
-                            tag['currentLineage'] = db_canonical
-                            # Also set display fields from canonical
-                            tag['Lineage'] = db_canonical
-                            tag['lineage'] = db_canonical.lower()
+                    # CRITICAL: Fill Vendor and Price from database when tag is missing them (fixes "Unknown Vendor" / "No Price")
+                    tag_vendor = (tag.get('Vendor') or tag.get('Vendor/Supplier*') or '').strip()
+                    if not tag_vendor or tag_vendor.lower() in ('unknown', 'unknown vendor', 'no vendor'):
+                        db_vendor = (db_record.get('Vendor') or db_record.get('Vendor/Supplier*') or '').strip()
+                        if db_vendor and db_vendor.lower() not in ('unknown', 'unknown vendor', 'nan', 'none', ''):
+                            tag['Vendor'] = db_vendor
+                            tag['Vendor/Supplier*'] = db_vendor
                             enriched_count += 1
-                    else:
-                        # FALLBACK: If no canonical_lineage in database, use products.Lineage for display only
-                        # This prevents tags from being left without lineage fields (which breaks the frontend)
-                        db_lineage = str(db_record.get('Lineage', '')).strip().upper()
-                        if db_lineage and db_lineage not in ['', 'NONE', 'NULL', 'NAN']:
-                            # Set display fields only - do NOT set canonical_lineage
-                            tag['Lineage'] = db_lineage
-                            tag['lineage'] = db_lineage.lower()
-                            tag['currentLineage'] = db_lineage
+                    tag_price = (tag.get('Price') or tag.get('Price*') or '').strip()
+                    if not tag_price or tag_price.lower() in ('nan', 'none', 'null', ''):
+                        db_price = (db_record.get('Price') or db_record.get('Price*') or db_record.get('Price* (Tier Name for Bulk)') or '').strip()
+                        if db_price and str(db_price).lower() not in ('nan', 'none', 'null', ''):
+                            tag['Price'] = db_price
+                            tag['Price*'] = db_price
+                            if 'Price* (Tier Name for Bulk)' in db_record:
+                                tag['Price* (Tier Name for Bulk)'] = db_record.get('Price* (Tier Name for Bulk)') or db_price
                             enriched_count += 1
+                    # Lineage: only enrich when tag doesn't already have database lineage
+                    if not tag.get('canonical_lineage') and not tag.get('currentLineage'):
+                        import re
+                        from src.core.constants import CLASSIC_TYPES
+                        product_type_for_cbd = (tag.get('Product Type*') or db_record.get('Product Type*') or '').strip().lower()
+                        is_classic_type = product_type_for_cbd in CLASSIC_TYPES or any(ct in product_type_for_cbd for ct in CLASSIC_TYPES)
+                        
+                        product_name_upper = (product_name or '').upper()
+                        description_upper = (tag.get('Description') or db_record.get('Description') or '').upper()
+                        has_ratio = bool(re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', product_name_upper) or re.search(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b', description_upper))
+                        has_cbd_token = any(token in product_name_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']) or any(token in description_upper for token in ['CBD', 'CBG', 'CBN', 'CBC'])
+                        
+                        if not is_classic_type and (has_ratio or has_cbd_token):
+                            tag['Product Strain'] = 'CBD Blend'
+                            tag['Product Strain*'] = 'CBD Blend'
+                            tag['Lineage'] = 'CBD'
+                            tag['lineage'] = 'CBD'
+                            tag['currentLineage'] = 'CBD'
+                            try:
+                                conn = product_db._get_connection()
+                                cursor = conn.cursor()
+                                cursor.execute('''
+                                    UPDATE products 
+                                    SET "Product Strain" = ?,
+                                        "Lineage" = ?,
+                                        sovereign_lineage = ?,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE "Product Name*" = ? OR ProductName = ?
+                                ''', ('CBD Blend', 'CBD', 'CBD', product_name, product_name))
+                                conn.commit()
+                                logger.info(f"✅ ENRICHMENT CBD FIX: Updated database for '{product_name}' -> Product Strain='CBD Blend', Lineage='CBD'")
+                            except Exception as db_err:
+                                logger.warning(f"Failed to update database during enrichment for '{product_name}': {db_err}")
+                            enriched_count += 1
+                        elif db_record.get('canonical_lineage'):
+                            db_canonical = str(db_record.get('canonical_lineage', '')).strip().upper()
+                            if db_canonical and db_canonical not in ['', 'NONE', 'NULL', 'NAN']:
+                                tag['canonical_lineage'] = db_canonical
+                                tag['currentLineage'] = db_canonical
+                                tag['Lineage'] = db_canonical
+                                tag['lineage'] = db_canonical.lower()
+                                enriched_count += 1
+                        else:
+                            db_lineage = str(db_record.get('Lineage', '')).strip().upper()
+                            if db_lineage and db_lineage not in ['', 'NONE', 'NULL', 'NAN']:
+                                tag['Lineage'] = db_lineage
+                                tag['lineage'] = db_lineage.lower()
+                                tag['currentLineage'] = db_lineage
+                                enriched_count += 1
                     
                     # Update Product Strain from database if not already set by CBD detection
                     if 'Product Strain' not in tag or not tag.get('Product Strain'):
@@ -4063,7 +4050,7 @@ class ExcelProcessor:
                 enriched_tags.append(tag)
             
             if enriched_count > 0:
-                logger.info(f"✅ Enriched {enriched_count} tags with database values (skipped {tags_with_lineage} that already had lineage)")
+                logger.info(f"✅ Enriched {enriched_count} tags with database values (Vendor/Price/lineage)")
             
             logger.debug(f"Enriched {len(enriched_tags)} tags with database values")
             return enriched_tags

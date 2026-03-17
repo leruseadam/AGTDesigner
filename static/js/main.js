@@ -1029,6 +1029,7 @@ const AppLoadingSplash = {
         }
         
         if (mainContent) {
+            mainContent.classList.add('store-selected');
             setTimeout(() => {
                 mainContent.classList.add('loaded');
                 mainContent.style.opacity = '1';
@@ -1083,14 +1084,10 @@ const AppLoadingSplash = {
         }
         
         if (mainContent) {
+            mainContent.classList.add('store-selected');
+            mainContent.style.display = 'block';
+            mainContent.style.visibility = 'visible';
             mainContent.style.opacity = '1';
-            // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
-            if (mainContent) {
-                mainContent.style.display = 'block';
-                mainContent.style.visibility = 'visible';
-                mainContent.style.opacity = '1';
-                mainContent.classList.add('loaded');
-            }
             mainContent.classList.add('loaded');
         }
         
@@ -1174,8 +1171,8 @@ const TagManager = {
 
     getAvailableTagsCacheKey() {
         try {
-            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
-                window.currentStore || 'default';
+            const store = (window.sessionStorage && (null)) ||
+                'AGT_Bothell';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
             
@@ -1201,8 +1198,8 @@ const TagManager = {
     // This allows cache to persist even when filename timestamp changes
     getNormalizedCacheKey() {
         try {
-            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
-                window.currentStore || 'default';
+            const store = (window.sessionStorage && (null)) ||
+                'AGT_Bothell';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
             
@@ -1245,8 +1242,8 @@ const TagManager = {
                 return null;
             }
 
-            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
-                window.currentStore || 'default';
+            const store = (window.sessionStorage && (null)) ||
+                'AGT_Bothell';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
 
@@ -1416,6 +1413,23 @@ const TagManager = {
             if (payload.timestamp && age > this.CACHE_TTL_MS) {
                 return null;
             }
+
+            // CRITICAL: Do not use old cached tags without proper lineage (even if cache is recent)
+            if (!this.cacheHasProperLineage(payload.tags)) {
+                console.warn('⚠️ Cached tags lack proper lineage - invalidating cache and fetching fresh data');
+                try {
+                    const key = this.getAvailableTagsCacheKey();
+                    const normKey = this.getNormalizedCacheKey();
+                    [window.localStorage, window.sessionStorage].forEach(s => {
+                        if (s) {
+                            if (key) s.removeItem(key);
+                            if (normKey && normKey !== key) s.removeItem(normKey);
+                        }
+                    });
+                } catch (e) { /* ignore */ }
+                return null;
+            }
+
             verboseLog(`✅ Cache HIT: ${payload.tags.length} tags loaded${payload._optimized ? ' (optimized cache)' : ''} (platform: ${payload.platform || 'unknown'})`);
 
             return payload.tags;
@@ -1423,6 +1437,22 @@ const TagManager = {
             console.warn('❌ Failed to load cache:', error);
             return null;
         }
+    },
+
+    /**
+     * Returns true only if a sufficient fraction of tags have proper lineage
+     * (canonical_lineage, currentLineage, sovereign_lineage, or Lineage non-empty).
+     * Used to reject old/incomplete caches so we never show cached tags without lineage.
+     */
+    cacheHasProperLineage(tags) {
+        if (!Array.isArray(tags) || tags.length === 0) return false;
+        const withLineage = tags.filter(t => {
+            if (!t || typeof t !== 'object') return false;
+            const L = (t.sovereign_lineage || t.canonical_lineage || t.currentLineage || t.Lineage || '').toString().trim();
+            return L !== '';
+        });
+        const ratio = withLineage.length / tags.length;
+        return ratio >= 0.8;
     },
 
     saveAvailableTagsToCache(tags) {
@@ -1610,6 +1640,14 @@ const TagManager = {
 
     // Helper method to hydrate UI from cached tags (extracted to avoid duplication)
     _hydrateFromCachedTags(cachedTags, hasRecentLineageUpdate, lastLineageUpdateTime) {
+        // CRITICAL: Never show old cached tags without proper lineage
+        if (!this.cacheHasProperLineage(cachedTags)) {
+            console.warn('⚠️ Cached tags lack proper lineage - skipping hydration, will fetch fresh data');
+            try {
+                this.clearAvailableTagsCache();
+            } catch (e) { /* ignore */ }
+            return false;
+        }
         // INSTANT LOADING FIX: Even if there was a recent lineage update, use cache for instant display
         // This ensures tags load instantly while fresh lineage data is fetched in background
         if (hasRecentLineageUpdate) {
@@ -2003,25 +2041,44 @@ const TagManager = {
             .map(name => {
                 // Try Map lookup first (fastest - O(1))
                 let tag = this._tagLookupMap?.get(name);
-                
+
                 // If not in Map, fallback to originalTags (only if Map wasn't built yet)
                 if (!tag && this.state.originalTags && Array.isArray(this.state.originalTags)) {
                     tag = this.state.originalTags.find(t => t['Product Name*'] === name);
                 }
-                
+
                 // Last resort: current tags (filtered view)
                 if (!tag && this.state.tags && Array.isArray(this.state.tags)) {
                     tag = this.state.tags.find(t => t['Product Name*'] === name);
                 }
+
+                // FALLBACK: name may be a display name "Product - Weight" while Product Name*
+                // is the same without weight. Match by displayName or by stripping weight suffix.
+                const nameWithoutWeight = name.replace(/\s+-\s*[\d.]+\s*\w+\s*$/, '').trim();
+                if (!tag && nameWithoutWeight !== name) {
+                    tag = this._tagLookupMap?.get(nameWithoutWeight);
+                    if (!tag && this.state.tags && Array.isArray(this.state.tags)) {
+                        tag = this.state.tags.find(t =>
+                            (t.displayName && t.displayName === name) ||
+                            (t['Product Name*'] && (t['Product Name*'] === nameWithoutWeight || t['Product Name*'] === name))
+                        );
+                    }
+                    if (!tag && this.state.originalTags && Array.isArray(this.state.originalTags)) {
+                        tag = this.state.originalTags.find(t =>
+                            (t.displayName && t.displayName === name) ||
+                            (t['Product Name*'] && (t['Product Name*'] === nameWithoutWeight || t['Product Name*'] === name))
+                        );
+                    }
+                }
                 
-                // If still not found, create minimal tag object to preserve selection
+                // If still not found, create minimal tag object to preserve selection (use empty, not "Unknown", so labels don't show Unknown)
                 if (!tag) {
                     verboseLog(`Warning: Selected tag '${name}' not found in state, creating minimal object`);
                     tag = {
                         'Product Name*': name,
-                        'Product Brand': 'Unknown',
-                        'Vendor': 'Unknown',
-                        'Product Type*': 'Unknown',
+                        'Product Brand': '',
+                        'Vendor': '',
+                        'Product Type*': '',
                         'Lineage': 'MIXED'
                     };
                 }
@@ -4237,9 +4294,9 @@ const TagManager = {
 
     // Helper function to capitalize vendor names properly
     capitalizeVendorName(vendor) {
-        // CRITICAL FIX: Don't return empty string - preserve vendor or return 'Unknown Vendor'
+        // Use "No Vendor" for display so we never show "Unknown" in the UI
         if (!vendor || (typeof vendor === 'string' && vendor.trim() === '')) {
-            return 'Unknown Vendor';
+            return 'No Vendor';
         }
         
         // Handle common vendor name patterns
@@ -4282,8 +4339,8 @@ const TagManager = {
             })
             .join(' ');
         
-        // CRITICAL FIX: Never return empty string - if capitalization fails, return original
-        return capitalized || vendorTrimmed || 'Unknown Vendor';
+        // Never return empty string - if capitalization fails, return original or "No Vendor"
+        return capitalized || vendorTrimmed || 'No Vendor';
     },
 
     // Helper function to capitalize brand names properly
@@ -4399,7 +4456,7 @@ const TagManager = {
             
             const productType = isValidType
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
-              : 'Unknown Type';
+              : 'Other';
             // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
             const lineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
@@ -4508,29 +4565,24 @@ const TagManager = {
                 this._priceDebugLogged = true;
             }
 
-            // CRITICAL FIX: Only set to Unknown Vendor if vendor is truly missing after all checks
-            // Don't overwrite valid vendor data that was already in the tag
-            // This prevents "Unknown Vendor" from appearing when vendor data exists but wasn't found initially
+            // Use "No Vendor" for display when vendor is missing - never show "Unknown" in UI
             if (!vendor || vendor.trim() === '') {
                 // Final check: look for vendor in tag one more time (might have been set during _updateAvailableTags)
-                // Check all possible vendor field names one final time
-                const finalVendorCheck = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] || 
-                                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || 
+                const finalVendorCheck = tag.vendor || tag.Vendor || tag['Vendor'] || tag['vendor'] ||
+                                        tag['Vendor*'] || tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] ||
                                         tag['Product Vendor'] || tag['ProductVendor'] || '';
-                if (finalVendorCheck && String(finalVendorCheck).trim() !== '' && 
-                    String(finalVendorCheck).trim().toLowerCase() !== 'unknown' && 
+                if (finalVendorCheck && String(finalVendorCheck).trim() !== '' &&
+                    String(finalVendorCheck).trim().toLowerCase() !== 'unknown' &&
                     String(finalVendorCheck).trim().toLowerCase() !== 'unknown vendor') {
                     vendor = String(finalVendorCheck).trim();
                 } else {
-                    // SUPPRESSED: Don't log missing vendor warnings - Excel file may not have vendor columns
-                    // This is expected behavior when vendor data isn't in the Excel file
-                    vendor = 'Unknown Vendor';
+                    vendor = 'No Vendor';
                 }
             } else {
-                // Vendor was found - ensure it's trimmed and not "unknown"
+                // Vendor was found - normalize "unknown" to "No Vendor" for display
                 vendor = vendor.trim();
                 if (vendor.toLowerCase() === 'unknown' || vendor.toLowerCase() === 'unknown vendor') {
-                    vendor = 'Unknown Vendor';
+                    vendor = 'No Vendor';
                 }
             }
 
@@ -4750,8 +4802,8 @@ const TagManager = {
         const tagsToShow = filteredTags || originalTags;
         // CRITICAL FIX: Only show loading if store is confirmed
         // Don't show loading splash before store selection modal
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        const selectedStore = (window.sessionStorage && (null)) || null;
+        const storeConfirmed = true; // store always confirmed
         
         // Show splash immediately when tags are being loaded, unless user is actively searching OR store not confirmed
         if (!this.state.isSearching && storeConfirmed) {
@@ -4769,11 +4821,8 @@ const TagManager = {
                     </div>
                 `;
             }
-        } else if (!storeConfirmed) {
-            // Store not confirmed - don't show loading, let store modal show
-            verboseLog('Store not confirmed - skipping loading splash (store modal should show)');
         }
-        
+
         // PERFORMANCE: Call immediately - no setTimeout delay for instant rendering
         this._updateAvailableTags(originalTags, filteredTags);
     }, 50), // Ultra-fast debounce (50ms) for near-instant response
@@ -5313,6 +5362,7 @@ const TagManager = {
                         }
                     }
                 });
+                this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags);
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources (Map, originalTags, tags)
                 // This prevents tags from disappearing when filters are active
@@ -5788,14 +5838,6 @@ const TagManager = {
     _updateAvailableTags(originalTags, filteredTags = null) {
         // CRITICAL FIX: Don't update tags if store is not confirmed
         // This prevents loading states from appearing before store selection modal
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
-        if (!storeConfirmed) {
-            verboseLog('Store not confirmed - skipping _updateAvailableTags (store modal should show)');
-            return;
-        }
-        
         // CRITICAL FIX: Prevent unnecessary re-renders if tags haven't changed AND are already displayed
         // This prevents cycling/reloading when tags are the same, but only if DOM already shows them
         const tagsToProcess = filteredTags || originalTags;
@@ -6360,33 +6402,31 @@ const TagManager = {
 
                 verboseLog('Select All Available checkbox changed:', e.target.checked);
                 const isChecked = e.target.checked;
-                
-                // Get all visible tag checkboxes in available tags
-                const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
-                verboseLog('Found available tag checkboxes:', availableCheckboxes.length);
-                
-                availableCheckboxes.forEach(checkbox => {
-                    checkbox.checked = isChecked;
-                    // CRITICAL FIX: Look in originalTags first to find tags regardless of filters
-                    let tag = this.state.originalTags.find(t => t['Product Name*'] === checkbox.value);
-                    // If not found in originalTags, try current tags (filtered view)
-                    if (!tag) {
-                        tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                    }
-                    if (tag) {
-                        if (isChecked) {
-                            if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            }
-                        } else {
-                            const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            }
+
+                // Operate on ALL tags in state (not just rendered DOM checkboxes)
+                const allAvailableTags = this.state.tags || [];
+                verboseLog('Select All: operating on', allAvailableTags.length, 'tags from state');
+
+                allAvailableTags.forEach(tag => {
+                    const name = tag['Product Name*'];
+                    if (!name) return;
+                    if (isChecked) {
+                        if (!this.state.persistentSelectedTags.includes(name)) {
+                            this.state.persistentSelectedTags.push(name);
+                        }
+                    } else {
+                        const index = this.state.persistentSelectedTags.indexOf(name);
+                        if (index > -1) {
+                            this.state.persistentSelectedTags.splice(index, 1);
                         }
                     }
                 });
-                
+
+                // Sync rendered checkboxes to match
+                document.querySelectorAll('#availableTags .tag-checkbox').forEach(cb => {
+                    cb.checked = isChecked;
+                });
+
                 // Update the regular selectedTags set to match persistent ones
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
@@ -6546,24 +6586,44 @@ const TagManager = {
         
         // CRITICAL FIX: Render organized tags in chunks to prevent UI freeze
         this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
+
+        // FINAL SAFETY: If, for any reason, no tag rows were rendered but we have tags in memory,
+        // fall back to a simple flat list renderer so the user always sees products.
+        try {
+            const hasTagRows = availableTagsContainer.querySelectorAll('.tag-item').length > 0;
+            if (!hasTagRows && tags && tags.length > 0) {
+                console.warn('⚠️ No tag rows rendered after organized render; using simple flat list fallback');
+                const fallbackList = document.createElement('div');
+                fallbackList.className = 'tag-list';
+                const sortedSimple = [...tags].sort((a, b) => {
+                    const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                    const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                    return aName.localeCompare(bName);
+                });
+                this._renderTagsInBatches(sortedSimple, fallbackList);
+                availableTagsContainer.innerHTML = '';
+                availableTagsContainer.appendChild(fallbackList);
+            }
+        } catch (fallbackError) {
+            console.error('Simple flat list fallback render failed:', fallbackError);
+        }
     },
     
     _renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags) {
         let sortedVendors = Array.from(organizedTags.entries())
             .sort(([a], [b]) => (a || '').localeCompare(b || ''));
         
-        // CRITICAL FIX: Always render tags even if they have Unknown Vendor
+        // CRITICAL FIX: Always render tags even if they have no vendor
         // The previous logic was hiding tags during initial load, causing empty display
-        // If tags have Unknown Vendor, it means vendor data is missing from Excel - show them anyway
+        // If all tags have no vendor, vendor data may be missing from Excel - show them anyway
         const isInitialLoading = (this._fetchingAvailableTags || this._checkingExistingData) && 
                                  (!this.state.tags || this.state.tags.length === 0);
-        const hasOnlyUnknownVendor = sortedVendors.length === 1 && 
-                                     sortedVendors[0][0] === 'Unknown Vendor';
+        const hasOnlyNoVendor = sortedVendors.length === 1 && 
+            (sortedVendors[0][0] === 'No Vendor' || sortedVendors[0][0] === 'Unknown Vendor');
         
-        if (hasOnlyUnknownVendor && tagList && tagList.length > 0) {
-            // Tags exist but all have Unknown Vendor - this means vendor data is missing
-            // Still render them, but log a warning
-            console.warn(`⚠️ All ${tagList.length} tags have "Unknown Vendor" - vendor data may be missing from Excel file`);
+        if (hasOnlyNoVendor && tagList && tagList.length > 0) {
+            // Tags exist but all have no vendor - vendor data may be missing from Excel file
+            console.warn(`⚠️ All ${tagList.length} tags have no vendor - vendor data may be missing from Excel file`);
             console.warn('⚠️ Check that your Excel file has a "Vendor" or "Vendor/Supplier*" column with vendor names');
             // Continue to render - don't skip
         }
@@ -6688,6 +6748,9 @@ const TagManager = {
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
                 const checkboxes = vendorSection.querySelectorAll('input[type="checkbox"]');
                 console.log(`🔍 Select-all checkbox changed: isChecked=${isChecked}, found ${checkboxes.length} checkboxes in vendor section`);
+                // Always sync _selectedTagsSet from persistentSelectedTags before add/remove
+                // to prevent stale Set entries blocking re-selection after deselect
+                this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags);
                 let tagCheckboxCount = 0;
                 let tagsNotInMap = 0;
                 checkboxes.forEach(checkbox => {
@@ -7779,13 +7842,19 @@ const TagManager = {
             // Use word boundaries to avoid false matches (e.g. "abc" containing "bc")
             // Do NOT include lineageStr — lineage is already resolved above and checked separately
             const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
-            const sources = [nameStr, descStr, brandStr, ratioStr];
+            // CRITICAL FIX: Ratio_or_THC_CBD template values like "THC: | BR | CBD:" contain
+            // the word "CBD" but have no actual CBD content. Only include ratioStr in the CBD
+            // token check if it contains a numeric value (%, mg, or a digit) — otherwise it's
+            // just an empty placeholder template and should not trigger CBD detection.
+            const ratioHasNumericValue = ratioStr && /[\d%]|mg\b/i.test(ratioStr);
+            const effectiveRatioStr = ratioHasNumericValue ? ratioStr : '';
+            const sources = [nameStr, descStr, brandStr, effectiveRatioStr];
             const tokenRegex = new RegExp(`\\b(${tokens.join('|')})\\b`);
             if (sources.some(text => text && tokenRegex.test(text))) {
                 return true;
             }
             // Ratio patterns (1:1, 2:1, 1:1:1, etc.) in name or ratio mean CBD
-            const ratioSources = [nameStr, ratioStr, descStr];
+            const ratioSources = [nameStr, effectiveRatioStr, descStr];
             if (ratioSources.some(s => s && /\b\d+\s*:\s*\d+(?:\s*:\s*\d+)*\b/.test(s))) {
                 return true;
             }
@@ -8830,6 +8899,32 @@ const TagManager = {
             savingOption.disabled = true;
             dohSelect.appendChild(savingOption);
             
+            // SAFETY: If backend hangs or network dies, force-reset after timeout
+            let safetyTimeout = setTimeout(() => {
+                try {
+                    console.warn(`⚠️ DOH update taking too long for "${displayName}" – resetting dropdown.`);
+                    // Revert dropdown and image
+                    dohSelect.disabled = false;
+                    dohSelect.value = prevValue;
+                    const tagElementTimeout = dohSelect.closest('.tag-row, .tag-item');
+                    if (tagElementTimeout && typeof tagElementTimeout._updateDohImage === 'function') {
+                        tagElementTimeout._updateDohImage(prevValue);
+                    } else if (typeof updateDohImage === 'function') {
+                        updateDohImage(prevValue);
+                    }
+                    // Remove temporary Saving option if it's still present
+                    if (savingOption.parentNode) {
+                        try {
+                            dohSelect.removeChild(savingOption);
+                        } catch (e) {
+                            // ignore
+                        }
+                    }
+                } catch (e) {
+                    console.error('DOH safety timeout cleanup failed:', e);
+                }
+            }, 15000); // 15s safety timeout
+
             try {
                 const response = await fetch('/api/update-doh', {
                     method: 'POST',
@@ -8892,6 +8987,10 @@ const TagManager = {
                 }
             } finally {
                 dohSelect.disabled = false;
+                if (safetyTimeout) {
+                    clearTimeout(safetyTimeout);
+                    safetyTimeout = null;
+                }
             }
         });
         
@@ -10731,13 +10830,13 @@ const TagManager = {
                 }
                 
                 if (!foundTag) {
-                    // Create minimal tag object so it can be displayed
+                    // Create minimal tag object so it can be displayed (use empty, not "Unknown", so labels don't show Unknown)
                     verboseLog(`Creating minimal tag object for "${tagName}"`);
                     return {
                         'Product Name*': tagName,
-                        'Product Brand': 'Unknown',
-                        'Vendor': 'Unknown',
-                        'Product Type*': 'Unknown',
+                        'Product Brand': '',
+                        'Vendor': '',
+                        'Product Type*': '',
                         'Lineage': 'MIXED',
                         'Source': 'Frontend Selection'
                     };
@@ -10849,8 +10948,9 @@ const TagManager = {
                         }
                     }
                 });
-                
+
                 // Update the regular selectedTags set to match persistent ones
+                this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags);
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
                 // Update selected tags display
@@ -11141,6 +11241,7 @@ const TagManager = {
                                         }
                                     }
                                 });
+                                this.state._selectedTagsSet = new Set(this.state.persistentSelectedTags);
                                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                                 // CRITICAL FIX: Use getSelectedTagObjects() which checks all sources
                                 const selectedTagObjects = this.getSelectedTagObjects();
@@ -11946,8 +12047,8 @@ const TagManager = {
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
         // CRITICAL FIX: Only show loading if store is confirmed
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        const selectedStore = (window.sessionStorage && (null)) || null;
+        const storeConfirmed = true; // store always confirmed
         
         // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
         // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
@@ -11966,10 +12067,7 @@ const TagManager = {
                 `;
             }
         } else if (!this._suppressActionSplash) {
-            if (!storeConfirmed) {
-                // Store not confirmed - don't show loading, let store modal show
-                verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
-            } else if (storeConfirmed && hasExistingTags) {
+            if (hasExistingTags) {
                 // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
                 this.showActionSplash('Refreshing tags...');
                 // Also show loading indicator in container if it exists
@@ -12468,17 +12566,30 @@ const TagManager = {
                     // CRITICAL: Reset flag when no tags returned
                     this._fetchingAvailableTags = false;
                     console.warn('Backend returned empty tags array - no Excel file loaded');
-                    // Show message to user when no Excel file is uploaded
+                    // Show message to user: friendly "uploading" state while file is uploading, else normal empty state
                     const availableTagsContainer = document.getElementById('availableTags');
                     if (availableTagsContainer) {
-                        availableTagsContainer.innerHTML = `
-                            <div class="text-center py-4">
-                                <div class="alert alert-info mx-3">
-                                    <i class="fas fa-info-circle"></i>
-                                    <p class="mb-0 mt-2">No Excel file uploaded. Please upload an Excel file to see available tags.</p>
+                        const isUploading = this._excelUploadInProgress === true;
+                        if (isUploading) {
+                            availableTagsContainer.innerHTML = `
+                                <div class="text-center py-4">
+                                    <div class="alert alert-info mx-3 border-0" style="background: rgba(0, 212, 170, 0.12); color: #b8e6dc;">
+                                        <div class="spinner-border spinner-border-sm text-info me-2" role="status" aria-hidden="true"></div>
+                                        <span>Loading your file…</span>
+                                        <p class="mb-0 mt-2 small text-muted">Your inventory will appear in a moment.</p>
+                                    </div>
                                 </div>
-                            </div>
-                        `;
+                            `;
+                        } else {
+                            availableTagsContainer.innerHTML = `
+                                <div class="text-center py-4">
+                                    <div class="alert alert-info mx-3">
+                                        <i class="fas fa-info-circle"></i>
+                                        <p class="mb-0 mt-2">No Excel file uploaded. Please upload an Excel file to see available tags.</p>
+                                    </div>
+                                </div>
+                            `;
+                        }
                     }
                 }
                 this.state.tags = [];
@@ -14260,7 +14371,7 @@ const TagManager = {
                     splash.style.display = 'none';
                     const mainContent = document.getElementById('mainContent');
                     if (mainContent) {
-                        // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
+                        mainContent.classList.add('store-selected');
                         mainContent.style.display = 'block';
                         mainContent.style.visibility = 'visible';
                         mainContent.style.opacity = '1';
@@ -15386,6 +15497,24 @@ const TagManager = {
             // The _tagLookupMap is updated immediately when lineage changes (line 6752-6756)
             // so we don't need to refresh - just get the objects directly
             const checkedTags = this.getSelectedTagObjects();
+
+            // DEBUG: Log what we're actually sending to /api/generate
+            if (checkedTags.length > 0) {
+                const s = checkedTags[0];
+                console.log('🔬 GENERATE DEBUG sample[0]:', {
+                    name: s['Product Name*'],
+                    Price: s['Price'],
+                    'Price*': s['Price*'],
+                    Vendor: s['Vendor'],
+                    'Vendor/Supplier*': s['Vendor/Supplier*'],
+                    'Weight*': s['Weight*'],
+                    CombinedWeight: s['CombinedWeight'],
+                    'Product Type*': s['Product Type*'],
+                    keys: Object.keys(s).length
+                });
+            }
+            console.log('🔬 persistentSelectedTags:', this.state.persistentSelectedTags.slice(0,3));
+            console.log('🔬 _tagLookupMap size:', this._tagLookupMap?.size);
 
             verboseLog('Generation request - full tag objects with lineage:', checkedTags);
 
@@ -16598,6 +16727,7 @@ const TagManager = {
     },
 
     showExcelLoadingSplash(filename) {
+        this._excelUploadInProgress = true;
         verboseLog('🎬 SHOWING EXCEL SPLASH for:', filename);
         const splash = document.getElementById('excelLoadingSplash');
         const filenameElement = document.getElementById('excelLoadingFilename');
@@ -16605,8 +16735,8 @@ const TagManager = {
         
         if (splash && filenameElement && statusElement) {
             verboseLog('✅ Splash elements found, displaying...');
-            filenameElement.textContent = filename;
-            statusElement.textContent = 'Processing...';
+            filenameElement.textContent = filename || 'Your file';
+            statusElement.textContent = 'This will just take a moment…';
             splash.style.display = 'flex';
             splash.style.zIndex = '99999';
             splash.style.position = 'fixed';
@@ -16635,6 +16765,7 @@ const TagManager = {
     },
 
     hideExcelLoadingSplash() {
+        this._excelUploadInProgress = false;
         verboseLog('🎬 HIDING EXCEL SPLASH');
         
         // Clear safety timeout if it exists
@@ -16874,37 +17005,6 @@ const TagManager = {
 
     // Action splash screen for clear/undo operations
     showActionSplash(message) {
-        // CRITICAL FIX: Don't show loading splash if store selection modal is visible or store not confirmed
-        const storeModal = document.getElementById('storeSelectionModal');
-        
-        // Check if store modal is visible using multiple methods
-        let isStoreModalVisible = false;
-        if (storeModal) {
-            // Check Bootstrap modal state
-            if (typeof bootstrap !== 'undefined') {
-                const modalInstance = bootstrap.Modal.getInstance(storeModal);
-                if (modalInstance && modalInstance._isShown) {
-                    isStoreModalVisible = true;
-                }
-            }
-            // Fallback: check DOM classes and styles
-            if (!isStoreModalVisible) {
-                isStoreModalVisible = storeModal.classList.contains('show') || 
-                                     (storeModal.style.display !== 'none' && storeModal.offsetParent !== null);
-            }
-        }
-        
-        // Also check if store is not confirmed
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
-        // CRITICAL: Also check if we're in the middle of store selection process
-        const isCheckingStore = window.checkingStoreRequired === true;
-        
-        if (isStoreModalVisible || !storeConfirmed || isCheckingStore) {
-            verboseLog('Store modal visible or not confirmed - skipping action splash:', message);
-            return;
-        }
         // Create splash if it doesn't exist
         let splash = document.getElementById('actionSplash');
         if (!splash) {
@@ -17383,33 +17483,31 @@ const TagManager = {
             selectAllAvailable.addEventListener('change', (e) => {
                 verboseLog('Select All Available checkbox changed:', e.target.checked);
                 const isChecked = e.target.checked;
-                
-                // Get all visible tag checkboxes in available tags
-                const availableCheckboxes = document.querySelectorAll('#availableTags .tag-checkbox');
-                verboseLog('Found available tag checkboxes:', availableCheckboxes.length);
-                
-                availableCheckboxes.forEach(checkbox => {
-                    checkbox.checked = isChecked;
-                    // CRITICAL FIX: Look in originalTags first to find tags regardless of filters
-                    let tag = this.state.originalTags.find(t => t['Product Name*'] === checkbox.value);
-                    // If not found in originalTags, try current tags (filtered view)
-                    if (!tag) {
-                        tag = this.state.tags.find(t => t['Product Name*'] === checkbox.value);
-                    }
-                    if (tag) {
-                        if (isChecked) {
-                            if (!this.state.persistentSelectedTags.includes(tag['Product Name*'])) {
-                                this.state.persistentSelectedTags.push(tag['Product Name*']);
-                            }
-                        } else {
-                            const index = this.state.persistentSelectedTags.indexOf(tag['Product Name*']);
-                            if (index > -1) {
-                                this.state.persistentSelectedTags.splice(index, 1);
-                            }
+
+                // Operate on ALL tags in state (not just rendered DOM checkboxes)
+                const allAvailableTags = this.state.tags || [];
+                verboseLog('Select All: operating on', allAvailableTags.length, 'tags from state');
+
+                allAvailableTags.forEach(tag => {
+                    const name = tag['Product Name*'];
+                    if (!name) return;
+                    if (isChecked) {
+                        if (!this.state.persistentSelectedTags.includes(name)) {
+                            this.state.persistentSelectedTags.push(name);
+                        }
+                    } else {
+                        const index = this.state.persistentSelectedTags.indexOf(name);
+                        if (index > -1) {
+                            this.state.persistentSelectedTags.splice(index, 1);
                         }
                     }
                 });
-                
+
+                // Sync rendered checkboxes to match
+                document.querySelectorAll('#availableTags .tag-checkbox').forEach(cb => {
+                    cb.checked = isChecked;
+                });
+
                 // Update the regular selectedTags set to match persistent ones
                 this.state.selectedTags = new Set(this.state.persistentSelectedTags);
                 
@@ -17457,8 +17555,8 @@ const TagManager = {
 
             // CRITICAL: Check store selection before attempting upload
             try {
-                const storeCheckResponse = await fetch('/api/check-store-required');
-                const storeCheckData = await storeCheckResponse.json();
+                // store check removed
+                const storeCheckData = { required: false, has_store: true };
                 if (storeCheckData.required && !storeCheckData.has_store) {
                     const errorMsg = 'Please select a store before uploading files. Click on the store name in the header to select a store.';
                     console.error('Upload blocked:', errorMsg);
@@ -20158,6 +20256,21 @@ async function handleJsonPasteInput(input) {
             // This ensures JSON matched products are available for lookup when converting selected tag names to objects
             if (matchResult.available_tags && matchResult.available_tags.length > 0) {
                 verboseLog('Updating available tags with new data:', matchResult.available_tags.length);
+                // Directly inject the fresh JSON match objects into state and _tagLookupMap.
+                // This ensures getSelectedTagObjects() finds full objects (Price/Vendor/Weight)
+                // without triggering an expensive full DOM re-render of the available tags list.
+                TagManager.state.originalTags = matchResult.available_tags;
+                TagManager.state.tags = matchResult.available_tags;
+                TagManager._tagLookupMap = new Map();
+                matchResult.available_tags.forEach(t => {
+                    if (t && t['Product Name*']) {
+                        TagManager._tagLookupMap.set(t['Product Name*'], t);
+                    }
+                    if (t && t.displayName && !TagManager._tagLookupMap.has(t.displayName)) {
+                        TagManager._tagLookupMap.set(t.displayName, t);
+                    }
+                });
+                // Then call _updateAvailableTags to render the list in the UI.
                 TagManager._updateAvailableTags(matchResult.available_tags, null);
                 TagManager.saveAvailableTagsToCache(matchResult.available_tags || []);
                 TagManager.state.hydratedFromCache = false;
@@ -20191,33 +20304,60 @@ async function handleJsonPasteInput(input) {
                     });
                 }
                 
-                // Convert selected tag names to tag objects
+                // Convert selected tag names/objects to tag objects
+                // Server may send full objects OR name strings — handle both.
+                const selectedTagNames = [];
                 const selectedTagObjects = matchResult.selected_tags
-                    .map(tagName => {
+                    .map(tagItem => {
+                        // If item is already a full tag object (not a string), use it directly
+                        if (tagItem && typeof tagItem === 'object') {
+                            const name = tagItem['Product Name*'] || tagItem.ProductName || tagItem.displayName || '';
+                            if (name) selectedTagNames.push(name);
+                            return tagItem;
+                        }
+                        // tagItem is a string name — look it up
+                        const tagName = tagItem;
                         // Try to find the tag object in available_tags map
                         const tagObj = availableTagsMap.get(tagName);
                         if (tagObj) {
+                            selectedTagNames.push(tagName);
                             return tagObj;
                         }
+                        // Strip weight suffix (e.g. "Product - 3.5g" -> "Product") and retry
+                        const nameWithoutWeight = tagName.replace(/\s+-\s*[\d.]+\s*\w+\s*$/, '').trim();
+                        const tagObjNoWeight = nameWithoutWeight !== tagName ? availableTagsMap.get(nameWithoutWeight) : null;
+                        if (tagObjNoWeight) {
+                            selectedTagNames.push(tagName);
+                            return tagObjNoWeight;
+                        }
                         // If not found, try to find in state.tags
-                        const foundInState = TagManager.state.tags?.find(t => 
-                            (t['Product Name*'] || t.ProductName || t.displayName) === tagName
+                        const foundInState = TagManager.state.tags?.find(t =>
+                            (t['Product Name*'] || t.ProductName || t.displayName) === tagName ||
+                            (t['Product Name*'] || t.ProductName || t.displayName) === nameWithoutWeight
                         );
                         if (foundInState) {
+                            selectedTagNames.push(tagName);
                             return foundInState;
                         }
                         verboseLog(`Warning: Could not find tag object for name: ${tagName}`);
                         return null;
                     })
                     .filter(Boolean); // Remove null entries
-                
+
                 verboseLog(`Converted ${matchResult.selected_tags.length} selected tag names to ${selectedTagObjects.length} tag objects`);
-                
+
                 if (selectedTagObjects.length > 0) {
-                    // Update persistent selected tags with the tag names
-                    TagManager.state.persistentSelectedTags = matchResult.selected_tags;
-                    TagManager.state.selectedTags = new Set(matchResult.selected_tags);
-                    
+                    // Update persistent selected tags with the name strings (not objects)
+                    // so that _tagLookupMap can resolve them correctly during generation
+                    const namesForPersistence = selectedTagNames.length > 0 ? selectedTagNames :
+                        selectedTagObjects.map(t => t['Product Name*'] || t.ProductName || t.displayName || '').filter(Boolean);
+                    TagManager.state.persistentSelectedTags = namesForPersistence;
+                    TagManager.state.selectedTags = new Set(namesForPersistence);
+
+                    // Stamp selection time so fetchAndUpdateSelectedTags won't overwrite
+                    // these selections within the next 10 seconds (race condition guard).
+                    TagManager._lastTagSelectionTime = Date.now();
+
                     // Now call updateSelectedTags with tag objects
                     TagManager.updateSelectedTags(selectedTagObjects);
                 } else {
@@ -20400,6 +20540,12 @@ document.addEventListener('click', function(e) {
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     console.log('📋 DOMContentLoaded fired - initializing app');
+
+    // Clear JSON match state on every page load so stale results don't persist
+    try { sessionStorage.removeItem('agt_json_main_cache'); } catch(e) {}
+    if (typeof TagManager !== 'undefined') {
+        TagManager.state.isJsonMatchedSession = false;
+    }
 
     // Show splash screen immediately (but don't load tags yet - wait for store selection)
     AppLoadingSplash.show();
@@ -21401,7 +21547,7 @@ document.addEventListener('forceRefreshSelectedTags', function(event) {
 // JSON Matching Function - Global function for JSON product matching
 window.performJsonMatch = function() {
     const jsonUrlInput = document.getElementById('jsonUrlInput');
-    const matchBtn = document.querySelector('#jsonMatchModal .btn-modern2');
+    const matchBtn = document.getElementById('jsonMatchBtn') || document.querySelector('#jsonMatchModal .btn-primary');
     const resultsDiv = document.getElementById('jsonMatchResults');
     const matchCount = document.getElementById('matchCount');
     const matchedProductsList = document.getElementById('matchedProductsList');
@@ -21431,18 +21577,34 @@ window.performJsonMatch = function() {
         return;
     }
 
-    // Clear previous selected tags list before processing new match
+    // Clear ALL previous state before running a new match — no stale results allowed
+    try { sessionStorage.removeItem('agt_json_main_cache'); } catch(e) {}
+    // agt_selected_tags and agt_available_tags_* live in localStorage, not sessionStorage
+    try { localStorage.removeItem('agt_selected_tags'); } catch(e) {}
+    try {
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('agt_available_tags_')) keysToRemove.push(k);
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch(e) {}
+
     if (typeof TagManager !== 'undefined') {
         verboseLog('Clearing previous selected tags before JSON match');
         TagManager.state.persistentSelectedTags = [];
         TagManager.state.selectedTags = new Set();
-        
+        TagManager.state.tags = [];
+        TagManager.state.originalTags = [];
+        TagManager.state.hydratedFromCache = false;
+        if (TagManager._tagLookupMap) TagManager._tagLookupMap.clear();
+
         // Clear the selected tags display
         const selectedTagsContainer = document.getElementById('selectedTags');
         if (selectedTagsContainer) {
             selectedTagsContainer.innerHTML = '';
         }
-        
+
         // Update tag counts
         TagManager.updateTagCount('selected', 0);
     }
@@ -21454,7 +21616,7 @@ window.performJsonMatch = function() {
     // Show progress message
     resultsDiv.classList.remove('d-none');
     matchCount.textContent = 'Processing...';
-    matchedProductsList.innerHTML = '<div class="text-info">Matching products from JSON URL. This may take up to 2 minutes for large datasets. Progress will be logged in the browser console.</div>';
+    matchedProductsList.innerHTML = '<div style="color:#0dcaf0!important;padding:8px 12px;">Matching products from JSON URL. This may take up to 2 minutes for large datasets.</div>';
 
     // Add timeout to prevent hanging
     const controller = new AbortController();
@@ -21508,26 +21670,31 @@ window.performJsonMatch = function() {
         // Show results
         matchCount.textContent = matchResult.matched_count || 0;
         
-        // Populate matched products list with note about where they were added
+        // Populate matched products list
+        const cachedNotice = document.getElementById('jsonMatchCachedNotice');
+        if (cachedNotice) cachedNotice.classList.add('d-none');
         if (matchResult.matched_names && matchResult.matched_names.length > 0) {
-            matchedProductsList.innerHTML = `
-                <div class="alert alert-success mb-3">
-                    <strong>Success!</strong> ${matchResult.matched_count} products were matched and added to the <strong>Available Tags</strong> list.
-                    <br>Please review the available tags and select the items you need.
-                </div>
-                <div class="mb-2"><strong>Matched Products:</strong></div>
-                ${matchResult.matched_names
-                    .map(product => `<div class="mb-1">• ${product}</div>`)
-                    .join('')}
-            `;
+            matchedProductsList.innerHTML = matchResult.matched_names
+                .map(p => `<div class="jm-row" style="color:#c8cdd8!important;">• ${p}</div>`)
+                .join('');
         } else {
-            matchedProductsList.innerHTML = '<div class="text-muted">No specific product details available</div>';
+            matchedProductsList.innerHTML = '<div class="px-2 py-2 small" style="color:#9099aa!important;">No specific product details available</div>';
         }
-        
+
         resultsDiv.classList.remove('d-none');
-        
+
+        // Cache results so the modal can restore them when reopened
+        try {
+            sessionStorage.setItem('agt_json_main_cache', JSON.stringify({
+                matchResult: matchResult,
+                timestamp: Date.now()
+            }));
+        } catch (e) {
+            console.warn('Could not cache main JSON match results:', e);
+        }
+
         // Successfully matched products from JSON URL
-        
+
         // Clear the input
         jsonUrlInput.value = '';
         
@@ -21585,15 +21752,31 @@ window.performJsonMatch = function() {
             TagManager.state.isJsonMatchedSession = true;
             
             // CRITICAL FIX: Automatically select ALL JSON matched tags
-            // This ensures all 14 tags are selected for generation
+            // This ensures all matched tags are selected for generation
             if (tagsToShow && tagsToShow.length > 0) {
-                // Select all available tags
+                // Register full tag objects into lookup map and originalTags so
+                // getSelectedTagObjects() can find them by name (prevents "Unknown Vendor/Type")
+                if (!TagManager._tagLookupMap) TagManager._tagLookupMap = new Map();
+                tagsToShow.forEach(tag => {
+                    const name = tag['Product Name*'] || tag.ProductName || tag.Description || '';
+                    if (name) TagManager._tagLookupMap.set(name, tag);
+                });
+                // Also merge into originalTags
+                if (!TagManager.state.originalTags) TagManager.state.originalTags = [];
+                const existingNames = new Set(TagManager.state.originalTags.map(t => t['Product Name*'] || ''));
+                tagsToShow.forEach(tag => {
+                    const name = tag['Product Name*'] || tag.ProductName || tag.Description || '';
+                    if (name && !existingNames.has(name)) {
+                        TagManager.state.originalTags.push(tag);
+                    }
+                });
+
                 TagManager.state.persistentSelectedTags = tagsToShow.map(tag => tag['Product Name*'] || tag.ProductName || tag.Description || '');
                 TagManager.state.selectedTags = new Set(TagManager.state.persistentSelectedTags);
-                
+
                 // Update the UI to reflect the selection
                 TagManager.updateSelectedTags(tagsToShow);
-                
+
                 verboseLog(`✅ Auto-selected all ${TagManager.state.persistentSelectedTags.length} JSON matched tags`);
             }
             
@@ -21992,7 +22175,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // User templates modal: add, replace, view custom designs
 document.addEventListener('DOMContentLoaded', function() {
-    const TEMPLATE_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical', mini: 'Mini', double: 'Double', preroll: 'Preroll', inventory: 'Inventory' };
+    const TEMPLATE_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical', mini: 'Mini', miniroll: 'Mini-roll', double: 'Double', new: 'New', preroll: 'Preroll', inventory: 'Inventory' };
     const manageBtn = document.getElementById('manageTemplatesBtn');
     const modalEl = document.getElementById('userTemplatesModal');
     const listEl = document.getElementById('userTemplatesList');
@@ -22002,7 +22185,9 @@ document.addEventListener('DOMContentLoaded', function() {
         horizontal: 'fa-grip-lines',
         vertical:   'fa-grip-lines-vertical',
         mini:       'fa-compress-alt',
+        miniroll:   'fa-compress-alt',
         double:     'fa-columns',
+        new:        'fa-file-alt',
         preroll:    'fa-scroll',
         inventory:  'fa-clipboard-list'
     };
@@ -22010,7 +22195,9 @@ document.addEventListener('DOMContentLoaded', function() {
         horizontal: '#6366f1',
         vertical:   '#8b5cf6',
         mini:       '#06b6d4',
+        miniroll:   '#06b6d4',
         double:     '#10b981',
+        new:        '#14b8a6',
         preroll:    '#f59e0b',
         inventory:  '#ef4444'
     };
@@ -22132,6 +22319,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <option value="mini">Mini</option>
                                 <option value="miniroll">Mini-roll</option>
                                 <option value="double">Double</option>
+                                <option value="new">New</option>
                                 <option value="inventory">Inventory</option>
                                 <option value="preroll">Preroll</option>
                             </select>

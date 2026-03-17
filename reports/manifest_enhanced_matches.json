@@ -1,0 +1,218 @@
+[
+  {
+    "json_name": "MAC x Trophy Wife LR Dabstract 1g AIO - (I)",
+    "db_name": "Triple Chocolate Chip by FK It - 14g",
+    "confidence": 0.725,
+    "vendor_match": null
+  },
+  {
+    "json_name": "Sunset Sherbert LR Dabstract 1g AIO - (I)",
+    "db_name": "Triple Chocolate Chip by FK It - 28g",
+    "confidence": 0.725,
+    "vendor_match": null
+  },
+  {
+    "json_name": "Valley Orange LR Dabstract 1g AIO - (H)",
+    "db_name": "Triple Chocolate Chip by FK It - 7g",
+    "confidence": 0.725,
+    "vendor_match": null
+  },
+  {
+    "json_name": "Seattle Trophy Wife LR Dabstract 1g C-Cell - (H)",
+    "db_name": "Chocolate River Small Buds by Skord - 7g",
+    "confidence": 0.725,
+    "vendor_match": null
+  },
+  {
+    "json_name": "Triangle Fire LR Dabstract 1g C-Cell - (H)",
+    "db_name": "Chocolate Chip Muffin Live Resin Cartridge by Bodhi High - 1g",
+    "confidence": 0.725,
+    "vendor_match": null
+  },
+  {
+    "json_name": "White Fire OG LR Dabstract 1g C-Cell - (I)",
+    "db_name": "Trophy Wife Pax Pod by Dabstract - 1g",
+    "confidence": 0.7546000000000002,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Green Apple Fruit Drops",
+    "db_name": "Seattle Trophy Wife Live Resin Disposable Vape by Dabstract - 1g",
+    "confidence": 0.7436000000000001,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Strawberry Kiwi Fruit Drops",
+    "db_name": "Golden Pineapple Bong Buddies",
+    "confidence": 0.8094,
+    "vendor_match": 0.33
+  },
+  {
+    "json_name": "Watermelon Fruit Drops",
+    "db_name": "Raspberry Skywalker Panda Pen Distillate Disposable Vape",
+    "confidence": 0.6669999999999999,
+    "vendor_match": 0.17
+  },
+  {
+    "json_name": "LR Milk Chocolate - Sativa",
+    "db_name": "Trophy Wife Pax Pod by Dabstract - 0.5g",
+    "confidence": 0.7326000000000001,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Blue Raspberry LR Gummiez - Indica",
+    "db_name": "Dutch Treat x Trophy Wife Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.7315000000000002,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Blue Raspberry LR Gummiez - Sativa",
+    "db_name": "Sunday Driver Pure AIO Live Resin Disposable Vape by Bodhi High - 1g",
+    "confidence": 0.6599999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Dragon Fruit LR Gummiez - Indica",
+    "db_name": "Sundae Driver Pure AIO Live Resin Disposable Vape by Bodhi High - 1g",
+    "confidence": 0.6599999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Indica - Raspberry Skywalker Panda Pen AIO",
+    "db_name": "Honey Tree - Live Resin Prana AIO - HTE - Maui Wowie - Sativa - 1mL",
+    "confidence": 0.6569999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Bone Collector 1g Preroll",
+    "db_name": "Holy Roller Pure AIO Live Resin Disposable Vape by Bodhi High -1g",
+    "confidence": 0.6569999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Terpee Slurpee 1g Preroll",
+    "db_name": "Super Wreck Pure AIO Live Resin Disposable Vape by Bodhi High - 1g",
+    "confidence": 0.6569999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Unicorn Rainbow 1g Preroll",
+    "db_name": "Pure - Live Resin Prana AIO - Liquid Diamonds - Northern Lights - Indica - 1mL",
+    "confidence": 0.6569999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Blue Dream - Platinum 1g Preroll",
+    "db_name": "High Life x Trophy Wife Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.7216000000000001,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Trophy Wife - Platinum 1g Preroll",
+    "db_name": "Original AIO Disposable Vape - Gelato Punch Live Resin - Hybrid - 0.5mL",
+    "confidence": 0.6509999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Bone Collector Bong Buddies",
+    "db_name": "Terpee Slurpee Live Resin Pure AIO Disposable Cartridge by Bodhi High - 1g",
+    "confidence": 0.6479999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Golden Pineapple Bong Buddies",
+    "db_name": "G-Soap Original AIO Live Resin Disposable Vape by Bodhi High - 1g",
+    "confidence": 0.6479999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Phat Panda Flower (Bone Collector/7g)",
+    "db_name": "Fire OG Pure AIO Live Resin Disposable Vape by Bodhi High - 1g",
+    "confidence": 0.6449999999999999,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Phat Panda Flower (Dutch Treat/7g)",
+    "db_name": "Raspberry Skywalker Panda Pen Distillate Disposable Vape by Phat Panda - 1g",
+    "confidence": 0.637,
+    "vendor_match": 0.17
+  },
+  {
+    "json_name": "Phat Panda Flower (Dutch Treat/14g)",
+    "db_name": "Strawberry OG x The White Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.6974,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Phat Panda Flower (Jack & Coke/7g)",
+    "db_name": "Triangle Poison Live Resin Cartridge By Dabstract - 1g",
+    "confidence": 0.6963,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Indica - Northern Lights Infused Preroll",
+    "db_name": "Gelateria Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.69245,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Sativa - Green Crack Infused Preroll",
+    "db_name": "Sour Tangie Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.6880500000000002,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Platinum Flower (Doughp - Platinum Line/3.5g)",
+    "db_name": "Purple Ice Water Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.6847500000000001,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Platinum Flower (London Pound Cake - Platinum Line/3.5g)",
+    "db_name": "Orange Dream Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.6831,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Platinum Flower (London Pound Cake - Platinum Line/14g)",
+    "db_name": "Dirty Martini Live Resin Cartridge By Dabstract - 1g",
+    "confidence": 0.6814500000000001,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Platinum Flower (MAC Stomper - Platinum Line/7g)",
+    "db_name": "Jack Herer X Trophy Wife Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.6814500000000001,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Platinum Flower (Point Break - Platinum Line/28g)",
+    "db_name": "Tangie X Trophy Wife Live Resin Cartridge by Dabstract - 1g",
+    "confidence": 0.6814500000000001,
+    "vendor_match": 1.0
+  },
+  {
+    "json_name": "Platinum Flower (Raspberry Burger - Platinum Line/14g)",
+    "db_name": "Pineapple Donut Live Resin Sugar by Sticky Frog - 1g",
+    "confidence": 0.6787000000000001,
+    "vendor_match": 0.22
+  },
+  {
+    "json_name": "Platinum Flower (Wedding Cake - Platinum Line/14g)",
+    "db_name": "Bone Collector Core Flower by Phat Panda - 7g",
+    "confidence": 0.7338,
+    "vendor_match": 0.31
+  },
+  {
+    "json_name": "Platinum Flower (Wedding Cake - Platinum Line/28g)",
+    "db_name": "Bone Collector Core Flower by Phat Panda - 14g",
+    "confidence": 0.729,
+    "vendor_match": 0.31
+  },
+  {
+    "json_name": "Pineapple Donut LR Snickle Fritz Sugar",
+    "db_name": "Valley Orange Live Resin Disposable Vape by Dabstract - 1g",
+    "confidence": 0.604,
+    "vendor_match": 1.0
+  }
+]

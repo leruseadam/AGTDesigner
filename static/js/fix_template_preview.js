@@ -162,8 +162,19 @@ function initializeTemplatePreview() {
             }
             
             // Save additional settings to localStorage for persistence
+            let templateType = templateSelectModal ? templateSelectModal.value : 'vertical';
+            // SAFETY: Clamp templateType to one of the actual options on the main select.
+            // If an old or invalid value is present (e.g., from a previous version),
+            // force it to a known-safe default so the dropdown never renders blank.
+            if (templateSelect) {
+                const allowedValues = Array.from(templateSelect.options || []).map(opt => opt.value);
+                if (!allowedValues.includes(templateType)) {
+                    templateType = allowedValues.includes('horizontal') ? 'horizontal' : (allowedValues[0] || 'horizontal');
+                }
+            }
+
             const templateSettings = {
-                templateType: templateSelectModal ? templateSelectModal.value : 'vertical',
+                templateType: templateType,
                 scale: scaleInputModal ? scaleInputModal.value : '1.0',
                 font: fontSelectModal ? fontSelectModal.value : 'Arial',
                 fontSizeMode: fontSizingModeModal ? fontSizingModeModal.value : 'auto',
@@ -229,7 +240,20 @@ function initializeTemplatePreview() {
     if (savedSettings) {
         try {
             const settings = JSON.parse(savedSettings);
-            if (templateSelect) templateSelect.value = settings.templateType || 'vertical';
+            let templateType = settings.templateType || 'vertical';
+
+            if (templateSelect) {
+                const allowedValues = Array.from(templateSelect.options || []).map(opt => opt.value);
+                if (!allowedValues.includes(templateType)) {
+                    // Invalid / legacy value in storage → normalize to a safe default
+                    templateType = allowedValues.includes('horizontal') ? 'horizontal' : (allowedValues[0] || 'horizontal');
+                    settings.templateType = templateType;
+                    // Persist the normalized value so future loads are clean
+                    localStorage.setItem('templateSettings', JSON.stringify(settings));
+                }
+                templateSelect.value = templateType;
+            }
+
             if (scaleInput) scaleInput.value = settings.scale || '1.0';
             if (fontSelect) fontSelect.value = settings.font || 'Arial';
         } catch (e) {
