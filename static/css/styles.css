@@ -27,16 +27,17 @@
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
   
-  --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
+  --tag-list-height: max(var(--tag-list-min-height), calc(110vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: 52rem;   /* Center column - natural content height */
+  --center-panel-height: 64rem;   /* Center column - natural content height */
   --tag-list-scroll-padding: 1rem;
 }
 
-/* On wide screens tag lists use viewport height to avoid overflowing */
+/* On wide screens make the tag lists slightly taller than the center column
+   so they visually extend beyond the center card without changing aspect ratio. */
 @media (min-width: 1000px) {
   :root {
-    --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));
+    --tag-list-height: calc(var(--center-panel-height) + 2rem);
   }
 }
 
@@ -722,13 +723,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 52rem;
+    --center-panel-height: 64rem;
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 52rem;
+    --center-panel-height: 64rem;
   }
 }
 
@@ -736,7 +737,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 52rem;
+    --center-panel-height: 64rem;
   }
   #availableTags,
   #selectedTags {
@@ -747,7 +748,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 52rem;
+    --center-panel-height: 64rem;
   }
   #availableTags,
   #selectedTags {
@@ -792,10 +793,10 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 74vh);
-    --center-panel-height: 46rem;
+    --center-panel-height: 57rem;
   }
   @supports (height: 100dvh) {
-  :root { --tag-list-height: max(var(--tag-list-min-height), 74dvh); --center-panel-height: 52rem; }
+  :root { --tag-list-height: max(var(--tag-list-min-height), 74dvh); --center-panel-height: 64rem; }
   }
   .control-panel,
   .center-panel,
@@ -970,7 +971,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: 52rem;     /* Height of center control panel */
+    --center-panel-height: 64rem;     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
 
     /* Dynamic filter border sizing */
@@ -5594,13 +5595,13 @@ body.modal-open #mainContent.store-selection-disabled,
 
 /* Filter Action Buttons */
 .filter-action-button {
-  min-width: 130px;
-  width: auto;
-  min-height: 38px;
-  padding: 0.45rem 0.8rem;
-  border-radius: 7px;
-  font-weight: 600;
-  font-size: 12px;
+  min-width: 168px;
+  width: 168px;
+  min-height: 46px;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6851,12 +6852,6 @@ body.modal-open #mainContent.store-selection-disabled,
   padding: 0.75rem;
 }
 
-/* Brief highlight when scrolling to POSaBit Integration Settings */
-#databaseModal .posabit-highlight {
-  box-shadow: 0 0 0 2px rgba(0, 212, 170, 0.9), 0 0 20px rgba(0, 212, 170, 0.4);
-  transition: box-shadow 0.3s ease;
-}
-
 #databaseModal .card {
   margin-bottom: 0.75rem;
 }
@@ -8013,32 +8008,6 @@ body.modal-open #mainContent.store-selection-disabled,
 .main-content-row > [data-container-type] {
   width: 100% !important;
   max-width: 100% !important;
-}
-
-/* Ensure top filter bar never overflows horizontally on main page */
-.enhanced-filter-bar {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-}
-
-.enhanced-filter-bar .filter-row {
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.enhanced-filter-bar .filter-group {
-  flex: 1 1 140px;
-  min-width: 120px;
-}
-
-/* On narrower screens, allow the bar to wrap so it doesn't overflow */
-@media (max-width: 1200px) {
-  .enhanced-filter-bar {
-    flex-wrap: wrap;
-  }
 }
 
 /* Center column should be shorter than the side tag list columns */

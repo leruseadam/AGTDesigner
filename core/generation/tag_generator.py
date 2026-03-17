@@ -40,33 +40,10 @@ from src.core.constants import (
     LINEAGE_COLOR_MAP
 )
 
-# In-memory cache of template bytes to avoid repeated file I/O and speed up
-# template loading. Keys are absolute template paths.
-_template_bytes_cache = {}
-
-def _get_template_bytes(path: str) -> bytes:
-    b = _template_bytes_cache.get(path)
-    if b is None:
-        with open(path, 'rb') as fh:
-            b = fh.read()
-            _template_bytes_cache[path] = b
-    return b
-
 # Performance optimization: disable debug logging in production
 DEBUG_ENABLED = False
 
 logger = logging.getLogger(__name__)
-
-def _clean_lineage_text(value) -> str:
-    """Normalize lineage/brand text to prevent hidden-space artifacts in DOCX output."""
-    if value is None:
-        return ""
-    text = str(value)
-    # Remove zero-width characters and normalize uncommon Unicode spaces to normal spaces.
-    text = re.sub(r"[\u200B-\u200D\u2060\uFEFF]", "", text)
-    text = re.sub(r"[\u00A0\u2000-\u200A\u202F\u205F\u3000]", " ", text)
-    # Collapse repeated whitespace and trim.
-    return re.sub(r"\s+", " ", text).strip()
 
 def _find_most_likely_ounce_weight(product_name, product_type):
     """
@@ -153,10 +130,8 @@ def get_template_path(template_type):
         'horizontal': 'horizontal.docx',
         'vertical': 'vertical.docx',
         'mini': 'mini.docx',
-        'miniroll': 'miniroll.docx',
         'double': 'double.docx',
-        'inventory': 'inventory.docx',
-        'preroll': 'preroll.docx'
+        'inventory': 'inventory.docx'
     }
 
     # Validate template type
@@ -202,14 +177,51 @@ def get_template_path(template_type):
 
     return str(template_path)
 
-def chunk_records(records, chunk_size=60):
-    """Split the list of records into larger chunks to reduce docx processing overhead."""
-    if chunk_size < 1:
-        chunk_size = 60
-    # No deduplication here for maximum speed
+def chunk_records(records, chunk_size=9):
+    """Split the list of records into chunks of a given size."""
+    # CRITICAL FIX: Only deduplicate if there are significantly more duplicates than expected
+    # This prevents removing legitimate products that happen to have similar names
+    if len(records) > 0:
+        # Check if we have excessive duplicates (more than 50% duplicates)
+        seen_products = set()
+        unique_records = []
+        duplicate_count = 0
+        
+        for record in records:
+            product_name = record.get('ProductName', 'Unknown')
+            if product_name not in seen_products:
+                seen_products.add(product_name)
+                unique_records.append(record)
+            else:
+                duplicate_count += 1
+                # CRITICAL FIX: Keep duplicates but log them for transparency
+                unique_records.append(record)
+                logger.info(f"Keeping duplicate product in chunking: {product_name} (duplicate #{duplicate_count})")
+        
+        # Only deduplicate if we have excessive duplicates (more than 50% of records)
+        duplicate_percentage = (duplicate_count / len(records)) * 100
+        if duplicate_percentage > 50:
+            logger.warning(f"Excessive duplicates detected ({duplicate_percentage:.1f}%), deduplicating")
+            # Remove duplicates in this case
+            seen_products = set()
+            unique_records = []
+            for record in records:
+                product_name = record.get('ProductName', 'Unknown')
+                if product_name not in seen_products:
+                    seen_products.add(product_name)
+                    unique_records.append(record)
+                else:
+                    logger.warning(f"Skipping duplicate product in chunking: {product_name}")
+            records = unique_records
+        else:
+            logger.info(f"Keeping all {len(records)} records (duplicate rate: {duplicate_percentage:.1f}%)")
+    
+    # Split records into chunks
     chunks = []
     for i in range(0, len(records), chunk_size):
-        chunks.append(records[i:i + chunk_size])
+        chunk = records[i:i + chunk_size]
+        chunks.append(chunk)
+    
     logger.info(f"Split {len(records)} records into {len(chunks)} chunks of size {chunk_size}")
     return chunks
 
@@ -241,9 +253,7 @@ def create_dynamic_mini_template(template_path, num_products, scale_factor=1.0):
     row_height_pts = Pt(1.5 * 72)           # 1.5 inches per row
     cut_line_twips = int(0.001 * 1440)
 
-    # Load template bytes from cache to avoid repeated disk reads
-    tpl_bytes = _get_template_bytes(template_path)
-    doc = Document(BytesIO(tpl_bytes))
+    doc = Document(template_path)
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     old = doc.tables[0]
@@ -351,8 +361,7 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
     row_height_pts = Pt(2.4 * 72)  # 2.4 inches per row for horizontal template
     cut_line_twips = int(0.001 * 1440)
     
-    tpl_bytes = _get_template_bytes(template_path)
-    doc = Document(BytesIO(tpl_bytes))
+    doc = Document(template_path)
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     
@@ -370,7 +379,7 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
     tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
     
     # Copy the original table properties and styling from the source template
-    old_tbl = Document(BytesIO(tpl_bytes)).tables[0]
+    old_tbl = Document(template_path).tables[0]
     for prop in old_tbl._element.xpath('./w:tblPr/*'):
         tbl._element.append(deepcopy(prop))
     
@@ -416,8 +425,7 @@ def create_dynamic_3x3_template(template_path, num_products, scale_factor=1.0):
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
             # Copy table properties from the original template
-            old_tpl_bytes = _get_template_bytes(template_path)
-            old_tbl = Document(BytesIO(old_tpl_bytes)).tables[0]
+            old_tbl = Document(template_path).tables[0]
             for prop in old_tbl._element.xpath('./w:tblPr/*'):
                 tbl._element.append(deepcopy(prop))
             
@@ -587,8 +595,7 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
     row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for double template
     cut_line_twips = int(0.001 * 1440)
 
-    tpl_bytes = _get_template_bytes(template_path)
-    doc = Document(BytesIO(tpl_bytes))
+    doc = Document(template_path)
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     old = doc.tables[0]
@@ -680,8 +687,7 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
             # Copy table properties from the original template
-            old_tpl_bytes = _get_template_bytes(template_path)
-            old_tbl = Document(BytesIO(old_tpl_bytes)).tables[0]
+            old_tbl = Document(template_path).tables[0]
             for prop in old_tbl._element.xpath('./w:tblPr/*'):
                 tbl._element.append(deepcopy(prop))
             
@@ -745,7 +751,8 @@ def create_dynamic_double_template(template_path, num_products, scale_factor=1.0
                         for t in cell.xpath('.//w:t'):
                             if t.text and 'Label1' in t.text:
                                 t.text = t.text.replace('Label1', f'Label{cnt}')
-                        # REMOVED: Duplicate append that was causing content duplication
+                        for el in src_tc.xpath('./*'):
+                            cell._tc.append(deepcopy(el))
                     else:
                         # CRITICAL FIX: For empty cells, completely remove them to prevent blank placeholders
                         cell = tbl.cell(r, c)
@@ -811,8 +818,7 @@ def expand_template_to_4x5_fixed_scaled(template_path, scale_factor=1.0):
     row_height_pts  = Pt(1.5 * 72)           # 1.5 inches per row for equal height
     cut_line_twips  = int(0.001 * 1440)
 
-    tpl_bytes = _get_template_bytes(template_path)
-    doc = Document(BytesIO(tpl_bytes))
+    doc = Document(template_path)
     if not doc.tables:
         raise RuntimeError("Template must contain at least one table.")
     old = doc.tables[0]
@@ -875,43 +881,33 @@ def process_chunk(args):
     chunk, base_template, font_scheme, orientation, scale_factor = args
     logger = logging.getLogger(__name__)
     
-    # Skip verbose lineage debugging to improve performance
+    # Debug lineage data
+    from .docx_formatting import debug_lineage_data
+    debug_lineage_data(chunk)
     # CRITICAL FIX: Disable ALL dynamic templates to prevent XML corruption
     # Use standard template expansion with post-processing cleanup instead
-    if orientation == "mini" or orientation == "miniroll":
+    if orientation == "mini":
         local_template_buffer = base_template
         num_labels = 20  # Use standard 4x5 grid
-        logger.debug(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using standard template expansion")
-    elif orientation == "preroll":
-        local_template_buffer = base_template
-        num_labels = 12  # Use standard 4x3 grid (same as double)
-        logger.debug(f"🔧 PREROLL TEMPLATE EXPANSION: Using standard 4x3 expansion (same as double)")
+        logger.info(f"🔧 MINI TEMPLATE EXPANSION: Using standard template expansion")
     elif orientation == "double":
         local_template_buffer = base_template
         num_labels = 12  # Use standard 4x3 grid
-        logger.debug(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
+        logger.info(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
     else:
         # CRITICAL FIX: Use dynamic label count based on chunk size
         # Allow templates to expand to accommodate all products in the chunk
         local_template_buffer = base_template
         num_labels = len(chunk)  # Use actual chunk size instead of hardcoded 9
-        logger.debug(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
-    # Prefer loading from cached bytes when possible
-    try:
-        if isinstance(local_template_buffer, (bytes, bytearray)):
-            local_buf = BytesIO(local_template_buffer)
-            tpl = DocxTemplate(local_buf)
-        else:
-            tpl = DocxTemplate(local_template_buffer)
-    except Exception:
-        # Fallback to direct load
-        tpl = DocxTemplate(local_template_buffer)
+        logger.info(f"🔧 {orientation.upper()} TEMPLATE EXPANSION: Using dynamic expansion for {num_labels} labels")
+    tpl = DocxTemplate(local_template_buffer)
     context = {}
-    image_width = Mm(8) if orientation in ("mini", "miniroll") else Mm(9 if orientation == 'vertical' else 12)
+    image_width = Mm(8) if orientation == "mini" else Mm(9 if orientation == 'vertical' else 12)
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")
     
+    # CRITICAL FIX: Only create labels for the products we have, not empty slots
     actual_num_labels = min(len(chunk), num_labels)
     
     # OPTIMIZATION: Pre-load all lineage and strain data in batch to avoid N+1 queries
@@ -934,36 +930,27 @@ def process_chunk(args):
                 if strain:
                     strain_names.add(strain)
             
-            # Batch query for product lineage (sovereign > strain > products.Lineage)
+            # Batch query for product lineage
             if product_names:
                 try:
                     conn = product_db._get_connection()
                     cur = conn.cursor()
                     placeholders = ','.join(['?'] * len(product_names))
                     batch_lineage_query = f'''
-                        SELECT p."Product Name*",
-                               COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
-                                        s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
-                        FROM products p
-                        LEFT JOIN strains s1 ON p.strain_id = s1.id
-                        LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                        LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                        WHERE p."Product Name*" IN ({placeholders})
-                        ORDER BY p.id DESC
+                        SELECT "Product Name*", "Lineage"
+                        FROM products
+                        WHERE "Product Name*" IN ({placeholders})
+                        ORDER BY id DESC
                     '''
                     cur.execute(batch_lineage_query, product_names)
-                    seen = set()
                     for row_result in cur.fetchall():
                         pname, lineage = row_result
-                        if not pname or pname in seen:
-                            continue
-                        if lineage and str(lineage).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
+                        if lineage and str(lineage).strip() not in ['', 'None', 'nan']:
                             product_lineage_cache[pname] = str(lineage).strip().upper()
-                            seen.add(pname)
                 except Exception as batch_err:
                     logger.warning(f"Batch product lineage query failed: {batch_err}")
             
-            # Batch query for strain info (sovereign_lineage > display_lineage > canonical_lineage)
+            # Batch query for strain info
             if strain_names:
                 try:
                     conn = product_db._get_connection()
@@ -971,18 +958,19 @@ def process_chunk(args):
                     strain_list = list(strain_names)
                     placeholders = ','.join(['?'] * len(strain_list))
                     batch_strain_query = f'''
-                        SELECT strain_name, sovereign_lineage, canonical_lineage
+                        SELECT strain_name, display_lineage, sovereign_lineage, canonical_lineage
                         FROM strains
                         WHERE strain_name IN ({placeholders})
                     '''
                     cur.execute(batch_strain_query, strain_list)
                     for row_result in cur.fetchall():
                         sname = row_result[0]
-                        preferred = row_result[1] or row_result[2]
-                        if preferred and str(preferred).strip().upper() != 'SOVEREIGN':
+                        preferred = row_result[1] or row_result[2] or row_result[3]
+                        if preferred:
                             strain_info_cache[sname] = {
-                                'sovereign_lineage': row_result[1],
-                                'canonical_lineage': row_result[2]
+                                'display_lineage': row_result[1],
+                                'sovereign_lineage': row_result[2],
+                                'canonical_lineage': row_result[3]
                             }
                 except Exception as batch_strain_err:
                     logger.warning(f"Batch strain info query failed: {batch_strain_err}")
@@ -1005,9 +993,13 @@ def process_chunk(args):
             doh_compliant = ''
             doh_lower = ''
             
+            logger.info(f"🔍 DOH RAW VALUES for '{product_name}':")
+            logger.info(f"  row.get('DOH'): '{doh_raw}'")
+            logger.info(f"  row.get('DOH Compliant (Yes/No)'): '{doh_compliant}'")
+            logger.info(f"  row.get('doh'): '{doh_lower}'")
+            
             doh_value = (doh_raw).upper()
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"DOH: '{product_name}' -> '{doh_value}'")
+            logger.info(f"🔍 DOH PROCESSING: Product '{product_name}' - Combined value: '{doh_value}'")
             product_type = str(row.get("Product Type*", "")).strip().lower()
             if DEBUG_ENABLED:
                 logger.debug(f"Product type: {product_type}")
@@ -1039,8 +1031,7 @@ def process_chunk(args):
                     if DEBUG_ENABLED:
                         logger.debug(f"Using DOH image: {doh_image_path}")
                     label_data["DOH"] = InlineImage(tpl, doh_image_path, width=image_width)
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(f"DOH: '{product_name}' - Added image")
+                    logger.info(f"✅ DOH DECISION: Product '{product_name}' - Added DOH.png")
                 if DEBUG_ENABLED:
                     logger.debug(f"Created DOH image with width: {image_width}")
             else:
@@ -1115,8 +1106,8 @@ def process_chunk(args):
                 if " by " in product_name:
                     product_brand = product_name.split(" by ")[-1].strip()
                 else:
-                    # Prefer Product Brand field; do NOT fall back to vendor to avoid vendor being used as brand
-                    product_brand = str(row.get("Product Brand", "")).strip()
+                    # Fallback to vendor if no "by" in name
+                    product_brand = str(row.get("Vendor", "")).strip()
             
             # Only add brand markers for non-classic types
             # Classic types should show lineage instead of brand
@@ -1124,10 +1115,16 @@ def process_chunk(args):
             is_classic_type = product_type in [ct.lower() for ct in CLASSIC_TYPES]
             
             if is_classic_type:
-                # For classic types, lineage will be set after database lookup below
-                # Don't set it here - wait for database lookup to determine lineage
-                # Default will be HYBRID if no database lineage found (never Excel)
-                pass
+                # For classic types, ensure lineage data is available
+                # CRITICAL FIX: Set default lineage for classic types if missing
+                lineage_val = str(row.get("Lineage", "")).strip()
+                if not lineage_val or lineage_val.lower() in ['', 'nan', 'none', 'null']:
+                    # Set default HYBRID lineage for classic types with missing lineage
+                    lineage_val = "HYBRID"
+                    logger.info(f"🔧 SET DEFAULT LINEAGE: Set HYBRID lineage for classic type '{product_name}' (missing lineage)")
+                
+                # Set lineage data for classic types
+                label_data["Lineage"] = lineage_val
             else:
                 # For non-classic types, preserve brand data for template processor
                 # The template processor will handle the proper formatting based on template type
@@ -1180,83 +1177,10 @@ def process_chunk(args):
             
             print(f"DEBUG: Excel-first weight construction - Weight*: '{row.get('Weight*', '')}', Units: '{row.get('Units', '')}' -> '{weight_units}'")
             
-            # CRITICAL FIX: For pre-rolls, use JointRatio instead of WeightUnits if available
-            joint_ratio_value = row.get("JointRatio", "")
-            if pd.isna(joint_ratio_value) or str(joint_ratio_value).lower() in ['nan', 'none', '', 'null']:
-                joint_ratio_value = ""
-            
-            # Check if this is a pre-roll product type
-            is_preroll = product_type in ['pre-roll', 'infused pre-roll'] or 'pre-roll' in product_type.lower()
-            
-            # For pre-rolls with JointRatio, use it instead of WeightUnits
-            if is_preroll and joint_ratio_value:
-                display_weight = joint_ratio_value
-                print(f"DEBUG: Pre-roll product - using JointRatio '{joint_ratio_value}' instead of WeightUnits")
-            else:
-                display_weight = weight_units
-            
             # Preserve original ProductName; keep Description as the clean field
             label_data["ProductName"] = product_name  # Do not repurpose ProductName
             label_data["Description"] = description  # Primary clean display field
-            label_data["WeightUnits"] = wrap_with_marker(display_weight, "WEIGHTUNITS")  # CRITICAL FIX: Wrap with markers for template rendering
-
-            # --- PREROLL BRAND INFERENCE ---
-            # If this is a preroll and Product Brand is missing, try to infer brand
-            # from the product name using common patterns (e.g., "by BrandName - ...")
-            try:
-                if is_preroll and (not product_brand or product_brand.strip() == ''):
-                    # Detect known preroll subbrands embedded in product names (user-provided map)
-                    preroll_subbrand_map = {
-                        'honey stixx': 'Honey Stixx',
-                        'honey stix': 'Honey Stixx',
-                        'sugar stix': 'Sugar Stix',
-                        'sugar stixx': 'Sugar Stixx',
-                        'flavour stix': 'Flavour Stix',
-                        'flavour stixx': 'Flavour Stix',
-                        'rosin rolls': 'Rosin Rolls',
-                        'bang stix': 'Bang Stix',
-                        'bloomers': 'Bloomers',
-                        'rose infused': 'Rose Infused',
-                        'sugar cone': 'Sugar Cone',
-                        'snickerdoobie': 'SnickerDoobie',
-                        'hash holes': 'Hash Holes',
-                        'hash infused': 'Hash Infused',
-                        'sparklers': 'Sparklers',
-                        'melt stix': 'Melt Stix',
-                        'blunts': 'Blunts',
-                        'bubble hash': 'Bubble Hash'
-                    }
-                    pname_lower = product_name.lower()
-                    for sub, canonical in preroll_subbrand_map.items():
-                        if sub in pname_lower:
-                            inferred_brand = canonical
-                            product_brand = inferred_brand
-                            if logger.isEnabledFor(logging.INFO):
-                                logger.info(f"PREROLL SUBBRAND INFERRED: '{product_name}' -> '{product_brand}' (matched '{sub}')")
-                            break
-                    inferred_brand = ''
-                    # Look for "by BrandName -" or "by BrandName" at end
-                    by_match = re.search(r'\sby\s+([^-\n]+?)(?:\s+-|$)', product_name, re.IGNORECASE)
-                    if by_match:
-                        inferred_brand = by_match.group(1).strip()
-                    else:
-                        # Fallback: left-of-dash could be brand if product names are "Brand - Product"
-                        if ' - ' in product_name:
-                            left = product_name.split(' - ')[0].strip()
-                            # Heuristic: left side should be reasonably short and not contain weight/unit tokens
-                            if left and len(left) < 40 and not re.search(r'\d+g|mg|pack|x\s*\d+', left, re.IGNORECASE):
-                                inferred_brand = left
-                    # Final fallback: check other fields like Brand/ProductBrand/Vendor
-                    if not inferred_brand:
-                        inferred_brand = (row.get('ProductBrand') or row.get('Brand') or row.get('Vendor') or '').strip()
-
-                    if inferred_brand:
-                        product_brand = inferred_brand
-                        if logger.isEnabledFor(logging.INFO):
-                            logger.info(f"PREROLL BRAND INFERRED: '{product_name}' -> '{product_brand}'")
-            except Exception:
-                # Don't block generation for inference errors
-                pass
+            label_data["WeightUnits"] = wrap_with_marker(weight_units, "WEIGHTUNITS")  # CRITICAL FIX: Wrap with markers for template rendering
             
             # For edibles, use brand instead of lineage in the label
             edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
@@ -1267,70 +1191,114 @@ def process_chunk(args):
             # OPTIMIZATION: Use pre-loaded cache instead of individual queries
             if is_classic_type:
                 try:
+                    # FIRST: Check for product-level lineage (preserves user changes to specific products)
                     product_name = row.get('Product Name*', '') or row.get('ProductName', '')
                     excel_lineage = str(row.get("Lineage", "")).strip()
-                    lineage_val = None
-                    # 1. Product-level lineage from database
+                    found_lineage = False
                     if product_name:
+                        # Use cached product lineage (loaded in batch before loop)
                         db_product_lineage = product_lineage_cache.get(product_name)
                         if db_product_lineage and str(db_product_lineage).strip() not in ['', 'None', 'nan']:
                             lineage_val = str(db_product_lineage).strip().upper()
+                            found_lineage = True
                             logger.info(f"✅ DOCX LINEAGE: Using database lineage '{lineage_val}' for '{product_name}' (Excel had: '{excel_lineage}')")
-                    # 2. Fallback: strain-level (sovereign_lineage > canonical_lineage)
-                    if (not lineage_val or lineage_val in ['MIXED', 'THC', '', None]) and product_strain:
-                        strain_info = strain_info_cache.get(product_strain)
-                        if strain_info:
-                            for key in ('sovereign_lineage', 'canonical_lineage'):
-                                canon = strain_info.get(key)
-                                if canon and str(canon).strip() not in ['', 'None', 'nan', 'SOVEREIGN']:
-                                    lineage_val = str(canon).strip().upper()
-                                    logger.info(f"✅ DOCX LINEAGE: Using strain {key} '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
-                                    break
-                    # 3. Final fallback: HYBRID
-                    if not lineage_val or lineage_val in ['MIXED', 'THC', '', None]:
-                        lineage_val = 'HYBRID'
-                        logger.warning(f"⚠️ DOCX LINEAGE: No valid lineage found for '{product_name}' (strain: '{product_strain}'), using default '{lineage_val}'")
-                    # 4. Enforce: never allow MIXED or THC for classic types
-                    if lineage_val in ['MIXED', 'THC', '', None]:
-                        lineage_val = 'HYBRID'
-                        logger.warning(f"⚠️ DOCX LINEAGE: Invalid lineage '{lineage_val}' for classic type '{product_name}', forcing to 'HYBRID'")
+                        elif product_strain:
+                            # FALLBACK: Check strain-level lineage from cache
+                            strain_info = strain_info_cache.get(product_strain)
+                            if strain_info:
+                                preferred = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage')
+                                )
+                                if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
+                                    lineage_val = str(preferred).strip().upper()
+                                    found_lineage = True
+                                    logger.info(f"✅ DOCX LINEAGE: Using strain-level lineage '{lineage_val}' for '{product_name}' (strain: '{product_strain}', Excel had: '{excel_lineage}')")
+                                else:
+                                    # No strain lineage found, fallback to Excel
+                                    lineage_val = lineage_text.upper() if lineage_text else ""
+                                    if lineage_val:
+                                        found_lineage = True
+                                        logger.warning(f"⚠️ DOCX LINEAGE: No database lineage found for '{product_name}' (strain: '{product_strain}'), using Excel lineage '{lineage_val}'")
+                                    else:
+                                        logger.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name}' (strain: '{product_strain}'), Excel lineage also empty")
+                            else:
+                                # No strain info found, fallback to Excel
+                                lineage_val = lineage_text.upper() if lineage_text else ""
+                                if lineage_val:
+                                    found_lineage = True
+                                logger.warning(f"⚠️ DOCX LINEAGE: No strain info found for '{product_strain}', using Excel lineage '{lineage_val}' for '{product_name}'")
+                        else:
+                            # No strain, fallback to Excel
+                            lineage_val = lineage_text.upper() if lineage_text else ""
+                            if lineage_val:
+                                found_lineage = True
+                                logger.warning(f"⚠️ DOCX LINEAGE: No product-level lineage found for '{product_name}' and no strain, using Excel lineage '{lineage_val}'")
+                            else:
+                                logger.warning(f"⚠️ DOCX LINEAGE: No lineage found for '{product_name}' (no strain, Excel lineage also empty)")
+                    else:
+                        # No product name, try strain-level only from cache
+                        if product_strain:
+                            strain_info = strain_info_cache.get(product_strain)
+                            if strain_info:
+                                preferred = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage')
+                                )
+                                if preferred and str(preferred).strip() not in ['', 'None', 'nan']:
+                                    lineage_val = str(preferred).upper()
+                                    found_lineage = True
+                                else:
+                                    lineage_val = lineage_text.upper() if lineage_text else ""
+                                    if lineage_val:
+                                        found_lineage = True
+                            else:
+                                lineage_val = lineage_text.upper() if lineage_text else ""
+                                if lineage_val:
+                                    found_lineage = True
+                        else:
+                            lineage_val = lineage_text.upper() if lineage_text else ""
+                            if lineage_val:
+                                found_lineage = True
                 except Exception as e:
-                    lineage_val = 'HYBRID'
-                    logger.warning(f"⚠️ DOCX LINEAGE ERROR: Database lookup failed for '{product_name}', using default '{lineage_val}' - Error: {e}")
+                    # Fallback to Excel lineage if database lookup fails
+                    lineage_val = lineage_text.upper() if lineage_text else ""
+                    if lineage_val:
+                        found_lineage = True
+                    logger.debug(f"⚠️ DOCX LINEAGE: Using Excel lineage '{lineage_val}' due to error: {e}")
+                # FINAL DEFAULT: If still no lineage, set to HYBRID for classic types
+                if not found_lineage or not lineage_val or lineage_val.lower() in ['', 'nan', 'none', 'null']:
+                    lineage_val = "HYBRID"
+                    logger.info(f"🔧 SET DEFAULT LINEAGE: Set HYBRID lineage for classic type '{product_name}' (missing lineage after all lookups)")
             else:
                 # CRITICAL FIX: For ALL non-classic types (edibles, tinctures, gummies, etc.), 
                 # use brand name for Lineage, not the raw Excel lineage value
                 # This prevents "CBD" from appearing in non-classic type labels
-                # If no brand is available, use default "MIXED" - DO NOT fall back to Excel lineage
-                if product_brand and str(product_brand).strip():
-                    lineage_val = product_brand.upper()
-                else:
-                    lineage_val = 'MIXED'  # Default for non-classic types
+                # If no brand is available, leave Lineage empty - DO NOT fall back to Excel lineage
+                lineage_val = product_brand.upper() if product_brand else ""
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
-            # Final hardening: normalize lineage text so LabelX.Lineage never carries extra/hidden spaces.
-            lineage_val = _clean_lineage_text(lineage_val).upper()
-            # If classic type: enforce canonical classic lineages; anything unrecognized or empty => HYBRID
-            if is_classic_type:
-                allowed_classic = {"SATIVA", "HYBRID/SATIVA", "HYBRID", "HYBRID/INDICA", "INDICA"}
-                if not lineage_val or lineage_val not in allowed_classic:
-                    lineage_val = "HYBRID"
-            else:
-                if not lineage_val:
-                    lineage_val = "MIXED"
-
+            # No extra space before Lineage in the output
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
             
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
             if is_classic_type:
                 if lineage_val:
-                    # Use the lineage value from database (never Excel)
-                    label_data["ProductBrand"] = lineage_val  # Don't wrap with markers for template rendering
-                    label_data["ProductBrand_Center"] = lineage_val  # Don't wrap with markers for template rendering
+                    # Use the lineage value from database or Excel
+                    label_data["ProductBrand"] = lineage_val.strip()  # Don't wrap with markers for template rendering
+                    label_data["ProductBrand_Center"] = lineage_val.strip()  # Don't wrap with markers for template rendering
                 else:
-                    # No lineage available - use default HYBRID for classic types (never fall back to Excel)
-                    label_data["ProductBrand"] = "HYBRID"
-                    label_data["ProductBrand_Center"] = "HYBRID"
+                    # Fallback to Excel lineage if no database lineage found
+                    fallback_lineage = lineage_text.upper() if lineage_text else ""
+                    if fallback_lineage:
+                        label_data["ProductBrand"] = fallback_lineage.strip()  # Don't wrap with markers for template rendering
+                        label_data["ProductBrand_Center"] = fallback_lineage.strip()  # Don't wrap with markers for template rendering
+                    else:
+                        # No lineage available, set to empty
+                        label_data["ProductBrand"] = ""
+                        label_data["ProductBrand_Center"] = ""
             else:
                 # CRITICAL FIX: For vertical template, ensure brand goes to Lineage field only
                 # and ProductStrain field is cleared to prevent 1pt font issue
@@ -1556,15 +1524,6 @@ def generate_multiple_label_tables(records, template_path):
         if final_doc.paragraphs:
             p = final_doc.paragraphs[0]
             p._element.getparent().remove(p._element)
-        
-        # ⚡ PERFORMANCE: Pre-load template once instead of per-record
-        template_doc = None
-        try:
-            template_doc = DocxTemplate(template_path)
-        except Exception as template_err:
-            logger.error(f"Failed to load template: {template_err}")
-            raise
-        
         # Group by lineage and chunk within each group
         for lineage, group in groupby(records_sorted, key=get_lineage):
             group_list = list(group)
@@ -1595,9 +1554,7 @@ def generate_multiple_label_tables(records, template_path):
                     if idx < len(chunk):
                         record = chunk[idx]
                         try:
-                            # ⚡ PERFORMANCE: Reuse template, create fresh copy for rendering
-                            from copy import deepcopy
-                            doc = deepcopy(template_doc)
+                            doc = DocxTemplate(template_path)
                             context = build_context(record, doc)
                             doc.render(context)
                             tmp_stream = BytesIO()
@@ -1771,4 +1728,6 @@ def create_safe_document():
     except Exception as e:
         logger.error(f"Error creating safe document: {e}")
         raise
+
+
 

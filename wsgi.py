@@ -36,13 +36,6 @@ os.environ['MAX_MEMORY_MB'] = '450'  # Allow more memory before cleanup
 os.environ['CACHE_SIZE_LIMIT'] = '100'  # Increase cache size for better hit rates
 os.environ['BATCH_SIZE_LIMIT'] = '500'  # Larger batches for faster processing
 
-# POSaBit API: set these only in PythonAnywhere's WSGI file on the server
-# (/var/www/..._wsgi.py), not in this repo. Example lines to add there:
-#   os.environ['POSABIT_API_TOKEN'] = 'your_token'
-#   os.environ['POSABIT_MENU_FEED_KEY'] = '8965dc69-d3aa-439c-877d-c5c407b0f1dc'
-#   os.environ['POSABIT_API_BASE_URL'] = 'https://app.posabit.com/api'
-#   os.environ['USE_POSABIT_PRODUCTS'] = 'true'
-
 # Configure logging to prevent verbose output and "Message too long" errors
 logging.basicConfig(
     level=logging.ERROR,

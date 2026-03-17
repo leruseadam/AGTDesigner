@@ -1029,7 +1029,6 @@ const AppLoadingSplash = {
         }
         
         if (mainContent) {
-            mainContent.classList.add('store-selected');
             setTimeout(() => {
                 mainContent.classList.add('loaded');
                 mainContent.style.opacity = '1';
@@ -1084,10 +1083,14 @@ const AppLoadingSplash = {
         }
         
         if (mainContent) {
-            mainContent.classList.add('store-selected');
-            mainContent.style.display = 'block';
-            mainContent.style.visibility = 'visible';
             mainContent.style.opacity = '1';
+            // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
+            if (mainContent) {
+                mainContent.style.display = 'block';
+                mainContent.style.visibility = 'visible';
+                mainContent.style.opacity = '1';
+                mainContent.classList.add('loaded');
+            }
             mainContent.classList.add('loaded');
         }
         
@@ -1171,8 +1174,8 @@ const TagManager = {
 
     getAvailableTagsCacheKey() {
         try {
-            const store = (window.sessionStorage && (null)) ||
-                'AGT_Bothell';
+            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                window.currentStore || 'default';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
             
@@ -1198,8 +1201,8 @@ const TagManager = {
     // This allows cache to persist even when filename timestamp changes
     getNormalizedCacheKey() {
         try {
-            const store = (window.sessionStorage && (null)) ||
-                'AGT_Bothell';
+            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                window.currentStore || 'default';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
             
@@ -1242,8 +1245,8 @@ const TagManager = {
                 return null;
             }
 
-            const store = (window.sessionStorage && (null)) ||
-                'AGT_Bothell';
+            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
+                window.currentStore || 'default';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
 
@@ -4802,8 +4805,8 @@ const TagManager = {
         const tagsToShow = filteredTags || originalTags;
         // CRITICAL FIX: Only show loading if store is confirmed
         // Don't show loading splash before store selection modal
-        const selectedStore = (window.sessionStorage && (null)) || null;
-        const storeConfirmed = true; // store always confirmed
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
         
         // Show splash immediately when tags are being loaded, unless user is actively searching OR store not confirmed
         if (!this.state.isSearching && storeConfirmed) {
@@ -4821,8 +4824,11 @@ const TagManager = {
                     </div>
                 `;
             }
+        } else if (!storeConfirmed) {
+            // Store not confirmed - don't show loading, let store modal show
+            verboseLog('Store not confirmed - skipping loading splash (store modal should show)');
         }
-
+        
         // PERFORMANCE: Call immediately - no setTimeout delay for instant rendering
         this._updateAvailableTags(originalTags, filteredTags);
     }, 50), // Ultra-fast debounce (50ms) for near-instant response
@@ -5838,6 +5844,14 @@ const TagManager = {
     _updateAvailableTags(originalTags, filteredTags = null) {
         // CRITICAL FIX: Don't update tags if store is not confirmed
         // This prevents loading states from appearing before store selection modal
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        
+        if (!storeConfirmed) {
+            verboseLog('Store not confirmed - skipping _updateAvailableTags (store modal should show)');
+            return;
+        }
+        
         // CRITICAL FIX: Prevent unnecessary re-renders if tags haven't changed AND are already displayed
         // This prevents cycling/reloading when tags are the same, but only if DOM already shows them
         const tagsToProcess = filteredTags || originalTags;
@@ -6586,27 +6600,6 @@ const TagManager = {
         
         // CRITICAL FIX: Render organized tags in chunks to prevent UI freeze
         this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
-
-        // FINAL SAFETY: If, for any reason, no tag rows were rendered but we have tags in memory,
-        // fall back to a simple flat list renderer so the user always sees products.
-        try {
-            const hasTagRows = availableTagsContainer.querySelectorAll('.tag-item').length > 0;
-            if (!hasTagRows && tags && tags.length > 0) {
-                console.warn('⚠️ No tag rows rendered after organized render; using simple flat list fallback');
-                const fallbackList = document.createElement('div');
-                fallbackList.className = 'tag-list';
-                const sortedSimple = [...tags].sort((a, b) => {
-                    const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
-                    const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
-                    return aName.localeCompare(bName);
-                });
-                this._renderTagsInBatches(sortedSimple, fallbackList);
-                availableTagsContainer.innerHTML = '';
-                availableTagsContainer.appendChild(fallbackList);
-            }
-        } catch (fallbackError) {
-            console.error('Simple flat list fallback render failed:', fallbackError);
-        }
     },
     
     _renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags) {
@@ -12047,8 +12040,8 @@ const TagManager = {
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
         // CRITICAL FIX: Only show loading if store is confirmed
-        const selectedStore = (window.sessionStorage && (null)) || null;
-        const storeConfirmed = true; // store always confirmed
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
         
         // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
         // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
@@ -12067,7 +12060,10 @@ const TagManager = {
                 `;
             }
         } else if (!this._suppressActionSplash) {
-            if (hasExistingTags) {
+            if (!storeConfirmed) {
+                // Store not confirmed - don't show loading, let store modal show
+                verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
+            } else if (storeConfirmed && hasExistingTags) {
                 // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
                 this.showActionSplash('Refreshing tags...');
                 // Also show loading indicator in container if it exists
@@ -14371,7 +14367,7 @@ const TagManager = {
                     splash.style.display = 'none';
                     const mainContent = document.getElementById('mainContent');
                     if (mainContent) {
-                        mainContent.classList.add('store-selected');
+                        // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
                         mainContent.style.display = 'block';
                         mainContent.style.visibility = 'visible';
                         mainContent.style.opacity = '1';
@@ -17005,6 +17001,37 @@ const TagManager = {
 
     // Action splash screen for clear/undo operations
     showActionSplash(message) {
+        // CRITICAL FIX: Don't show loading splash if store selection modal is visible or store not confirmed
+        const storeModal = document.getElementById('storeSelectionModal');
+        
+        // Check if store modal is visible using multiple methods
+        let isStoreModalVisible = false;
+        if (storeModal) {
+            // Check Bootstrap modal state
+            if (typeof bootstrap !== 'undefined') {
+                const modalInstance = bootstrap.Modal.getInstance(storeModal);
+                if (modalInstance && modalInstance._isShown) {
+                    isStoreModalVisible = true;
+                }
+            }
+            // Fallback: check DOM classes and styles
+            if (!isStoreModalVisible) {
+                isStoreModalVisible = storeModal.classList.contains('show') || 
+                                     (storeModal.style.display !== 'none' && storeModal.offsetParent !== null);
+            }
+        }
+        
+        // Also check if store is not confirmed
+        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
+        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        
+        // CRITICAL: Also check if we're in the middle of store selection process
+        const isCheckingStore = window.checkingStoreRequired === true;
+        
+        if (isStoreModalVisible || !storeConfirmed || isCheckingStore) {
+            verboseLog('Store modal visible or not confirmed - skipping action splash:', message);
+            return;
+        }
         // Create splash if it doesn't exist
         let splash = document.getElementById('actionSplash');
         if (!splash) {
@@ -17555,8 +17582,8 @@ const TagManager = {
 
             // CRITICAL: Check store selection before attempting upload
             try {
-                // store check removed
-                const storeCheckData = { required: false, has_store: true };
+                const storeCheckResponse = await fetch('/api/check-store-required');
+                const storeCheckData = await storeCheckResponse.json();
                 if (storeCheckData.required && !storeCheckData.has_store) {
                     const errorMsg = 'Please select a store before uploading files. Click on the store name in the header to select a store.';
                     console.error('Upload blocked:', errorMsg);
@@ -22175,7 +22202,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // User templates modal: add, replace, view custom designs
 document.addEventListener('DOMContentLoaded', function() {
-    const TEMPLATE_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical', mini: 'Mini', miniroll: 'Mini-roll', double: 'Double', new: 'New', preroll: 'Preroll', inventory: 'Inventory' };
+    const TEMPLATE_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical', mini: 'Mini', double: 'Double', preroll: 'Preroll', inventory: 'Inventory' };
     const manageBtn = document.getElementById('manageTemplatesBtn');
     const modalEl = document.getElementById('userTemplatesModal');
     const listEl = document.getElementById('userTemplatesList');
@@ -22185,9 +22212,7 @@ document.addEventListener('DOMContentLoaded', function() {
         horizontal: 'fa-grip-lines',
         vertical:   'fa-grip-lines-vertical',
         mini:       'fa-compress-alt',
-        miniroll:   'fa-compress-alt',
         double:     'fa-columns',
-        new:        'fa-file-alt',
         preroll:    'fa-scroll',
         inventory:  'fa-clipboard-list'
     };
@@ -22195,9 +22220,7 @@ document.addEventListener('DOMContentLoaded', function() {
         horizontal: '#6366f1',
         vertical:   '#8b5cf6',
         mini:       '#06b6d4',
-        miniroll:   '#06b6d4',
         double:     '#10b981',
-        new:        '#14b8a6',
         preroll:    '#f59e0b',
         inventory:  '#ef4444'
     };
@@ -22319,7 +22342,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <option value="mini">Mini</option>
                                 <option value="miniroll">Mini-roll</option>
                                 <option value="double">Double</option>
-                                <option value="new">New</option>
                                 <option value="inventory">Inventory</option>
                                 <option value="preroll">Preroll</option>
                             </select>

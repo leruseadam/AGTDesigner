@@ -53,7 +53,9 @@
       "Bash(du:*)",
       "Bash(git stash:*)",
       "Bash(cd /Users/adamcordova/Desktop/labelMaker_\\\\ QR\\\\ copy\\\\ final && PYTHONPATH=. python3:*)",
-      "WebFetch(domain:api-trace.getbamboo.com)"
+      "WebFetch(domain:api-trace.getbamboo.com)",
+      "Read(//Users/adamcordova/Downloads/**)",
+      "Bash(\"/Users/adamcordova/Desktop/labelMaker_ QR copy final/uploads/.last_upload.json\")"
     ],
     "deny": [],
     "ask": [],

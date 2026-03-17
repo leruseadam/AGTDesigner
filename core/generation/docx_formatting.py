@@ -18,7 +18,7 @@ COLORS = {
     'CBD': 'F1C232',
     'CBD_BLEND': 'F1C232',  # Same color as CBD
     'MIXED': '0021F5',
-    'PARA': 'C83278'
+    'PARA': 'FFC0CB'
 }
 
 def debug_lineage_data(records):
@@ -31,49 +31,10 @@ def debug_lineage_data(records):
         strain = record.get('Product Strain', record.get('strain', ''))
         logger.info(f"  Record {i+1}: '{product_name}' | Lineage: '{lineage}' | Type: '{product_type}' | Strain: '{strain}'")
 
-def _set_lineage_run_white(run):
-    """Set run text to white at both run and XML level so it sticks on colored lineage/brand bars (e.g. yellow CBD)."""
-    run.font.color.rgb = RGBColor(255, 255, 255)
-    if hasattr(run.font.color, 'theme_color') and run.font.color.theme_color is not None:
-        run.font.color.theme_color = None
-    rPr = run._element.get_or_add_rPr()
-    color = rPr.find(qn('w:color'))
-    if color is None:
-        color = OxmlElement('w:color')
-        rPr.append(color)
-    color.set(qn('w:val'), 'FFFFFF')
-
-def _set_paragraph_auto_spacing(paragraph):
-    """Set paragraph spacing to Auto (clear before/after) at Python and XML level."""
-    paragraph.paragraph_format.space_before = None
-    paragraph.paragraph_format.space_after = None
-    pPr = paragraph._element.get_or_add_pPr()
-    sp = pPr.find(qn('w:spacing'))
-    if sp is None:
-        sp = OxmlElement('w:spacing')
-        pPr.append(sp)
-    if qn('w:before') in sp.attrib:
-        del sp.attrib[qn('w:before')]
-    if qn('w:after') in sp.attrib:
-        del sp.attrib[qn('w:after')]
-    sp.set(qn('w:lineRule'), 'auto')
-
-def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
-    """Apply lineage colors to all cells based on keywords in cell text.
-    template_type: when 'horizontal', paragraph spacing in lineage/brand cells is 1.5pt/1.5pt (equal margins); otherwise 2pt/1pt.
-    """
+def apply_lineage_colors(doc):
+    """Apply lineage colors to all cells based on keywords in cell text."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    if template_type == 'horizontal':
-        space_before_pt, space_after_pt = 1.5, 1.5  # Equal margins above and below for lineage
-        before_twips, after_twips = '30', '30'
-    elif template_type == 'double':
-        # Double: non-classic (brand) cells use Auto before/after; classic uses 2/1
-        space_before_pt, space_after_pt = 2, 1
-        before_twips, after_twips = '40', '20'
-    else:
-        space_before_pt, space_after_pt = 2, 1
-        before_twips, after_twips = '40', '20'
     
     try:
         logger.info("Starting lineage color application...")
@@ -83,564 +44,206 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    try:
-                        cells_processed += 1
-                        original_text = cell.text.upper()  # Keep original text to check for markers
-                        # CRITICAL: Check for classic type BEFORE removing markers
-                        # This ensures we can detect classic lineage types even when they're wrapped in markers
-                        is_classic_type_before_processing = any(lineage in original_text for lineage in ["SATIVA", "INDICA", "HYBRID"])
-                        
-                        # Detect if this cell contains center-brand markers so we can
-                        # force paragraph centering later (handles capsules/non-classic)
-                        has_productbrand_center_marker = (
-                            'PRODUCTBRAND_CENTER_START' in original_text or
-                            'PRODUCTBRAND_CENTER_END' in original_text
-                        )
-                        lineage_hint_value = None
-                        lineage_hint_token = None
-                        hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s_]+)__")
-                        hint_match = hint_pattern.search(original_text)
-                        if hint_match:
-                            lineage_hint_value = hint_match.group(1).strip()
-                            lineage_hint_token = hint_match.group(0)
-                            logger.info(f"🔍 FOUND LINEAGE HINT TOKEN: '{lineage_hint_token}' -> value: '{lineage_hint_value}' in cell text: '{original_text[:100]}'")
-                            original_text = original_text.replace(lineage_hint_token, "")
-                        else:
-                            logger.debug(f"🔍 NO LINEAGE HINT TOKEN found in cell text: '{original_text[:100]}'")
-                        
-                        # Detect placeholder field markers (so we can apply per-field controls)
-                        marker_to_field = {
-                            'DESC_START': 'Description',
-                            'WEIGHTUNITS_START': 'WeightUnits',
-                            'PRODUCTBRAND_START': 'ProductBrand',
-                            'PRODUCTBRAND_CENTER_START': 'ProductBrand_Center',
-                            'PRICE_START': 'Price',
-                            'LINEAGE_START': 'Lineage',
-                            'DOH': 'DOH',
-                            'RATIO_START': 'Ratio_or_THC_CBD',
-                            'THC_CBD_START': 'THC_CBD',
-                            'PRODUCTNAME_START': 'ProductName',
-                            'PRODUCTSTRAIN_START': 'ProductStrain',
-                            'PRODUCTTYPE_START': 'ProductType'
-                        }
-                        detected_field = None
-                        for mk, fk in marker_to_field.items():
-                            if mk in original_text:
-                                detected_field = fk
-                                break
-
-                        # Convenience: fetch per-placeholder configuration
-                        ph_cfg = None
-                        try:
-                            ph_cfg = (placeholder_settings or {}).get(detected_field) if placeholder_settings else None
-                        except Exception:
-                            ph_cfg = None
-
-                        # CRITICAL FIX: Skip blank cells - don't apply any background color
-                        # But NOT if we extracted a lineage hint token (cell had color info)
-                        if (not original_text.strip() or original_text.strip() == '') and not lineage_hint_value:
-                            # Set white background for blank cells
-                            tc = cell._tc
-                            tcPr = tc.find(qn('w:tcPr'))
-                            if tcPr is None:
-                                tcPr = OxmlElement('w:tcPr')
-                                tc.insert(0, tcPr)
-                            
-                            # Remove any existing background color
-                            shd = tcPr.find(qn('w:shd'))
-                            if shd is not None:
-                                tcPr.remove(shd)
-                            
-                            # Add white background
-                            shd = OxmlElement('w:shd')
-                            shd.set(qn('w:val'), 'clear')
-                            shd.set(qn('w:color'), 'auto')
-                            shd.set(qn('w:fill'), 'FFFFFF')  # White background
-                            tcPr.append(shd)
-                            continue
-                        
-                        # CRITICAL FIX: Also check for cells that only contain markers (will be empty after marker removal)
-                        temp_text = original_text
-                        for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
-                            temp_text = temp_text.replace(marker, "")
-                        if lineage_hint_token:
-                            temp_text = temp_text.replace(lineage_hint_token, "")
-    
-                        # If after removing markers, the cell is empty, check if we have a hint token for color
-                        if not temp_text.strip():
-                            # CRITICAL FIX: If we have a lineage hint, apply color even for marker-only cells
-                            if lineage_hint_value:
-                                hint_upper = lineage_hint_value.upper().strip()
-                                hint_key = hint_upper.replace(" ", "_")
-                                # CRITICAL FIX: Handle case where hint is "_BLEND" instead of "CBD_BLEND"
-                                # This can happen if CBD_ prefix was stripped somehow
-                                if hint_upper == '_BLEND' or hint_key == '_BLEND':
-                                    hint_upper = 'CBD_BLEND'
-                                    hint_key = 'CBD_BLEND'
-                                color_candidate = (
-                                    COLORS.get(hint_upper) or
-                                    COLORS.get(hint_key) or
-                                    COLORS.get('CBD_BLEND') if 'CBD' in hint_upper or hint_upper.endswith('_BLEND') or hint_upper == '_BLEND' else None
-                                )
-                                if color_candidate:
-                                    tc = cell._tc
-                                    tcPr = tc.get_or_add_tcPr()
-                                    for old_shd in tcPr.findall(qn('w:shd')):
-                                        tcPr.remove(old_shd)
-                                    shd = OxmlElement('w:shd')
-                                    shd.set(qn('w:fill'), color_candidate)
-                                    shd.set(qn('w:val'), 'clear')
-                                    shd.set(qn('w:color'), 'auto')
-                                    tcPr.append(shd)
-                                    from src.core.generation.unified_font_sizing import get_font_size
-                                    field = 'lineage' if is_classic_type_before_processing else 'brand'
-                                    orient = template_type if template_type in ('horizontal', 'vertical', 'double') else 'vertical'
-                                    bar_font_size = get_font_size(hint_upper or ' ', field, orient, 1.0)
-                                    for paragraph in cell.paragraphs:
-                                        for run in paragraph.runs:
-                                            _set_lineage_run_white(run)
-                                            run.font.bold = True
-                                            run.font.name = "Arial"
-                                            run.font.size = bar_font_size
-                                    # Center brand text when markers are used (but only for non-classic types)
-                                    if has_productbrand_center_marker and not is_classic_type_before_processing:
-                                        for paragraph in cell.paragraphs:
-                                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                            # Also set at XML level
-                                            pPr = paragraph._element.get_or_add_pPr()
-                                            pPr.set(qn('w:jc'), 'center')
-                                        logger.info(f"✅ CENTERED hint-only cell (non-classic type)")
-                                    logger.info(f"LINEAGE COLOR (hint-only cell): Applied {hint_upper} color #{color_candidate}")
-                                    colors_applied += 1
-                                    continue
-    
-                            # No hint token - set white background for marker-only cells
-                            tc = cell._tc
-                            tcPr = tc.find(qn('w:tcPr'))
-                            if tcPr is None:
-                                tcPr = OxmlElement('w:tcPr')
-                                tc.insert(0, tcPr)
-    
-                            # Remove any existing background color
-                            shd = tcPr.find(qn('w:shd'))
-                            if shd is not None:
-                                tcPr.remove(shd)
-    
-                            # Add white background
-                            shd = OxmlElement('w:shd')
-                            shd.set(qn('w:val'), 'clear')
-                            shd.set(qn('w:color'), 'auto')
-                            shd.set(qn('w:fill'), 'FFFFFF')  # White background
-                            tcPr.append(shd)
-                            continue
-                        
-                        color_hex = None
-                        
-                        # Check if ProductStrain is CBD or CBD Blend (before marker removal)
-                        # CRITICAL FIX: Also check for CBD in ProductStrain markers for nonclassic types
-                        is_product_strain_cbd = False
-                        strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
-                        for strain_content in strain_matches:
-                            strain_upper = strain_content.upper()
-                            if "CBD" in strain_upper or "CBD BLEND" in strain_upper:
-                                is_product_strain_cbd = True
-                                logger.debug(f"Found CBD in ProductStrain: '{strain_content}' -> is_product_strain_cbd=True")
-                                break
-                        
-                        # Remove marker wrappers for robust matching
-                        for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
-                            original_text = original_text.replace(marker, "")
-                        # Remove hint token only after extracting value
-                        if lineage_hint_token:
-                            original_text = original_text.replace(lineage_hint_token, "")
-                        text = original_text.strip()
-                        
-                        # Remove ProductStrain content from text to prevent it from triggering lineage colors
-                        # ProductStrain should only affect coloring through the is_product_strain_cbd_blend flag
-                        strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
-                        for strain_content in strain_matches:
-                            text = text.replace(strain_content, "")
-                        text = text.strip()
-                        
-                        # Check if this is a classic type by looking for classic lineage indicators
-                        # Classic types have actual lineage (SATIVA, INDICA, HYBRID) in their Lineage field
-                        # Non-classic types use ProductStrain for color (CBD=yellow, else MIXED=blue)
-                        # CRITICAL: Use the check we did BEFORE marker removal to ensure accurate detection
-                        is_classic_type = is_classic_type_before_processing
-    
-                        # Apply lineage coloring logic
-                        color_hex = None
-                        lineage_matched = None
-    
-                        # CRITICAL: Check lineage hint token FIRST - this is the authoritative source from UI
-                        if lineage_hint_value:
-                            hint_upper = lineage_hint_value.upper().strip()
-                            hint_key = hint_upper.replace(" ", "_")
-                            # CRITICAL FIX: Handle case where hint is "_BLEND" instead of "CBD_BLEND"
-                            # This can happen if CBD_ prefix was stripped somehow
-                            if hint_upper == '_BLEND' or hint_key == '_BLEND':
-                                hint_upper = 'CBD_BLEND'
-                                hint_key = 'CBD_BLEND'
-                            # Try multiple lookup strategies (CBD family: CBD, CBG, CBN, CBC -> yellow)
-                            cbd_family_hint = hint_upper in ('CBD', 'CBD_BLEND', 'CBG', 'CBN', 'CBC') or 'CBD' in hint_upper or hint_upper.endswith('_BLEND') or hint_upper == '_BLEND'
-                            color_candidate = (
-                                COLORS.get(hint_upper) or
-                                COLORS.get(hint_key) or
-                                (COLORS.get('CBD_BLEND') if cbd_family_hint else None)
-                            )
-                            if color_candidate:
-                                color_hex = color_candidate
-                                lineage_matched = f"{hint_upper} (from hint token)"
-                                logger.info(f"✅ LINEAGE COLOR FROM HINT: '{hint_upper}' -> #{color_hex} (hint_key='{hint_key}')")
-                            else:
-                                logger.warning(f"⚠️ HINT TOKEN FOUND BUT NO COLOR MATCH: '{hint_upper}' (tried: '{hint_upper}', '{hint_key}')")
-    
-                        # CRITICAL FIX: For non-classic types, use ProductStrain to determine color
-                        # Non-classic types should ONLY get CBD (yellow) or MIXED (blue)
-                        # Only apply this if we didn't get a color from the hint token
-                        if not color_hex and not is_classic_type and (is_product_strain_cbd or "CBD" not in text):
-                            # This is a non-classic type - use CBD or MIXED color based on ProductStrain
-                            if is_product_strain_cbd:
-                                color_hex = COLORS['CBD']
-                                lineage_matched = "CBD (non-classic, from ProductStrain)"
-                            else:
-                                color_hex = COLORS['MIXED']
-                                lineage_matched = "MIXED (non-classic)"
-                            logger.info(f"Non-classic type color: {lineage_matched}")
-                        elif "PARAPHERNALIA" in text:
-                            color_hex = COLORS['PARA']
-                            lineage_matched = "PARAPHERNALIA"
-                        elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
-                            color_hex = COLORS['HYBRID_INDICA']
-                            lineage_matched = "HYBRID/INDICA"
-                        elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
-                            color_hex = COLORS['HYBRID_SATIVA']
-                            lineage_matched = "HYBRID/SATIVA"
-                        elif "SATIVA" in text:
-                            color_hex = COLORS['SATIVA']
-                            lineage_matched = "SATIVA"
-                        elif "INDICA" in text:
-                            color_hex = COLORS['INDICA']
-                            lineage_matched = "INDICA"
-                        elif "HYBRID" in text:
-                            color_hex = COLORS['HYBRID']
-                            lineage_matched = "HYBRID"
-                        elif "CBD" in text or "CBD_BLEND" in text or "CBD BLEND" in text:
-                            # Classic type with CBD lineage
-                            color_hex = COLORS['CBD']
-                            lineage_matched = "CBD"
-    
-                        # Log lineage color application
-                        if color_hex:
-                            logger.info(f"LINEAGE COLOR: '{text[:50]}...' -> {lineage_matched} -> #{color_hex}")
-                            colors_applied += 1
-                        else:
-                            logger.debug(f"NO LINEAGE MATCH: '{text[:50]}' (classic: {is_classic_type}, strain_cbd: {is_product_strain_cbd})")
-    
-                        # Apply color if we have one and there's actual content
-                        if color_hex and text.strip():
-                            # Set cell background color
-                            tc = cell._tc
-                            tcPr = tc.get_or_add_tcPr()
-                            for old_shd in tcPr.findall(qn('w:shd')):
-                                tcPr.remove(old_shd)
-                            shd = OxmlElement('w:shd')
-                            shd.set(qn('w:fill'), color_hex)
-                            shd.set(qn('w:val'), 'clear')
-                            shd.set(qn('w:color'), 'auto')
-                            tcPr.append(shd)
-                            # Set all runs in the bar to the same size (avoids tiny vendor "Alpha Crux, LLC" in same cell)
-                            from src.core.generation.unified_font_sizing import get_font_size
-                            bar_text = text.strip() or ''
-                            if not bar_text and cell.paragraphs:
-                                bar_text = ' '.join(p.text.strip() for p in cell.paragraphs).strip()
-                            field = 'lineage' if is_classic_type else 'brand'
-                            orient = template_type if template_type in ('horizontal', 'vertical', 'double') else 'vertical'
-                            bar_font_size = get_font_size(bar_text or ' ', field, orient, 1.0)
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    _set_lineage_run_white(run)
-                                    run.font.bold = True
-                                    # Apply placeholder font override if provided
-                                    if ph_cfg and ph_cfg.get('font'):
-                                        run.font.name = ph_cfg.get('font')
-                                    else:
-                                        run.font.name = "Arial"
-                                    # Apply placeholder size override if provided (use Pt)
-                                    try:
-                                        if ph_cfg and ph_cfg.get('size'):
-                                            run.font.size = Pt(int(ph_cfg.get('size')))
-                                        else:
-                                            run.font.size = bar_font_size
-                                    except Exception:
-                                        run.font.size = bar_font_size
-                            
-                            # CRITICAL: For non-classic types (brand in banner), center and match lineage spacing
-                            # Double template: non-classic uses Auto before/after; others use default
-                            if not is_classic_type:
-                                for paragraph in cell.paragraphs:
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    try:
-                                        pPr = paragraph._element.get_or_add_pPr()
-                                        jc_elem = pPr.find(qn('w:jc'))
-                                        if jc_elem is not None:
-                                            pPr.remove(jc_elem)
-                                        pPr.set(qn('w:jc'), 'center')
-                                        if template_type == 'double':
-                                            _set_paragraph_auto_spacing(paragraph)
-                                        else:
-                                            paragraph.paragraph_format.space_before = Pt(space_before_pt)
-                                            paragraph.paragraph_format.space_after = Pt(space_after_pt)
-                                            sp = pPr.find(qn('w:spacing'))
-                                            if sp is None:
-                                                sp = OxmlElement('w:spacing')
-                                                pPr.append(sp)
-                                            sp.set(qn('w:before'), before_twips)
-                                            sp.set(qn('w:after'), after_twips)
-                                            sp.set(qn('w:lineRule'), 'auto')
-                                        logger.info(f"✅ CENTERED+SPACING non-classic brand cell (color applied): '{original_text[:50]}'")
-                                    except Exception as e:
-                                        logger.warning(f"⚠️ Failed to set alignment/spacing: {e}")
-
-                        # CRITICAL: Center brand text when PRODUCTBRAND_CENTER markers are present (backup path)
-                        # BUT only for non-classic types - classic types (INDICA, HYBRID, SATIVA) should remain left-aligned
-                        # This ensures brand names like "GRAVITY GUMMIES" are centered, but lineage stays left-aligned
-                        # Apply centering regardless of whether color was applied - it's based on markers and type
-                        if has_productbrand_center_marker:
-                            # Get original cell text for debugging (before any processing)
-                            cell_text_debug = cell.text[:100] if cell.text else ""
-                            logger.info(f"🔍 CENTERING CHECK: has_productbrand_center_marker=True, is_classic_type={is_classic_type}, cell_text='{cell_text_debug}'")
-                            for paragraph in cell.paragraphs:
-                                if not is_classic_type:
-                                    # Non-classic types: center brand text and match lineage paragraph spacing
-                                    # Double template: Auto before/after for non-classic
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    try:
-                                        pPr = paragraph._element.get_or_add_pPr()
-                                        jc_elem = pPr.find(qn('w:jc'))
-                                        if jc_elem is not None:
-                                            pPr.remove(jc_elem)
-                                        pPr.set(qn('w:jc'), 'center')
-                                        if template_type == 'double':
-                                            _set_paragraph_auto_spacing(paragraph)
-                                        else:
-                                            paragraph.paragraph_format.space_before = Pt(space_before_pt)
-                                            paragraph.paragraph_format.space_after = Pt(space_after_pt)
-                                            spacing = pPr.find(qn('w:spacing'))
-                                            if spacing is None:
-                                                spacing = OxmlElement('w:spacing')
-                                                pPr.append(spacing)
-                                            spacing.set(qn('w:before'), before_twips)
-                                            spacing.set(qn('w:after'), after_twips)
-                                            spacing.set(qn('w:lineRule'), 'auto')
-                                        logger.info(f"✅ CENTERED non-classic brand text (has_productbrand_center_marker=True, is_classic_type=False, text='{cell_text_debug[:50]}')")
-                                    except Exception as e:
-                                        logger.warning(f"⚠️ Failed to set XML alignment: {e}, using Python alignment only")
-                                        logger.info(f"✅ CENTERED non-classic brand text (Python level only, text='{cell_text_debug[:50]}')")
-                                else:
-                                    # Classic types: keep left-aligned (explicitly set to None/left)
-                                    paragraph.alignment = None  # or WD_ALIGN_PARAGRAPH.LEFT
-                                    # Also set at XML level
-                                    try:
-                                        pPr = paragraph._element.get_or_add_pPr()
-                                        jc_elem = pPr.find(qn('w:jc'))
-                                        if jc_elem is not None:
-                                            pPr.remove(jc_elem)
-                                        pPr.set(qn('w:jc'), 'left')
-                                    except Exception:
-                                        pass
-                                    logger.debug(f"⚠️ LEFT-ALIGNED classic lineage text (has_productbrand_center_marker=True, is_classic_type=True)")
-                        elif not text.strip():
-                            # Final safety: if text is empty after all processing, ensure white background
-                            tc = cell._tc
-                            tcPr = tc.find(qn('w:tcPr'))
-                            if tcPr is None:
-                                tcPr = OxmlElement('w:tcPr')
-                                tc.insert(0, tcPr)
-                            
-                            # Remove any existing background color
-                            shd = tcPr.find(qn('w:shd'))
-                            if shd is not None:
-                                tcPr.remove(shd)
-                            
-                            # Add white background
-                            shd = OxmlElement('w:shd')
-                            shd.set(qn('w:val'), 'clear')
-                            shd.set(qn('w:color'), 'auto')
-                            shd.set(qn('w:fill'), 'FFFFFF')  # White background
-                            tcPr.append(shd)
-                        
-                        # Remove lineage hint token and PRODUCTBRAND_CENTER markers from actual cell content if present
-                        # BUT preserve centering that was already applied
-                        if lineage_hint_token:
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    if lineage_hint_token in run.text.upper():
-                                        run.text = run.text.replace(lineage_hint_token, "")
-                        # Remove PRODUCTBRAND_CENTER markers from cell content (they've already been used for centering)
-                        # BUT ensure centering is preserved after marker removal
-                        if has_productbrand_center_marker:
-                            # Re-apply centering and lineage-matching spacing before removing markers
-                            if not is_classic_type:
-                                for paragraph in cell.paragraphs:
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    try:
-                                        pPr = paragraph._element.get_or_add_pPr()
-                                        jc_elem = pPr.find(qn('w:jc'))
-                                        if jc_elem is not None:
-                                            pPr.remove(jc_elem)
-                                        pPr.set(qn('w:jc'), 'center')
-                                        if template_type == 'double':
-                                            _set_paragraph_auto_spacing(paragraph)
-                                        else:
-                                            paragraph.paragraph_format.space_before = Pt(space_before_pt)
-                                            paragraph.paragraph_format.space_after = Pt(space_after_pt)
-                                            sp = pPr.find(qn('w:spacing'))
-                                            if sp is None:
-                                                sp = OxmlElement('w:spacing')
-                                                pPr.append(sp)
-                                            sp.set(qn('w:before'), before_twips)
-                                            sp.set(qn('w:after'), after_twips)
-                                            sp.set(qn('w:lineRule'), 'auto')
-                                    except Exception:
-                                        pass
-                            
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    run_text_upper = run.text.upper()
-                                    if 'PRODUCTBRAND_CENTER_START' in run_text_upper:
-                                        # Extract content between markers before removing them
-                                        start_idx = run_text_upper.find('PRODUCTBRAND_CENTER_START')
-                                        end_idx = run_text_upper.find('PRODUCTBRAND_CENTER_END')
-                                        if start_idx != -1 and end_idx != -1:
-                                            # Remove markers but keep the content
-                                            run.text = run.text.replace('PRODUCTBRAND_CENTER_START', '').replace('PRODUCTBRAND_CENTER_END', '')
-                                    elif 'PRODUCTBRAND_CENTER_END' in run_text_upper:
-                                        run.text = run.text.replace('PRODUCTBRAND_CENTER_END', '')
-                            
-                            # Re-apply centering and spacing after marker removal
-                            if not is_classic_type:
-                                for paragraph in cell.paragraphs:
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    try:
-                                        pPr = paragraph._element.get_or_add_pPr()
-                                        jc_elem = pPr.find(qn('w:jc'))
-                                        if jc_elem is not None:
-                                            pPr.remove(jc_elem)
-                                        pPr.set(qn('w:jc'), 'center')
-                                        if template_type == 'double':
-                                            _set_paragraph_auto_spacing(paragraph)
-                                        else:
-                                            paragraph.paragraph_format.space_before = Pt(space_before_pt)
-                                            paragraph.paragraph_format.space_after = Pt(space_after_pt)
-                                            sp = pPr.find(qn('w:spacing'))
-                                            if sp is None:
-                                                sp = OxmlElement('w:spacing')
-                                                pPr.append(sp)
-                                            sp.set(qn('w:before'), before_twips)
-                                            sp.set(qn('w:after'), after_twips)
-                                            sp.set(qn('w:lineRule'), 'auto')
-                                        logger.debug(f"✅ RE-APPLIED CENTERING after marker removal for '{cell.text[:50] if cell.text else ''}'")
-                                    except Exception:
-                                        pass
-                    except Exception as cell_err:
-                        logger.warning(f"Lineage color skipped for one cell: {cell_err}")
-        # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
-        _final_lineage_cleanup_after_coloring(doc)
-        
-        # FINAL WHITE TEXT PASS: Ensure all colored lineage/brand bars have white text (fixes yellow CBD bar showing black)
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    tc = cell._tc
-                    tcPr = tc.find(qn('w:tcPr'))
-                    if tcPr is None:
-                        continue
-                    shd = tcPr.find(qn('w:shd'))
-                    if shd is None:
-                        continue
-                    fill = shd.get(qn('w:fill'))
-                    if not fill or fill == 'FFFFFF' or fill == 'auto':
-                        continue
-                    for paragraph in cell.paragraphs:
-                        for run in paragraph.runs:
-                            _set_lineage_run_white(run)
-        
-        # FINAL CENTERING PASS: Ensure brand centering persists after all processing
-        # This catches any cells that might have had markers removed but still need centering
-        logger.info("Applying final centering pass for non-classic brand cells...")
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    cell_text = cell.text.upper() if cell.text else ""
-                    # Check if this looks like a brand cell (contains brand-like text, no classic lineage)
-                    has_classic_lineage = any(lineage in cell_text for lineage in ["SATIVA", "INDICA", "HYBRID"])
-                    # Common brand patterns (all caps, multiple words, not lineage)
-                    # Any all-caps text with multiple words in a colored cell that doesn't have classic lineage should be centered
-                    looks_like_brand = (
-                        len(cell_text) > 3 and
-                        cell_text.isupper() and
-                        ' ' in cell_text and
-                        not has_classic_lineage and
-                        not cell_text.strip().startswith('$') and
-                        not any(char.isdigit() for char in cell_text[:3]) and  # Not starting with numbers
-                        not cell_text.strip().startswith('THC') and  # Not THC/CBD content
-                        not cell_text.strip().startswith('CBD') and
-                        not cell_text.strip().startswith('CBN') and
-                        not cell_text.strip().startswith('CBG')
-                    )
+                    cells_processed += 1
+                    original_text = cell.text.upper()  # Keep original text to check for markers
+                    lineage_hint_value = None
+                    lineage_hint_token = None
+                    hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s]+)__")
+                    hint_match = hint_pattern.search(original_text)
+                    if hint_match:
+                        lineage_hint_value = hint_match.group(1).strip()
+                        lineage_hint_token = hint_match.group(0)
+                        original_text = original_text.replace(lineage_hint_token, "")
                     
-                    # Check if this cell has a colored background (indicating it's a banner cell)
-                    tc = cell._tc
-                    tcPr = tc.find(qn('w:tcPr'))
-                    has_color = False
-                    if tcPr is not None:
+                    # CRITICAL FIX: Skip blank cells - don't apply any background color
+                    if not original_text.strip() or original_text.strip() == '':
+                        # Set white background for blank cells
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
                         shd = tcPr.find(qn('w:shd'))
                         if shd is not None:
-                            fill = shd.get(qn('w:fill'))
-                            if fill and fill != 'FFFFFF' and fill != 'auto':
-                                has_color = True
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
+                        continue
                     
-                    # If it has a colored background and looks like a brand, center it and match lineage spacing
-                    if has_color and (looks_like_brand or (not has_classic_lineage and len(cell_text) > 5 and cell_text.isupper())):
+                    # CRITICAL FIX: Also check for cells that only contain markers (will be empty after marker removal)
+                    temp_text = original_text
+                    for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
+                        temp_text = temp_text.replace(marker, "")
+                    if lineage_hint_token:
+                        temp_text = temp_text.replace(lineage_hint_token, "")
+                    
+                    # If after removing markers, the cell is empty, treat it as blank
+                    if not temp_text.strip():
+                        # Set white background for marker-only cells
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
+                        continue
+                    
+                    color_hex = None
+                    
+                    # Check if ProductStrain is CBD or CBD Blend (before marker removal)
+                    is_product_strain_cbd = False
+                    strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
+                    for strain_content in strain_matches:
+                        if "CBD" in strain_content.upper():
+                            is_product_strain_cbd = True
+                            break
+                    
+                    # Remove marker wrappers for robust matching
+                    for marker in ["LINEAGE_START", "LINEAGE_END", "PRODUCTSTRAIN_START", "PRODUCTSTRAIN_END", "PRODUCTBRAND_CENTER_START", "PRODUCTBRAND_CENTER_END"]:
+                        original_text = original_text.replace(marker, "")
+                    # Remove hint token only after extracting value
+                    if lineage_hint_token:
+                        original_text = original_text.replace(lineage_hint_token, "")
+                    text = original_text.strip()
+                    
+                    # Remove ProductStrain content from text to prevent it from triggering lineage colors
+                    # ProductStrain should only affect coloring through the is_product_strain_cbd_blend flag
+                    strain_matches = re.findall(r"PRODUCTSTRAIN_START(.*?)PRODUCTSTRAIN_END", original_text)
+                    for strain_content in strain_matches:
+                        text = text.replace(strain_content, "")
+                    text = text.strip()
+                    
+                    # Check if this is a classic type by looking for classic lineage indicators
+                    # Classic types have actual lineage (SATIVA, INDICA, HYBRID, CBD) in their content
+                    is_classic_type = any(lineage in text for lineage in ["SATIVA", "INDICA", "HYBRID", "CBD"])
+                    
+                    # Apply lineage coloring logic based on clean text
+                    color_hex = None
+                    lineage_matched = None
+                    
+                    if "PARAPHERNALIA" in text:
+                        color_hex = COLORS['PARA']
+                        lineage_matched = "PARAPHERNALIA"
+                    elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
+                        color_hex = COLORS['HYBRID_INDICA']
+                        lineage_matched = "HYBRID/INDICA"
+                    elif "HYBRID/SATIVA" in text or "HYBRID SATIVA" in text:
+                        color_hex = COLORS['HYBRID_SATIVA']
+                        lineage_matched = "HYBRID/SATIVA"
+                    elif "SATIVA" in text:
+                        color_hex = COLORS['SATIVA']
+                        lineage_matched = "SATIVA"
+                    elif "INDICA" in text:
+                        color_hex = COLORS['INDICA']
+                        lineage_matched = "INDICA"
+                    elif "HYBRID" in text:
+                        color_hex = COLORS['HYBRID']
+                        lineage_matched = "HYBRID"
+                    elif "CBD" in text or "CBD_BLEND" in text:
+                        # Apply CBD lineage colors if it's a classic type OR if ProductStrain is CBD
+                        if is_classic_type or is_product_strain_cbd:
+                            color_hex = COLORS['CBD']
+                            lineage_matched = "CBD"
+                    elif "CBD BLEND" in text:
+                        # Apply CBD BLEND lineage colors if it's a classic type OR if ProductStrain is CBD
+                        if is_classic_type or is_product_strain_cbd:
+                            color_hex = COLORS['CBD_BLEND']
+                            lineage_matched = "CBD BLEND"
+                    elif "MIXED" in text:
+                        # MIXED lineage always gets blue bars (this covers non-classic types like edibles)
+                        color_hex = COLORS['MIXED']  # Blue for Mixed
+                        lineage_matched = "MIXED"
+                    elif not is_classic_type and is_product_strain_cbd:
+                        # For non-classic types with CBD strain, use yellow color
+                        color_hex = COLORS['CBD']
+                        lineage_matched = "CBD (non-classic)"
+                    elif lineage_hint_value:
+                        hint_key = lineage_hint_value.replace(" ", "_")
+                        color_candidate = COLORS.get(lineage_hint_value) or COLORS.get(hint_key)
+                        if color_candidate:
+                            color_hex = color_candidate
+                            lineage_matched = f"{lineage_hint_value} (hint)"
+                    elif not is_classic_type and text.strip():
+                        # For non-classic types without specific strain, use blue color (MIXED)
+                        # BUT ONLY if there's actual content (not empty after marker removal)
+                        color_hex = COLORS['MIXED']
+                        lineage_matched = "MIXED (non-classic)"
+                    
+                    # Log lineage color application
+                    if color_hex:
+                        logger.info(f"LINEAGE COLOR: '{text}' -> {lineage_matched} -> #{color_hex}")
+                        colors_applied += 1
+                    else:
+                        logger.debug(f"NO LINEAGE MATCH: '{text}' (classic: {is_classic_type}, strain_cbd: {is_product_strain_cbd})")
+                    
+                    if color_hex and text.strip():
+                        # Final safety check: only apply color if there's actual content
+                        # Set cell background color
+                        tc = cell._tc
+                        tcPr = tc.get_or_add_tcPr()
+                        for old_shd in tcPr.findall(qn('w:shd')):
+                            tcPr.remove(old_shd)
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:fill'), color_hex)
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        tcPr.append(shd)
                         for paragraph in cell.paragraphs:
-                            current_alignment = paragraph.alignment
-                            if current_alignment == WD_ALIGN_PARAGRAPH.CENTER:
-                                # Still apply spacing so brand looks like lineage
-                                paragraph.paragraph_format.space_before = Pt(space_before_pt)
-                                paragraph.paragraph_format.space_after = Pt(space_after_pt)
-                                try:
-                                    pPr = paragraph._element.get_or_add_pPr()
-                                    sp = pPr.find(qn('w:spacing'))
-                                    if sp is None:
-                                        sp = OxmlElement('w:spacing')
-                                        pPr.append(sp)
-                                    sp.set(qn('w:before'), before_twips)
-                                    sp.set(qn('w:after'), after_twips)
-                                    sp.set(qn('w:lineRule'), 'auto')
-                                except Exception:
-                                    pass
-                                continue
-                            
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            paragraph.paragraph_format.space_before = Pt(space_before_pt)
-                            paragraph.paragraph_format.space_after = Pt(space_after_pt)
-                            try:
-                                pPr = paragraph._element.get_or_add_pPr()
-                                jc_elem = pPr.find(qn('w:jc'))
-                                if jc_elem is not None:
-                                    pPr.remove(jc_elem)
-                                pPr.set(qn('w:jc'), 'center')
-                                sp = pPr.find(qn('w:spacing'))
-                                if sp is None:
-                                    sp = OxmlElement('w:spacing')
-                                    pPr.append(sp)
-                                sp.set(qn('w:before'), before_twips)
-                                sp.set(qn('w:after'), after_twips)
-                                sp.set(qn('w:lineRule'), 'auto')
-                                logger.info(f"✅ FINAL CENTERING PASS: Centered brand cell '{cell_text[:50]}' (has_color={has_color}, looks_like_brand={looks_like_brand})")
-                            except Exception as e:
-                                logger.warning(f"⚠️ Failed to set XML alignment in final pass: {e}")
+                            for run in paragraph.runs:
+                                # Preserve existing font size to maintain ProductStrain 1pt sizing
+                                existing_font_size = run.font.size
+                                run.font.color.rgb = RGBColor(255, 255, 255)
+                                run.font.bold = True
+                                run.font.name = "Arial"
+                                # Restore the original font size if it was set
+                                if existing_font_size is not None:
+                                    run.font.size = existing_font_size
+                    elif not text.strip():
+                        # Final safety: if text is empty after all processing, ensure white background
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        
+                        # Remove any existing background color
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        
+                        # Add white background
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')  # White background
+                        tcPr.append(shd)
+                    
+                    # Remove lineage hint token from actual cell content if present
+                    if lineage_hint_token:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                if lineage_hint_token in run.text.upper():
+                                    run.text = run.text.replace(lineage_hint_token, "")
+        # FINAL LINEAGE CLEANUP: Remove any leading spaces from lineage content after coloring
+        _final_lineage_cleanup_after_coloring(doc)
         
         logger.info(f"LINEAGE COLOR SUMMARY: Processed {cells_processed} cells, applied colors to {colors_applied} cells")
         logger.debug("Applied lineage colors to document")
@@ -709,8 +312,6 @@ def _final_lineage_cleanup_after_coloring(doc):
     This runs after all other processing to ensure clean lineage display.
     """
     try:
-        whitespace_chars = ' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF'
-
         # Define lineage values that should be cleaned
         lineage_values = [
             "SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", 
@@ -721,45 +322,6 @@ def _final_lineage_cleanup_after_coloring(doc):
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    cell_text_upper = (cell.text or "").upper()
-                    is_lineage_cell = any(v in cell_text_upper for v in lineage_values)
-                    if not is_lineage_cell:
-                        continue
-
-                    if cell.paragraphs:
-                        for idx, para in enumerate(cell.paragraphs):
-                            # Non-destructive cleanup: keep paragraph structure intact for Word compatibility.
-                            para.paragraph_format.space_before = Pt(0)
-                            para.paragraph_format.space_after = Pt(0)
-                            pPr = para._element.get_or_add_pPr()
-                            sp = pPr.find(qn('w:spacing'))
-                            if sp is None:
-                                sp = OxmlElement('w:spacing')
-                                pPr.append(sp)
-                            sp.set(qn('w:before'), '0')
-                            sp.set(qn('w:after'), '0')
-                            sp.set(qn('w:lineRule'), 'auto')
-
-                            # Clear fully blank helper paragraphs instead of removing XML nodes.
-                            if idx > 0 and not (para.text or "").strip():
-                                for run in para.runs:
-                                    run.text = ""
-
-                        # Strip leading whitespace/newline runs before first visible lineage text.
-                        started = False
-                        for para in cell.paragraphs:
-                            for run in para.runs:
-                                run_text = run.text or ""
-                                if started:
-                                    continue
-                                cleaned = run_text.lstrip(whitespace_chars)
-                                if cleaned:
-                                    if cleaned != run_text:
-                                        run.text = cleaned
-                                    started = True
-                                else:
-                                    run.text = ""
-
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
                             original_text = run.text
@@ -768,7 +330,7 @@ def _final_lineage_cleanup_after_coloring(doc):
                             for lineage in lineage_values:
                                 if lineage in original_text.upper():
                                     # Aggressively clean leading spaces
-                                    cleaned_text = original_text.lstrip(whitespace_chars)
+                                    cleaned_text = original_text.lstrip(' \t\n\r\u00A0\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u200B\u200C\u200D\u200E\u200F\u2028\u2029\u202A\u202B\u202C\u202D\u202E\u202F\u205F\u2060\u2061\u2062\u2063\u2064\u2065\u2066\u2067\u2068\u2069\u206A\u206B\u206C\u206D\u206E\u206F\u3000\uFEFF')
                                     
                                     if cleaned_text != original_text:
                                         run.text = cleaned_text
@@ -1527,15 +1089,8 @@ def truncate_text_for_cell(text, max_length=50):
     return text[:max_length-3] + "..."
 
 
-def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_processing=False):
-    """
-    Enforce fixed cell dimensions to prevent any cell growth with text.
-    
-    Args:
-        table: The table to process
-        template_type: Type of template (mini, vertical, etc.)
-        skip_paragraph_processing: If True, skip expensive paragraph/run processing (faster)
-    """
+def enforce_fixed_cell_dimensions(table, template_type=None):
+    """Enforce fixed cell dimensions to prevent any cell growth with text."""
     try:
         from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
         from docx.shared import Inches
@@ -1569,13 +1124,9 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
             tblPr = OxmlElement('w:tblPr')
         
         # Ensure fixed layout
-        tblLayout = tblPr.find(qn('w:tblLayout'))
-        if tblLayout is None:
-            tblLayout = OxmlElement('w:tblLayout')
-            tblLayout.set(qn('w:type'), 'fixed')
-            tblPr.append(tblLayout)
-        elif tblLayout.get(qn('w:type')) != 'fixed':
-            tblLayout.set(qn('w:type'), 'fixed')
+        tblLayout = OxmlElement('w:tblLayout')
+        tblLayout.set(qn('w:type'), 'fixed')
+        tblPr.append(tblLayout)
         
         # Set table to not auto-fit
         table.autofit = False
@@ -1596,7 +1147,7 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                         if tblGrid is not None:
                             # Remove existing grid
                             tblGrid.getparent().remove(tblGrid)
-
+                        
                         # Create new grid with correct dimensions
                         tblGrid = OxmlElement('w:tblGrid')
                         # Use the actual number of columns in the table, not table.columns
@@ -1607,12 +1158,12 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                 gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
                                 tblGrid.append(gridCol)
                             table._element.insert(0, tblGrid)
-
+                            
                             # Set row heights and cell widths based on template type
                             for row in table.rows:
                                 row.height = Inches(cell_dims['height'])
                                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-
+                                
                                 # Set individual cell widths
                                 for cell in row.cells:
                                     tcPr = cell._tc.get_or_add_tcPr()
@@ -1623,8 +1174,47 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                     tcW.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
                                     tcW.set(qn('w:type'), 'dxa')
                 except Exception as e:
-                    logger.warning(f"Could not enforce template-specific dimensions for {template_type}: {e}")
+                    logger.warning(f"Could not enforce mini template dimensions: {e}")
                     # Continue with general dimension enforcement
+            
+            try:
+                from src.core.constants import CELL_DIMENSIONS
+                cell_dims = CELL_DIMENSIONS.get(template_type)
+                if cell_dims and table.rows:
+                    # Set column widths based on template type
+                    tblGrid = table._element.find(qn('w:tblGrid'))
+                    if tblGrid is not None:
+                        # Remove existing grid
+                        tblGrid.getparent().remove(tblGrid)
+                    
+                    # Create new grid with correct dimensions
+                    tblGrid = OxmlElement('w:tblGrid')
+                    # Use the actual number of columns in the table, not table.columns
+                    num_cols = len(table.rows[0].cells) if table.rows else 0
+                    if num_cols > 0:
+                        for _ in range(num_cols):
+                            gridCol = OxmlElement('w:gridCol')
+                            gridCol.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
+                            tblGrid.append(gridCol)
+                        table._element.insert(0, tblGrid)
+                        
+                        # Set row heights and cell widths based on template type
+                        for row in table.rows:
+                            row.height = Inches(cell_dims['height'])
+                            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+                            
+                            # Set individual cell widths
+                            for cell in row.cells:
+                                tcPr = cell._tc.get_or_add_tcPr()
+                                tcW = tcPr.find(qn('w:tcW'))
+                                if tcW is None:
+                                    tcW = OxmlElement('w:tcW')
+                                    tcPr.append(tcW)
+                                tcW.set(qn('w:w'), str(int(cell_dims['width'] * 1440)))
+                                tcW.set(qn('w:type'), 'dxa')
+            except Exception as e:
+                logger.warning(f"Could not enforce template-specific dimensions for {template_type}: {e}")
+                # Continue with general dimension enforcement
         
         # Ensure table has a valid tblGrid before processing cells
         tblGrid = table._element.find(qn('w:tblGrid'))
@@ -1706,6 +1296,13 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                 tcW.set(qn('w:w'), '2880')  # Fixed width in twips (2.0 inches = 2880 twips)
                                 tcW.set(qn('w:type'), 'dxa')  # Fixed width type
                             
+                            # Disable cell auto-sizing
+                            tcFitText = tcPr.find(qn('w:tcFitText'))
+                            if tcFitText is None:
+                                tcFitText = OxmlElement('w:tcFitText')
+                                tcPr.append(tcFitText)
+                            tcFitText.set(qn('w:val'), '0')  # Disable fit text
+                            
                             # Set cell height to exact value
                             # ONLY set height if template_type was not provided (template-specific heights set above)
                             if not template_type:
@@ -1717,66 +1314,59 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                 tcH.set(qn('w:hRule'), 'exact')  # Exact height rule
                             
                             # Process paragraphs in the cell to prevent text overflow
-                            # OPTIMIZATION: Skip expensive paragraph/run processing if requested
-                            if not skip_paragraph_processing:
-                                for paragraph in cell.paragraphs:
-                                    # Set template-specific paragraph spacing
-                                    if template_type == 'double':
-                                        before, after = Pt(2), Pt(2)
-                                    elif template_type == 'vertical':
-                                        before, after = Pt(6), Pt(6)
-                                    elif template_type == 'horizontal':
-                                        before, after = Pt(0), Pt(0)
-                                    else:
-                                        before, after = Pt(0), Pt(0)
-
-                                    paragraph.paragraph_format.space_before = before
-                                    paragraph.paragraph_format.space_after = after
-                                    paragraph.paragraph_format.line_spacing = 1.0
+                            for paragraph in cell.paragraphs:
+                                # Set paragraph spacing to minimum
+                                paragraph.paragraph_format.space_before = Pt(0)
+                                paragraph.paragraph_format.space_after = Pt(0)
+                                paragraph.paragraph_format.line_spacing = 1.0
+                                
+                                # CRITICAL: Set paragraph alignment to prevent expansion
+                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                
+                                # CRITICAL: Enable text wrapping and prevent overflow
+                                pPr = paragraph._element.get_or_add_pPr()
+                                
+                                # Add text wrapping control
+                                wrap = pPr.find(qn('w:wordWrap'))
+                                if wrap is None:
+                                    wrap = OxmlElement('w:wordWrap')
+                                    pPr.append(wrap)
+                                wrap.set(qn('w:val'), '1')  # Enable word wrapping
+                                
+                                # Add overflow control
+                                overflow = pPr.find(qn('w:overflowPunct'))
+                                if overflow is None:
+                                    overflow = OxmlElement('w:overflowPunct')
+                                    pPr.append(overflow)
+                                overflow.set(qn('w:val'), '0')  # Disable overflow punctuation
+                                
+                                # CRITICAL: Truncate text if it's too long for the cell
+                                full_text = paragraph.text
+                                if full_text and len(full_text) > 50:  # Adjust max length as needed
+                                    truncated_text = truncate_text_for_cell(full_text, 50)
+                                    # Clear existing runs and add truncated text
+                                    paragraph.clear()
+                                    run = paragraph.add_run(truncated_text)
                                     
-                                    # CRITICAL: Set paragraph alignment to prevent expansion
-                                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                    # Set font properties to prevent text expansion
+                                    if not run.font.size:
+                                        # Use unified font sizing system for default size
+                                        from src.core.generation.unified_font_sizing import get_font_size
+                                        default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                                        run.font.size = default_size
                                     
-                                    # CRITICAL: Enable text wrapping but keep words together (never split mid-word)
-                                    pPr = paragraph._element.get_or_add_pPr()
-
-                                    # CRITICAL FIX: Disable character-level wrapping - only allow word-level wrapping
-                                    # This prevents mid-word splits like "Blueberry - 7" -> "Blueberry - 7|g"
-                                    wordWrap = pPr.find(qn('w:wordWrap'))
-                                    if wordWrap is None:
-                                        wordWrap = OxmlElement('w:wordWrap')
-                                        pPr.append(wordWrap)
-                                    wordWrap.set(qn('w:val'), '1')  # Enable wrapping at word boundaries only
-
-                                    # CRITICAL FIX: Suppress automatic hyphenation to prevent "3.5g" from breaking
-                                    suppressAutoHyphens = pPr.find(qn('w:suppressAutoHyphens'))
-                                    if suppressAutoHyphens is None:
-                                        suppressAutoHyphens = OxmlElement('w:suppressAutoHyphens')
-                                        pPr.append(suppressAutoHyphens)
-
-                                    # CRITICAL FIX: Prevent text from overflowing or breaking mid-word
-                                    # Use autoSpaceDE (disable auto-spacing) to prevent unexpected breaks
-                                    autoSpaceDE = pPr.find(qn('w:autoSpaceDE'))
-                                    if autoSpaceDE is None:
-                                        autoSpaceDE = OxmlElement('w:autoSpaceDE')
-                                        pPr.append(autoSpaceDE)
-                                    autoSpaceDE.set(qn('w:val'), '0')  # Disable auto-spacing that can cause mid-word breaks
-
-                                    # Add overflow control
-                                    overflow = pPr.find(qn('w:overflowPunct'))
-                                    if overflow is None:
-                                        overflow = OxmlElement('w:overflowPunct')
-                                        pPr.append(overflow)
-                                    overflow.set(qn('w:val'), '0')  # Disable overflow punctuation
+                                    # CRITICAL: Force text to wrap within cell boundaries
+                                    rPr = run._element.get_or_add_rPr()
                                     
-                                    # CRITICAL: Truncate text if it's too long for the cell
-                                    full_text = paragraph.text
-                                    if full_text and len(full_text) > 50:  # Adjust max length as needed
-                                        truncated_text = truncate_text_for_cell(full_text, 50)
-                                        # Clear existing runs and add truncated text
-                                        paragraph.clear()
-                                        run = paragraph.add_run(truncated_text)
-                                        
+                                    # Add text wrapping control to run
+                                    wrap_run = rPr.find(qn('w:wordWrap'))
+                                    if wrap_run is None:
+                                        wrap_run = OxmlElement('w:wordWrap')
+                                        rPr.append(wrap_run)
+                                    wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
+                                else:
+                                    # Ensure text doesn't wrap beyond cell boundaries
+                                    for run in paragraph.runs:
                                         # Set font properties to prevent text expansion
                                         if not run.font.size:
                                             # Use unified font sizing system for default size
@@ -1793,25 +1383,6 @@ def enforce_fixed_cell_dimensions(table, template_type=None, skip_paragraph_proc
                                             wrap_run = OxmlElement('w:wordWrap')
                                             rPr.append(wrap_run)
                                         wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
-                                    else:
-                                        # Ensure text doesn't wrap beyond cell boundaries
-                                        for run in paragraph.runs:
-                                            # Set font properties to prevent text expansion
-                                            if not run.font.size:
-                                                # Use unified font sizing system for default size
-                                                from src.core.generation.unified_font_sizing import get_font_size
-                                                default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
-                                                run.font.size = default_size
-                                            
-                                            # CRITICAL: Force text to wrap within cell boundaries
-                                            rPr = run._element.get_or_add_rPr()
-                                            
-                                            # Add text wrapping control to run
-                                            wrap_run = rPr.find(qn('w:wordWrap'))
-                                            if wrap_run is None:
-                                                wrap_run = OxmlElement('w:wordWrap')
-                                                rPr.append(wrap_run)
-                                            wrap_run.set(qn('w:val'), '1')  # Enable word wrapping
                         except Exception as cell_error:
                             logger.warning(f"Error processing cell in row: {cell_error}")
                             continue
@@ -2427,67 +1998,55 @@ def prevent_table_expansion_enhanced(doc, template_type=None):
                             tcPr.append(tcFitText)
                         tcFitText.set(qn('w:val'), '0')  # Disable fit text
                         
-                        # LAYER 7: Process paragraphs to prevent text overflow (optimized - only if needed)
-                        # OPTIMIZATION: Only process paragraphs if cell has text that might overflow
-                        cell_text = cell.text.strip()
-                        if cell_text and len(cell_text) > 30:  # Only process cells with substantial text
-                            for paragraph in cell.paragraphs:
-                                # Set template-specific minimal spacing
-                                if template_type == 'double':
-                                    before, after = Pt(2), Pt(2)
-                                elif template_type == 'vertical':
-                                    before, after = Pt(6), Pt(6)
-                                elif template_type == 'horizontal':
-                                    before, after = Pt(0), Pt(0)
-                                else:
-                                    before, after = Pt(0), Pt(0)
-
-                                paragraph.paragraph_format.space_before = before
-                                paragraph.paragraph_format.space_after = after
-                                paragraph.paragraph_format.line_spacing = 1.0
+                        # LAYER 7: Process paragraphs to prevent text overflow
+                        for paragraph in cell.paragraphs:
+                            # Set minimal spacing
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
+                            paragraph.paragraph_format.line_spacing = 1.0
+                            
+                            # Force left alignment to prevent expansion
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            
+                            # Add text wrapping controls at XML level
+                            pPr = paragraph._element.get_or_add_pPr()
+                            
+                            # Enable word wrapping
+                            wrap = pPr.find(qn('w:wordWrap'))
+                            if wrap is None:
+                                wrap = OxmlElement('w:wordWrap')
+                                pPr.append(wrap)
+                            wrap.set(qn('w:val'), '1')
+                            
+                            # Disable overflow
+                            overflow = pPr.find(qn('w:overflowPunct'))
+                            if overflow is None:
+                                overflow = OxmlElement('w:overflowPunct')
+                                pPr.append(overflow)
+                            overflow.set(qn('w:val'), '0')
+                            
+                            # LAYER 8: Process runs to prevent font expansion
+                            for run in paragraph.runs:
+                                # Ensure text doesn't cause expansion
+                                if len(run.text) > 100:
+                                    # Truncate very long text
+                                    run.text = run.text[:97] + "..."
                                 
-                                # Force left alignment to prevent expansion
-                                paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                                # Set font properties to prevent expansion
+                                if not run.font.size:
+                                    # Use unified font sizing system for default size
+                                    from src.core.generation.unified_font_sizing import get_font_size
+                                    default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
+                                    run.font.size = default_size
                                 
-                                # Add text wrapping controls at XML level
-                                pPr = paragraph._element.get_or_add_pPr()
+                                # Add text wrapping control to run level
+                                rPr = run._element.get_or_add_rPr()
                                 
-                                # Enable word wrapping
-                                wrap = pPr.find(qn('w:wordWrap'))
-                                if wrap is None:
-                                    wrap = OxmlElement('w:wordWrap')
-                                    pPr.append(wrap)
-                                wrap.set(qn('w:val'), '1')
-                                
-                                # Disable overflow
-                                overflow = pPr.find(qn('w:overflowPunct'))
-                                if overflow is None:
-                                    overflow = OxmlElement('w:overflowPunct')
-                                    pPr.append(overflow)
-                                overflow.set(qn('w:val'), '0')
-                                
-                                # LAYER 8: Process runs to prevent font expansion (only if text is long)
-                                for run in paragraph.runs:
-                                    # Ensure text doesn't cause expansion
-                                    if len(run.text) > 100:
-                                        # Truncate very long text
-                                        run.text = run.text[:97] + "..."
-                                    
-                                    # Set font properties to prevent expansion (only if not already set)
-                                    if not run.font.size:
-                                        # Use unified font sizing system for default size
-                                        from src.core.generation.unified_font_sizing import get_font_size
-                                        default_size = get_font_size(run.text, 'default', 'vertical', 1.0)
-                                        run.font.size = default_size
-                                    
-                                    # Add text wrapping control to run level (only if not already set)
-                                    rPr = run._element.get_or_add_rPr()
-                                    
-                                    wrap_run = rPr.find(qn('w:wordWrap'))
-                                    if wrap_run is None:
-                                        wrap_run = OxmlElement('w:wordWrap')
-                                        rPr.append(wrap_run)
-                                        wrap_run.set(qn('w:val'), '1')
+                                wrap_run = rPr.find(qn('w:wordWrap'))
+                                if wrap_run is None:
+                                    wrap_run = OxmlElement('w:wordWrap')
+                                    rPr.append(wrap_run)
+                                wrap_run.set(qn('w:val'), '1')
                 
                 # LAYER 9: Final table-level constraints
                 # Disable all table auto-sizing features

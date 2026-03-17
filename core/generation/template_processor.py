@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 import re
 import time
-import unicodedata
 from typing import Dict, Any, List, Optional
 import traceback
 import pandas as pd
@@ -24,23 +23,19 @@ from importlib.metadata import version as get_package_version
 from importlib import resources as importlib_resources
 import sys
 import types
-import warnings
 import docxcompose.properties as _docx_props
 
-# Suppress pkg_resources deprecation warning (will be addressed when dependencies are updated)
-with warnings.catch_warnings():
-    warnings.filterwarnings('ignore', category=UserWarning, message='.*pkg_resources is deprecated.*')
-    try:
-        import pkg_resources  # type: ignore
-    except ModuleNotFoundError:
-        import types as _types  # Fallback if types not available
-        pkg_resources = _types.ModuleType('pkg_resources')  # type: ignore
+try:
+    import pkg_resources  # type: ignore
+except ModuleNotFoundError:
+    import types as _types  # Fallback if types not available
+    pkg_resources = _types.ModuleType('pkg_resources')  # type: ignore
 
-        def _resource_string(package, resource):
-            return importlib_resources.read_binary(package, resource)
+    def _resource_string(package, resource):
+        return importlib_resources.read_binary(package, resource)
 
-        pkg_resources.resource_string = _resource_string  # type: ignore
-        sys.modules['pkg_resources'] = pkg_resources  # type: ignore
+    pkg_resources.resource_string = _resource_string  # type: ignore
+    sys.modules['pkg_resources'] = pkg_resources  # type: ignore
 
 if not hasattr(_docx_props, 'pkg_resources'):
     _docx_props.pkg_resources = pkg_resources
@@ -49,14 +44,12 @@ if not hasattr(_docx_props, 'pkg_resources'):
 from src.core.utils.common import safe_get
 from src.core.generation.docx_formatting import (
     apply_lineage_colors,
-    _set_lineage_run_white,
     enforce_fixed_cell_dimensions,
     prevent_table_expansion_enhanced,
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
 )
-from src.core.generation._ui_lineage_port import compute_display_lineage_like_ui
 from src.core.generation.unified_font_sizing import (
     get_font_size,
     get_font_size_by_marker,
@@ -77,37 +70,7 @@ IS_PYTHONANYWHERE = 'pythonanywhere.com' in os.environ.get('HTTP_HOST', '')
 # Use same settings for both local and PythonAnywhere to ensure consistent generation
 MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
 MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
-CHUNK_SIZE_LIMIT = 100              # PERFORMANCE: Increased from 50 to 100 for faster generation of large batches
-
-# Pattern for "100mg THC", "50mg CBD", " - 100mg THC" etc. (non-classic: replace with weight)
-# Match at end of string
-_MG_THC_CBD_PATTERN = re.compile(
-    r'(?:\s*-\s*|\s+)\d+\s*mg\s*(?:\s*THC|\s*CBD|\s*THC/CBD)?\s*$',
-    re.IGNORECASE
-)
-# More permissive: " - 100mg THC" at end (flexible spaces) for sources that format differently
-_MG_THC_CBD_RELAXED = re.compile(
-    r'\s*-\s*\d+\s*mg\s*(?:THC|CBD|THC/CBD)?\s*$',
-    re.IGNORECASE
-)
-
-
-# Module-level QR image bytes cache: keyed by (content_string, box_size, border).
-# Avoids re-rendering identical QR codes across tags within the same process.
-_qr_image_bytes_cache: dict = {}
-
-
-def _replace_mg_thc_cbd_with_weight(text, weight_units):
-    """For non-classic types: replace trailing '100mg THC' / '50mg CBD' etc. with weight. Returns cleaned text + weight suffix."""
-    if not text or not isinstance(text, str):
-        return (text or '', weight_units or '')
-    text = str(text).strip()
-    cleaned = _MG_THC_CBD_PATTERN.sub('', text).strip().rstrip('-').strip()
-    if cleaned == text:
-        cleaned = _MG_THC_CBD_RELAXED.sub('', text).strip().rstrip('-').strip()
-    w = (weight_units or '').strip()
-    return (cleaned, w)
-
+CHUNK_SIZE_LIMIT = 50               # Limit chunk size for performance
 
 def get_font_scheme(template_type, base_size=12):
     schemes = {
@@ -116,40 +79,12 @@ def get_font_scheme(template_type, base_size=12):
         'mini': {"base_size": base_size - 2, "min_size": 6, "max_length": 15},
         'horizontal': {"base_size": base_size + 1, "min_size": 7, "max_length": 20},
         'double': {"base_size": base_size - 1, "min_size": 8, "max_length": 30},
-        'inventory': {"base_size": base_size, "min_size": 8, "max_length": 40},  # Inventory slips can handle longer text
-        'preroll': {"base_size": base_size - 1, "min_size": 8, "max_length": 30}  # Preroll now uses double font scheme
+        'inventory': {"base_size": base_size, "min_size": 8, "max_length": 40}  # Inventory slips can handle longer text
     }
     return {
         field: {**schemes.get(template_type, schemes['default'])}
         for field in ["Description", "ProductBrand", "Price", "Lineage", "DOH", "Ratio_or_THC_CBD", "Ratio"]
     }
-
-
-def _is_invisible_edge_char(ch: str) -> bool:
-    """Treat Unicode separators/control/format chars as edge whitespace."""
-    if not ch:
-        return False
-    category = unicodedata.category(ch)
-    return category in {"Zs", "Zl", "Zp", "Cc", "Cf"}
-
-
-def _trim_invisible_edges(value: Any) -> str:
-    """Trim only leading/trailing invisible whitespace/control characters."""
-    if value is None:
-        return ""
-    text = str(value)
-    start = 0
-    end = len(text)
-    while start < end and _is_invisible_edge_char(text[start]):
-        start += 1
-    while end > start and _is_invisible_edge_char(text[end - 1]):
-        end -= 1
-    return text[start:end]
-
-
-def _has_visible_text(value: Any) -> bool:
-    """Return True when text contains visible content after edge trim."""
-    return bool(_trim_invisible_edges(value))
 
 class TemplateProcessor:
     # ...rest of the code...
@@ -158,12 +93,10 @@ class TemplateProcessor:
         base_dir = Path(__file__).parent / 'templates'
         template_map = {
             'mini': 'mini.docx',
-            'miniroll': 'miniroll.docx',
             'double': 'double.docx',
             'inventory': 'inventory.docx',
             'horizontal': 'horizontal.docx',
             'vertical': 'vertical.docx',
-            'preroll': 'preroll.docx',
         }
         filename = template_map.get(self.template_type, 'horizontal.docx')
         template_path = base_dir / filename
@@ -196,15 +129,7 @@ class TemplateProcessor:
         resolved_path = str(template_path.resolve()) if template_path.exists() else str(template_path)
         self.logger.error(f"Template not found: {resolved_path}")
         raise FileNotFoundError(f"Template not found: {resolved_path}")
-    def __init__(
-        self,
-        template_type,
-        font_scheme,
-        scale_factor: float = 1.0,
-        excel_processor=None,
-        fast_mode: bool = False,
-        user_template_path: Optional[str] = None,
-    ):
+    def __init__(self, template_type, font_scheme, scale_factor=1.0, excel_processor=None):
         self.template_type = template_type
         self.font_scheme = font_scheme
         self.logger = logging.getLogger(__name__)  # Initialize logger first
@@ -217,47 +142,19 @@ class TemplateProcessor:
         else:
             self.scale_factor = scale_factor
         self.excel_processor = excel_processor  # Store the session's Excel processor
-        # fast_mode parameter kept for backwards compatibility but no longer skips any processing
-        # All features (font sizing, lineage colors, markers) are now applied regardless of batch size
-        self.fast_mode = bool(fast_mode)
-
-        # Allow overriding the DOCX path with a user-uploaded design (User template group)
-        self.user_template_path = user_template_path
-        if user_template_path:
-            try:
-                if os.path.isfile(user_template_path):
-                    self._template_path = user_template_path
-                    self.logger.info(f"🎨 Using user template for '{self.template_type}': {user_template_path}")
-                else:
-                    self.logger.warning(
-                        f"User template path provided but not found on disk: {user_template_path} – falling back to classic template"
-                    )
-                    self._template_path = self._get_template_path()
-            except Exception as e:
-                self.logger.warning(
-                    f"Error while validating user_template_path '{user_template_path}': {e} – falling back to classic template"
-                )
-                self._template_path = self._get_template_path()
-        else:
-            # Classic template group (built-in DOCX)
-            self._template_path = self._get_template_path()
+        self._template_path = self._get_template_path()
         self._expanded_template_buffer = self._expand_template_if_needed()
         self._dynamic_template_created = False  # Track if dynamic template was created
         self._last_dynamic_count = None  # Track last product count used to build dynamic buffer
-        self._vendor_fallback = None  # Vendor to use as fallback when records are vendor-filtered but individual records have missing vendor
         
         # Set chunk size based on template type with performance limits
         if not IS_PYTHONANYWHERE:
             self.logger.info(f"DEBUG: Setting chunk size for template_type='{self.template_type}' (type: {type(self.template_type)})")
         
-        if self.template_type in ('mini', 'miniroll'):
+        if self.template_type == 'mini':
             self.chunk_size = min(20, CHUNK_SIZE_LIMIT)  # Fixed: 4x5 grid = 20 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for mini template")
-        elif self.template_type == 'preroll':
-            self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page (same as double)
-            if not IS_PYTHONANYWHERE:
-                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for preroll template")
         elif self.template_type == 'double':
             self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page
             if not IS_PYTHONANYWHERE:
@@ -278,13 +175,16 @@ class TemplateProcessor:
         # Performance tracking
         self.start_time = time.time()
         self.chunk_count = 0
-        
-        # Template expansion cache - avoid re-expanding templates with same size
-        self._template_expansion_cache = {}
 
         # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
         if self.template_type in ['horizontal', 'vertical', 'double']:
             self.chunk_size = None  # Will be set dynamically in process_records for these templates
+
+        # PERFORMANCE: QR code and DOH image caching
+        self._qr_cache = {}  # Cache QR codes by product name
+        self._doh_cache = {}  # Cache DOH images
+        
+        if self.template_type in ['horizontal', 'vertical', 'double']:
             self.logger.info(f"CRITICAL FIX: Chunking disabled for template '{self.template_type}' - chunk_size will match total records")
         else:
             self.logger.info(f"Chunking retained for template '{self.template_type}' with chunk_size {self.chunk_size}")
@@ -302,14 +202,12 @@ class TemplateProcessor:
             matches = re.findall(r'Label(\d+)\.', text)
             
             # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 4 for 2x2)
-            if self.template_type in ('mini', 'miniroll'):
+            if self.template_type == 'mini':
                 required_labels = 20  # 4x5 grid
             elif self.template_type == 'double':
                 required_labels = 12  # 4x3 grid
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
-            elif self.template_type == 'preroll':
-                required_labels = 12  # 4x3 grid (same as double)
             else:
                 required_labels = 9   # 3x3 grid
             
@@ -318,7 +216,7 @@ class TemplateProcessor:
             if len(unique_labels) < required_labels or force_expand:
                 # CRITICAL FIX: Use standard expansion methods for now
                 # Dynamic templates will be created later in _process_chunk based on actual product count
-                if self.template_type in ('mini', 'miniroll'):
+                if self.template_type == 'mini':
                     self.logger.info("Calling 4x5 expansion method")
                     return self._expand_template_to_4x5_fixed_scaled()
                 elif self.template_type == 'inventory':
@@ -326,10 +224,6 @@ class TemplateProcessor:
                     return self._expand_template_to_2x2_inventory()
                 elif self.template_type == 'double':
                     self.logger.info("Calling 4x3 expansion method")
-                    return self._expand_template_to_4x3_fixed_double()
-                elif self.template_type == 'preroll':
-                    # Preroll now uses 4x3 grid like double template
-                    self.logger.info("Calling 4x3 expansion method for preroll template")
                     return self._expand_template_to_4x3_fixed_double()
                 else:
                     # horizontal and vertical templates expand to 3x3 grid
@@ -354,7 +248,7 @@ class TemplateProcessor:
         
         try:
             # Load the original template
-            template_path = self._template_path
+            template_path = self._get_template_path()
             self.logger.info(f"Loading double template from: {template_path}")
             doc = Document(template_path)
             
@@ -440,7 +334,7 @@ class TemplateProcessor:
             # Fallback to original template if fixing fails
             try:
                 self.logger.info("Attempting fallback to original template")
-                with open(self._template_path, 'rb') as f:
+                with open(self._get_template_path(), 'rb') as f:
                     buffer = BytesIO(f.read())
                 self.logger.info("Fallback successful, returning original template")
                 return buffer
@@ -478,7 +372,7 @@ class TemplateProcessor:
         row_height_pts = Pt(row_height_inches * 72)
         cut_line_twips = int(0.001 * 1440)
 
-        template_path = self._template_path
+        template_path = self._get_template_path()
         doc = Document(template_path)
         if not doc.tables:
             raise RuntimeError("Template must contain at least one table.")
@@ -550,7 +444,7 @@ class TemplateProcessor:
         row_height_pts = Pt(1.5 * 72)  # 1.5 inches per row for equal height
         cut_line_twips = int(0.001 * 1440)
 
-        template_path = self._template_path
+        template_path = self._get_template_path()
         doc = Document(template_path)
         if not doc.tables:
             raise RuntimeError("Template must contain at least one table.")
@@ -688,24 +582,14 @@ class TemplateProcessor:
                     cell._tc.append(deepcopy(el))
                 
                 cnt += 1
-
+        
         # Add cell spacing
         tblPr2 = tbl._element.find(qn('w:tblPr'))
         spacing = OxmlElement('w:tblCellSpacing')
         spacing.set(qn('w:w'), str(cut_line_twips))
         spacing.set(qn('w:type'), 'dxa')
         tblPr2.append(spacing)
-
-        # PREROLL: Add 0.2" buffer spacing below table
-        if self.template_type == 'preroll':
-            # Add paragraph after table with 0.2" spacing
-            paragraph = doc.add_paragraph()
-            pPr = paragraph._element.get_or_add_pPr()
-            # Add spacing after paragraph (0.2 inches = 0.2 * 1440 twips = 288 twips)
-            spacing_elem = OxmlElement('w:spacing')
-            spacing_elem.set(qn('w:after'), '288')  # 0.2" in twips
-            pPr.append(spacing_elem)
-
+        
         # Save and return
         buf = BytesIO()
         doc.save(buf)
@@ -722,148 +606,6 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.warning(f"Failed to create dynamic template: {e}")
             return False
-
-    def _expand_template_to_4x4_fixed_preroll(self, num_products=None):
-        """Expand template to 4x4 grid for preroll templates (1.5" x 1.9" labels)."""
-        from docx import Document
-        from docx.shared import Pt
-        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        from io import BytesIO
-        from copy import deepcopy
-
-        num_cols, num_rows = 4, 4  # 4x4 grid for 16 labels
-        col_width_twips = str(int(1.5 * 1440))  # 1.5 inches width per column
-        row_height_pts = Pt(1.9 * 72)  # 1.9 inches height per row
-        cut_line_twips = int(0.001 * 1440)
-
-        template_path = self._template_path
-        doc = Document(template_path)
-        if not doc.tables:
-            raise RuntimeError("Template must contain at least one table.")
-
-        # Get the original table and its properties
-        original_table = doc.tables[0]
-        original_table_xml = original_table._element
-
-        # Extract original table properties (colors, borders, styling)
-        original_tblPr = original_table_xml.find(qn('w:tblPr'))
-        original_shd = original_tblPr.find(qn('w:shd')) if original_tblPr is not None else None
-        original_borders = original_tblPr.find(qn('w:tblBorders')) if original_tblPr is not None else None
-
-        # Get the original cell structure and content
-        original_cell = original_table.cell(0, 0)
-        src_tc = deepcopy(original_cell._tc)
-
-        # Remove the original table
-        original_table._element.getparent().remove(original_table._element)
-
-        # Remove empty paragraphs
-        while doc.paragraphs and not doc.paragraphs[0].text.strip():
-            doc.paragraphs[0]._element.getparent().remove(doc.paragraphs[0]._element)
-
-        # Create new 4x4 table
-        tbl = doc.add_table(rows=num_rows, cols=num_cols)
-        tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-        # Set up table properties
-        tblPr = tbl._element.find(qn('w:tblPr')) or OxmlElement('w:tblPr')
-
-        # Preserve original shading if it exists
-        if original_shd is not None:
-            shd = deepcopy(original_shd)
-            tblPr.insert(0, shd)
-        else:
-            # Default shading
-            shd = OxmlElement('w:shd')
-            shd.set(qn('w:val'), 'clear')
-            shd.set(qn('w:color'), 'auto')
-            shd.set(qn('w:fill'), 'D3D3D3')
-            tblPr.insert(0, shd)
-
-        # Set table layout
-        layout = OxmlElement('w:tblLayout')
-        layout.set(qn('w:type'), 'fixed')
-        tblPr.append(layout)
-        tbl._element.insert(0, tblPr)
-
-        # Set up grid columns
-        grid = OxmlElement('w:tblGrid')
-        for _ in range(num_cols):
-            gc = OxmlElement('w:gridCol')
-            gc.set(qn('w:w'), col_width_twips)
-            grid.append(gc)
-        tbl._element.insert(0, grid)
-
-        # Set row heights and individual cell widths
-        for row in tbl.rows:
-            row.height = row_height_pts
-            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-
-            # Set individual cell widths to ensure exact 1.5" x 1.9" dimensions
-            for cell in row.cells:
-                tcPr = cell._tc.get_or_add_tcPr()
-                tcW = tcPr.find(qn('w:tcW'))
-                if tcW is None:
-                    tcW = OxmlElement('w:tcW')
-                    tcPr.append(tcW)
-                tcW.set(qn('w:w'), col_width_twips)
-                tcW.set(qn('w:type'), 'dxa')
-
-        # Add cut line borders if original had them
-        if original_borders is not None:
-            borders = deepcopy(original_borders)
-            tblPr.append(borders)
-
-        # Populate cells with original content, updating labels
-        cnt = 1
-        max_cells = num_products if num_products else (num_rows * num_cols)
-
-        for r in range(num_rows):
-            for c in range(num_cols):
-                if cnt > max_cells:
-                    # Clear extra cells completely and set white background
-                    cell = tbl.cell(r, c)
-                    for paragraph in cell.paragraphs:
-                        paragraph.clear()
-                    # Set white background for empty cells
-                    tcPr = cell._tc.get_or_add_tcPr()
-                    shd = tcPr.find(qn('w:shd'))
-                    if shd is None:
-                        shd = OxmlElement('w:shd')
-                        tcPr.append(shd)
-                    shd.set(qn('w:val'), 'clear')
-                    shd.set(qn('w:fill'), 'FFFFFF')
-                else:
-                    # Copy original cell content
-                    cell = tbl.cell(r, c)
-                    dest_tc = cell._tc
-
-                    # Replace destination tc with a deep copy of source tc
-                    new_tc = deepcopy(src_tc)
-                    dest_tc.getparent().replace(dest_tc, new_tc)
-
-                    # Update label placeholders (e.g., {{Label1}} -> {{Label16}})
-                    for paragraph in tbl.cell(r, c).paragraphs:
-                        for run in paragraph.runs:
-                            if run.text:
-                                run.text = run.text.replace('{{Label1}}', f'{{{{Label{cnt}}}}}')
-                cnt += 1
-
-        # Add cell spacing (cut lines)
-        tblPr2 = tbl._element.find(qn('w:tblPr'))
-        spacing = OxmlElement('w:tblCellSpacing')
-        spacing.set(qn('w:w'), str(cut_line_twips))
-        spacing.set(qn('w:type'), 'dxa')
-        tblPr2.append(spacing)
-
-        # Save and return
-        buf = BytesIO()
-        doc.save(buf)
-        buf.seek(0)
-        return buf
-
     def _expand_template_to_4x3_fixed_double(self, num_products=None):
         """Expand template to 4x3 grid for double templates (4 columns, 3 rows)."""
         from docx import Document
@@ -881,7 +623,7 @@ class TemplateProcessor:
         row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
         cut_line_twips = int(0.001 * 1440)
 
-        template_path = self._template_path
+        template_path = self._get_template_path()
         doc = Document(template_path)
         if not doc.tables:
             raise RuntimeError("Template must contain at least one table.")
@@ -903,10 +645,6 @@ class TemplateProcessor:
         
         product_idx = 0
         for page in range(pages):
-            # Insert a real page break between tables so each 4x3 sheet starts on a new page.
-            if page > 0:
-                doc.add_page_break()
-
             tbl = doc.add_table(rows=num_rows, cols=num_cols)
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
             
@@ -984,8 +722,12 @@ class TemplateProcessor:
             spacing.set(qn('w:type'), 'dxa')
             tblPr2.append(spacing)
             
-            if page > 0:
-                self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break before table {page + 1} of {pages}")
+            # Insert page break after each table except the last
+            if page < pages - 1:
+                page_break_para = doc.add_paragraph()
+                page_break_run = page_break_para.add_run()
+                page_break_run.add_break(WD_BREAK.PAGE)
+                self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break after table {page + 1} of {pages}")
         
         buf = BytesIO()
         doc.save(buf)
@@ -993,7 +735,7 @@ class TemplateProcessor:
         return buf
 
     def _expand_template_to_3x3_fixed(self, num_products=None):
-        template_path = self._template_path
+        template_path = self._get_template_path()
         doc = Document(template_path)
         if not doc.tables:
             raise ValueError("Template DOCX does not contain any tables.")
@@ -1092,25 +834,6 @@ class TemplateProcessor:
                                     new_text
                                 )
                         
-                        # CRITICAL FIX: Add QR placeholder after DOH
-                        if '{{Label1.QR}}' not in cell_text and 'QR' not in cell_text:
-                            text_elements = list(tc.iter(qn('w:t')))
-                            doh_end_index = -1
-                            for i, t in enumerate(text_elements):
-                                if t.text and 'DOH' in t.text:
-                                    for j in range(i, len(text_elements)):
-                                        if text_elements[j].text and '}}' in text_elements[j].text:
-                                            doh_end_index = j
-                                            break
-                            if doh_end_index >= 0:
-                                new_text = OxmlElement('w:t')
-                                new_text.text = f'\n{{{{Label{cnt}.QR}}}}'
-                                doh_end_element = text_elements[doh_end_index]
-                                doh_end_element.getparent().insert(
-                                    doh_end_element.getparent().index(doh_end_element) + 1,
-                                    new_text
-                                )
-                        
                         # CRITICAL FIX: Add DescAndWeight after QR for product description + weight
                         if '{{Label1.DescAndWeight}}' not in cell_text and 'DescAndWeight' not in cell_text:
                             text_elements = list(tc.iter(qn('w:t')))
@@ -1162,19 +885,13 @@ class TemplateProcessor:
             spacing.set(qn('w:type'), 'dxa')
             tblPr2.append(spacing)
             
-            # Insert page break at START of each table after the first (avoids blank page between tables).
-            # A standalone paragraph with only a break was rendering as a blank page.
-            if page > 0:
-                first_cell = tbl.cell(0, 0)
-                page_break_para = first_cell.add_paragraph()
-                # Insert at beginning of cell so break comes before existing content
-                first_cell._tc.insert(0, page_break_para._element)
+            # Insert page break after each table except the last
+            if page < pages - 1:
+                # Add a page break paragraph to force Word to create a new page
+                page_break_para = doc.add_paragraph()
                 page_break_run = page_break_para.add_run()
                 page_break_run.add_break(WD_BREAK.PAGE)
-                page_break_para.paragraph_format.space_before = Pt(0)
-                page_break_para.paragraph_format.space_after = Pt(0)
-                page_break_para.paragraph_format.line_spacing = Pt(1)
-                self.logger.info(f"🔍 PAGE BREAK: Added page break at start of page {page + 1} of {pages}")
+                self.logger.info(f"🔍 PAGE BREAK: Added page break after page {page + 1} of {pages}")
 
         from src.core.generation.docx_formatting import remove_all_headers_and_footers
         doc = remove_all_headers_and_footers(doc)
@@ -1187,30 +904,6 @@ class TemplateProcessor:
         documents = []
         # FULLY DISABLE CHUNKING for horizontal, vertical, and double templates
         try:
-            # VENDOR FALLBACK: Detect if records were filtered by vendor (all have same vendor)
-            # If so, use that vendor as fallback for records with missing vendor
-            # PERFORMANCE: Sample first 50 records instead of checking all to speed up detection
-            self._vendor_fallback = None
-            if records:
-                vendor_counts = {}
-                sample_size = min(50, len(records))  # Sample first 50 records for speed
-                sample_records = records[:sample_size]
-                
-                for record in sample_records:
-                    vendor = (record.get('Vendor') or record.get('Vendor/Supplier*') or 
-                             record.get('Vendor/Supplier') or record.get('ProductVendor', ''))
-                    if vendor and not pd.isna(vendor) and str(vendor).strip() and str(vendor).lower() not in ['nan', 'none', 'null', '']:
-                        vendor_str = str(vendor).strip()
-                        vendor_counts[vendor_str] = vendor_counts.get(vendor_str, 0) + 1
-                
-                # If one vendor dominates (appears in >50% of sampled records), use it as fallback
-                if vendor_counts:
-                    total_with_vendor = sum(vendor_counts.values())
-                    most_common_vendor = max(vendor_counts.items(), key=lambda x: x[1])
-                    if most_common_vendor[1] >= total_with_vendor * 0.5 and most_common_vendor[1] >= 2:
-                        self._vendor_fallback = most_common_vendor[0]
-                        # Only log if we actually use it (reduces logging overhead)
-            
             if self.template_type in ['horizontal', 'vertical', 'double']:
                 self.chunk_size = len(records)
                 self.logger.info(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
@@ -1221,26 +914,31 @@ class TemplateProcessor:
                 self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
                 
-                # DEDUPLICATION: Skip entirely for preroll - generate_preroll_tags already produces
-                # one record per group (group_id|brand_key). Dedup was collapsing groups to ~18.
-                if self.template_type != 'preroll':
-                    seen_products = set()
-                    unique_records = []
-                    duplicate_count = 0
-                    for record in records:
-                        product_name = record.get('ProductName', 'Unknown')
-                        price = record.get('Price', '')
-                        weight = record.get('Weight', '') or record.get('NetWeight', '')
-                        vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
-                        dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
-                        if dedup_key not in seen_products:
-                            seen_products.add(dedup_key)
-                            unique_records.append(record)
-                        else:
-                            duplicate_count += 1
-                    if duplicate_count > 0:
-                        self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
-                        records = unique_records
+                # DEDUPLICATION FIX: Remove exact duplicates even for JSON matched products
+                seen_products = set()
+                unique_records = []
+                duplicate_count = 0
+                
+                for record in records:
+                    # Create a unique key based on product name, price, and weight
+                    product_name = record.get('ProductName', 'Unknown')
+                    price = record.get('Price', '')
+                    weight = record.get('Weight', '') or record.get('NetWeight', '')
+                    vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+                    
+                    # Create deduplication key
+                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
+                    
+                    if dedup_key not in seen_products:
+                        seen_products.add(dedup_key)
+                        unique_records.append(record)
+                    else:
+                        duplicate_count += 1
+                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+                
+                if duplicate_count > 0:
+                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    records = unique_records
                 
                 # Process all records in a single chunk
                 chunk = records
@@ -1250,34 +948,36 @@ class TemplateProcessor:
             else:
                 # Ensure chunk size respects fixed page capacity for templates like mini/inventory
                 self.chunk_size = self.chunk_size or len(records)
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    self.logger.debug(f"Processing {len(records)} records for template '{self.template_type}' (chunk_size={self.chunk_size})")
+                self.logger.info(f"🔍 LABEL RENDER: Processing {len(records)} records for template '{self.template_type}' with chunk_size {self.chunk_size}.")
                 self.start_time = time.time()
                 self.chunk_count = 0
                 overall_order = [record.get('ProductName', 'Unknown') for record in records]
                 self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
 
-                # DEDUPLICATION: Skip entirely for preroll - generate_preroll_tags already produces
-                # one record per group (group_id|brand_key). Dedup was collapsing groups to ~18.
-                if self.template_type != 'preroll':
-                    seen_products = set()
-                    unique_records = []
-                    duplicate_count = 0
-                    for record in records:
-                        product_name = record.get('ProductName', 'Unknown')
-                        price = record.get('Price', '')
-                        weight = record.get('Weight', '') or record.get('NetWeight', '')
-                        vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
-                        dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
-                        if dedup_key not in seen_products:
-                            seen_products.add(dedup_key)
-                            unique_records.append(record)
-                        else:
-                            duplicate_count += 1
-                    if duplicate_count > 0:
-                        self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
-                        records = unique_records
+                # Apply the same deduplication logic for consistency across templates
+                seen_products = set()
+                unique_records = []
+                duplicate_count = 0
+
+                for record in records:
+                    product_name = record.get('ProductName', 'Unknown')
+                    price = record.get('Price', '')
+                    weight = record.get('Weight', '') or record.get('NetWeight', '')
+                    vendor = record.get('Vendor', '') or record.get('ProductVendor', '')
+
+                    dedup_key = f"{product_name}|{price}|{weight}|{vendor}".lower().strip()
+
+                    if dedup_key not in seen_products:
+                        seen_products.add(dedup_key)
+                        unique_records.append(record)
+                    else:
+                        duplicate_count += 1
+                        self.logger.info(f"🗑️ DEDUPLICATION: Removing duplicate '{product_name}' (Price: {price}, Weight: {weight})")
+
+                if duplicate_count > 0:
+                    self.logger.info(f"✅ DEDUPLICATION: Removed {duplicate_count} duplicate(s), {len(unique_records)} unique products remain")
+                    records = unique_records
 
                 if not records:
                     self.logger.warning("No records to process after deduplication.")
@@ -1289,46 +989,11 @@ class TemplateProcessor:
                     chunk = records[start:start + chunk_size]
                     chunks.append(chunk)
                 
-                # Log chunking for preroll (debug only)
-                if self.template_type == 'preroll':
-                    # CRITICAL: Always log vendor distribution for preroll
-                    preroll_vendors = {}
-                    for r in records:
-                        vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or 'NO_VENDOR'
-                        vendor_str = str(vendor).strip()
-                        preroll_vendors[vendor_str] = preroll_vendors.get(vendor_str, 0) + 1
-                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: Received {len(records)} records with {len(preroll_vendors)} unique vendors: {sorted(preroll_vendors.keys())}")
-                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: Vendor counts: {dict(sorted(preroll_vendors.items(), key=lambda x: x[1], reverse=True))}")
-                    self.logger.info(f"PREROLL TEMPLATE PROCESSOR: {len(records)} records -> {len(chunks)} chunks (chunk_size={chunk_size})")
-                    
-                    # CRITICAL: Log vendor distribution per chunk to identify missing vendors
-                    for chunk_idx, chunk in enumerate(chunks):
-                        chunk_vendors = {}
-                        for r in chunk:
-                            vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or 'NO_VENDOR'
-                            vendor_str = str(vendor).strip()
-                            chunk_vendors[vendor_str] = chunk_vendors.get(vendor_str, 0) + 1
-                        self.logger.info(f"PREROLL CHUNK {chunk_idx + 1}/{len(chunks)}: {len(chunk)} records, {len(chunk_vendors)} vendors: {sorted(chunk_vendors.keys())}")
-                    
-                    # Verify all vendors are in at least one chunk
-                    all_chunk_vendors = set()
-                    for chunk in chunks:
-                        for r in chunk:
-                            vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
-                            if vendor:
-                                all_chunk_vendors.add(str(vendor).strip())
-                    missing_vendors = set(preroll_vendors.keys()) - all_chunk_vendors
-                    if missing_vendors:
-                        self.logger.error(f"PREROLL CRITICAL: {len(missing_vendors)} vendors in input but NOT in any chunk: {sorted(missing_vendors)}")
-                    else:
-                        self.logger.info(f"PREROLL VERIFICATION: All {len(preroll_vendors)} vendors present in chunks")
-                
                 # Process chunks in parallel for better performance
                 if len(chunks) > 1:
                     from concurrent.futures import ThreadPoolExecutor, as_completed
                     
-                    if self.logger.isEnabledFor(logging.DEBUG):
-                        self.logger.debug(f"Parallel processing: {len(chunks)} chunks")
+                    self.logger.info(f"⚡ PARALLEL PROCESSING: Processing {len(chunks)} chunks concurrently")
                     chunk_docs = [None] * len(chunks)  # Preserve order
                     
                     with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
@@ -1345,49 +1010,21 @@ class TemplateProcessor:
                                 chunk_doc = future.result()
                                 chunk_docs[idx] = chunk_doc
                                 self.chunk_count += 1
-                                
-                                # CRITICAL: Log chunk completion with vendor info for preroll
-                                if self.template_type == 'preroll' and idx < len(chunks):
-                                    chunk = chunks[idx]
-                                    chunk_vendors = set()
-                                    for r in chunk:
-                                        vendor = r.get('Vendor/Supplier*', '') or r.get('Vendor', '') or ''
-                                        if vendor:
-                                            chunk_vendors.add(str(vendor).strip())
-                                    self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed with {len(chunk_vendors)} vendors: {sorted(chunk_vendors)}")
-                                else:
-                                    self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
+                                self.logger.info(f"⚡ PARALLEL: Chunk {idx + 1}/{len(chunks)} completed")
                             except Exception as e:
                                 self.logger.error(f"Error processing chunk {idx + 1}: {e}")
-                                self.logger.error(f"Chunk {idx + 1} error traceback: {traceback.format_exc()}")
                                 chunk_docs[idx] = None
                     
                     # Filter out None results and preserve order
-                    valid_docs = [doc for doc in chunk_docs if doc is not None]
-                    failed_chunks = len(chunks) - len(valid_docs)
-                    if failed_chunks > 0:
-                        self.logger.error(f"PREROLL CRITICAL: {failed_chunks} chunks failed to process! This may cause missing vendors.")
-                    documents.extend(valid_docs)
+                    documents.extend([doc for doc in chunk_docs if doc is not None])
                 else:
                     # Single chunk - process normally
                     self.chunk_count = 1
-                    if self.logger.isEnabledFor(logging.DEBUG):
-                        self.logger.debug(f"Processing single chunk: {len(records)} records")
-                    try:
-                        chunk_doc = self._process_chunk(records)
-                        if chunk_doc is not None:
-                            documents.append(chunk_doc)
-                        else:
-                            self.logger.error("Single chunk processing returned None")
-                    except Exception as e:
-                        self.logger.error(f"Error processing single chunk: {e}")
-                        self.logger.error(traceback.format_exc())
-                        # Don't add None to documents - let it fail gracefully
+                    self.logger.info(f"🔍 LABEL RENDER: Processing single chunk containing {len(records)} record(s)")
+                    documents.append(self._process_chunk(records))
             
             if not documents: 
-                self.logger.error(f"No documents generated! Expected {len(chunks) if 'chunks' in locals() else 1} document(s)")
                 return None
-            
             if len(documents) == 1: 
                 return documents[0]
             
@@ -1420,76 +1057,52 @@ class TemplateProcessor:
         from docx import Document
         from io import BytesIO
         
-        # Log chunk processing (debug only)
-        if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug(f"Processing chunk with {len(chunk)} records for template '{self.template_type}'")
+        # DEBUG_CHUNK_SIZE_TRACKING: Log actual chunk sizes
+        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Processing chunk with {len(chunk)} records")
+        self.logger.info(f"🔍 CHUNK SIZE DEBUG: Expected all {len(chunk)} records in this chunk for template '{self.template_type}'")
+        # After rendering, log the number of labels actually created
+        self.logger.info(f"🔍 LABEL RENDER: Actually rendered {len(chunk)} labels in this chunk.")
         
         chunk_start_time = time.time()
         
         try:
             # CRITICAL FIX: Re-expand template with correct number of products to prevent blank labels
-            # OPTIMIZATION: Cache template expansions to avoid re-expanding for same size
             num_products = len(chunk)
-            cache_key = f"{self.template_type}_{num_products}"
             
-            if cache_key in self._template_expansion_cache:
-                # Use cached template expansion
-                self._expanded_template_buffer = self._template_expansion_cache[cache_key]
-                if hasattr(self._expanded_template_buffer, 'seek'):
-                    self._expanded_template_buffer.seek(0)
-            else:
-                # For all templates, re-expand with correct number of products
-                if self.template_type in ['horizontal', 'vertical']:
-                    self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
-                elif self.template_type == 'double':
-                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                elif self.template_type in ('mini', 'miniroll'):
-                    self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
-                elif self.template_type == 'preroll':
-                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                
-                # Cache the expansion (create a copy since BytesIO is consumed)
-                if hasattr(self._expanded_template_buffer, 'getvalue'):
-                    cached_buffer = BytesIO(self._expanded_template_buffer.getvalue())
-                    self._template_expansion_cache[cache_key] = cached_buffer
-                    self._expanded_template_buffer.seek(0)
-                elif hasattr(self._expanded_template_buffer, 'seek'):
-                    self._expanded_template_buffer.seek(0)
+            # For all templates, re-expand with correct number of products
+            if self.template_type in ['horizontal', 'vertical']:
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
+            elif self.template_type == 'double':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
+            elif self.template_type == 'mini':
+                self.logger.info(f"🔧 RE-EXPANDING TEMPLATE: Re-expanding {self.template_type} template for {num_products} products")
+                self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
+            
+            if hasattr(self._expanded_template_buffer, 'seek'):
+                self._expanded_template_buffer.seek(0)
             
             doc = DocxTemplate(self._expanded_template_buffer)
             
-            # Log chunk processing (debug only)
-            if self.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"Processing chunk with {len(chunk)} records")
+            # Debug: Log the order of records in this chunk
+            chunk_order = [record.get('ProductName', 'Unknown') for record in chunk]
+            self.logger.info(f"Processing chunk with {len(chunk)} records in order: {chunk_order}")
             
-            # OPTIMIZATION: Pre-load all brand, vendor, lineage, and strain data in batch to avoid N+1 queries
-            # This reduces 200+ queries for 100 products to just 3-4 queries total
+            # OPTIMIZATION: Pre-load all brand data in batch to avoid N+1 queries
+            # This reduces 100+ queries for 100 products to just 1 query total
             product_brand_cache = {}
-            product_vendor_cache = {}
-            product_lineage_cache = {}
-            strain_info_cache = {}
-            joint_ratio_cache = {}
             try:
                 from src.core.data.product_database import get_product_database
                 product_db = get_product_database()
                 if product_db:
                     product_names = [r.get('ProductName', '') or r.get('Product Name*', '') for r in chunk]
                     product_names = [n for n in product_names if n]
-                    
-                    # Collect unique strain names for batch loading
-                    strain_names = set()
-                    for r in chunk:
-                        strain = r.get('ProductStrain', '') or r.get('Product Strain', '')
-                        if strain:
-                            strain_names.add(strain)
-                    
                     if product_names:
                         try:
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
                             placeholders = ','.join(['?'] * len(product_names))
-                            
-                            # Load brand data
                             batch_brand_query = f'''
                                 SELECT "Product Name*", "Product Brand"
                                 FROM products
@@ -1502,106 +1115,13 @@ class TemplateProcessor:
                                 pname, brand = row_result
                                 if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
                                     product_brand_cache[pname] = str(brand).strip()
-                            
-                            # Load vendor data - try Vendor/Supplier* first, then Vendor, then ProductVendor
-                            batch_vendor_query = f'''
-                                SELECT "Product Name*", 
-                                       CASE 
-                                           WHEN "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' THEN "Vendor/Supplier*"
-                                           WHEN "Vendor" IS NOT NULL AND "Vendor" != '' THEN "Vendor"
-                                           WHEN "ProductVendor" IS NOT NULL AND "ProductVendor" != '' THEN "ProductVendor"
-                                           ELSE NULL
-                                       END as vendor
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND (
-                                    ("Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '')
-                                    OR ("Vendor" IS NOT NULL AND "Vendor" != '')
-                                    OR ("ProductVendor" IS NOT NULL AND "ProductVendor" != '')
-                                )
-                            '''
-                            cursor.execute(batch_vendor_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, vendor = row_result
-                                if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_vendor_cache[pname] = str(vendor).strip()
-                            
-                            # Load lineage data: sovereign_lineage > strain lineage > products.Lineage
-                            # CRITICAL: Use same COALESCE as app _align_tags_with_db_lineage and force-step
-                            batch_lineage_query = f'''
-                                SELECT p."Product Name*",
-                                       COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
-                                                s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
-                                FROM products p
-                                LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                                WHERE p."Product Name*" IN ({placeholders})
-                                ORDER BY p.id DESC
-                            '''
-                            cursor.execute(batch_lineage_query, product_names)
-                            seen = set()
-                            for row_result in cursor.fetchall():
-                                pname, lineage = row_result
-                                if not pname or pname in seen:
-                                    continue
-                                normalized_lineage = _trim_invisible_edges(lineage)
-                                if normalized_lineage and normalized_lineage not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
-                                    product_lineage_cache[pname] = normalized_lineage.upper()
-                                    seen.add(pname)
-                            
-                            # Load JointRatio data
-                            batch_joint_ratio_query = f'''
-                                SELECT "Product Name*", JointRatio
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND JointRatio IS NOT NULL
-                                AND JointRatio != ""
-                            '''
-                            cursor.execute(batch_joint_ratio_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, joint_ratio = row_result
-                                if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    joint_ratio_cache[pname] = str(joint_ratio).strip()
-                            
-                            # Batch load strain info (sovereign_lineage > canonical_lineage)
-                            if strain_names:
-                                strain_placeholders = ','.join(['?'] * len(strain_names))
-                                batch_strain_query = f'''
-                                    SELECT strain_name, sovereign_lineage, canonical_lineage
-                                    FROM strains
-                                    WHERE strain_name IN ({strain_placeholders})
-                                '''
-                                cursor.execute(batch_strain_query, list(strain_names))
-                                for row_result in cursor.fetchall():
-                                    strain_name, sov_lineage, canon_lineage = row_result
-                                    strain_info = {}
-                                    for val, key in [(sov_lineage, 'sovereign_lineage'), (canon_lineage, 'canonical_lineage')]:
-                                        if val and str(val).strip() not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
-                                            strain_info[key] = str(val).strip()
-                                    if strain_info:
-                                        strain_info_cache[strain_name] = strain_info
-                        except Exception as batch_err:
-                            self.logger.warning(f"Batch data query failed: {batch_err}")
+                        except Exception as batch_brand_err:
+                            self.logger.warning(f"Batch brand query failed: {batch_brand_err}")
             except Exception as e:
-                self.logger.warning(f"Failed to pre-load batch data: {e}")
+                self.logger.warning(f"Failed to pre-load brand data: {e}")
             
             # Build context for each record in the chunk
             context = {}
-            
-            # For preroll, use ALL records in chunk (template expands to fit)
-            # For other fixed-grid templates, pad to required_labels
-            if self.template_type == 'preroll':
-                required_labels = len(chunk)  # Use all records - template expands to 4x5 grid per chunk
-            elif self.template_type in ('mini', 'miniroll'):
-                required_labels = 20  # Fixed grid: 4x5 = 20 labels
-            elif self.template_type == 'double':
-                required_labels = 12  # Fixed grid: 3x4 = 12 labels
-            elif self.template_type == 'inventory':
-                required_labels = 4   # Fixed grid: 2x2 = 4 labels
-            else:
-                required_labels = len(chunk)  # Dynamic templates use actual chunk size
-            
             for i, record in enumerate(chunk):
                 # Set current record for brand centering logic
                 self.current_record = record
@@ -1611,154 +1131,19 @@ class TemplateProcessor:
                 if self.template_type == 'inventory':
                     label_context = self._build_inventory_context(record)
                 else:
-                    # Pass all caches to avoid N+1 queries
-                    label_context = self._build_label_context(record, doc, product_brand_cache, product_vendor_cache, 
-                                                               product_lineage_cache, strain_info_cache, joint_ratio_cache)
+                    # Pass brand cache to avoid N+1 queries
+                    label_context = self._build_label_context(record, doc, product_brand_cache)
                 context[f'Label{i+1}'] = label_context
-                # Debug logging (debug level only)
-                if i < 3 and self.logger.isEnabledFor(logging.DEBUG):
-                    product_name = record.get('ProductName', 'Unknown')
-                    self.logger.debug(f"Label{i+1}: {product_name}")
-            
-            # For fixed-grid templates (mini, double, inventory), pad with empty labels
-            # For preroll, template expands to fit all records, so no padding needed
-            if self.template_type in ['mini', 'double', 'inventory']:
-                empty_label_context = self._get_empty_label_context()
-                for i in range(len(chunk) + 1, required_labels + 1):
-                    context[f'Label{i}'] = empty_label_context
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    self.logger.debug(f"Fixed grid: {len(chunk)} product labels + {required_labels - len(chunk)} empty = {required_labels} total")
-            else:
-                # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
-                # This saves printer ink by not generating empty cells
-                self.logger.info(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
+                # Debug logging to check field values and order
+                product_name = record.get('ProductName', 'Unknown')
+                self.logger.debug(f"Label{i+1} -> {product_name} - ProductBrand: '{label_context.get('ProductBrand', 'NOT_FOUND')}', Price: '{label_context.get('Price', 'NOT_FOUND')}', THC: '{label_context.get('THC', 'NOT_FOUND')}', CBD: '{label_context.get('CBD', 'NOT_FOUND')}'")
+            # CRITICAL FIX: Only create contexts for actual products to prevent blank tags on last sheet
+            # This saves printer ink by not generating empty cells
+            self.logger.info(f"🔧 BLANK TAG PREVENTION: Only creating {len(chunk)} labels instead of {self.chunk_size} to prevent blank tags on last sheet")
 
             # DOH images are already created in _build_label_context, no need for redundant creation here
             
             # QR code functionality enabled
-            # Debug: Log QR code presence in context before rendering
-            qr_count = sum(1 for label_key, label_data in context.items() 
-                          if isinstance(label_data, dict) and label_data.get('QR') and 
-                          not (isinstance(label_data.get('QR'), str) and label_data.get('QR').strip() == ''))
-            self.logger.info(f"🔍 QR CODE CHECK: {qr_count} labels have QR codes in context before render (total labels: {len([k for k in context.keys() if k.startswith('Label')])})")
-            
-            # Remove duplicate default-brand entries for preroll/mini templates
-            try:
-                if self.template_type in ('preroll', 'mini'):
-                    default_brand = "PREMIUM CANNABIS"
-                    label_keys = [k for k in context.keys() if k.startswith('Label')]
-                    name_groups = {}
-                    for k in label_keys:
-                        lbl = context.get(k) or {}
-                        pname = (lbl.get('Product Name*') or lbl.get('ProductName') or lbl.get('Product Name') or '').strip()
-                        if not pname:
-                            continue
-                        name_groups.setdefault(pname.lower(), []).append(k)
-
-                    # Debug: log per-label brand values before dedupe
-                    if self.logger.isEnabledFor(logging.DEBUG):
-                        for pname, keys in name_groups.items():
-                            brands = []
-                            for k in keys:
-                                lbl = context.get(k) or {}
-                                pb = (lbl.get('ProductBrand') or lbl.get('Product Brand') or '')
-                                try:
-                                    pb_unwrapped = unwrap_marker(str(pb)) if pb is not None else ''
-                                except Exception:
-                                    pb_unwrapped = str(pb).strip() if pb is not None else ''
-                                brands.append((k, pb_unwrapped.strip()))
-                            self.logger.debug(f"DEDUP DEBUG: Product '{pname}' label brands before dedupe: {brands}")
-
-                    # For each product name where at least one branded (non-default) record exists,
-                    # drop entries that only have the generic default brand to avoid duplicates.
-                    for pname, keys in name_groups.items():
-                        # Normalize and find branded keys
-                        branded_keys = []
-                        default_keys = []
-                        other_empty = []
-                        def _unwrap_candidates(lbl):
-                            # Consider multiple possible brand sources (ProductBrand, Product Brand, ProductVendor, Vendor)
-                            candidates = [
-                                lbl.get('ProductBrand'),
-                                lbl.get('Product Brand'),
-                                lbl.get('ProductBrand_Center'),
-                                lbl.get('ProductBrand_Center'),
-                                lbl.get('ProductVendor'),
-                                lbl.get('Product Vendor'),
-                                lbl.get('Vendor'),
-                                lbl.get('Vendor/Supplier*'),
-                                lbl.get('vendor'),
-                                lbl.get('Brand')
-                            ]
-                            for c in candidates:
-                                if c is None:
-                                    continue
-                                try:
-                                    s = str(c)
-                                except Exception:
-                                    continue
-                                # Try unwrapping common markers
-                                try:
-                                    s2 = unwrap_marker(s, 'PRODUCTBRAND')
-                                except Exception:
-                                    s2 = s
-                                try:
-                                    s2 = unwrap_marker(s2, 'PRODUCTBRAND_CENTER')
-                                except Exception:
-                                    pass
-                                try:
-                                    s2 = unwrap_marker(s2, 'PRODUCTVENDOR')
-                                except Exception:
-                                    pass
-                                s2 = s2.strip()
-                                if s2:
-                                    return s2
-                            return ''
-
-                        for k in keys:
-                            lbl = context.get(k) or {}
-                            pb = _unwrap_candidates(lbl)
-                            pb = pb.strip()
-                            pb_norm = pb.lower()
-                            if pb and pb_norm != default_brand.lower():
-                                branded_keys.append(k)
-                            elif pb and pb_norm == default_brand.lower():
-                                default_keys.append(k)
-                            else:
-                                other_empty.append(k)
-
-                        if branded_keys:
-                            # If branded entries exist, remove default-brand entries
-                            for k in default_keys + other_empty:
-                                context[k] = empty_label_context
-                            self.logger.debug(f"DEDUP ACTION: Kept branded keys {branded_keys} for '{pname}', removed {len(default_keys)+len(other_empty)} default/empty entries")
-                        else:
-                            self.logger.debug(f"DEDUP ACTION: No branded keys for '{pname}' - keeping all {len(keys)} entries")
-            except Exception as dedup_err:
-                self.logger.exception(f"DEDUP BRAND FILTER FAILED: {dedup_err}")
-
-            # DEBUG: Log final label-brand context immediately before render
-            if self.logger.isEnabledFor(logging.DEBUG):
-                try:
-                    label_keys = sorted([k for k in context.keys() if k.startswith('Label')])
-                    for k in label_keys:
-                        lbl = context.get(k) or {}
-                        pb_raw = lbl.get('ProductBrand') or lbl.get('Product Brand') or ''
-                        try:
-                            pb_unwrapped = unwrap_marker(str(pb_raw), 'PRODUCTBRAND') if isinstance(pb_raw, str) else pb_raw
-                        except Exception:
-                            pb_unwrapped = str(pb_raw)
-                        pbc_raw = lbl.get('ProductBrand_Center') or ''
-                        try:
-                            pbc_unwrapped = unwrap_marker(str(pbc_raw), 'PRODUCTBRAND_CENTER') if isinstance(pbc_raw, str) else pbc_raw
-                        except Exception:
-                            pbc_unwrapped = str(pbc_raw)
-                        lineage = lbl.get('Lineage') or ''
-                        self.logger.debug(f"FINAL CONTEXT: {k} ProductBrand:'{pb_unwrapped}' ProductBrand_Center:'{pbc_unwrapped}' Lineage:'{lineage}'")
-                except Exception:
-                    # Keep render path resilient; only best-effort logging
-                    self.logger.debug("FINAL CONTEXT: failed to dump label contexts before render")
-
             try:
                 doc.render(context)
                 self.logger.debug("DocxTemplate render completed successfully")
@@ -1769,34 +1154,25 @@ class TemplateProcessor:
                 buffer.seek(0)
                 rendered_doc = Document(buffer)
                 self._remove_unmerged_placeholders(rendered_doc, len(chunk))
-                # Remove completely empty pages (tables with no content)
-                self._remove_empty_pages(rendered_doc)
                 
             except Exception as render_error:
-                self.logger.error(f"DocxTemplate render failed: {render_error}")
-                self.logger.error(f"Context keys: {list(context.keys())}")
-                self.logger.error(f"Chunk size: {len(chunk)}, Template type: {self.template_type}")
-                # Re-raise the error so it can be handled upstream
-                raise
+                self.logger.warning(f"DocxTemplate render failed: {render_error}, using manual replacement")
+                # Only use manual replacement as a fallback when DocxTemplate fails
+                buffer = BytesIO()
+                doc.save(buffer)
+                buffer.seek(0)
+                rendered_doc = Document(buffer)
+                self._manual_replace_placeholders(rendered_doc, context)
+                return rendered_doc
             
             # CRITICAL FIX: Ensure all tables have proper tblGrid elements before processing
             self._ensure_table_grids_exist(rendered_doc)
             
-            # Apply lineage colors FIRST (in own try/except so one failure doesn't skip post-process).
-            # Must run before _post_process because post-process strips __LINEAGE_HINT_*__ from cell text.
+            # CRITICAL FIX: Wrap all post-processing in comprehensive error handling
             try:
-                # Pass placeholder-specific settings if available so coloration/clearing
-                # can be controlled per-field by UI settings stored in session.
-                ph_settings = getattr(self, 'placeholder_settings', {}) or {}
-                apply_lineage_colors(rendered_doc, self.template_type, ph_settings)
-            except Exception as color_err:
-                self.logger.warning(f"Lineage color application failed (post-process will still run): {color_err}")
-                self.logger.debug(traceback.format_exc())
-
-            # CRITICAL FIX: Wrap post-processing in comprehensive error handling
-            try:
-                self._post_process_and_replace_content(rendered_doc)
-                self._final_marker_cleanup(rendered_doc)
+                # PERFORMANCE: Combine post-processing, lineage colors, and marker cleanup in one pass
+                self._post_process_combined(rendered_doc, chunk_start_time)
+                
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
                 # Continue processing without post-processing features
@@ -1912,14 +1288,7 @@ class TemplateProcessor:
                 self._ensure_lineage_centering_for_nonclassic_types(rendered_doc)
             except Exception as e:
                 self.logger.warning(f"Final lineage centering fix failed: {e}")
-
-            # Remove trailing blank paragraphs/pages that Word adds after the last table.
-            # These cause an extra blank printed page at the end of the document.
-            try:
-                self._remove_trailing_blank_content(rendered_doc)
-            except Exception as e:
-                self.logger.warning(f"Trailing blank removal failed (non-fatal): {e}")
-
+            
             return rendered_doc
             
         except Exception as e:
@@ -1954,226 +1323,17 @@ class TemplateProcessor:
         
         return context
 
-    def _get_empty_label_context(self):
-        """Create an empty label context dictionary with all required fields set to empty strings."""
-        return {
-            'Description': '',
-            'WeightUnits': '',
-            'ProductBrand': '',
-            'Price': '',
-            'Lineage': '',
-            'DOH': '',
-            'Ratio_or_THC_CBD': '',
-            'THC_CBD': '',
-            'THC': '',
-            'CBD': '',
-            'Ratio': '',
-            'ProductName': '',
-            'ProductStrain': '',
-            'ProductVendor': '',
-            'DescAndWeight': '',
-            'JointRatio': '',
-            'ProductType': '',
-            # Marker fields for template processing
-            'ProductStrain_START': 'PRODUCTSTRAIN_START',
-            'ProductStrain_END': 'PRODUCTSTRAIN_END',
-            'Lineage_START': 'LINEAGE_START',
-            'Lineage_END': 'LINEAGE_END',
-            'ProductBrand_START': 'PRODUCTBRAND_START',
-            'ProductBrand_END': 'PRODUCTBRAND_END',
-            'ProductVendor_START': 'PRODUCTVENDOR_START',
-            'ProductVendor_END': 'PRODUCTVENDOR_END',
-            'DescAndWeight_START': 'DESC_START',
-            'DescAndWeight_END': 'DESC_END',
-            'Ratio_or_THC_CBD_START': 'THC_CBD_START',
-            'Ratio_or_THC_CBD_END': 'THC_CBD_END',
-            'Price_START': 'PRICE_START',
-            'Price_END': 'PRICE_END',
-            'WeightUnits_START': 'WEIGHTUNITS_START',
-            'WeightUnits_END': 'WEIGHTUNITS_END',
-            'Ratio_START': 'RATIO_START',
-            'Ratio_END': 'RATIO_END',
-            'JointRatio_START': 'JOINT_RATIO_START',
-            'JointRatio_END': 'JOINT_RATIO_END',
-            'THC_START': 'THC_START',
-            'THC_END': 'THC_END',
-            'CBD_START': 'CBD_START',
-            'CBD_END': 'CBD_END',
-            # QR code field (empty for blank labels)
-            'QR': '',
-        }
-    
-    def _build_label_context(self, record, doc, product_brand_cache=None, product_vendor_cache=None, 
-                             product_lineage_cache=None, strain_info_cache=None, joint_ratio_cache=None):
-        # Initialize caches to empty dicts if None
-        product_brand_cache = product_brand_cache or {}
-        product_vendor_cache = product_vendor_cache or {}
-        product_lineage_cache = product_lineage_cache or {}
-        strain_info_cache = strain_info_cache or {}
-        joint_ratio_cache = joint_ratio_cache or {}
+    def _build_label_context(self, record, doc, product_brand_cache=None):
         """Ultra-optimized label context building for maximum performance."""
-        # Use module-level re import (already imported at top of file)
         if product_brand_cache is None:
             product_brand_cache = {}
-        if product_vendor_cache is None:
-            product_vendor_cache = {}
         # CRITICAL FIX: Log lineage value received in template processor
         lineage_value = record.get('Lineage', 'NOT_FOUND')
         product_name = record.get('ProductName', 'Unknown')
-        self.logger.debug(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
+        self.logger.info(f"LINEAGE TEMPLATE DEBUG: Building context for '{product_name}' with lineage: '{lineage_value}'")
         
         # Fast dictionary copy
         label_context = dict(record)
-
-        # CLEAN ProductName: strip " by Brand/Vendor - weight/mg" suffix from ALL product types.
-        # DB product names end in "by BrandName - Xg" or "by BrandName - Xmg THC" which should not appear in the label title.
-        _raw_pname = label_context.get('ProductName') or label_context.get('Product Name*') or ''
-        if _raw_pname and ' by ' in _raw_pname:
-            # Check both vendor AND brand since DB names use " by BrandName"
-            _attribution_check = (
-                label_context.get('Product Brand') or label_context.get('ProductBrand') or
-                label_context.get('productBrand') or record.get('Product Brand') or record.get('ProductBrand') or
-                label_context.get('Vendor') or label_context.get('Vendor/Supplier*') or
-                label_context.get('ProductVendor') or record.get('Vendor') or record.get('Vendor/Supplier*') or ''
-            ).strip()
-            if _attribution_check and _attribution_check.lower() in _raw_pname.lower():
-                # Strip from the " by <name>" to the end of the string
-                _by_pattern = r'\s+by\s+' + re.escape(_attribution_check) + r'(?:\s*-\s*.+)?$'
-                _pname_clean = re.sub(_by_pattern, '', _raw_pname, flags=re.IGNORECASE).strip()
-                if _pname_clean and _pname_clean != _raw_pname and len(_pname_clean) >= 3:
-                    label_context['ProductName'] = _pname_clean
-                    label_context['Product Name*'] = _pname_clean
-                    self.logger.debug(f"🔧 PRODUCT NAME CLEAN: '{_raw_pname}' -> '{_pname_clean}' (stripped brand/vendor suffix)")
-
-        # CRITICAL: Never render placeholder "Unknown" on labels - treat as missing
-        for key in ('ProductStrain', 'Product Strain', 'ProductBrand', 'Product Brand', 'Vendor', 'Vendor/Supplier*', 'ProductVendor'):
-            val = label_context.get(key)
-            if val is not None and str(val).strip().lower() in ('unknown', 'unknown vendor', 'unknown brand', 'unknown strain'):
-                label_context[key] = ''
-        # CRITICAL: Ensure Price is set for docx (UI may have Price* only); template expects 'Price'
-        price_val = (
-            label_context.get('Price') or record.get('Price') or record.get('Price*') or
-            record.get('Price* (Tier Name for Bulk)') or record.get('Med Price') or
-            record.get('price') or label_context.get('price') or record.get('Unit Price') or record.get('Retail Price')
-        )
-        if price_val is not None and not (hasattr(pd, 'isna') and pd.isna(price_val)):
-            price_str = str(price_val).strip()
-            if price_str and price_str.lower() not in ('nan', 'none', 'null', ''):
-                if not price_str.startswith('$'):
-                    try:
-                        float(price_str.replace(',', '').replace('$', ''))
-                        price_str = '$' + price_str.lstrip('$')
-                    except ValueError:
-                        pass
-                label_context['Price'] = price_str
-        # Ensure Price is never NaN in context (web/request rows can have NaN from DataFrame)
-        if not label_context.get('Price') or (hasattr(pd, 'isna') and pd.isna(label_context.get('Price'))):
-            label_context['Price'] = ''
-
-        # DEBUG: Log Product Brand from record vs label_context
-        self.logger.debug(f"🔍 RECORD BRAND DEBUG for '{product_name}': record['Product Brand']='{record.get('Product Brand')}', record['ProductBrand']='{record.get('ProductBrand')}', record['Vendor']='{record.get('Vendor')}'")
-
-        # CRITICAL FIX: Read vendor directly from record first - it should already be in the Excel column
-        # Check ALL possible vendor field variations, including case-insensitive matching
-        vendor_from_record = None
-        
-        # First, get all vendor-related keys from the record (case-insensitive search)
-        vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-        
-        # Standard vendor field names to check (in priority order)
-        vendor_field_names = ['Vendor/Supplier*', 'Vendor/Supplier', 'Vendor', 'ProductVendor', 'vendor']
-        
-        # Try standard field names first - check label_context FIRST (it's a dict copy of record)
-        for field_name in vendor_field_names:
-            # Check label_context first (already copied from record via dict(record))
-            val = label_context.get(field_name)
-            if val is None or pd.isna(val):
-                # Fallback to record if not in label_context
-                val = record.get(field_name)
-            
-            # CRITICAL: More thorough check - handle empty strings, None, NaN, and whitespace-only values
-            if val is not None:
-                # Check if it's NaN using pandas
-                if not pd.isna(val):
-                    val_str = str(val).strip()
-                    val_lower = val_str.lower()
-                    # Check if it's a valid non-empty value (reject placeholder "Unknown")
-                    if val_str and val_lower not in ['nan', 'none', 'null', '', 'unknown', 'unknown vendor', 'unknown brand']:
-                        vendor_from_record = val_str
-                        self.logger.debug(f"✅ EARLY VENDOR EXTRACTION: Found vendor in field '{field_name}': '{vendor_from_record}' for '{product_name}'")
-                        break
-                    else:
-                        # Log why it was rejected
-                        self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' has value '{repr(val)}' (stripped: '{val_str}') which is empty/invalid for '{product_name}'")
-                else:
-                    self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' is NaN for '{product_name}'")
-            else:
-                self.logger.debug(f"🔍 VENDOR REJECTED: Field '{field_name}' is None for '{product_name}'")
-        
-        # If not found in standard fields, check ALL vendor-related keys from BOTH label_context and record
-        if not vendor_from_record and vendor_related_keys:
-            for key in vendor_related_keys:
-                # Check label_context first, then record
-                val = label_context.get(key)
-                if val is None or pd.isna(val):
-                    val = record.get(key)
-                
-                _v = str(val).strip() if val is not None else ''
-                _vl = _v.lower()
-                if val is not None and not pd.isna(val) and _v and _vl not in ['nan', 'none', 'null', '', 'unknown', 'unknown vendor', 'unknown brand']:
-                    vendor_from_record = _v
-                    self.logger.debug(f"✅ Found vendor in field '{key}': '{vendor_from_record}' for '{product_name}'")
-                    break
-        
-        # VENDOR FALLBACK: If vendor not found in record but we detected vendor filtering, use the fallback vendor
-        if not vendor_from_record and hasattr(self, '_vendor_fallback') and self._vendor_fallback:
-            vendor_from_record = self._vendor_fallback
-            # Reduced logging for performance - only log first few instances
-            if not hasattr(self, '_vendor_fallback_logged_count'):
-                self._vendor_fallback_logged_count = 0
-            if self._vendor_fallback_logged_count < 3:
-                self.logger.debug(f"✅ VENDOR FALLBACK: Using detected vendor '{vendor_from_record}' for '{product_name}' (vendor was missing from record)")
-                self._vendor_fallback_logged_count += 1
-        
-        # Store vendor early so it's available throughout processing
-        if vendor_from_record:
-            label_context['_vendor_from_record'] = vendor_from_record
-            # Also set ProductVendor directly in label_context so it's available immediately
-            # This ensures vendor is preserved even if later logic tries to clear it
-            # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
-            label_context['ProductVendor'] = f"PRODUCTVENDOR_START{vendor_from_record}PRODUCTVENDOR_END"
-        else:
-            # CRITICAL FIX: Always initialize ProductVendor, even if empty, so fallback logic can detect and populate it
-            # Initialize as empty with markers so the fallback logic can properly detect it needs to be populated
-            # Use wrap_with_marker for consistency so marker processing applies correct styling
-            label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
-            # Log warning with all available keys for debugging
-            all_keys_sample = list(record.keys())[:20]  # First 20 keys for debugging
-            # Also log actual values from vendor fields to see if they're empty or have different names
-            vendor_field_values = {}
-            for field in vendor_field_names:
-                val = record.get(field)
-                vendor_field_values[field] = f"value={repr(val)}, type={type(val).__name__}, is_na={pd.isna(val) if hasattr(pd, 'isna') else 'N/A'}"
-            # Also check vendor-related keys
-            for key in vendor_related_keys:
-                val = record.get(key)
-                vendor_field_values[key] = f"value={repr(val)}, type={type(val).__name__}, is_na={pd.isna(val) if hasattr(pd, 'isna') else 'N/A'}"
-            self.logger.warning(f"⚠️ No vendor found in record for '{product_name}'. Checked fields: {vendor_field_names}, Vendor-related keys: {vendor_related_keys}, Vendor field values: {vendor_field_values}, Sample record keys: {all_keys_sample}")
-        
-        # PREROLL TEMPLATE: Override ProductName with group display name if this is a grouped preroll
-        if self.template_type == 'preroll':
-            group_id = record.get('_group_id')
-            if group_id:
-                group_info = record.get('_group_info')
-                if group_info and isinstance(group_info, dict):
-                    group_display_name = group_info.get('display_name', '')
-                    if group_display_name:
-                        # Override ProductName, Product Name*, and Description immediately
-                        label_context['ProductName'] = group_display_name
-                        label_context['Product Name*'] = group_display_name
-                        label_context['Description'] = group_display_name
-                        self.logger.debug(f"PREROLL GROUP OVERRIDE: Set ProductName/Description to '{group_display_name}' (group_id: {group_id})")
-        
         has_cbd_blend_strain = False
         cbd_signal_tokens = ['CBD', 'CBG', 'CBN', 'CBC']
 
@@ -2183,24 +1343,12 @@ class TemplateProcessor:
             text_upper = str(value).upper()
             return any(token in text_upper for token in cbd_signal_tokens)
 
-        # CRITICAL FIX: Ratio_or_THC_CBD template values like "THC: | BR | CBD:" contain the
-        # word "CBD" but have no actual CBD content. Only include Ratio_or_THC_CBD/Ratio in the
-        # CBD signal check if it contains a numeric value — otherwise it's just an empty template.
-        def _ratio_has_real_content(val):
-            if not val:
-                return None
-            import re as _re
-            return val if _re.search(r'[\d%]|mg\b', str(val), _re.IGNORECASE) else None
-
-        ratio_val = (
-            label_context.get('Ratio_or_THC_CBD') or record.get('Ratio_or_THC_CBD') or record.get('Ratio')
-        )
         cbd_signal_candidates = [
             label_context.get('ProductStrain') or record.get('ProductStrain') or record.get('Product Strain'),
             label_context.get('ProductName') or record.get('ProductName') or record.get('Product Name*'),
             label_context.get('Description') or record.get('Description'),
             label_context.get('Product Brand') or record.get('Product Brand') or record.get('ProductBrand'),
-            _ratio_has_real_content(ratio_val),
+            label_context.get('Ratio_or_THC_CBD') or record.get('Ratio_or_THC_CBD') or record.get('Ratio'),
             label_context.get('Lineage') or record.get('Lineage'),
             record.get('Product Type*'),
             record.get('ProductType')
@@ -2208,7 +1356,6 @@ class TemplateProcessor:
         if any(_contains_cbd_signal(candidate) for candidate in cbd_signal_candidates):
             has_cbd_blend_strain = True
         else:
-            # re is already imported at module level
             ratio_pattern = re.compile(r'\b\d+\s*:\s*\d+(?:\s*:\s*\d+)?\b')
             ratio_sources = [
                 record.get('ProductName') or record.get('Product Name*'),
@@ -2235,7 +1382,7 @@ class TemplateProcessor:
                 label_context['Product Strain'] = cbd_blend_value
                 record['ProductStrain'] = cbd_blend_value
                 record['Product Strain'] = cbd_blend_value
-                self.logger.debug(f"CBD BLEND STRAIN ENFORCEMENT: Set ProductStrain to '{cbd_blend_value}' for '{product_name}'")
+                self.logger.info(f"CBD BLEND STRAIN ENFORCEMENT: Set ProductStrain to '{cbd_blend_value}' for '{product_name}'")
             elif current_strain_clean.upper() == 'CBD BLEND':
                 # Normalize capitalization
                 cbd_blend_value = 'CBD Blend'
@@ -2244,140 +1391,48 @@ class TemplateProcessor:
                 record['ProductStrain'] = cbd_blend_value
                 record['Product Strain'] = cbd_blend_value
         
-        # CRITICAL FIX: ALWAYS prioritize database lineage over Excel lineage for DOCX output
-        # Database lineage is the source of truth, not Excel lineage
-        # This ensures DOCX output uses database lineage values, not Excel lineage
+        # CRITICAL FIX: Double-check lineage from database to ensure it's up-to-date
+        # This is a safety net to catch any cases where the record lineage wasn't updated
         try:
             product_name = record.get('ProductName', record.get('Product Name*', ''))
-            excel_lineage = label_context.get('Lineage', '') or record.get('Lineage', '')
+            current_record_lineage = label_context.get('Lineage', '')
             
-            # CRITICAL: Use record lineage first (already enriched with database value, no sativa hybrid override)
-            # Only query database if record lineage is missing
-            db_lineage = None
-            # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-            # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
-            record_lineage = None
-            for lineage_field in ['sovereign_lineage', 'canonical_lineage', 'Lineage', 'lineage']:
-                candidate = record.get(lineage_field)
-                normalized_candidate = _trim_invisible_edges(candidate)
-                if normalized_candidate and normalized_candidate not in ['', 'None', 'nan']:
-                    lineage_str = normalized_candidate.upper()
-                    if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
-                        record_lineage = lineage_str
-                        break
-            
-            if record_lineage:
-                # Use record lineage (already set correctly by enrichment, avoids sativa hybrid override)
-                db_lineage = record_lineage
-                if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                    self.logger.debug(f"✅ LINEAGE: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-            elif product_name:
-                # Record lineage missing - query database directly (avoid get_product_lineage which applies override)
+            # Always check database for most up-to-date lineage (product-level first, then strain-level)
+            if product_name:
                 from app import get_product_database, get_current_store_name
                 store_name = get_current_store_name()
                 product_db = get_product_database(store_name)
                 if product_db:
-                    # Query database directly using same COALESCE logic as batch query
-                    # CRITICAL FIX: Join with strains table to get strain-level lineage (sovereign_lineage, canonical_lineage)
-                    # This matches the batch query logic at line 1399-1408 for consistency
-                    try:
-                        conn = product_db._get_connection()
-                        cursor = conn.cursor()
-                        # CRITICAL FIX: Use same COALESCE priority as batch query and _align_tags_with_db_lineage
-                        # Priority: p.sovereign_lineage > s.sovereign_lineage > s.canonical_lineage > p."Lineage"
-                        # Join with strains using multiple strategies (strain_id, normalized_product_strain, Product Strain name)
-                        cursor.execute('''
-                            SELECT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
-                                           s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage,
-                                   p.sovereign_lineage as product_sovereign,
-                                   s1.sovereign_lineage as strain1_sovereign,
-                                   s2.sovereign_lineage as strain2_sovereign,
-                                   s3.sovereign_lineage as strain3_sovereign,
-                                   s1.canonical_lineage as strain1_canonical,
-                                   s2.canonical_lineage as strain2_canonical,
-                                   s3.canonical_lineage as strain3_canonical,
-                                   p."Lineage" as product_lineage
-                            FROM products p
-                            LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE p."Product Name*" = ? OR p.ProductName = ? OR p.normalized_name = ?
-                            ORDER BY p.id DESC
-                            LIMIT 1
-                        ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                        result = cursor.fetchone()
-                        # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
-                        if result:
-                            # COALESCE result is in first column (index 0)
-                            # Check individual fields to determine source for logging
-                            lineage_val = result[0]  # COALESCE result
-                            product_sovereign = result[1]
-                            strain1_sovereign = result[2]
-                            strain2_sovereign = result[3]
-                            strain3_sovereign = result[4]
-                            strain1_canonical = result[5]
-                            strain2_canonical = result[6]
-                            strain3_canonical = result[7]
-                            product_lineage = result[8]
-                            
-                            # Determine source for logging
-                            source = 'unknown'
-                            if product_sovereign and str(product_sovereign).strip().upper() not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
-                                source = 'product.sovereign_lineage'
-                            elif strain1_sovereign or strain2_sovereign or strain3_sovereign:
-                                source = 'strain.sovereign_lineage'
-                            elif strain1_canonical or strain2_canonical or strain3_canonical:
-                                source = 'strain.canonical_lineage'
-                            elif product_lineage:
-                                source = 'product.Lineage'
-                            
-                            normalized_lineage_val = _trim_invisible_edges(lineage_val).upper()
-                            if normalized_lineage_val and normalized_lineage_val not in ['', 'NONE', 'NULL', 'NAN', 'SOVEREIGN']:
-                                db_lineage = normalized_lineage_val
-                                self.logger.debug(f"🔒 DOCX: Using {source} '{db_lineage}' for '{product_name}'")
-                            else:
-                                db_lineage = None
-                    except Exception as db_err:
-                        self.logger.warning(f"Direct database query failed, falling back to get_product_lineage: {db_err}")
-                        # Fallback to get_product_lineage if direct query fails
-                        db_lineage = product_db.get_product_lineage(product_name)
+                    # FIRST: Check product-level lineage (preserves user changes)
+                    db_lineage = product_db.get_product_lineage(product_name)
                     
-                    # CRITICAL: Always use database lineage if available, never Excel
-                    normalized_db_lineage = _trim_invisible_edges(db_lineage)
-                    if normalized_db_lineage and normalized_db_lineage not in ['', 'None', 'nan']:
-                        db_lineage_upper = normalized_db_lineage.upper()
-                        # Always override Excel lineage with database lineage
-                        if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
-                            # Database lineage differs from Excel - use database
-                            self.logger.debug(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
-                        label_context['Lineage'] = db_lineage_upper
-                    else:
-                        # No DB lineage - use defaults based on product type (never Excel)
-                        product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
-                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-                        
-                        if is_classic:
-                            default_lineage = 'HYBRID'
+                    # If no product-level lineage, check strain-level lineage
+                    if not db_lineage or str(db_lineage).strip() in ['', 'None', 'nan']:
+                        product_strain = record.get('Product Strain', '')
+                        if product_strain:
+                            strain_info = product_db.get_strain_info(product_strain)
+                            if strain_info:
+                                db_lineage = (
+                                    strain_info.get('display_lineage') or
+                                    strain_info.get('sovereign_lineage') or
+                                    strain_info.get('canonical_lineage') or
+                                    None
+                                )
+                    
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        db_lineage_upper = str(db_lineage).strip().upper()
+                        if db_lineage_upper != str(current_record_lineage).strip().upper():
+                            # Database has a different lineage - use it
+                            self.logger.info(f"✅ LINEAGE DB CHECK: '{product_name}' - Record: '{current_record_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
+                            label_context['Lineage'] = db_lineage_upper
                         else:
-                            default_lineage = 'MIXED'
-                        
-                        self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
-                        label_context['Lineage'] = default_lineage
+                            # Same lineage, but ensure it's uppercase for consistency
+                            label_context['Lineage'] = db_lineage_upper
+                    elif current_record_lineage:
+                        # No DB lineage, but record has one - keep it but ensure uppercase
+                        label_context['Lineage'] = str(current_record_lineage).strip().upper()
         except Exception as e:
-            self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
-            # On error, use defaults based on product type (never Excel)
-            product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
-            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
-            
-            if is_classic:
-                default_lineage = 'HYBRID'
-            else:
-                default_lineage = 'MIXED'
-            
-            self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX ERROR): '{product_name}' - Error checking DB, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
-            label_context['Lineage'] = default_lineage
+            self.logger.debug(f"Could not check database lineage: {e}")
         
         # CRITICAL FIX: Force DOH to be read from the actual data source, not defaults
         # If DOH is 'YES' but we updated it to 'No', use 'No' instead
@@ -2387,15 +1442,12 @@ class TemplateProcessor:
             # We need to preserve the user's DOH selection even for JSON matches
             pass
 
-        # Fast value cleaning - trim only leading/trailing whitespace.
-        # Keep internal spaces intact (e.g., descriptions and product names).
+        # Fast value cleaning - only process non-empty values
         for key, value in label_context.items():
-            if value is None:
+            if value is not None:
+                label_context[key] = str(value).strip()
+            else:
                 label_context[key] = ""
-                continue
-
-            cleaned_val = _trim_invisible_edges(value)
-            label_context[key] = cleaned_val
 
         # Ensure WeightUnits is populated from available weight fields
         # Special handling for pre-roll products: use JointRatio instead of Weight* + Units
@@ -2410,145 +1462,55 @@ class TemplateProcessor:
         else:
             # CRITICAL FIX: For new products without proper type, infer from product name
             product_name = record.get('ProductName', '')
-            name_lower = product_name.lower()
-
-            # 1) High‑signal concentrate patterns
-            if any(keyword in name_lower for keyword in ['live rosin', 'hash rosin', 'solventless', 'rosin']):
-                product_type = 'solventless concentrate'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'solventless concentrate' (from name)")
-
-            # 2) Vape / disposable patterns
-            elif any(keyword in name_lower for keyword in ['disposable vape', 'disposable cart', 'vape cart', 'cartridge', 'vape pen']):
-                product_type = 'vape cartridge'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'vape cartridge' (from name)")
-
-            # 3) Pre‑roll patterns (must check BEFORE flower — "Core Flower Pre-Roll" contains "flower")
-            elif any(keyword in name_lower for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
-                product_type = 'pre-roll'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
-
-            # 4) Classic flower keywords
-            elif any(keyword in name_lower for keyword in ['flower', 'bud', 'nug', 'herb']):
+            if any(keyword in product_name.lower() for keyword in ['flower', 'bud', 'nug', 'herb']):
                 product_type = 'flower'
-                self.logger.debug(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
-
-            # 5) Fallback – keep previous behaviour
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
+            elif any(keyword in product_name.lower() for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
+                product_type = 'pre-roll'
+                self.logger.info(f"🔧 INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
             else:
                 product_type = 'flower'  # Default to flower for new products
-                self.logger.debug(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
+                self.logger.info(f"🔧 DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
         
         # ALWAYS LOG TO SEE WHAT PRODUCT TYPES ARE PROCESSED
-        self.logger.debug(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
+        self.logger.info(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
         
         # CRITICAL FIX: Store the processed product type in the context
         label_context['ProductType'] = product_type
         label_context['Product Type*'] = product_type.title()  # Store as title case for consistency
         
-        # CRITICAL FIX: Process JointRatio FIRST for pre-rolls, before any other weight processing
-        # This ensures WeightUnits is set to JointRatio before DescAndWeight construction
-        # IMPORTANT: Clear any existing WeightUnits from record for pre-rolls to prevent using total weight
         if product_type in ['pre-roll', 'infused pre-roll']:
-            # CRITICAL FIX: Always clear WeightUnits for pre-rolls - we'll set it to JointRatio below
-            # This prevents using total weight (like "5g") instead of joint ratio (like "- 1g x 5 Pack")
-            if 'WeightUnits' in label_context:
-                existing_weight = label_context.get('WeightUnits', '')
-                # Clear WeightUnits if it doesn't contain joint ratio pattern (no "x" or "Pack")
-                # This ensures we always use JointRatio, not total weight
-                if existing_weight:
-                    weight_str = str(existing_weight).lower()
-                    has_joint_ratio_pattern = 'x' in weight_str or 'pack' in weight_str
-                    if not has_joint_ratio_pattern:
-                        self.logger.debug(f"🔧 PRE-ROLL: Clearing total weight WeightUnits '{existing_weight}' - will use JointRatio instead")
-                        label_context['WeightUnits'] = ''
-                    else:
-                        self.logger.debug(f"🔧 PRE-ROLL: WeightUnits '{existing_weight}' already looks like JointRatio, keeping it")
-            # For pre-roll products, use JointRatio as the weight
-            # CRITICAL FIX: Check BOTH record and label_context for JointRatio (label_context is a copy of record)
-            joint_ratio = (label_context.get('JointRatio') or 
-                          record.get('JointRatio') or 
-                          label_context.get('Joint Ratio') or
+            # For pre-roll products, use JointRatio as WeightUnits
+            joint_ratio = (record.get('JointRatio') or 
                           record.get('Joint Ratio') or 
                           '')
             
-            # CRITICAL FIX: Log all JointRatio sources for debugging
-            self.logger.debug(f"🔍 JOINTRATIO DEBUG: Product '{record.get('ProductName', 'N/A')}'")
-            self.logger.debug(f"   label_context.get('JointRatio'): {repr(label_context.get('JointRatio'))}")
-            self.logger.debug(f"   record.get('JointRatio'): {repr(record.get('JointRatio'))}")
-            self.logger.debug(f"   label_context.get('Joint Ratio'): {repr(label_context.get('Joint Ratio'))}")
-            self.logger.debug(f"   record.get('Joint Ratio'): {repr(record.get('Joint Ratio'))}")
-            self.logger.debug(f"   Final joint_ratio: {repr(joint_ratio)}")
-            
-            # CRITICAL FIX: If JointRatio is missing from record, try multiple sources
-            if not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
+            # CRITICAL FIX: If JointRatio is missing from record, try to get it from database directly
+            if not joint_ratio or joint_ratio.strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
                 product_name = record.get('ProductName') or record.get('Product Name*', '')
                 if product_name:
-                    # Try database cache first
                     try:
-                        # Use pre-loaded cache instead of individual query
-                        if joint_ratio_cache and product_name:
-                            joint_ratio = joint_ratio_cache.get(product_name)
-                            if joint_ratio:
-                                self.logger.debug(f"✅ Retrieved JointRatio '{joint_ratio}' from cache for '{product_name}'")
-                            else:
-                                self.logger.debug(f"No JointRatio in cache for '{product_name}'")
+                        # Get JointRatio directly from database
+                        from src.core.data.product_database import get_product_database
+                        product_db = get_product_database()
+                        if product_db:
+                            conn = product_db._get_connection()
+                            cursor = conn.cursor()
+                            cursor.execute('SELECT JointRatio FROM products WHERE "Product Name*" = ?', (product_name,))
+                            result = cursor.fetchone()
+                            if result and result[0]:
+                                joint_ratio = result[0]
+                                self.logger.info(f"🔧 FIXED: Retrieved JointRatio '{joint_ratio}' from database for '{product_name}'")
                     except Exception as e:
-                        self.logger.warning(f"⚠️ Could not retrieve JointRatio from cache: {e}")
-                    
-                    # CRITICAL FIX: If still missing, extract from product name
-                    if not joint_ratio or str(joint_ratio).strip() in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                        # re is already imported at module level
-                        product_name_str = str(product_name)
-                        
-                        # Pattern 1: "weight x count Pack" (e.g., "0.5g x 2 Pack", ".75g x 5 Pack")
-                        pattern1 = r'(\d*\.?\d+g)\s*x\s*(\d+)\s*Pack'
-                        match1 = re.search(pattern1, product_name_str, re.IGNORECASE)
-                        if match1:
-                            weight = match1.group(1)
-                            count = match1.group(2)
-                            joint_ratio = f"{weight} x {count} Pack"
-                            self.logger.debug(f"✅ Extracted JointRatio '{joint_ratio}' from product name '{product_name}' (pattern 1)")
-                        else:
-                            # Pattern 2: "weight x count" (e.g., "0.5g x 2", ".75g x 5")
-                            pattern2 = r'(\d*\.?\d+g)\s*x\s*(\d+)'
-                            match2 = re.search(pattern2, product_name_str, re.IGNORECASE)
-                            if match2:
-                                weight = match2.group(1)
-                                count = match2.group(2)
-                                joint_ratio = f"{weight} x {count}"
-                                self.logger.debug(f"✅ Extracted JointRatio '{joint_ratio}' from product name '{product_name}' (pattern 2)")
-                            else:
-                                # Pattern 3: Just weight (e.g., "1g", "0.5g", ".75g")
-                                pattern3 = r'(\d*\.?\d+g)'
-                                match3 = re.search(pattern3, product_name_str, re.IGNORECASE)
-                                if match3:
-                                    weight = match3.group(1)
-                                    joint_ratio = weight
-                                    self.logger.debug(f"✅ Extracted JointRatio '{joint_ratio}' from product name '{product_name}' (pattern 3)")
+                        self.logger.warning(f"🔧 FAILED: Could not retrieve JointRatio from database: {e}")
             
-            self.logger.debug(f"📦 PRE-ROLL: Product '{record.get('ProductName', 'N/A')}', Final JointRatio: '{joint_ratio}'")
-            
-            # Use JointRatio or default for all weight fields
+            self.logger.info(f"🔴 TEMPLATE DEBUG: Product '{record.get('ProductName', 'N/A')}', Type '{product_type}', JointRatio received: '{joint_ratio}'")
             if joint_ratio and joint_ratio.strip() not in ['', 'NULL', 'null', '0', '0.0', 'None', 'nan']:
-                formatted_joint_ratio = self.format_joint_ratio_pack(joint_ratio.strip())
-                # Set JointRatio for ALL weight-related fields
-                label_context['Weight*'] = formatted_joint_ratio
-                label_context['WeightUnits'] = formatted_joint_ratio
-                label_context['CombinedWeight'] = formatted_joint_ratio
-                label_context['weightWithUnits'] = formatted_joint_ratio
-                label_context['JointRatio'] = formatted_joint_ratio
-                self.logger.debug(f"✅ Using JointRatio as weight: '{formatted_joint_ratio}' for {product_type}")
+                label_context['WeightUnits'] = joint_ratio.strip()
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using JointRatio '{joint_ratio}' for {product_type}")
             else:
-                formatted_default = self.format_joint_ratio_pack("0.5g x 2 Pack")
-                # Set default for ALL weight-related fields
-                label_context['Weight*'] = formatted_default
-                label_context['WeightUnits'] = formatted_default
-                label_context['CombinedWeight'] = formatted_default
-                label_context['weightWithUnits'] = formatted_default
-                label_context['JointRatio'] = formatted_default
-                self.logger.warning(f"⚠️ Using default JointRatio as weight: '{formatted_default}' for {product_type}")
-            
-            # CRITICAL FIX: WeightUnits is already set to JointRatio above - skip non-pre-roll WeightUnits construction
-            # This ensures WeightUnits for pre-rolls uses JointRatio, not total weight
+                label_context['WeightUnits'] = "0.5g x 2 Pack"  # Default for pre-rolls
+                self.logger.debug(f"PRE-ROLL WeightUnits: Using default '0.5g x 2 Pack' for {product_type}")
         else:
             # For non-pre-roll products, construct WeightUnits from available fields
             weight_units = (
@@ -2570,7 +1532,7 @@ class TemplateProcessor:
                         'Product Name*': label_context.get('ProductName', '')
                     }
                     weight_units = self.excel_processor._format_weight_units(weight_record, excel_priority=True)
-                    self.logger.debug(f"🔧 WEIGHT NORMALIZED: '{weight_units}' using session Excel processor for '{record.get('ProductName', 'N/A')}'")
+                    self.logger.info(f"🔧 WEIGHT NORMALIZED: '{weight_units}' using session Excel processor for '{record.get('ProductName', 'N/A')}'")
                 else:
                     # Fallback to simple concatenation if no Excel processor available
                     weight_value = label_context.get('Weight*', '').strip()
@@ -2595,32 +1557,7 @@ class TemplateProcessor:
                     end_idx = weight_text.find(end_marker)
                     actual_weight = weight_text[start_idx:end_idx].strip()
                     label_context['WeightUnits'] = actual_weight
-                    self.logger.debug(f"🔧 WEIGHT MARKERS REMOVED: '{weight_text}' -> '{actual_weight}' for '{record.get('ProductName', 'N/A')}'")
-            
-            # CRITICAL FIX: Convert grams to ounces for nonclassic types
-            from src.core.constants import CLASSIC_TYPES
-            product_type_for_conversion = (label_context.get('Product Type*', '') or 
-                                         label_context.get('ProductType', '') or 
-                                         record.get('Product Type*', '') or 
-                                         record.get('ProductType', '')).lower().strip()
-            is_classic = product_type_for_conversion in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_for_conversion for ct in CLASSIC_TYPES)
-            
-            if not is_classic and label_context.get('WeightUnits'):
-                weight_str = str(label_context['WeightUnits']).strip()
-                # Check if weight is in grams (g, gram, grams)
-                gram_match = re.match(r'^([\d.]+)\s*(g|gram|grams)\s*$', weight_str, re.IGNORECASE)
-                if gram_match:
-                    grams_val = float(gram_match.group(1))
-                    oz_val = round(grams_val / 28.3495, 2)
-                    # Format as "X.XXoz" (no space, lowercase)
-                    converted_weight = f"{oz_val}oz"
-                    self.logger.debug(f"🔄 GRAM→OZ CONVERSION: Nonclassic type '{product_type_for_conversion}' - '{weight_str}' -> '{converted_weight}' for '{record.get('ProductName', 'N/A')}'")
-                    label_context['WeightUnits'] = converted_weight
-                    # Also update Weight* and Units fields if they exist
-                    if 'Weight*' in label_context:
-                        label_context['Weight*'] = str(oz_val)
-                    if 'Units' in label_context:
-                        label_context['Units'] = 'oz'
+                    self.logger.info(f"🔧 WEIGHT MARKERS REMOVED: '{weight_text}' -> '{actual_weight}' for '{record.get('ProductName', 'N/A')}'")
 
         # Define product type sets for use throughout the method
         from src.core.constants import CLASSIC_TYPES
@@ -2628,407 +1565,109 @@ class TemplateProcessor:
         edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
 
         # Use DescAndWeight from record if it exists, otherwise construct it
-        # PREROLL TEMPLATE: Check for group name FIRST before doing anything else
-        if self.template_type == 'preroll':
-            group_id = record.get('_group_id')
-            if group_id:
-                group_info = record.get('_group_info')
-                if group_info and isinstance(group_info, dict):
-                    group_display_name = group_info.get('display_name', '')
-                    if group_display_name:
-                        # CRITICAL FIX: Check if group display name already contains weight information
-                        # Patterns that indicate weight is already in the name:
-                        # - "Assorted Pre-Roll 1g x 5 Packs" (has "Xg x Y")
-                        # - "Pre-Roll - 1g" (has "- Xg" or "Xg" at end)
-                        # - "Infused Pre-Roll - 0.5g" (has "- Xg")
-                        has_weight_in_name = bool(re.search(r'\d+\.?\d*\s*g(?:\s*x\s*\d+)?(?:\s+Pack)?', group_display_name, re.IGNORECASE))
-
-                        if has_weight_in_name:
-                            # Group name already includes weight, use it as-is
-                            desc_and_weight = group_display_name
-                            self.logger.debug(f"PREROLL GROUP: Using group name as-is (already contains weight): '{desc_and_weight}' (group_id: {group_id})")
-                        else:
-                            # Group name doesn't include weight, add it from JointRatio/WeightUnits
-                            # Get JointRatio-derived weight from WeightUnits (set earlier for preroll products)
-                            weight_units = label_context.get('WeightUnits', '') or record.get('WeightUnits', '')
-                            if weight_units:
-                                # Remove newline prefix if present, and strip whitespace
-                                clean_weight = weight_units.replace('\n', '').strip()
-                                # Check if weight is already formatted with hyphen
-                                # Normalize non-breaking hyphen to regular hyphen for consistency
-                                if clean_weight.startswith('\u2011'):
-                                    # Replace non-breaking hyphen with regular hyphen
-                                    clean_weight = clean_weight.replace('\u2011', '-', 1).replace('\u00A0', ' ')
-                                if clean_weight.startswith('-'):
-                                    # Weight already has hyphen, just append it with space
-                                    desc_and_weight = f"{group_display_name} {clean_weight}"
-                                else:
-                                    # Add hyphen and space before weight
-                                    desc_and_weight = f"{group_display_name} - {clean_weight}"
-                                self.logger.debug(f"PREROLL GROUP: Added weight to group name: '{desc_and_weight}' (group: '{group_display_name}', weight: '{clean_weight}', group_id: {group_id})")
-                            else:
-                                # No weight available, use group name only
-                                desc_and_weight = group_display_name
-                                self.logger.debug(f"PREROLL GROUP: Using group name only (no weight available): '{group_display_name}' (group_id: {group_id})")
-
-                        label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
-                        # Skip all DescAndWeight construction below - we're done
-                        # Continue to QR code generation
-                    else:
-                        self.logger.warning(f"PREROLL: Group info missing display_name for group_id: {group_id}")
-                else:
-                    self.logger.warning(f"PREROLL: No group_info found for group_id: {group_id}")
+        if 'DescAndWeight' in label_context and label_context['DescAndWeight']:
+            # DescAndWeight is already set correctly in the record, use it as-is
+            desc_and_weight = label_context['DescAndWeight']
+            if not is_already_wrapped(desc_and_weight, 'DESC'):
+                label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+        else:
+            # Fallback: construct DescAndWeight from Description and WeightUnits
+            desc = label_context.get('Description', '') or ''
+            weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
+            
+            # DEBUG: Log the values being processed
+            self.logger.info(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}'")
+            
+            # Ultra-fast string operations
+            if desc.endswith('- '):
+                desc = desc[:-2]
+            if weight.startswith('- '):
+                weight = weight[2:]
+            
+            # DEBUG: Log all record keys and values to see what we're working with
+            self.logger.info(f"🔍 RECORD KEYS: {list(record.keys())}")
+            for key, value in record.items():
+                if 'weight' in key.lower() or 'units' in key.lower():
+                    self.logger.info(f"🔍 {key}: '{value}'")
+            
+            # CRITICAL FIX: Horizontal template uses DescAndWeight placeholder, not separate WeightUnits
+            # Add weight to description for the {{Label1.DescAndWeight}} placeholder
+            product_name_display = (
+                label_context.get('ProductName') or
+                record.get('ProductName') or
+                record.get('Product Name*', '')
+            )
+            
+            if self.template_type == 'double':
+                primary_text = (product_name_display or desc or '').strip()
+                self.logger.info(f"🔍 DOUBLE TEMPLATE DESC: Using primary text '{primary_text}'")
+                label_context['DescAndWeight'] = wrap_with_marker(primary_text, 'DESC')
             else:
-                self.logger.warning(f"PREROLL: No _group_id found in record - grouping may have failed")
-        
-        # For non-preroll or preroll without group, use normal DescAndWeight logic
-        # Check if we already set DescAndWeight for preroll group (skip if so)
-        if not (self.template_type == 'preroll' and record.get('_group_id') and label_context.get('DescAndWeight')):
-            # CRITICAL FIX: For pre-rolls, always reconstruct DescAndWeight using JointRatio
-            # Don't use existing DescAndWeight from record - it might have total weight instead of joint ratio
-            if 'DescAndWeight' in label_context and label_context['DescAndWeight'] and product_type not in ['pre-roll', 'infused pre-roll']:
-                # DescAndWeight is already set correctly in the record, but check if we need to convert grams to ounces
-                desc_and_weight = label_context['DescAndWeight']
-                if is_already_wrapped(desc_and_weight, 'DESC'):
-                    desc_and_weight = unwrap_marker(desc_and_weight, 'DESC')
-                
-                # CRITICAL FIX: Convert grams to ounces in existing DescAndWeight for nonclassic types
-                from src.core.constants import CLASSIC_TYPES
-                product_type_check = (label_context.get('Product Type*', '') or 
-                                    label_context.get('ProductType', '') or 
-                                    record.get('Product Type*', '') or 
-                                    record.get('ProductType', '')).lower().strip()
-                is_classic_for_existing = product_type_check in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_check for ct in CLASSIC_TYPES)
-                
-                # For non-classic types: replace "100mg THC" / "50mg CBD" etc. with actual weight (or strip if no weight)
-                if not is_classic_for_existing:
-                    weight_here = (label_context.get('WeightUnits') or record.get('WeightUnits') or '').strip()
-                    if not weight_here:
-                        w_val = (label_context.get('Weight*') or record.get('Weight*') or '').strip()
-                        u_val = (label_context.get('Units') or record.get('Units') or 'g').strip()
-                        if w_val and str(w_val).lower() not in ('nan', 'none', 'null', '') and not re.search(r'[a-zA-Z]', str(w_val)):
-                            weight_here = f"{w_val}{u_val}" if u_val else f"{w_val}g"
-                    cleaned_desc, weight_str = _replace_mg_thc_cbd_with_weight(desc_and_weight, weight_here)
-                    if cleaned_desc != desc_and_weight:
-                        if weight_str:
-                            desc_and_weight = f"{cleaned_desc} - {weight_str}" if cleaned_desc else weight_str
-                        else:
-                            desc_and_weight = cleaned_desc or desc_and_weight
-                        self.logger.debug(f"🔄 NON-CLASSIC: Replaced mg THC/CBD with weight in DescAndWeight -> '{desc_and_weight}'")
-                
-                if not is_classic_for_existing:
-                    # Check if DescAndWeight contains grams (e.g., "Pink Lemonade Hash Gummies - 32g")
-                    gram_pattern = r'([\d.]+)\s*(g|gram|grams)\b'
-                    gram_match = re.search(gram_pattern, desc_and_weight, re.IGNORECASE)
-                    if gram_match:
-                        grams_val = float(gram_match.group(1))
-                        oz_val = round(grams_val / 28.3495, 2)
-                        # Replace grams with ounces in the DescAndWeight string
-                        desc_and_weight = re.sub(gram_pattern, f"{oz_val}oz", desc_and_weight, flags=re.IGNORECASE)
-                        self.logger.debug(f"🔄 EXISTING DESCANDWEIGHT GRAM→OZ: Nonclassic type '{product_type_check}' - converted '{gram_match.group(0)}' -> '{oz_val}oz' in '{desc_and_weight}'")
-                
-                if not is_already_wrapped(desc_and_weight, 'DESC'):
-                    label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
-                else:
-                    label_context['DescAndWeight'] = desc_and_weight
-                # Skip the rest of DescAndWeight processing since it's already set
-                self.logger.debug(f"🔍 Using existing DescAndWeight from record: '{desc_and_weight}' (product_type: {product_type})")
-            else:
-                # For pre-rolls, always reconstruct DescAndWeight to ensure JointRatio is used
-                if product_type in ['pre-roll', 'infused pre-roll']:
-                    self.logger.debug(f"🔍 PRE-ROLL: Reconstructing DescAndWeight to ensure JointRatio is used (ignoring existing DescAndWeight from record)")
-                # Fallback: construct DescAndWeight from Description and WeightUnits
-                desc = label_context.get('Description', '') or ''
-                # If description is missing or incomplete (empty or just product name with no vendor), build from ProductName + vendor/brand
-                product_name_display = (label_context.get('ProductName') or record.get('Product Name*') or record.get('ProductName') or '').strip()
-                _raw_vendor = (label_context.get('Vendor/Supplier*') or label_context.get('Vendor') or label_context.get('Product Brand') or label_context.get('ProductBrand') or record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('Product Brand') or record.get('ProductBrand') or '')
-                vendor_or_brand = _raw_vendor.strip() if _raw_vendor and str(_raw_vendor).strip().lower() not in ('unknown', 'unknown vendor', 'unknown brand') else ''
-                # For pre-rolls, never inject "by Vendor" — description cell is ProductName - Weight only
-                if product_type not in ['pre-roll', 'infused pre-roll']:
-                    if not desc or (product_name_display and vendor_or_brand and (desc.strip() == product_name_display or ' by ' not in desc)):
-                        if product_name_display and vendor_or_brand:
-                            built_desc = f"{product_name_display} by {vendor_or_brand}"
-                            if built_desc != desc:
-                                desc = built_desc
-                                label_context['Description'] = desc
-                                self.logger.debug(f"🔧 DESCRIPTION FALLBACK: Built description '{desc}' from ProductName + vendor (was missing or incomplete)")
-                        elif product_name_display and not desc:
-                            desc = product_name_display
-                            label_context['Description'] = desc
-                else:
-                    if not desc and product_name_display:
-                        desc = product_name_display
-                        label_context['Description'] = desc
-                
-                # For non-classic types: strip "100mg THC" / "50mg CBD" from desc so we use actual weight below
-                from src.core.constants import CLASSIC_TYPES
-                product_type_check_desc = (label_context.get('Product Type*', '') or label_context.get('ProductType', '') or record.get('Product Type*', '') or record.get('ProductType', '')).lower().strip()
-                is_classic_for_desc = product_type_check_desc in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_check_desc for ct in CLASSIC_TYPES)
-                if not is_classic_for_desc and desc:
-                    cleaned_desc_only, _ = _replace_mg_thc_cbd_with_weight(desc, '')
-                    if cleaned_desc_only != desc:
-                        desc = cleaned_desc_only
-                        label_context['Description'] = desc
-                        self.logger.debug(f"🔄 NON-CLASSIC: Stripped mg THC/CBD from Description for weight replacement -> '{desc}'")
-                
-                # CRITICAL FIX: For pre-rolls, clean Description to remove ALL weight patterns before adding JointRatio
-                # This prevents showing both total weight (5g) and joint ratio (1g x 5 Pack)
-                if product_type in ['pre-roll', 'infused pre-roll']:
-                    # Remove ALL weight patterns from Description - both total weight and joint ratio
-                    # The Description might contain "Product Name - 5g - 1g x 5 Pack" or similar
-                    original_desc = desc
-                    # Pattern 1: Remove joint ratio patterns FIRST (e.g., " - 1g x 5 Pack", " - 0.5g x 2pk", " - .5g x 2pk")
-                    desc = re.sub(r'\s*-\s*\.?\d+\.?\d*\s*g\s*x\s*\d+\s*(?:Pack|pk)\s*', '', desc, flags=re.IGNORECASE)
-                    # Pattern 2: Remove total weight patterns (e.g., " - 5g", " - 1g", " - .5g")
-                    desc = re.sub(r'\s*-\s*\.?\d+\.?\d*\s*g\s*', '', desc, flags=re.IGNORECASE)
-                    # Pattern 3: Remove any remaining " - " at the end
-                    desc = re.sub(r'\s*-\s*$', '', desc)
-                    desc = desc.strip()
-                    # Strip " by Vendor/Brand" suffix from pre-roll descriptions
-                    desc = re.sub(r'\s+by\s+.+$', '', desc, flags=re.IGNORECASE).strip()
-                    # Normalize "Preroll" -> "Pre-Roll" for consistent label display
-                    if re.search(r'\bPreroll\b', desc, re.IGNORECASE):
-                        desc = re.sub(r'\bPreroll\b', 'Pre-Roll', desc, flags=re.IGNORECASE)
-                    label_context['Description'] = desc
-                    self.logger.debug(f"🔍 PRE-ROLL: Cleaned Description from '{original_desc}' to '{desc}'")
+                # Check if WeightUnits already contains the complete weight+units
+                weight_units = record.get("WeightUnits", "")
+                if weight_units and weight_units.strip():
+                    # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
+                    clean_weight = weight_units.strip()
                     
-                    # For pre-rolls, use JointRatio first, then WeightUnits as fallback
-                    weight = (label_context.get('JointRatio', '') or label_context.get('WeightUnits', '') or '').replace('\u202F', '')
-                    if weight:
-                        self.logger.debug(f"🔍 PRE-ROLL DescAndWeight: Using JointRatio/WeightUnits '{weight}' for product '{record.get('ProductName', 'N/A')}'")
-                else:
-                    weight = (label_context.get('WeightUnits', '') or '').replace('\u202F', '')
-                    # For non-classic: fallback to Weight* + Units when WeightUnits empty (e.g. edibles)
-                    if not weight and not is_classic_for_desc:
-                        w_val = (label_context.get('Weight*') or record.get('Weight*') or '').strip()
-                        u_val = (label_context.get('Units') or record.get('Units') or 'g').strip()
-                        if w_val and str(w_val).lower() not in ('nan', 'none', 'null', '') and not re.search(r'[a-zA-Z]', str(w_val)):
-                            weight = f"{w_val}{u_val}" if u_val else f"{w_val}g"
-                            self.logger.debug(f"🔄 NON-CLASSIC: Using Weight*+Units for DescAndWeight: '{weight}'")
-                
-                # CRITICAL FIX: Convert grams to ounces in weight string for nonclassic types
-                # Check if this is a nonclassic type
-                from src.core.constants import CLASSIC_TYPES
-                product_type_check = (label_context.get('Product Type*', '') or 
-                                    label_context.get('ProductType', '') or 
-                                    record.get('Product Type*', '') or 
-                                    record.get('ProductType', '')).lower().strip()
-                is_classic_for_desc = product_type_check in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type_check for ct in CLASSIC_TYPES)
-                
-                if not is_classic_for_desc and weight:
-                    # Check if weight contains grams (e.g., "32g", "1g", "1.12g")
-                    gram_pattern = r'([\d.]+)\s*(g|gram|grams)\b'
-                    gram_match = re.search(gram_pattern, weight, re.IGNORECASE)
-                    if gram_match:
-                        grams_val = float(gram_match.group(1))
-                        oz_val = round(grams_val / 28.3495, 2)
-                        # Replace grams with ounces in the weight string
-                        weight = re.sub(gram_pattern, f"{oz_val}oz", weight, flags=re.IGNORECASE)
-                        self.logger.debug(f"🔄 DESCANDWEIGHT GRAM→OZ: Nonclassic type '{product_type_check}' - converted weight in DescAndWeight: '{gram_match.group(0)}' -> '{oz_val}oz'")
-                
-                # DEBUG: Log the values being processed
-                self.logger.debug(f"🔍 DESCANDWEIGHT DEBUG: Product '{record.get('ProductName', 'N/A')}' - Description: '{desc}', WeightUnits: '{weight}', ProductType: '{product_type}'")
-                
-                # Ultra-fast string operations
-                if desc.endswith('- '):
-                    desc = desc[:-2]
-                if weight.startswith('- '):
-                    weight = weight[2:]
-                
-                # DEBUG: Log all record keys and values to see what we're working with
-                self.logger.debug(f"🔍 RECORD KEYS: {list(record.keys())}")
-                for key, value in record.items():
-                    if 'weight' in key.lower() or 'units' in key.lower():
-                        self.logger.debug(f"🔍 {key}: '{value}'")
-                
-                # CRITICAL FIX: Horizontal template uses DescAndWeight placeholder, not separate WeightUnits
-                # Add weight to description for the {{Label1.DescAndWeight}} placeholder
-                product_name_display = (
-                    label_context.get('ProductName') or
-                    record.get('ProductName') or
-                    record.get('Product Name*', '')
-                )
-                
-                if self.template_type == 'preroll':
-                    # PREROLL TEMPLATE: Use group display name with JointRatio-derived weight
-                    # Check if we already set DescAndWeight for grouped preroll (above)
-                    if not (record.get('_group_id') and label_context.get('DescAndWeight')):
-                        # Use description (should be group name if grouping worked) or product_name_display as fallback
-                        primary_text = (desc or product_name_display or '').strip()
-                        
-                        # Get JointRatio-derived weight from WeightUnits (set earlier for preroll products)
-                        weight_units = label_context.get('WeightUnits', '') or record.get('WeightUnits', '')
-                        if weight_units:
-                            # Remove newline prefix if present, and strip whitespace
-                            clean_weight = weight_units.replace('\n', '').strip()
-                            # Check if weight already has hyphen (from format_joint_ratio_pack)
-                            # Normalize non-breaking hyphen to regular hyphen for consistency
-                            if clean_weight.startswith('\u2011'):
-                                # Replace non-breaking hyphen with regular hyphen
-                                clean_weight = clean_weight.replace('\u2011', '-', 1).replace('\u00A0', ' ')
-                            # CRITICAL FIX: Remove trailing hyphen from primary_text to prevent double hyphen
-                            # (e.g., "Pre-Roll-" + "- 0.5g" = "Pre-Roll-- 0.5g")
-                            primary_text_clean = primary_text.rstrip('-').rstrip()
-                            if clean_weight.startswith('-'):
-                                # Weight already has hyphen, just append it with space
-                                desc_and_weight = f"{primary_text_clean} {clean_weight}"
-                            else:
-                                # Add hyphen and space before weight
-                                desc_and_weight = f"{primary_text_clean} - {clean_weight}"
-                            self.logger.debug(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text_clean}' with weight '{clean_weight}' -> '{desc_and_weight}'")
-                        else:
-                            # No weight available, use description only
-                            desc_and_weight = primary_text
-                            self.logger.debug(f"🔍 PREROLL TEMPLATE DESC: Using '{primary_text}' (no weight available)")
-                        
-                        label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+                    # CRITICAL FIX: Clean weight duplication patterns directly in template processor
+                    # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
+                    decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
+                    match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
+                    if match1:
+                        clean_weight = f"{match1.group(1)}{match1.group(2)}"
+                        self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                     else:
-                        self.logger.debug(f"🔍 PREROLL TEMPLATE DESC: Already set to group name, skipping reconstruction")
-                else:
-                    # CRITICAL FIX: For pre-rolls, use the weight variable we already extracted from JointRatio above (line 2323)
-                    # This ensures we use JointRatio (like "1g x 5 Pack"), not total weight (like "5g")
-                    if product_type in ['pre-roll', 'infused pre-roll']:
-                        # Use the weight variable we already extracted and cleaned above
-                        if weight and weight.strip():
-                            clean_weight = weight.strip()
-                            self.logger.debug(f"🔍 PRE-ROLL: Using JointRatio-derived weight '{clean_weight}' for DescAndWeight (from weight variable)")
+                        # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
+                        integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
+                        match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
+                        if match2:
+                            clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
+                            self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                         else:
-                            # Fallback to WeightUnits/JointRatio from label_context if weight variable is empty
-                            weight_units = label_context.get("WeightUnits", "") or label_context.get("JointRatio", "")
-                            clean_weight = (weight_units.strip() if weight_units else '').replace('\u202F', '')
-                            # Remove "- " prefix if present (format_joint_ratio_pack adds it)
-                            if clean_weight.startswith('- '):
-                                clean_weight = clean_weight[2:].strip()
-                            # If still empty, build from Weight* + Units so description line shows weight (e.g. " - 1g")
-                            if not clean_weight:
-                                w_val = (label_context.get('Weight*') or record.get('Weight*') or '').strip()
-                                u_val = (label_context.get('Units') or record.get('Units') or 'g').strip()
-                                if w_val and str(w_val).lower() not in ('nan', 'none', 'null', ''):
-                                    clean_weight = f"{w_val}{u_val}" if u_val else f"{w_val}g"
-                                    self.logger.debug(f"🔍 PRE-ROLL weight from Weight*+Units: '{clean_weight}' for DescAndWeight")
-                            self.logger.debug(f"🔍 PRE-ROLL WeightUnits fallback: Using '{clean_weight}' for DescAndWeight")
-                    else:
-                        # For non-pre-roll products, get WeightUnits from label_context or record
-                        weight_units = label_context.get("WeightUnits", "") or record.get("WeightUnits", "")
-                        
-                        # Check if WeightUnits already contains the complete weight+units
-                        if weight_units and weight_units.strip():
-                            # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
-                            clean_weight = weight_units.strip()
-                            
-                            # CRITICAL FIX: Clean weight duplication patterns directly in template processor
-                            # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
-                            decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
-                            match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
-                            if match1:
-                                clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                                self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                            else:
-                                # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
-                                integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
-                                match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
-                                if match2:
-                                    clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                                    self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                                else:
-                                    # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
-                                    mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
-                                    match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
-                                    if match3:
-                                        clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                                        self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                        else:
-                            clean_weight = ''
+                            # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
+                            mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
+                            match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
+                            if match3:
+                                clean_weight = f"{match3.group(1)}{match3.group(2)}"
+                                self.logger.info(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
                     
-                    # Construct DescAndWeight if we have clean_weight
-                    if clean_weight:
-                        # CRITICAL FIX: For non-pre-roll products, clean weight duplication patterns
-                        # For pre-rolls, clean_weight already has JointRatio format (like "1g x 5 Pack"), skip duplication cleaning
-                        if product_type not in ['pre-roll', 'infused pre-roll']:
-                            # CRITICAL FIX: Clean weight duplication patterns directly in template processor
-                            # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
-                            decimal_dup_pattern = r'^(\d+\.\d{1,2})\1(oz|g|mg|kg|lb|lbs)$'
-                            match1 = re.match(decimal_dup_pattern, clean_weight, re.IGNORECASE)
-                            if match1:
-                                clean_weight = f"{match1.group(1)}{match1.group(2)}"
-                                self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED DECIMAL DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                            else:
-                                # Pattern 2: Integer duplication like "1010.0g" -> "10.0g"
-                                integer_dup_pattern = r'^(\d+)\1\.0(oz|g|mg|kg|lb|lbs)$'
-                                match2 = re.match(integer_dup_pattern, clean_weight, re.IGNORECASE)
-                                if match2:
-                                    clean_weight = f"{match2.group(1)}.0{match2.group(2)}"
-                                    self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED INTEGER DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                                else:
-                                    # Pattern 3: Mixed duplication like "0.220.22g" -> "0.22g"
-                                    mixed_dup_pattern = r'^(\d+\.\d+)\1(oz|g|mg|kg|lb|lbs)$'
-                                    match3 = re.match(mixed_dup_pattern, clean_weight, re.IGNORECASE)
-                                    if match3:
-                                        clean_weight = f"{match3.group(1)}{match3.group(2)}"
-                                        self.logger.debug(f"✅ TEMPLATE PROCESSOR FIXED MIXED DUPLICATION: '{weight_units}' -> '{clean_weight}'")
-                        
-                        # Keep weight on the same line as description with non-breaking space
-                        # Use consistent space-hyphen-space pattern for all templates
-                        desc_and_weight = f"{desc} - {clean_weight}"
-                        self.logger.debug(f"🔍 DESCANDWEIGHT CONSTRUCTION: desc='{desc}', clean_weight='{clean_weight}' -> '{desc_and_weight}'")
-                    else:
-                        # Fallback to constructing from Weight* + Units
-                        weight_value = record.get("Weight*", "")
+                    # Keep weight on the same line as description with non-breaking space
+                    desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                    self.logger.info(f"🔍 WEIGHT FROM WEIGHTUNITS: '{clean_weight}' -> '{desc_and_weight}'")
+                else:
+                    # Fallback to constructing from Weight* + Units
+                    weight_value = record.get("Weight*", "")
+                    units_value = record.get("Units", "")
+                    
+                    if not weight_value:
+                        weight_value = record.get("Weight", "")
+                    if not units_value:
                         units_value = record.get("Units", "")
-                        
-                        if not weight_value:
-                            weight_value = record.get("Weight", "")
-                        if not units_value:
-                            units_value = record.get("Units", "")
-                        
-                        self.logger.debug(f"🔍 FALLBACK WEIGHT VALUES: Weight*='{weight_value}', Units='{units_value}'")
-                        
-                        if weight_value and units_value:
-                            clean_weight = f"{weight_value}{units_value}"
-                            # Use consistent space-hyphen-space pattern for all templates
-                            desc_and_weight = f"{desc} - {clean_weight}"
-                            self.logger.debug(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
-                        else:
-                            desc_and_weight = desc
-                            self.logger.debug(f"🔍 NO WEIGHT AVAILABLE: Weight*='{weight_value}', Units='{units_value}' -> '{desc_and_weight}'")
                     
-                    self.logger.debug(f"🔍 DESCANDWEIGHT RESULT: '{desc_and_weight}'")
-                    label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
+                    self.logger.info(f"🔍 FALLBACK WEIGHT VALUES: Weight*='{weight_value}', Units='{units_value}'")
+                    
+                    if weight_value and units_value:
+                        clean_weight = f"{weight_value}{units_value}"
+                        desc_and_weight = f"{desc} -\u00A0{clean_weight}"
+                        self.logger.info(f"🔍 WEIGHT CONSTRUCTED: '{clean_weight}' -> '{desc_and_weight}'")
+                    else:
+                        desc_and_weight = desc
+                        self.logger.info(f"🔍 NO WEIGHT AVAILABLE: Weight*='{weight_value}', Units='{units_value}' -> '{desc_and_weight}'")
+                
+                self.logger.info(f"🔍 DESCANDWEIGHT RESULT: '{desc_and_weight}'")
+                label_context['DescAndWeight'] = wrap_with_marker(desc_and_weight, 'DESC')
 
         # Fast DOH image processing - only if needed
         # IMPORTANT: Only use the canonical DOH field for image decisions
         # Ignore legacy "DOH Compliant (Yes/No)" and any other variants
-        doh_value = label_context.get('DOH', '') or record.get('DOH', '')
+        doh_value = label_context.get('DOH', '')
         product_name = label_context.get('ProductName', 'Unknown')
-        
-        # CRITICAL FIX: If DOH is missing from record, query database directly
-        if not doh_value or str(doh_value).strip() in ['', 'None', 'nan']:
-            try:
-                from app import get_product_database, get_current_store_name
-                store_name = get_current_store_name()
-                product_db = get_product_database(store_name)
-                if product_db:
-                    conn = product_db._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute('''
-                        SELECT "DOH" FROM products
-                        WHERE "Product Name*" = ? OR ProductName = ? OR normalized_name = ?
-                        ORDER BY id DESC
-                        LIMIT 1
-                    ''', (product_name, product_name, product_db._normalize_product_name(product_name)))
-                    result = cursor.fetchone()
-                    if result and result[0] and str(result[0]).strip() not in ['', 'None', 'nan']:
-                        doh_value = str(result[0]).strip()
-                        label_context['DOH'] = doh_value
-                        if self.logger.isEnabledFor(logging.DEBUG):
-                            self.logger.debug(f"DOH from DB: '{product_name}' -> '{doh_value}'")
-            except Exception as db_err:
-                self.logger.warning(f"Could not retrieve DOH from database: {db_err}")
 
         # CRITICAL DEBUG: Log DOH field processing with all possible sources
-        # DOH processing - only log at debug level
-        if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug(f"DOH: '{product_name}' -> '{doh_value}'")
+        self.logger.info(f"🔍 DOH DOCX GENERATION: Product '{product_name}' - DOH field: '{doh_value}' from record")
+        self.logger.info(f"🔍 DOH DOCX GENERATION: Using only canonical DOH field: '{label_context.get('DOH', '')}'")
+        self.logger.info(f"🔍 DOH DOCX GENERATION: Record Source: '{record.get('Source', 'N/A')}'")
+        self.logger.info(f"🔍 DOH DOCX GENERATION: First 20 field keys in record: {list(record.keys())[:20]}")
 
         # Handle different DOH values: YES (legacy), DOH, THC, CBD
         doh_upper = str(doh_value).strip().upper() if doh_value else ''
@@ -3041,8 +1680,7 @@ class TemplateProcessor:
             # Also clear other DOH-related fields
             label_context['DOH Compliant (Yes/No)'] = ''
             label_context['doh'] = ''
-            if self.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"DOH: '{product_name}' - cleared (value: '{doh_value}')")
+            self.logger.info(f"✅ DOH DOCX GENERATION: Explicitly clearing DOH for '{product_name}' - value: '{doh_value}' (NO/NONE/FALSE) - NO IMAGE WILL BE ADDED")
         elif doh_upper in ['YES', 'DOH', 'THC', 'CBD']:
             product_type = (label_context.get('ProductType') or
                           label_context.get('Product Type*') or
@@ -3052,112 +1690,54 @@ class TemplateProcessor:
             image_path = process_doh_image(doh_upper, product_type)
             if image_path:
                 # Fast width selection - reduced by 1mm for all template types
-                # Preroll template uses half size (5.5mm) for DOH logo
-                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13, 'preroll': 5.5}
+                width_map = {'mini': 8, 'double': 10, 'vertical': 13, 'horizontal': 13}
                 image_width = Mm(width_map.get(self.template_type, 11))
                 label_context['DOH'] = InlineImage(doc, image_path, width=image_width)
                 # Ensure DOH image takes priority - clear any other DOH-related content
                 label_context['DOH_TEXT'] = ''  # Clear any text content
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    self.logger.debug(f"DOH: '{product_name}' - added image ({doh_upper})")
+                self.logger.info(f"✅ DOH DOCX GENERATION: Created DOH image for '{product_name}' with value '{doh_upper}' - IMAGE WILL BE ADDED: {image_path}")
             else:
                 label_context['DOH'] = ''
                 label_context['DOH_TEXT'] = ''
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    self.logger.debug(f"DOH: '{product_name}' - no image path")
+                self.logger.info(f"⚠️ DOH DOCX GENERATION: No image path found for '{product_name}' - NO IMAGE WILL BE ADDED")
         else:
             # For any DOH value other than "YES"/"DOH"/"THC"/"CBD", leave it blank (don't display text)
             # This ensures DOH="no" or DOH="none" results in blank space, not text
             label_context['DOH'] = ''
             label_context['DOH_TEXT'] = ''
-            if self.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"DOH: '{product_name}' - cleared (value: '{doh_value}')")
+            self.logger.info(f"✅ DOH DOCX GENERATION: Clearing DOH for '{product_name}' - value: '{doh_value}' (not DOH/THC/CBD/YES) - NO IMAGE WILL BE ADDED")
         
         # CRITICAL: Lineage and ProductVendor logic for classic types
         # This implements the same logic that was in tag_generator
-        product_type = (label_context.get('ProductType', '').lower() or
+        product_type = (label_context.get('ProductType', '').lower() or 
                        label_context.get('Product Type*', '').lower())
-
-        # CRITICAL FIX: Extract brand from product name FIRST using "by BrandName -" pattern
-        # The Product Brand field in the database often contains vendor names, not actual brands
-        # The actual brand is reliably found in the product name after "by"
-        product_brand = ''
-        by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name, re.IGNORECASE)
-        if by_match:
-            extracted_brand = by_match.group(1).strip()
-            if extracted_brand and extracted_brand.lower() not in ['', 'none', 'nan']:
-                product_brand = extracted_brand
-                if self.logger.isEnabledFor(logging.DEBUG):
-                    self.logger.debug(f"Brand extracted: '{product_brand}' from '{product_name}'")
-
-        # Fallback to Product Brand field only if extraction failed
-        if not product_brand:
-            product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
-        # CRITICAL: Treat placeholder "Unknown" / "Unknown Vendor" as missing so enrichment runs
-        # (e.g. JSON-matched tags when frontend sends minimal fallback objects)
-        if product_brand and str(product_brand).strip().lower() in ('unknown', 'unknown vendor', 'unknown brand'):
-            product_brand = ''
-            label_context['Product Brand'] = ''
-            label_context['ProductBrand'] = ''
-            self.logger.debug(f"Treating placeholder brand 'Unknown' as missing for '{product_name}' - will use enrichment")
-        # CRITICAL FIX: Do NOT clear brand for preroll templates even if it matches vendor.
-        # The preroll_tag_generator has already done the work to find the correct brand from the
-        # actual Product Brand field in the Excel data. If the brand happens to match the vendor
-        # name (e.g., "Hustler's Ambition" brand from "Hustler's Ambition" vendor), that's correct
-        # and should be preserved. Only clear brand if it's genuinely empty.
-        #
-        # DISABLED: The previous logic was clearing legitimate brands:
-        # if self.template_type in ('preroll', 'mini') and pb_clean and v_clean:
-        #     if pb_clean == v_clean or v_clean in pb_clean or pb_clean in v_clean:
-        #         product_brand = ''  # This was incorrectly clearing valid brands
-        #
-        # Now we trust the brand value that was set by preroll_tag_generator.
-        if self.template_type in ('preroll', 'mini'):
-            self.logger.debug(f"PREROLL/MINI BRAND: Preserving brand '{product_brand}' for '{product_name}' (not clearing same-as-vendor)")
-
-        # PREROLL FIX: If "brand" appears to be just the strain value, prefer vendor fallback.
-        # This avoids banners showing strain names (e.g., "KHALIFA KUSH") in the brand slot.
-        if self.template_type == 'preroll':
-            strain_candidate = (
-                label_context.get('ProductStrain')
-                or label_context.get('Product Strain')
-                or record.get('ProductStrain')
-                or record.get('Product Strain')
-                or ''
-            )
-            brand_clean = _trim_invisible_edges(product_brand).upper()
-            strain_clean = _trim_invisible_edges(strain_candidate).upper()
-            if brand_clean and strain_clean and brand_clean == strain_clean:
-                vendor_candidate = (
-                    label_context.get('_vendor_from_record')
-                    or record.get('Vendor/Supplier*')
-                    or record.get('Vendor')
-                    or record.get('ProductVendor')
-                    or ''
-                )
-                vendor_clean = _trim_invisible_edges(vendor_candidate)
-                if vendor_clean:
-                    self.logger.debug(
-                        f"PREROLL BRAND FIX: Replacing strain-like brand '{product_brand}' with vendor '{vendor_clean}' for '{product_name}'"
-                    )
-                    product_brand = vendor_clean
-                    label_context['Product Brand'] = vendor_clean
-                    label_context['ProductBrand'] = vendor_clean
+        product_brand = label_context.get('ProductBrand') or label_context.get('Product Brand', '')
         lineage_text = label_context.get('Lineage', '')
         product_strain = label_context.get('ProductStrain') or label_context.get('Product Strain', '')
         
-        # CRITICAL DEBUG: Log brand field processing (only for first few products)
-        if not hasattr(self, '_brand_debug_count'):
-            self._brand_debug_count = 0
-        self._brand_debug_count += 1
-        if self._brand_debug_count <= 3:
-            self.logger.debug(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
+        # CRITICAL DEBUG: Log brand field processing
+        self.logger.info(f"BRAND DEBUG: Product '{product_name}' - Brand field: '{product_brand}' (ProductBrand: '{label_context.get('ProductBrand')}', Product Brand: '{label_context.get('Product Brand')}')")
         
-        # If brand is missing, defer immediate fallback and attempt cache/vendor enrichment first
-        # (Avoid setting generic 'PREMIUM PREROLLS' for prerolls which hides the real brand)
+        # CRITICAL FIX: Check if brand is missing and apply fallback logic FIRST
         if not product_brand or product_brand.strip() in ['', 'None', 'NULL', 'null', 'nan']:
-            enriched_brand = ""
-            self.logger.debug(f"BRAND MISSING: No ProductBrand for '{product_name}', will try cache/vendor enrichment")
+            # Apply fallback logic immediately for missing brands
+            # Check more specific terms first, then more general ones
+            if 'sorbet' in product_name.lower():
+                enriched_brand = "SORBET CO."
+            elif 'moonshot' in product_name.lower():
+                enriched_brand = "MOONSHOT"
+            elif 'lemonade' in product_name.lower():
+                enriched_brand = "LEMONADE CO."
+            elif 'pre-roll' in product_name.lower() or 'preroll' in product_name.lower():
+                enriched_brand = "PREMIUM PREROLLS"
+            else:
+                enriched_brand = "PREMIUM CANNABIS"
+            
+            if enriched_brand:
+                product_brand = enriched_brand
+                label_context['Product Brand'] = enriched_brand
+                label_context['ProductBrand'] = enriched_brand
+                self.logger.info(f"🔧 IMMEDIATE BRAND FALLBACK: Set '{enriched_brand}' for '{product_name}' (no brand data)")
         
         # BRAND ENRICHMENT: If brand is still missing, try to get it from database cache, then fallback to vendor
         # OPTIMIZATION: Use pre-loaded cache instead of individual queries
@@ -3168,53 +1748,31 @@ class TemplateProcessor:
                 # Use cached brand data (loaded in batch before loop)
                 enriched_brand = product_brand_cache.get(product_name, "")
                 if enriched_brand:
-                    self.logger.debug(f"🔧 BRAND ENRICHED: Retrieved brand '{enriched_brand}' from database cache for '{product_name}'")
+                    self.logger.info(f"🔧 BRAND ENRICHED: Retrieved brand '{enriched_brand}' from database cache for '{product_name}'")
             except Exception as e:
                 self.logger.warning(f"🔧 BRAND ENRICHMENT FAILED: Could not retrieve brand from cache: {e}")
             
-            # If database enrichment failed, fall back to vendor when available
-            # CRITICAL FIX: Use vendor fallback for ALL templates including preroll/mini
-            # Vendor is better than "PREMIUM CANNABIS" as it at least identifies the source
+            # If database enrichment failed, fallback to vendor
             if not enriched_brand:
-                # DEBUG: Log what brand fields are available in the record
-                self.logger.debug(f"🔍 BRAND LOOKUP DEBUG for '{product_name}': Product Brand='{record.get('Product Brand')}', ProductBrand='{record.get('ProductBrand')}', Brand='{record.get('Brand')}', Vendor='{record.get('Vendor')}'")
-
-                # Prefer explicit Product Brand fields before falling back to vendor
-                brand_fallback = (
-                    record.get('Product Brand') or
-                    record.get('ProductBrand') or
-                    record.get('Brand') or
-                    None
-                )
-                if brand_fallback:
-                    bf = str(brand_fallback).strip()
-                    if bf and bf.lower() not in ('', 'none', 'null', 'nan', 'unknown', 'unknown vendor', 'unknown brand'):
-                        enriched_brand = bf
-                        self.logger.debug(f"🔧 BRAND FALLBACK: Using Product Brand '{enriched_brand}' as brand for '{product_name}'")
-                if not enriched_brand:
-                    # Fall back to vendor only if no Product Brand is available
-                    # CRITICAL: This should ONLY happen if Product Brand is truly empty
-                    vendor_fallback = (record.get('Vendor') or
-                                     record.get('Vendor/Supplier*') or
-                                     record.get('ProductVendor', ''))
-                    # Treat "Unknown" / "Unknown Vendor" as missing so we don't render it on labels
-                    if vendor_fallback and str(vendor_fallback).strip().lower() in ('unknown', 'unknown vendor'):
-                        vendor_fallback = ''
-                    if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                        enriched_brand = str(vendor_fallback).strip()
-                        self.logger.warning(f"⚠️ BRAND FALLBACK TO VENDOR: Using vendor '{enriched_brand}' as brand for '{product_name}' (Product Brand was empty/missing)")
-                    else:
-                        self.logger.debug(f"NO BRAND/VENDOR FALLBACK: No Product Brand or vendor available for '{product_name}'")
-
-            # If still no brand after vendor fallback, try to extract from product name
-            # Product names follow pattern: "Product Description by BrandName - Size"
+                vendor_fallback = (record.get('Vendor') or 
+                                 record.get('Vendor/Supplier*') or 
+                                 record.get('ProductVendor', ''))
+                if vendor_fallback and str(vendor_fallback).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
+                    enriched_brand = str(vendor_fallback).strip()
+                    self.logger.info(f"🔧 BRAND FALLBACK: Using vendor '{enriched_brand}' as brand for '{product_name}'")
+            
+            # CRITICAL FIX: If still no brand after all fallbacks, use a default brand based on product type
             if not enriched_brand:
-                by_match = re.search(r'\sby\s+([^-]+?)(?:\s+-|$)', product_name, re.IGNORECASE)
-                if by_match:
-                    potential_brand = by_match.group(1).strip()
-                    if potential_brand and potential_brand.lower() not in ['', 'none', 'nan']:
-                        enriched_brand = potential_brand
-                        self.logger.debug(f"🔧 EXTRACTED BRAND: Using brand '{enriched_brand}' extracted from product name '{product_name}' (by X - pattern)")
+                # Extract a meaningful default brand from product name or use generic fallback
+                if 'lemonade' in product_name.lower():
+                    enriched_brand = "LEMONADE CO."
+                elif 'moonshot' in product_name.lower():
+                    enriched_brand = "MOONSHOT"
+                elif 'sorbet' in product_name.lower():
+                    enriched_brand = "SORBET CO."
+                else:
+                    enriched_brand = "PREMIUM CANNABIS"
+                self.logger.info(f"🔧 DEFAULT BRAND: Using default brand '{enriched_brand}' for '{product_name}' (no brand data available)")
             
             # Update the brand field if enrichment was successful
             if enriched_brand:
@@ -3223,16 +1781,10 @@ class TemplateProcessor:
                 label_context['Product Brand'] = enriched_brand
                 label_context['ProductBrand'] = enriched_brand
                 # Don't set ProductBrand fields here - they will be set later based on template type
-                self.logger.debug(f"✅ BRAND UPDATED: Product '{product_name}' brand set to '{enriched_brand}' in context")
+                self.logger.info(f"✅ BRAND UPDATED: Product '{product_name}' brand set to '{enriched_brand}' in context")
         
         # Check if it's a classic type
-        # CRITICAL: Ensure case-insensitive comparison
-        product_type_lower = product_type.lower() if product_type else ''
-        classic_types_lower = {t.lower() for t in classic_types}
-        is_classic_type = product_type_lower in classic_types_lower
-        # Debug logging for blunts and pre-rolls to diagnose vendor issues
-        if product_name and ('blunt' in product_name.lower() or 'pre-roll' in product_name.lower()):
-            self.logger.debug(f"🔍 CLASSIC TYPE CHECK: '{product_name}' - product_type: '{product_type}', product_type_lower: '{product_type_lower}', is_classic: {is_classic_type}, classic_types includes blunt: {'blunt' in classic_types_lower}")
+        is_classic_type = product_type in classic_types
         
         if is_classic_type:
             # For classic types, Lineage should show strain lineage and ProductVendor should show brand
@@ -3243,71 +1795,56 @@ class TemplateProcessor:
             
             # PRIORITY 1: Use lineage from record (includes manual dropdown changes and database updates)
             # CRITICAL: Always use uppercase to ensure consistency
-            normalized_lineage_text = _trim_invisible_edges(lineage_text)
-            if normalized_lineage_text:
-                lineage_val = normalized_lineage_text.upper()
-                self.logger.debug(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
+            if lineage_text and lineage_text.strip():
+                lineage_val = str(lineage_text).strip().upper()
+                self.logger.info(f"✅ Using record lineage (from database/excel): '{lineage_val}' for '{product_name}'")
             else:
-                # PRIORITY 2: Fallback to cache lookup if record lineage is empty
-                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking cache...")
-                db_lineage = None
-                # Priority: sovereign_lineage > canonical_lineage > Lineage > lineage (sovereign has manual tag manager edits)
-                # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
-                record_lineage = None
-                for lineage_field in ['sovereign_lineage', 'canonical_lineage', 'Lineage', 'lineage']:
-                    candidate = record.get(lineage_field)
-                    normalized_candidate = _trim_invisible_edges(candidate)
-                    if normalized_candidate and normalized_candidate not in ['', 'None', 'nan']:
-                        lineage_str = normalized_candidate.upper()
-                        if lineage_str != 'SOVEREIGN':  # Reject "SOVEREIGN" as invalid
-                            record_lineage = lineage_str
-                            break
-                
-                if record_lineage:
-                    # Use record lineage (already set correctly by enrichment)
-                    db_lineage = record_lineage
-                    if 'lemon' in product_name.lower() or 'cherry' in product_name.lower():
-                        self.logger.debug(f"✅ LINEAGE FALLBACK: Using record lineage '{db_lineage}' for '{product_name}' (from enrichment, no sativa hybrid override)")
-                elif product_name and product_lineage_cache:
-                    # Use pre-loaded cache instead of individual query
-                    db_lineage = product_lineage_cache.get(product_name)
-                    if db_lineage:
-                        self.logger.debug(f"✅ Using cached lineage '{db_lineage}' for '{product_name}'")
-                
-                normalized_db_lineage = _trim_invisible_edges(db_lineage)
-                if normalized_db_lineage and normalized_db_lineage not in ['', 'None', 'nan']:
-                    lineage_val = normalized_db_lineage.upper()
-                    self.logger.debug(f"✅ Using product lineage: '{lineage_val}' for '{product_name}'")
-                
-                # If no product-level lineage, try strain-level from cache
-                if not lineage_val and product_strain and strain_info_cache:
-                    strain_info = strain_info_cache.get(product_strain)
-                    if strain_info:
-                        preferred = (
-                            strain_info.get('display_lineage') or
-                            strain_info.get('sovereign_lineage') or
-                            strain_info.get('canonical_lineage')
-                        )
-                        if preferred:
-                            preferred_str = _trim_invisible_edges(preferred).upper()
-                            # CRITICAL FIX: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
-                            if preferred_str != 'SOVEREIGN':
-                                lineage_val = preferred_str
-                            self.logger.debug(f"✅ Using cached strain lineage: '{lineage_val}' for strain '{product_strain}'")
-                
-                if not lineage_val:
-                    self.logger.debug(f"No lineage found in record or cache")
+                # PRIORITY 2: Fallback to database lookup if record lineage is empty
+                self.logger.warning(f"⚠️ No lineage in record for '{product_name}', checking database...")
+                try:
+                    from app import get_product_database, get_current_store_name
+                    store_name = get_current_store_name()
+                    product_db = get_product_database(store_name)
+                    
+                    # Try to get product-level lineage first (more specific, includes manual updates)
+                    product_name = record.get('Product Name*', record.get('ProductName', ''))
+                    db_lineage = None
+                    if product_name:
+                        db_lineage = product_db.get_product_lineage(product_name)
+                    if db_lineage and str(db_lineage).strip() not in ['', 'None', 'nan']:
+                        lineage_val = str(db_lineage).strip().upper()
+                        self.logger.info(f"✅ Using database product lineage fallback: '{lineage_val}' for '{product_name}'")
+                    
+                    # If no product-level lineage, try strain-level
+                    if not lineage_val and product_strain:
+                        strain_info = product_db.get_strain_info(product_strain)
+                        if strain_info:
+                            preferred = (
+                                strain_info.get('display_lineage') or
+                                strain_info.get('sovereign_lineage') or
+                                strain_info.get('canonical_lineage')
+                            )
+                            if preferred:
+                                lineage_val = str(preferred).strip().upper()
+                                self.logger.info(f"✅ Using database strain lineage fallback: '{lineage_val}' for strain '{product_strain}'")
+                    
+                    if not lineage_val:
+                        self.logger.debug(f"No lineage found in record or database")
+                except Exception as e:
+                    # Default fallback if database lookup fails
+                    lineage_val = ""
+                    self.logger.debug(f"Using default fallback due to error: '{lineage_val}' (error: {e})")
             
             # CRITICAL FIX: Ensure classic types always have lineage data
-            if not lineage_val or _trim_invisible_edges(lineage_val) == "":
+            if not lineage_val or lineage_val.strip() == "":
                 lineage_val = "HYBRID"
-                self.logger.debug(f"🔧 FALLBACK LINEAGE: Set HYBRID lineage for classic type '{product_name}' (no lineage data available)")
+                self.logger.info(f"🔧 FALLBACK LINEAGE: Set HYBRID lineage for classic type '{product_name}' (no lineage data available)")
             
             # Set Lineage to strain lineage for classic types
             if lineage_val:
                 # Debug: Log the lineage value to see if it has leading spaces
                 self.logger.debug(f"DEBUG: Original lineage_val: '{repr(lineage_val)}'")
-                cleaned_lineage_val = _trim_invisible_edges(lineage_val)
+                cleaned_lineage_val = lineage_val.strip()
                 self.logger.debug(f"DEBUG: Cleaned lineage_val: '{repr(cleaned_lineage_val)}'")
                 
                 # CRITICAL FIX: For horizontal and vertical templates, preserve the full lineage value
@@ -3329,214 +1866,81 @@ class TemplateProcessor:
                     label_context['Lineage'] = cleaned_lineage_val
                 else:
                     label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
+                self.logger.debug(f"Set Lineage to strain lineage: '{cleaned_lineage_val}' for classic type '{product_type}'")
             else:
                 label_context['Lineage'] = ""
                 self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
             
             # Set ProductVendor to actual vendor/supplier for classic types
-            # CRITICAL: Use vendor from record FIRST (it's already in the Excel column)
-            vendor_val = label_context.get('_vendor_from_record')
-            
-            # If _vendor_from_record wasn't set, try reading directly from record again
-            # This handles cases where vendor reading at the start might have failed
-            if not vendor_val or _trim_invisible_edges(vendor_val) in ['', 'None', 'NULL', 'null', 'nan']:
-                # Try ALL possible vendor field variations directly from record
-                vendor_fields = [
-                    'Vendor/Supplier*',
-                    'Vendor/Supplier',
-                    'Vendor',
-                    'ProductVendor',
-                    'vendor',
-                    'Vendor/Supplier *',  # Handle space variations
-                    'Vendor/Supplier* ',  # Handle trailing space
-                ]
-                
-                # Also check label_context (from dict copy) in case field name doesn't match exactly
-                for field in vendor_fields:
-                    val = label_context.get(field) or record.get(field)
-                    normalized_val = _trim_invisible_edges(val)
-                    if val is not None and not pd.isna(val) and normalized_val and normalized_val.lower() not in ['nan', 'none', 'null', '']:
-                        vendor_val = normalized_val
-                        self.logger.debug(f"✅ Found vendor in field '{field}': '{vendor_val}' for '{product_name}' (direct read)")
-                        # Store it for later use
-                        label_context['_vendor_from_record'] = vendor_val
-                        break
-                
-                # If still not found, check ALL vendor-related keys (case-insensitive)
-                if not vendor_val or _trim_invisible_edges(vendor_val) in ['', 'None', 'NULL', 'null', 'nan']:
-                    vendor_related_keys = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                    for key in vendor_related_keys:
-                        val = record.get(key)
-                        normalized_val = _trim_invisible_edges(val)
-                        if val is not None and not pd.isna(val) and normalized_val and normalized_val.lower() not in ['nan', 'none', 'null', '']:
-                            vendor_val = normalized_val
-                            self.logger.debug(f"✅ Found vendor in field '{key}': '{vendor_val}' for '{product_name}' (case-insensitive match)")
-                            label_context['_vendor_from_record'] = vendor_val
-                            break
-            
-            # PRIORITY 2: Try database cache as fallback ONLY if record doesn't have it
-            if not vendor_val or _trim_invisible_edges(vendor_val) in ['', 'None', 'NULL', 'null', 'nan']:
-                try:
-                    cached_vendor = product_vendor_cache.get(product_name, "")
-                    normalized_cached_vendor = _trim_invisible_edges(cached_vendor)
-                    if normalized_cached_vendor and normalized_cached_vendor not in ['', 'None', 'NULL', 'null', 'nan']:
-                        vendor_val = normalized_cached_vendor
-                        self.logger.debug(f"🔧 CLASSIC VENDOR ENRICHED: Retrieved vendor '{vendor_val}' from database cache for '{product_name}'")
-                except Exception as e:
-                    self.logger.warning(f"🔧 CLASSIC VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-            
-            # If still no vendor, log all available fields for debugging
-            if not vendor_val or not _trim_invisible_edges(vendor_val):
-                available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                self.logger.warning(f"⚠️ INITIAL EXTRACTION: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-                # Log actual values from vendor fields for debugging
-                for field in vendor_fields:
-                    val = record.get(field)
-                    if val is not None:
-                        self.logger.warning(f"⚠️ INITIAL EXTRACTION: Field '{field}' has value: '{val}' (type: {type(val).__name__})")
-                self.logger.warning(f"⚠️ INITIAL EXTRACTION: Will try fallback logic later. All record keys: {list(record.keys())[:20]}...")  # First 20 keys for debugging
-            
-            # Handle NaN values and empty strings
-            if vendor_val is None or pd.isna(vendor_val) or str(vendor_val).lower() in ['nan', 'none', 'null', '']:
-                vendor_val = ''
-            
-            # CRITICAL: Check if ProductVendor was already set at the start (from _vendor_from_record)
-            # If so, preserve it - don't overwrite with empty
-            existing_vendor = label_context.get('ProductVendor', '')
-            # Check if existing_vendor has actual content (unwrap markers to check)
-            existing_vendor_has_content = False
-            if existing_vendor and _trim_invisible_edges(existing_vendor):
-                try:
-                    # unwrap_marker is already imported at the top of the file
-                    unwrapped = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
-                    if unwrapped and _trim_invisible_edges(unwrapped):
-                        existing_vendor_has_content = True
-                except:
-                    # If unwrapping fails, check if it's just the plain value (no markers)
-                    if 'PRODUCTVENDOR_START' not in str(existing_vendor):
-                        existing_vendor_has_content = True
-                    else:
-                        # Has markers, check if content between markers is non-empty
-                        match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', str(existing_vendor))
-                        if match and _trim_invisible_edges(match.group(1)):
-                            existing_vendor_has_content = True
-            
-            # Never render "Unknown" in ProductVendor (treat as missing)
-            def _vendor_ok(v):
-                if not v: return False
-                vn = _trim_invisible_edges(str(v)).lower()
-                return vn not in ('unknown', 'unknown vendor', 'unknown brand')
-
-            if existing_vendor_has_content:
-                # Unwrap and check - if content is "Unknown", treat as empty
-                try:
-                    unwrapped_existing = unwrap_marker(str(existing_vendor), 'PRODUCTVENDOR')
-                    if not _vendor_ok(unwrapped_existing):
-                        existing_vendor_has_content = False
-                except Exception:
-                    pass
-            if existing_vendor_has_content:
-                # ProductVendor was set at the start with content, keep it
-                self.logger.debug(f"✅ Preserving ProductVendor set at start: '{existing_vendor}' for '{product_name}'")
-            elif vendor_val and _vendor_ok(vendor_val):
-                # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
-                label_context['ProductVendor'] = f"PRODUCTVENDOR_START{_trim_invisible_edges(vendor_val)}PRODUCTVENDOR_END"
-                self.logger.debug(f"✅ Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}' (product: '{product_name}')")
-            else:
-                # CRITICAL: Even if vendor_val is empty, check _vendor_from_record one more time
-                # This catches cases where vendor reading at the start found it but it wasn't used above
-                final_vendor = label_context.get('_vendor_from_record', '')
-                normalized_final_vendor = _trim_invisible_edges(final_vendor)
-                if normalized_final_vendor and normalized_final_vendor not in ['', 'None', 'NULL', 'null', 'nan'] and _vendor_ok(normalized_final_vendor):
-                    # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{normalized_final_vendor}PRODUCTVENDOR_END"
-                    self.logger.debug(f"✅ Set ProductVendor from _vendor_from_record: '{final_vendor}' for classic type '{product_type}' (product: '{product_name}')")
+            # Get vendor from record, not from product_brand
+            vendor_val = record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor', '')
+            if vendor_val and str(vendor_val).lower() != 'nan':
+                # For vertical template, don't wrap with markers since it uses simple placeholders
+                if self.template_type == 'vertical':
+                    label_context['ProductVendor'] = str(vendor_val)
                 else:
-                    # Only set to empty if we truly have no vendor data and ProductVendor wasn't already set
-                    # CRITICAL FIX: Set with markers when empty so fallback logic can detect and populate it
-                    # Use the same check as above to see if existing_vendor has content
-                    if not existing_vendor_has_content:
-                        label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
-                        self.logger.warning(f"⚠️ ProductVendor set to empty for classic type '{product_type}' (product: '{product_name}', no vendor data found)")
+                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(vendor_val)}PRODUCTVENDOR_END"
+                self.logger.debug(f"Set ProductVendor to vendor: '{vendor_val}' for classic type '{product_type}'")
+            else:
+                label_context['ProductVendor'] = ""
+                self.logger.debug(f"ProductVendor set to empty for classic type '{product_type}' (no vendor data)")
             
             # Ensure ProductStrain uses proper marker wrapping for classic types (1pt sizing)
-            # CRITICAL FIX: For vertical templates, classic types should NOT display ProductStrain
-            # Lineage already shows the strain information, so ProductStrain would be redundant
             product_strain_value = record.get('ProductStrain') or record.get('Product Strain', '')
-            if self.template_type == 'vertical':
-                # Vertical templates: Classic types don't need ProductStrain (Lineage shows strain info)
-                label_context['ProductStrain'] = ""
-                self.logger.debug(f"VERTICAL CLASSIC FIX: Cleared ProductStrain for classic type '{product_type}' (Lineage already shows strain)")
-            elif product_strain_value:
-                if self.template_type in ('mini', 'miniroll'):
-                    label_context['ProductStrain'] = _trim_invisible_edges(product_strain_value)
+            if product_strain_value:
+                if self.template_type == 'mini':
+                    label_context['ProductStrain'] = str(product_strain_value).strip()
                 else:
-                    label_context['ProductStrain'] = wrap_with_marker(_trim_invisible_edges(product_strain_value), 'PRODUCTSTRAIN')
+                    label_context['ProductStrain'] = wrap_with_marker(str(product_strain_value).strip(), 'PRODUCTSTRAIN')
             else:
                 label_context['ProductStrain'] = ""
             
             # CRITICAL FIX: Classic types should NOT have ProductBrand for most templates
             # However, mini templates still display brand in dedicated cells
-            if self.template_type in ('mini', 'miniroll', 'preroll'):
+            if self.template_type == 'mini':
                 if product_brand:
-                    classic_brand_text = _trim_invisible_edges(product_brand).upper()
-                    if classic_brand_text.lower() in ('unknown', 'unknown vendor', 'unknown brand'):
-                        classic_brand_text = ''
+                    classic_brand_text = str(product_brand).strip().upper()
                     # Ensure markers are applied consistently for downstream formatting
                     plain_brand = classic_brand_text
-                    if plain_brand and is_already_wrapped(plain_brand, 'PRODUCTBRAND'):
+                    if is_already_wrapped(plain_brand, 'PRODUCTBRAND'):
                         plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND')
-                    elif plain_brand and is_already_wrapped(plain_brand, 'PRODUCTBRAND_CENTER'):
+                    elif is_already_wrapped(plain_brand, 'PRODUCTBRAND_CENTER'):
                         plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND_CENTER')
-                    if plain_brand:
-                        label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
-                        label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
-                    else:
-                        label_context['ProductBrand'] = ""
-                        label_context['ProductBrand_Center'] = ""
-                    template_name = 'PREROLL' if self.template_type == 'preroll' else 'MINI'
-                    self.logger.debug(
-                        f"🎯 {template_name} CLASSIC BRAND: Preserving ProductBrand '{classic_brand_text}' for classic type '{product_type}'"
+                    label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
+                    label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
+                    self.logger.info(
+                        f"🎯 MINI CLASSIC BRAND: Preserving ProductBrand '{classic_brand_text}' for classic type '{product_type}'"
                     )
                 else:
                     label_context['ProductBrand'] = ""
                     label_context['ProductBrand_Center'] = ""
-                    template_name = 'PREROLL' if self.template_type == 'preroll' else 'MINI'
-                    self.logger.debug(
-                        f"🎯 {template_name} CLASSIC BRAND: No brand available to preserve for classic type '{product_type}'"
+                    self.logger.info(
+                        f"🎯 MINI CLASSIC BRAND: No brand available to preserve for classic type '{product_type}'"
                     )
             else:
                 label_context['ProductBrand'] = ""
                 label_context['ProductBrand_Center'] = ""
-                self.logger.debug(
+                self.logger.info(
                     f"🔧 CLASSIC TYPE FIX: Set ProductBrand to empty for classic type '{product_type}' (classic types show lineage, not brand)"
                 )
         else:
             # For ALL non-classic types (including tinctures), Lineage shows brand and ProductVendor is empty
             # Color is determined by Product Strain (CBD Blend = yellow, Mixed = blue)
             self.logger.debug(f"Processing non-classic type '{product_type}' for Lineage and ProductVendor")
-            # Ensure ProductVendor is empty for non-classic types so vendor does not appear
-            # when Lineage is intended to show the brand. This prevents later rendering
-            # from picking up a vendor fallback for non-classic products.
-            label_context['ProductVendor'] = ""
-            label_context['ProductVendor_START'] = 'PRODUCTVENDOR_START'
-            label_context['ProductVendor_END'] = 'PRODUCTVENDOR_END'
             if product_brand:
-                self.logger.debug(f"BRAND PROCESSING: Non-classic type '{product_type}' with brand '{product_brand}' (len={len(product_brand)}), template_type='{self.template_type}'")
+                self.logger.info(f"BRAND PROCESSING: Non-classic type '{product_type}' with brand '{product_brand}' (len={len(product_brand)}), template_type='{self.template_type}'")
                 # For non-classic types, separate Product Strain and Product Brand for different font sizing
                 # Lineage shows Product Brand only (centered) - this is the primary field
                 # For vertical template, don't wrap with markers since it uses simple placeholders
-                # Center brand should always be ALL CAPS; never show "Unknown"
+                # Center brand should always be ALL CAPS
                 brand_center_text = str(product_brand).upper()
-                if brand_center_text.strip().lower() in ('unknown', 'unknown vendor', 'unknown brand'):
-                    brand_center_text = ''
                 if self.template_type == 'vertical':
                     # Mirror double-template handling: treat brand content as lineage with hint markers for color logic
                     final_brand_text = str(brand_center_text).strip().upper()
 
                     product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
                     if product_strain_value:
-                        strain_token = _trim_invisible_edges(product_strain_value).upper()
+                        strain_token = str(product_strain_value).strip().upper()
                         strain_token = strain_token.replace('PRODUCTSTRAIN_START', '').replace('PRODUCTSTRAIN_END', '').strip()
                         if strain_token:
                             original_brand = final_brand_text
@@ -3564,13 +1968,10 @@ class TemplateProcessor:
                                 final_brand_text,
                                 flags=re.IGNORECASE,
                             )
-                            # Whole-token only so e.g. "S" in "MARY'S" is not removed
-                            _tok_before = r"(?:^|[\s\-–\/\(\)\[\]\{\}])"
-                            _tok_after = r"(?:[\s\-–\/\(\)\[\]\{\}]|$)"
                             for component in list(strain_components):
                                 if component:
                                     final_brand_text = re.sub(
-                                        rf"{_tok_before}{re.escape(component)}{_tok_after}",
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(component)}[\s\)\]\}}\-–\/]*",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
@@ -3579,7 +1980,7 @@ class TemplateProcessor:
                             for lineage_token in lineage_tokens:
                                 if lineage_token:
                                     final_brand_text = re.sub(
-                                        rf"{_tok_before}{re.escape(lineage_token)}{_tok_after}",
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(lineage_token)}[\s\)\]\}}\-–\/]*",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
@@ -3599,43 +2000,39 @@ class TemplateProcessor:
                             final_brand_text = re.sub(r"\s{2,}", " ", final_brand_text).strip()
                             final_brand_text = final_brand_text.rstrip("-–/").rstrip()
                             if final_brand_text != original_brand:
-                                self.logger.debug(
+                                self.logger.info(
                                     f"🎯 VERTICAL TEMPLATE STRAIN SPLIT: Removed strain/lineage token from brand -> '{final_brand_text}'"
                                 )
                     if not final_brand_text:
                         final_brand_text = str(brand_center_text).strip().upper()
 
-                    self.logger.debug(f"🔍 VERTICAL BRAND DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
+                    self.logger.info(f"🔍 VERTICAL BRAND DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
 
-                    # CRITICAL FIX: For vertical template, match horizontal template behavior
-                    # Use the exact same lineage/color logic as the UI for vertical banners
-                    # This ensures DOCX banner colors match the on-screen tag colors exactly.
-                    # Use label_context which may have displayLineage set from app.py
-                    lineage_for_color = compute_display_lineage_like_ui(label_context)
-                    # Normalize CBD -> CBD_BLEND for color mapping consistency
-                    if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
-                        lineage_for_color = 'CBD_BLEND'
-                    # CRITICAL FIX: Handle case where value might be _BLEND or BLEND instead of CBD_BLEND
-                    if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
-                        lineage_for_color = 'CBD_BLEND'
-                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
-                    
-                    product_name_debug = label_context.get('Product Name*') or label_context.get('ProductName', 'Unknown')
-                    display_lineage_debug = label_context.get('displayLineage', 'NOT_SET')
-                    self.logger.debug(
-                        f"🎨 VERTICAL LINEAGE COLOR: Product '{product_name_debug}' -> "
-                        f"displayLineage='{display_lineage_debug}' -> "
-                        f"computed='{lineage_for_color}' -> hint='{lineage_hint_token}'"
+                    lineage_for_color_source = (
+                        label_context.get('Lineage') or
+                        record.get('Lineage') or
+                        ''
                     )
-                    
-                    # CRITICAL FIX: Wrap brand text with PRODUCTBRAND_CENTER markers so font sizing uses 'brand' field type, not 'lineage'
-                    # This ensures vertical template brands use brand font sizing (10-16pt) instead of lineage font sizing (14-18pt)
-                    label_context['Lineage'] = f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
-                    label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
-                    # Store per-cell color so apply_lineage_colors can use it even if hint is stripped
-                    label_context['_lineage_color'] = lineage_for_color
-                elif self.template_type in ('mini', 'miniroll'):
+                    if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
+                        lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
+                    lineage_for_color = str(lineage_for_color_source).strip().upper()
+
+                    if not lineage_for_color:
+                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
+
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
+
+                    # Use lineage hint for color logic while leaving actual brand in ProductBrand field
+                    label_context['Lineage'] = lineage_hint_token
+
+                    # Populate ProductBrand with hint + brand markers for display (single source of truth)
+                    label_context['ProductBrand'] = (
+                        f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
+                    )
+                    label_context['ProductBrand_Center'] = ""
+
+                    self.logger.info(f"🎯 VERTICAL TEMPLATE BRAND FIX: Set ProductBrand to '{final_brand_text}' with lineage hint '{lineage_for_color}'")
+                elif self.template_type == 'mini':
                     # For mini template, set both Lineage and ProductBrand for maximum compatibility
                     # Mini templates need brand information in multiple fields
                     plain_brand = brand_center_text
@@ -3646,19 +2043,7 @@ class TemplateProcessor:
                     label_context['Lineage'] = brand_center_text
                     label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
                     label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
-                    self.logger.debug(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
-                elif self.template_type == 'preroll':
-                    # For preroll template, use same ProductBrand handling as mini template
-                    # Preroll templates need brand information in multiple fields just like mini
-                    plain_brand = brand_center_text
-                    if is_already_wrapped(plain_brand, 'PRODUCTBRAND'):
-                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND')
-                    elif is_already_wrapped(plain_brand, 'PRODUCTBRAND_CENTER'):
-                        plain_brand = unwrap_marker(plain_brand, 'PRODUCTBRAND_CENTER')
-                    label_context['Lineage'] = brand_center_text
-                    label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
-                    label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
-                    self.logger.debug(f"🎯 PREROLL TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for preroll template")
+                    self.logger.info(f"🎯 MINI TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for mini template")
                 elif self.template_type == 'double':
                     # For double template, use brand text as-is with markers for downstream formatting
                     final_brand_text = str(brand_center_text).strip().upper()
@@ -3666,7 +2051,7 @@ class TemplateProcessor:
                     # Remove trailing strain content if it was concatenated with the brand text
                     product_strain_value = (product_strain or record.get('ProductStrain') or record.get('Product Strain', ''))
                     if product_strain_value:
-                        strain_token = _trim_invisible_edges(product_strain_value).upper()
+                        strain_token = str(product_strain_value).strip().upper()
                         # Remove marker remnants if present
                         strain_token = strain_token.replace('PRODUCTSTRAIN_START', '').replace('PRODUCTSTRAIN_END', '').strip()
                         if strain_token:
@@ -3701,25 +2086,21 @@ class TemplateProcessor:
                                 final_brand_text,
                                 flags=re.IGNORECASE,
                             )
-                            # Remove strain tokens anywhere within the brand text.
-                            # CRITICAL: Only remove when component is a whole token (not e.g. "S" inside "MARY'S").
-                            # Use token boundaries so apostrophes in brand names are preserved.
-                            _tok_before = r"(?:^|[\s\-–\/\(\)\[\]\{\}])"
-                            _tok_after = r"(?:[\s\-–\/\(\)\[\]\{\}]|$)"
+                            # Remove strain tokens anywhere within the brand text
                             for component in list(strain_components):
                                 if component:
                                     final_brand_text = re.sub(
-                                        rf"{_tok_before}{re.escape(component)}{_tok_after}",
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(component)}[\s\)\]\}}\-–\/]*",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
                                     )
-                            # Remove lineage tokens accidentally attached to brand text (whole-token only).
+                            # Remove lineage tokens accidentally attached to brand text
                             lineage_tokens = ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"]
                             for lineage_token in lineage_tokens:
                                 if lineage_token:
                                     final_brand_text = re.sub(
-                                        rf"{_tok_before}{re.escape(lineage_token)}{_tok_after}",
+                                        rf"[\s\(\[\{{\-–\/]*{re.escape(lineage_token)}[\s\)\]\}}\-–\/]*",
                                         " ",
                                         final_brand_text,
                                         flags=re.IGNORECASE,
@@ -3739,39 +2120,31 @@ class TemplateProcessor:
                             # Collapse extra whitespace created by removals
                             final_brand_text = re.sub(r"\s{2,}", " ", final_brand_text).strip()
                             final_brand_text = final_brand_text.rstrip("-–/").rstrip()
-                            # CRITICAL FIX: Remove store ID suffixes like " - 435011" from brand names
-                            final_brand_text = re.sub(r'\s*-\s*\d{3,}.*$', '', final_brand_text).strip()
                             if final_brand_text != original_brand:
-                                self.logger.debug(
+                                self.logger.info(
                                     f"🎯 DOUBLE TEMPLATE STRAIN SPLIT: Removed strain/lineage token from brand -> '{final_brand_text}'"
                                 )
                     if not final_brand_text:
-                        final_brand_text = str(brand_center_text).strip().upper()
-                    # CRITICAL FIX: Remove store ID suffixes from final_brand_text
-                    final_brand_text = re.sub(r'\s*-\s*\d{3,}.*$', '', final_brand_text).strip()
+                        final_brand_text = clean_brand_text or str(brand_center_text).strip().upper()
                     
                     # CRITICAL FIX: Add debugging to see final brand text
-                    self.logger.debug(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
+                    self.logger.info(f"🔍 BRAND CLEANING DEBUG: Final brand text: '{final_brand_text}' (length: {len(final_brand_text)})")
                     
-                    # CRITICAL: Use the exact same lineage/color logic as the UI for double template banners
-                    # This ensures DOCX banner colors match the on-screen tag colors exactly.
-                    # Use label_context which may have displayLineage set from app.py
-                    lineage_for_color = compute_display_lineage_like_ui(label_context)
-                    # Normalize CBD -> CBD_BLEND for color mapping consistency
-                    if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
-                        lineage_for_color = 'CBD_BLEND'
-                    # CRITICAL FIX: Handle case where value might be _BLEND or BLEND instead of CBD_BLEND
-                    if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
-                        lineage_for_color = 'CBD_BLEND'
-                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
-                    
-                    product_name_debug = label_context.get('Product Name*') or label_context.get('ProductName', 'Unknown')
-                    display_lineage_debug = label_context.get('displayLineage', 'NOT_SET')
-                    self.logger.debug(
-                        f"🎨 DOUBLE LINEAGE COLOR: Product '{product_name_debug}' -> "
-                        f"displayLineage='{display_lineage_debug}' -> "
-                        f"computed='{lineage_for_color}' -> hint='{lineage_hint_token}'"
+                    # Preserve the original lineage value (if any) so we can drive color assignment later
+                    lineage_for_color_source = (
+                        label_context.get('Lineage') or
+                        record.get('Lineage') or
+                        ''
                     )
+                    if is_already_wrapped(lineage_for_color_source, 'LINEAGE'):
+                        lineage_for_color_source = unwrap_marker(lineage_for_color_source, 'LINEAGE')
+                    lineage_for_color = str(lineage_for_color_source).strip().upper()
+                    
+                    if not lineage_for_color:
+                        # Fall back to CBD lineage when we have CBD signal, otherwise treat as MIXED (blue)
+                        lineage_for_color = 'CBD' if has_cbd_blend_strain else 'MIXED'
+                    
+                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
                     lineage_content = (
                         f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
@@ -3781,14 +2154,12 @@ class TemplateProcessor:
                     label_context['ProductBrand_Center'] = (
                         f"PRODUCTBRAND_CENTER_START{final_brand_text}PRODUCTBRAND_CENTER_END"
                     )
-                    # Store per-cell color so apply_lineage_colors can use it even if hint is stripped
-                    label_context['_lineage_color'] = lineage_for_color
                     self.logger.debug(
                         f"DOUBLE TEMPLATE LINEAGE COLOR: Brand '{final_brand_text}' -> lineage '{lineage_for_color}' "
                         f"(product_type='{product_type}')"
                     )
                     
-                    self.logger.debug(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
+                    self.logger.info(f"🎯 DOUBLE TEMPLATE BRAND FIX: Set Lineage to '{final_brand_text}' for double template (with markers)")
                 else:
                     # For other templates (horizontal, etc.), use marker-based formatting
                     # CRITICAL FIX: Clean brand_center_text to prevent corruption
@@ -3797,53 +2168,22 @@ class TemplateProcessor:
                     clean_brand_text = re.sub(r'PRODUCTSTRR_STARTCONSTELL.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'PRODUCTBRAND_CENTER_START.*', '', clean_brand_text)
                     clean_brand_text = re.sub(r'CONSTELLATION\$.*', '', clean_brand_text)
-
+                    
                     # CRITICAL FIX: Remove any remaining $ symbols that might be marker remnants
                     # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
                     clean_brand_text = re.sub(r'\$.*', '', clean_brand_text)
-
-                    # CRITICAL FIX: Remove store ID suffixes like " - 435011" from brand names
-                    # Pattern: " - " followed by digits (store/database IDs)
-                    clean_brand_text = re.sub(r'\s*-\s*\d{3,}.*$', '', clean_brand_text)
-
-                    clean_brand_text = clean_brand_text.strip()
-
-                    # CRITICAL: Use the exact same lineage/color logic as the UI for horizontal/vertical banners
-                    # This ensures DOCX banner colors match the on-screen tag colors exactly.
-                    # Use label_context which may have displayLineage set from app.py
-                    lineage_for_color = compute_display_lineage_like_ui(label_context)
-                    # Normalize CBD -> CBD_BLEND for color mapping consistency
-                    if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
-                        lineage_for_color = 'CBD_BLEND'
-                    # CRITICAL FIX: Handle case where value might be _BLEND or BLEND instead of CBD_BLEND
-                    if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
-                        lineage_for_color = 'CBD_BLEND'
-                    lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
                     
-                    product_name_debug = label_context.get('Product Name*') or label_context.get('ProductName', 'Unknown')
-                    display_lineage_debug = label_context.get('displayLineage', 'NOT_SET')
-                    self.logger.debug(
-                        f"🎨 HORIZONTAL/VERTICAL LINEAGE COLOR: Product '{product_name_debug}' -> "
-                        f"displayLineage='{display_lineage_debug}' -> "
-                        f"computed='{lineage_for_color}' -> hint='{lineage_hint_token}'"
-                    )
-
+                    clean_brand_text = clean_brand_text.strip()
+                    
                     if clean_brand_text:
-                        lineage_value = f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
+                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{clean_brand_text}PRODUCTBRAND_CENTER_END"
                     else:
                         # Fallback to original brand text if cleaning removed everything
-                        lineage_value = f"{lineage_hint_token}PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
-
-                    # Set Lineage and also populate ProductBrand_Center so downstream
-                    # docx formatting consistently recognizes the centered brand field.
-                    label_context['Lineage'] = lineage_value
-                    # Keep ProductBrand empty to avoid duplication, but ensure the
-                    # ProductBrand_Center field contains the same centered marker text
-                    # so templates that render brand from a dedicated cell will center it.
+                        label_context['Lineage'] = f"PRODUCTBRAND_CENTER_START{brand_center_text}PRODUCTBRAND_CENTER_END"
+                    
+                    # Set ProductBrand fields to empty to prevent duplication for non-vertical templates
                     label_context['ProductBrand'] = ""
-                    label_context['ProductBrand_Center'] = lineage_value
-                    # Store per-cell color so apply_lineage_colors can use it even if hint is stripped
-                    label_context['_lineage_color'] = lineage_for_color
+                    label_context['ProductBrand_Center'] = ""
                 
                 # Product Strain gets its own field with small font size
                 # CRITICAL FIX: For vertical template, allow ProductStrain but use proper font sizing
@@ -3857,7 +2197,7 @@ class TemplateProcessor:
                         self.logger.debug(f"VERTICAL FIX: No ProductStrain available")
                 elif product_strain:
                     # For mini templates, don't wrap with markers since they use simple placeholders
-                    if self.template_type in ('mini', 'miniroll'):
+                    if self.template_type == 'mini':
                         label_context['ProductStrain'] = product_strain
                     else:
                         label_context['ProductStrain'] = f"PRODUCTSTRAIN_START{product_strain}PRODUCTSTRAIN_END"
@@ -3867,19 +2207,17 @@ class TemplateProcessor:
                 self.logger.debug(f"Set Lineage/ProductBrand to '{product_brand}' and ProductStrain to '{product_strain}' for non-classic type '{product_type}'")
             else:
                 # No brand available for non-classic type
-                # CRITICAL FIX: Still compute lineage color using same UI logic as with-brand path
-                # so CBD products get yellow instead of falling through to MIXED (blue)
-                lineage_for_color = compute_display_lineage_like_ui(label_context)
-                if lineage_for_color in ('CBD', 'CBG', 'CBN', 'CBC'):
-                    lineage_for_color = 'CBD_BLEND'
-                if lineage_for_color in ('_BLEND', 'BLEND') or (lineage_for_color.endswith('_BLEND') and not lineage_for_color.startswith('CBD')):
-                    lineage_for_color = 'CBD_BLEND'
-                lineage_hint_token = f"__LINEAGE_HINT_{lineage_for_color}__"
-                label_context['Lineage'] = lineage_hint_token
-                label_context['ProductBrand'] = ""
-                label_context['ProductBrand_Center'] = ""
-                label_context['_lineage_color'] = lineage_for_color
-                self.logger.debug(f"No brand for non-classic type '{product_type}' - computed lineage color '{lineage_for_color}' via hint token")
+                if self.template_type == 'vertical':
+                    # For vertical template, still set empty values but don't prevent data population
+                    label_context['Lineage'] = ""
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                    self.logger.debug(f"VERTICAL BRAND FIX: Set empty brand values for vertical template (no brand available)")
+                else:
+                    label_context['Lineage'] = ""
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                self.logger.debug(f"Lineage, ProductBrand, and ProductBrand_Center set to empty for non-classic type '{product_type}'")
             
             # Always set ProductStrain for nonclassic types, regardless of whether there's a product brand
             # CRITICAL FIX: For vertical template, use marker-based formatting for proper font sizing
@@ -3899,7 +2237,7 @@ class TemplateProcessor:
                 label_context['ProductStrain'] = ""
                 self.logger.debug(f"DEBUG: ProductStrain set to empty (no product_strain value) for template {self.template_type}")
             
-            # ProductVendor is not used for non-classic types - set to empty (intentional design)
+            # ProductVendor is not used for non-classic types - set to empty
             label_context['ProductVendor'] = ""
             self.logger.debug(f"ProductVendor set to empty for non-classic type '{product_type}' (not used for non-classic types)")
         
@@ -3946,10 +2284,6 @@ class TemplateProcessor:
             
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
 
-        # NOTE: Removed logic that added " by Vendor/Brand" to DescAndWeight.
-        # The vendor/brand is displayed in its own area (ProductBrand/ProductVendor bar),
-        # not in the product description line.
-
         # Fast wrapping for remaining fields
         # For all templates, wrap with markers consistently
         if label_context.get('DescAndWeight'):
@@ -3962,18 +2296,13 @@ class TemplateProcessor:
         # Fast strain handling - always show the actual strain value from Excel
         # But don't override if ProductStrain was already set for nonclassic types
         # CRITICAL FIX: Don't override ProductStrain if we already processed non-classic types
-        # CRITICAL FIX: For vertical templates, ensure ProductStrain is always set if available
-        # CRITICAL FIX: For vertical templates with non-classic types, ProductStrain is already set above - don't override
         should_process_strain = (
             'ProductStrain' not in label_context or 
-            (not label_context['ProductStrain'] and not self._is_non_classic_type(product_type)) or
-            (self.template_type == 'vertical' and not label_context.get('ProductStrain') and not self._is_non_classic_type(product_type))
+            (not label_context['ProductStrain'] and not self._is_non_classic_type(product_type))
         )
         
         if should_process_strain:
             product_strain = record.get('ProductStrain') or record.get('Product Strain', '')
-            if product_strain and str(product_strain).strip().lower() in ('unknown', 'unknown strain'):
-                product_strain = ''
             product_strain_upper = str(product_strain).upper()
             if any(token in product_strain_upper for token in ['CBD', 'CBG', 'CBN', 'CBC']):
                 has_cbd_blend_strain = True
@@ -3984,16 +2313,13 @@ class TemplateProcessor:
             
             if product_strain:
                 # All templates use wrapped format for consistent processing by manual_docx_replace()
-                # CRITICAL FIX: For vertical templates, ensure ProductStrain is always wrapped with markers
                 label_context['ProductStrain'] = wrap_with_marker(product_strain, 'PRODUCTSTRAIN')
                 self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to '{label_context['ProductStrain']}' for {self.template_type} template (OVERRIDE)")
             else:
-                # Only set to empty if we're not preserving an existing value
-                if 'ProductStrain' not in label_context or not label_context.get('ProductStrain'):
-                    label_context['ProductStrain'] = ''
-                    self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to empty (no strain from record) (OVERRIDE)")
+                label_context['ProductStrain'] = ''
+                self.logger.debug(f"STRAIN OVERRIDE DEBUG: Set ProductStrain to empty (no strain from record) (OVERRIDE)")
         else:
-            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Skipping strain override - ProductStrain already set to '{label_context.get('ProductStrain', 'NOT_SET')}'")
+            self.logger.debug(f"STRAIN OVERRIDE DEBUG: Skipping strain override - ProductStrain already set to '{label_context['ProductStrain']}' for non-classic type")
 
         # Double template should never display ProductStrain text (prevent 12pt strain labels)
         if self.template_type == 'double':
@@ -4001,19 +2327,6 @@ class TemplateProcessor:
                 label_context['ProductStrain'] = ''
 
         # Lineage logic is now handled earlier in the method for both classic and non-classic types
-
-        # Final safeguard: never render "Unknown" in ProductBrand / ProductVendor (unwrap and clear if present)
-        for _fk in ('ProductBrand', 'ProductBrand_Center', 'ProductVendor'):
-            _fv = label_context.get(_fk, '')
-            if not _fv:
-                continue
-            try:
-                _marker = 'PRODUCTVENDOR' if _fk == 'ProductVendor' else ('PRODUCTBRAND_CENTER' if _fk == 'ProductBrand_Center' else 'PRODUCTBRAND')
-                _unw = unwrap_marker(str(_fv), _marker)
-                if _unw and str(_unw).strip().lower() in ('unknown', 'unknown vendor', 'unknown brand'):
-                    label_context[_fk] = '' if _fk == 'ProductVendor' else wrap_with_marker('', _marker)
-            except Exception:
-                pass
 
         # Add marker strings for template processing
         # These markers will be rendered by DocxTemplate and preserved for font sizing
@@ -4062,54 +2375,21 @@ class TemplateProcessor:
         # Fast description processing
         if label_context.get('Description'):
             label_context['Description'] = self.fix_hyphen_spacing(label_context['Description'])
-            
-            # PREROLL TEMPLATE: Truncate description to universal format
-            # Example: "Super Sour Diesel Infused Pre‑Roll ‑ 1g" -> " Infused Pre‑Roll ‑ 1g"
-            if self.template_type == 'preroll':
-                description = label_context['Description']
-                # Find common preroll patterns and extract the universal part
-                # Look for patterns like "Infused Pre‑Roll", "Pre‑Roll", etc. followed by weight
-                # Pattern to match: [anything] + [Infused]? + Pre[- ]?Roll + [anything with weight]
-                # Note: 're' module is already imported at the top of this file
-                preroll_patterns = [
-                    r'(.+?)(Infused\s+Pre[-‑ ]?Roll.*)',
-                    r'(.+?)(Pre[-‑ ]?Roll.*)',
-                ]
-                for pattern in preroll_patterns:
-                    match = re.search(pattern, description, re.IGNORECASE)
-                    if match:
-                        # Extract the universal part (everything after the strain name)
-                        universal_desc = match.group(2).strip()
-                        # Ensure it starts with a space if there was a strain name
-                        if not universal_desc.startswith(' '):
-                            universal_desc = ' ' + universal_desc
-                        label_context['Description'] = universal_desc
-                        self.logger.debug(f"PREROLL DESC TRUNCATE: '{description}' -> '{universal_desc}'")
-                        break
-            
-            # CRITICAL FIX: Apply non-breaking hyphens to Description for preroll templates
-            # This ensures entries like "Pre-Roll - 1g" (without "Assorted") have non-breaking hyphens
-            # Do this after truncation so the final Description has non-breaking hyphens
-            if self.template_type == 'preroll' and label_context.get('Description'):
-                from src.core.generation.text_processing import make_nonbreaking_hyphens
-                original_description = label_context['Description']
-                label_context['Description'] = make_nonbreaking_hyphens(label_context['Description'])
-                self.logger.debug(f"🔧 NON-BREAKING FORMATTING (PREROLL): Description '{original_description}' -> '{label_context['Description']}'")
 
         # CRITICAL FIX: Apply non-breaking hyphens to ProductName to prevent "Pre-Roll" splitting
         if label_context.get('ProductName'):
             from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_product_name = label_context['ProductName']
             label_context['ProductName'] = make_nonbreaking_hyphens(label_context['ProductName'])
-            self.logger.debug(f"🔧 NON-BREAKING FORMATTING: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
-
-        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight
+            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: ProductName '{original_product_name}' -> '{label_context['ProductName']}'")
+        
+        # CRITICAL FIX: Also apply non-breaking hyphens to DescAndWeight to prevent "Pre-Roll" splitting
         if label_context.get('DescAndWeight'):
             from src.core.generation.text_processing import make_nonbreaking_hyphens
             original_desc_weight = label_context['DescAndWeight']
             label_context['DescAndWeight'] = make_nonbreaking_hyphens(label_context['DescAndWeight'])
-            self.logger.debug(f"🔧 NON-BREAKING FORMATTING: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
-
+            self.logger.info(f"🔧 NON-BREAKING HYPHEN DEBUG: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
+        
 
         # Fast line break processing
         product_type = (label_context.get('ProductType', '').lower() or 
@@ -4149,17 +2429,6 @@ class TemplateProcessor:
                 label_context['DescAndWeight_RAW'] = unwrap_marker(label_context['DescAndWeight'], 'DESC')
             if label_context.get('Lineage'):
                 label_context['Lineage_RAW'] = unwrap_marker(label_context['Lineage'], 'LINEAGE')
-            # Normalize Lineage: remove line breaks and collapse whitespace to avoid added lines
-            if label_context.get('Lineage'):
-                try:
-                    raw_lineage = str(label_context.get('Lineage') or '')
-                    raw_lineage = raw_lineage.replace('\r', ' ').replace('\n', ' ')
-                    # Replace NBSP/soft-hyphen with normal space/empty
-                    raw_lineage = raw_lineage.replace('\u00A0', ' ').replace('\u00AD', '')
-                    label_context['Lineage'] = ' '.join(raw_lineage.split()).strip()
-                except Exception:
-                    # If normalization fails, keep original value
-                    pass
             if label_context.get('ProductStrain'):
                 label_context['ProductStrain_RAW'] = unwrap_marker(label_context['ProductStrain'], 'PRODUCTSTRAIN')
             if label_context.get('ProductVendor'):
@@ -4181,230 +2450,29 @@ class TemplateProcessor:
             val = ' '.join(val.split())
             label_context['JointRatio'] = val
         
-        # Fast vendor handling - set ProductVendor if it's missing or empty (ONLY for classic types)
-        # This ensures vendor is populated even if earlier logic didn't set it or set it to empty
-        # Non-classic types should NOT have ProductVendor
-        product_type_check = (label_context.get('ProductType', '').lower() or 
-                             label_context.get('Product Type*', '').lower())
-        from src.core.constants import CLASSIC_TYPES
-        classic_types_lower = [t.lower() for t in CLASSIC_TYPES]
-        is_classic_type_for_vendor = product_type_check in classic_types_lower
-        # Debug logging for product types that should be classic but aren't matching
-        if product_name and ('blunt' in product_name.lower() or 'pre-roll' in product_name.lower()):
-            self.logger.debug(f"🔍 VENDOR TYPE CHECK: '{product_name}' - product_type_check: '{product_type_check}', is_classic: {is_classic_type_for_vendor}, classic_types: {classic_types_lower}")
-        
-        # Only process vendor for classic types
-        if is_classic_type_for_vendor:
-            current_vendor = label_context.get('ProductVendor', '')
-            vendor_is_empty = False
+        # Fast vendor handling - only override if ProductVendor wasn't already set by our logic
+        # This preserves the ProductVendor logic for classic types
+        if 'ProductVendor' not in label_context:
+            product_type = (label_context.get('ProductType', '').lower() or 
+                           label_context.get('Product Type*', '').lower())
             
-            # Check if ProductVendor is missing or empty
-            if not current_vendor or not str(current_vendor).strip():
-                vendor_is_empty = True
-            else:
-                # Unwrap markers to check if actual content is empty
-                try:
-                    unwrapped = unwrap_marker(str(current_vendor), 'PRODUCTVENDOR')
-                    if not unwrapped or not unwrapped.strip():
-                        vendor_is_empty = True
-                except:
-                    # If unwrapping fails, check if it's just empty markers
-                    if 'PRODUCTVENDOR_START' in str(current_vendor) and 'PRODUCTVENDOR_END' in str(current_vendor):
-                        match = re.search(r'PRODUCTVENDOR_START(.*?)PRODUCTVENDOR_END', str(current_vendor))
-                        if not match or not match.group(1).strip():
-                            vendor_is_empty = True
-                    elif str(current_vendor).strip() == '':
-                        vendor_is_empty = True
-            
-            if vendor_is_empty:
-                # PRIORITY 1: Use vendor we already read from record at the start
-                enriched_vendor = label_context.get('_vendor_from_record', '')
-                if enriched_vendor:
-                    self.logger.debug(f"✅ Using vendor from record: '{enriched_vendor}' for '{product_name}'")
-                
-                # PRIORITY 2: Try to enrich vendor from pre-loaded cache if not in record
-                if not enriched_vendor:
-                    try:
-                        # Use cached vendor data (loaded in batch before loop)
-                        enriched_vendor = product_vendor_cache.get(product_name, "")
-                        if enriched_vendor:
-                            self.logger.debug(f"🔧 VENDOR ENRICHED: Retrieved vendor '{enriched_vendor}' from database cache for '{product_name}'")
-                    except Exception as e:
-                        self.logger.warning(f"🔧 VENDOR ENRICHMENT FAILED: Could not retrieve vendor from cache: {e}")
-                
-                # PRIORITY 3: Fallback to record fields directly if still not found
-                if not enriched_vendor:
-                    product_type = (label_context.get('ProductType', '').lower() or
-                                   label_context.get('Product Type*', '').lower())
+            # Only set vendor from record if ProductVendor wasn't already set by our logic
+            product_vendor = record.get('Vendor') or record.get('Vendor/Supplier*', '') or record.get('ProductVendor', '')
+            # Handle NaN values in vendor data
+            if pd.isna(product_vendor) or str(product_vendor).lower() == 'nan':
+                product_vendor = ''
+            label_context['ProductVendor'] = wrap_with_marker(product_vendor, 'PRODUCTVENDOR')
 
-                    # CRITICAL: Check all possible vendor field names with comprehensive fallback
-                    product_vendor = None
-                    vendor_fields = [
-                        'Vendor/Supplier*',
-                        'Vendor/Supplier',
-                        'Vendor',
-                        'ProductVendor',
-                        'vendor',
-                        'Vendor/Supplier *',  # Handle space variations
-                        'Vendor/Supplier* ',  # Handle trailing space
-                    ]
-
-                    # Try each field name
-                    for field in vendor_fields:
-                        val = record.get(field)
-                        if val is not None and not pd.isna(val) and str(val).strip() and str(val).lower() not in ['nan', 'none', 'null', '']:
-                            product_vendor = val
-                            self.logger.debug(f"✅ FALLBACK: Found vendor in field '{field}': '{product_vendor}' for '{product_name}'")
-                            break
-
-                    # If still no vendor, log all available fields for debugging
-                    if not product_vendor or not str(product_vendor).strip():
-                        available_fields = [k for k in record.keys() if 'vendor' in k.lower() or 'supplier' in k.lower()]
-                        self.logger.warning(f"⚠️ FALLBACK: No vendor found for '{product_name}'. Available vendor-related fields: {available_fields}")
-
-                    # Handle NaN values in vendor data
-                    if product_vendor is None or pd.isna(product_vendor) or str(product_vendor).lower() in ['nan', 'none', 'null', '']:
-                        product_vendor = ''
-                    enriched_vendor = product_vendor
-
-                # Set vendor if we found one
-                if enriched_vendor and str(enriched_vendor).strip():
-                    # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
-                    label_context['ProductVendor'] = wrap_with_marker(str(enriched_vendor).strip(), 'PRODUCTVENDOR')
-                    self.logger.debug(f"✅ PRODUCTVENDOR FALLBACK: Set ProductVendor to '{enriched_vendor}' for '{product_name}'")
-                else:
-                    # No vendor found anywhere, set to empty
-                    label_context['ProductVendor'] = wrap_with_marker('', 'PRODUCTVENDOR')
-                    self.logger.warning(f"⚠️ VENDOR MISSING: No vendor data found for '{product_name}'")
-        # End of classic type vendor handling - non-classic types already have ProductVendor set to empty above
-
-        # Generate QR code - special handling for preroll template
+        # Generate QR code for Product Name
         product_name = label_context.get('Product Name*') or label_context.get('ProductName') or label_context.get('Product Name', '')
-        qr_url_for_log = None  # Initialize for logging
         if product_name and str(product_name).strip():
-            # For preroll template, generate URL to preroll items page
-            # For all other templates, use product name as before
-            if self.template_type == 'preroll':
-                # Generate group-specific URL pointing to preroll items page for this product group
-                # CRITICAL FIX: Use group_key (includes vendor) instead of just group_id
-                # This ensures each vendor gets their own QR code that shows only their products
-                group_key = label_context.get('_group_key') or record.get('_group_key')
-                group_id = label_context.get('_group_id') or record.get('_group_id', 'other')
-                
-                # Extract vendor from record for vendor-specific filtering
-                vendor = (
-                    label_context.get('Vendor') or 
-                    label_context.get('Vendor/Supplier*') or
-                    record.get('Vendor') or 
-                    record.get('Vendor/Supplier*') or 
-                    record.get('Vendor/Supplier', '') or
-                    ''
-                )
-                vendor_clean = str(vendor).strip()
-                
-                # Always derive the QR base from the current request host so we don't
-                # bake any specific domain into the code or printed labels.
-                from flask import request
-
-                try:
-                    base_url = (request.host_url or '').rstrip('/')
-                except Exception:
-                    base_url = ''
-
-                # Prefer explicit environment QR_BASE_URL when provided (useful for local/dev testing).
-                # This avoids using request.host_url (which may be localhost) when a production
-                # QR base is configured in the environment.
-                env_qr = os.environ.get('QR_BASE_URL', '').strip()
-                if env_qr:
-                    base_url = env_qr.rstrip('/')
-
-                # If host_url is unavailable, try multiple fallbacks
-                if not base_url:
-                    # First try environment variable
-                    base_url = os.environ.get('QR_BASE_URL', '').strip()
-
-                # If still no base_url, try Flask config
-                if not base_url:
-                    try:
-                        from flask import current_app
-                        base_url = current_app.config.get('QR_BASE_URL', '').strip()
-                    except Exception:
-                        pass
-
-                # Last resort: prefer AGT Designer URL if provided, otherwise use legacy default
-                if not base_url:
-                    # Allow explicit AGT Designer URL to be set via env var for QR links
-                    base_url = os.environ.get('AGT_DESIGNER_URL', '').strip()
-                if not base_url:
-                    base_url = os.environ.get('QR_BASE_URL', '').strip() or 'https://www.agtpricetags.com'
-                    self.logger.warning(f"No QR_BASE_URL or AGT_DESIGNER_URL configured, using default: {base_url}")
-
-                # CRITICAL FIX: Include vendor in URL for vendor-specific product lists
-                # Prefer the normalized vendor/brand key embedded in the group_key
-                # so the preroll-items route can find the cached group (keys use
-                # normalized brand_key). If no group_key vendor is available,
-                # normalize the vendor_clean value.
-                group_key_val = label_context.get('_group_key') or record.get('_group_key')
-                vendor_param = None
-                if group_key_val and '|' in group_key_val:
-                    try:
-                        vendor_param = group_key_val.split('|', 1)[1]
-                    except Exception:
-                        vendor_param = None
-
-                if not vendor_param:
-                    # Normalize vendor_clean into a stable key: lowercase, strip non-alphanum
-                    vendor_param = re.sub(r'[^a-z0-9]+', '', vendor_clean.lower()) if vendor_clean else ''
-                    if not vendor_param:
-                        vendor_param = vendor_clean.replace(' ', '_')[:60]
-
-                # URL encode vendor_param to handle special characters
-                from urllib.parse import quote
-                vendor_encoded = quote(vendor_param)
-                qr_url = f"{base_url.rstrip('/')}/preroll-items/{group_id}?vendor={vendor_encoded}"
-
-                # Final safety check: never emit localhost/127.0.0.1 in QR URLs on printed labels
-                # unless explicitly allowed by QR_ALLOW_LOCAL environment variable (dev only)
-                allow_local = os.environ.get('QR_ALLOW_LOCAL', '') in ['1', 'true', 'True']
-                # Auto-allow local links when running locally and no explicit public QR base is configured.
-                if not allow_local:
-                    host_is_local = ('localhost' in base_url.lower() or '127.0.0.1' in base_url)
-                    has_explicit_public_base = bool(
-                        os.environ.get('QR_BASE_URL', '').strip()
-                        or os.environ.get('AGT_DESIGNER_URL', '').strip()
-                    )
-                    if host_is_local and not has_explicit_public_base:
-                        allow_local = True
-                if ('localhost' in qr_url.lower() or '127.0.0.1' in qr_url) and not allow_local:
-                    fallback_base = (
-                        os.environ.get('QR_BASE_URL', '').strip()
-                        or os.environ.get('AGT_DESIGNER_URL', '').strip()
-                        or 'https://www.agtpricetags.com'
-                    ).rstrip('/')
-                    self.logger.warning(
-                        f"PREROLL QR: Localhost base detected ({qr_url}); "
-                        f"falling back to production base '{fallback_base}'"
-                    )
-                    qr_url = f"{fallback_base}/preroll-items/{group_id}?vendor={vendor_encoded}"
-
-                self.logger.debug(f"PREROLL QR: Generated QR URL for group '{group_id}' with vendor param '{vendor_param}': {qr_url}")
-                qr_code = self._generate_qr_code(qr_url, doc, is_url=True)
-                qr_url_for_log = qr_url  # Store for logging
-                if qr_code:
-                    self.logger.debug(f"PREROLL QR: Successfully generated QR code for URL: {qr_url}")
-                else:
-                    self.logger.error(f"PREROLL QR: Failed to generate QR code for URL: {qr_url}")
-            else:
-                # All other templates: use product name as before
-                qr_code = self._generate_qr_code(product_name, doc)
-            
+            qr_code = self._generate_qr_code(product_name, doc)
             if qr_code:
                 label_context['QR'] = qr_code
-                log_product = qr_url_for_log if (self.template_type == 'preroll' and qr_url_for_log) else product_name
-                self.logger.debug(f"✅ QR CODE SET: Template '{self.template_type}', Product: '{log_product}', QR object type: {type(qr_code)}")
+                self.logger.debug(f"Generated QR code for product: '{product_name}'")
             else:
                 label_context['QR'] = ''
-                self.logger.warning(f"❌ QR CODE MISSING: Failed to generate QR code for product: '{product_name}' (template: {self.template_type})")
+                self.logger.warning(f"Failed to generate QR code for product: '{product_name}'")
         else:
             label_context['QR'] = ''
             self.logger.debug("No product name available for QR code generation")
@@ -4427,75 +2495,22 @@ class TemplateProcessor:
             else:
                 self.logger.debug(f"FINAL: No JointRatio found for {product_type}")
 
-        # FINAL SAFETY CHECK: Ensure ProductVendor is ALWAYS set for classic types (even if empty)
-        # This ensures the template placeholder {{Label1.ProductVendor}} is always replaced
-        product_type_final = (label_context.get('ProductType', '').lower() or
-                             label_context.get('Product Type*', '').lower())
-        from src.core.constants import CLASSIC_TYPES
-        if product_type_final in [t.lower() for t in CLASSIC_TYPES]:
-            # Check if ProductVendor is missing or empty
-            current_vendor = label_context.get('ProductVendor', '')
-            vendor_is_empty = not current_vendor or not str(current_vendor).strip()
-
-            # If empty, try one more time to get vendor from _vendor_from_record or record
-            if vendor_is_empty:
-                fallback_vendor = label_context.get('_vendor_from_record') or record.get('Vendor/Supplier*') or record.get('Vendor') or record.get('ProductVendor')
-                if fallback_vendor and str(fallback_vendor).strip() and str(fallback_vendor).lower() not in ['nan', 'none', 'null', '']:
-                    # Use PRODUCTVENDOR markers for all templates (including vertical) so vendor gets grey/italic styling
-                    label_context['ProductVendor'] = f"PRODUCTVENDOR_START{str(fallback_vendor).strip()}PRODUCTVENDOR_END"
-                    self.logger.debug(f"✅ FINAL CHECK: Set ProductVendor to '{fallback_vendor}' for classic type (was empty)")
-                else:
-                    # CRITICAL: Always set ProductVendor to empty string if no vendor found
-                    # This ensures the template placeholder is replaced (not left as-is)
-                    label_context['ProductVendor'] = ""
-                    self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor set to empty for classic type '{product_type_final}' (no vendor data found anywhere)")
-            # Ensure ProductVendor exists in context even if it wasn't empty
-            if 'ProductVendor' not in label_context:
-                label_context['ProductVendor'] = ""
-                self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor was missing from context, set to empty")
-        
-        # FINAL DEBUG: Log ProductVendor value for blunts and pre-rolls before returning context
-        final_product_vendor = label_context.get('ProductVendor', 'NOT_SET')
-        product_name_final = label_context.get('ProductName', '') or label_context.get('Product Name*', '')
-        if product_name_final and ('blunt' in product_name_final.lower() or 'pre-roll' in product_name_final.lower()):
-            try:
-                if 'PRODUCTVENDOR_START' in str(final_product_vendor):
-                    final_vendor_unwrapped = unwrap_marker(str(final_product_vendor), 'PRODUCTVENDOR')
-                    self.logger.debug(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_vendor_unwrapped}' (was wrapped)")
-                else:
-                    self.logger.debug(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_product_vendor}'")
-            except Exception as e:
-                self.logger.warning(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_product_vendor}' (error unwrapping: {e})")
-
         return label_context
 
-    def _generate_qr_code(self, product_name, doc, is_url=False):
-        """Generate QR code for the given product name (or URL for preroll template) and return as InlineImage."""
+    def _generate_qr_code(self, product_name, doc):
+        """Generate QR code for the given product name and return as InlineImage."""
         try:
             if not product_name or str(product_name).strip() == '':
-                self.logger.warning("Empty product name/URL provided for QR code generation")
+                self.logger.warning("Empty product name provided for QR code generation")
                 return None
             
-            # Clean the product name or URL
+            # Clean the product name
             clean_name = str(product_name).strip()
-            
-            # For preroll URLs, ensure it's an absolute URL if possible, without hardcoding any domain.
-            if is_url and not clean_name.startswith('http'):
-                try:
-                    from flask import request
-                    if hasattr(request, 'host_url') and request.host_url:
-                        base_url = request.host_url.rstrip('/')
-                        clean_name = f"{base_url}{clean_name}"
-                        self.logger.debug(f"Converted relative URL to absolute using request.host_url: {clean_name}")
-                except Exception:
-                    # If we can't get a host URL, leave the relative path as-is. Most scanners
-                    # will still treat it as a valid URL once opened in a browser context.
-                    self.logger.warning(f"Could not convert relative URL to absolute; leaving as-is: {clean_name}")
-            
-            # Use cached PNG bytes when available to avoid re-rendering identical QR codes
-            _qr_cache_key = (clean_name, 10, 4)
-            if _qr_cache_key in _qr_image_bytes_cache:
-                img_bytes = _qr_image_bytes_cache[_qr_cache_key]
+
+            # PERFORMANCE: Check QR code cache first
+            cache_key = f"{clean_name}_{self.template_type}_{self.scale_factor}"
+            if cache_key in self._qr_cache:
+                img_buffer = BytesIO(self._qr_cache[cache_key])
             else:
                 # Create QR code instance
                 qr = qrcode.QRCode(
@@ -4504,17 +2519,22 @@ class TemplateProcessor:
                     box_size=10,  # Size of each box in pixels
                     border=4,     # Border size in boxes
                 )
+
+                # Add data to QR code
                 qr.add_data(clean_name)
                 qr.make(fit=True)
-                qr_image = qr.make_image(fill_color="black", back_color="white")
-                tmp_buf = BytesIO()
-                qr_image.save(tmp_buf, format='PNG')
-                img_bytes = tmp_buf.getvalue()
-                _qr_image_bytes_cache[_qr_cache_key] = img_bytes
 
-            # Wrap cached bytes in a fresh BytesIO for InlineImage
-            img_buffer = BytesIO(img_bytes)
-            img_buffer.seek(0)
+                # Create QR code image
+                qr_image = qr.make_image(fill_color="black", back_color="white")
+
+                # Convert to BytesIO for InlineImage
+                img_buffer = BytesIO()
+                qr_image.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+
+                # Cache the QR code image bytes
+                self._qr_cache[cache_key] = img_buffer.getvalue()
+                img_buffer.seek(0)
             
             # Determine QR code size using unified font sizing system
             # Get font size in points for QR field, then convert to millimeters
@@ -4533,17 +2553,11 @@ class TemplateProcessor:
             qr_size = Mm(qr_size_mm)
             
             # Check if doc is a DocxTemplate or Document
-            # CRITICAL FIX: Always use the doc parameter for InlineImage creation
-            # DocxTemplate requires the template object to properly render InlineImage
             if hasattr(doc, 'docx'):
                 # This is a DocxTemplate - use it directly for InlineImage
-                # This is required for DocxTemplate to properly render the image
                 qr_inline_image = InlineImage(doc, img_buffer, width=qr_size)
-                self.logger.debug(f"Created InlineImage with DocxTemplate for QR code: {clean_name[:50]}")
             else:
                 # This is a Document - create InlineImage with None template for manual insertion
-                # This shouldn't happen during normal rendering, but handle it gracefully
-                self.logger.warning(f"QR code generation received Document instead of DocxTemplate - creating InlineImage with None")
                 qr_inline_image = InlineImage(None, img_buffer, width=qr_size)
                 # Store document reference for manual insertion
                 qr_inline_image._doc = doc
@@ -4618,7 +2632,7 @@ class TemplateProcessor:
             self.logger.warning(f"DOH cell cleanup failed: {e}")
         
         # Enhanced mini template processing
-        if self.template_type in ('mini', 'miniroll'):
+        if self.template_type == 'mini':
             try:
                 self.logger.info("Processing mini template with enhanced design preservation")
                 
@@ -4633,9 +2647,14 @@ class TemplateProcessor:
                 # The dynamic template creation already handles empty cells properly
                 self.logger.info("Skipping blank cell clearing for dynamic mini template")
                 
-                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
-                # This avoids processing every cell/paragraph/run twice
-                self.logger.info("Skipping early dimension enforcement for mini template (will be done at end)")
+                # CRITICAL: Enforce fixed cell dimensions to maintain 1.5" x 1.5" cells
+                for table in doc.tables:
+                    enforce_fixed_cell_dimensions(table, 'mini')
+                    self.logger.info("Applied fixed cell dimensions to mini template table")
+                
+                # CRITICAL: Enhanced table expansion prevention for mini template
+                doc = prevent_table_expansion_enhanced(doc, 'mini')
+                self.logger.info("Applied enhanced table expansion prevention to mini template")
                 
                 # Apply mini template specific font sizing
                 self._apply_mini_template_font_sizing(doc)
@@ -4643,33 +2662,6 @@ class TemplateProcessor:
             except Exception as e:
                 self.logger.warning(f"Mini template processing failed: {e}")
                 # Continue processing even if mini-specific steps fail
-        
-        # Enhanced preroll template processing (same as mini, but uses its own font sizing config)
-        if self.template_type == 'preroll':
-            try:
-                self.logger.info("Processing preroll template with enhanced design preservation")
-                
-                # Add markers for proper processing (same as mini)
-                self._add_weight_units_markers(doc)
-                self._add_brand_markers(doc)
-                
-                # Ensure proper brand centering for preroll templates (same as mini)
-                self._ensure_mini_template_brand_centering(doc)
-                
-                # CRITICAL FIX: Skip blank cell clearing for dynamic templates
-                # The dynamic template creation already handles empty cells properly
-                self.logger.info("Skipping blank cell clearing for dynamic preroll template")
-                
-                # OPTIMIZATION: Skip expensive dimension enforcement here - will be done once at the end
-                # This avoids processing every cell/paragraph/run twice
-                self.logger.info("Skipping early dimension enforcement for preroll template (will be done at end)")
-                
-                # Apply preroll template specific font sizing (uses preroll config, not mini)
-                self._apply_mini_template_font_sizing(doc)  # This method now uses self.template_type
-                    
-            except Exception as e:
-                self.logger.warning(f"Preroll template processing failed: {e}")
-                # Continue processing even if preroll-specific steps fail
 
         # ProductStrain in Brand cells fix
         try:
@@ -4688,10 +2680,6 @@ class TemplateProcessor:
         # Fast font sizing (with timeout protection)
         try:
             self._post_process_template_specific(doc)
-            
-            # CRITICAL: Final pass to ensure white text on colored lineage/brand cells
-            # This catches any runs that were created or modified after apply_lineage_colors
-            self._ensure_white_text_on_colored_cells(doc)
         except Exception as e:
             self.logger.warning(f"Font sizing failed: {e}")
 
@@ -4774,22 +2762,24 @@ class TemplateProcessor:
             # CRITICAL FIX: Ensure DOH images have proper vertical margins to prevent cutoff
             self._ensure_doh_logo_vertical_margins(doc)
             
-            # FINAL ENFORCEMENT: Absolutely ensure DOH images are centered - this overrides all other positioning
-            self._final_doh_positioning_enforcement(doc)
-            
             # CRITICAL FIX: Final marker cleanup to ensure ALL markers are stripped
-            # NOTE: This must happen AFTER all font sizing is complete (which happens in _post_process_template_specific)
-            # ProductStrain markers need to be processed for font sizing before being removed
             self._final_marker_cleanup(doc)
             
-            # PREROLL TEMPLATE: Center QR codes
-            if self.template_type == 'preroll':
-                self._ensure_preroll_qr_centering(doc)
+            # FINAL ENFORCEMENT: Absolutely ensure DOH images are centered - this overrides all other positioning
+            self._final_doh_positioning_enforcement(doc)
         except Exception as e:
             self.logger.warning(f"DOH centering failed: {e}")
         
-        # OPTIMIZATION: Only call prevent_table_expansion_enhanced once - it already does everything
-        # enforce_fixed_cell_dimensions does, plus more, so we don't need both
+        # CRITICAL: Final cell dimension enforcement to prevent any expansion
+        try:
+            for table in doc.tables:
+                enforce_fixed_cell_dimensions(table, self.template_type)
+                self.logger.info(f"Applied final fixed cell dimensions to {self.template_type} template table")
+        except Exception as e:
+            self.logger.warning(f"Final cell dimension enforcement failed: {e}")
+
+        
+        # CRITICAL: Enhanced table expansion prevention - additional layer of protection
         try:
             doc = prevent_table_expansion_enhanced(doc, self.template_type)
             self.logger.info(f"Applied enhanced table expansion prevention to {self.template_type} template")
@@ -4885,36 +2875,6 @@ class TemplateProcessor:
         for paragraph in doc.paragraphs:
             for run in paragraph.runs:
                 process_run(run)
-        
-        # CRITICAL: Final pass to ensure white text on colored lineage/brand cells
-        # This catches any runs that were created or modified after apply_lineage_colors
-        self._ensure_white_text_on_colored_cells(doc)
-    
-    def _ensure_white_text_on_colored_cells(self, doc):
-        """Final pass to ensure all runs in cells with colored backgrounds have white text."""
-        try:
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        # Check if cell has colored background
-                        tc = cell._tc
-                        tcPr = tc.get_or_add_tcPr()
-                        shd = tcPr.find(qn('w:shd'))
-                        has_color = False
-                        if shd is not None:
-                            fill = shd.get(qn('w:fill'))
-                            if fill and fill.upper() not in ('FFFFFF', 'AUTO', 'NONE', ''):
-                                has_color = True
-                        
-                        # If cell has colored background, ensure all runs are white
-                        if has_color:
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    # Only set white if run has actual text content
-                                    if run.text and run.text.strip():
-                                        _set_lineage_run_white(run)
-        except Exception as e:
-            self.logger.warning(f"Error ensuring white text on colored cells: {e}")
 
     def _ensure_doh_image_centering(self, doc):
         """
@@ -5303,6 +3263,56 @@ class TemplateProcessor:
                 
         except Exception as e:
             self.logger.warning(f"Error adding DOH vertical spacer: {e}")
+    def _post_process_combined(self, doc, chunk_start_time):
+        """
+        PERFORMANCE OPTIMIZATION: Combined post-processing in a single pass.
+        Combines font sizing, lineage colors, and marker cleanup to reduce document iterations.
+        """
+        import re
+        from src.core.generation.docx_formatting import apply_lineage_colors
+
+        # Check timeout
+        if time.time() - chunk_start_time > MAX_PROCESSING_TIME_PER_CHUNK:
+            self.logger.warning(f"Chunk processing timeout reached ({MAX_PROCESSING_TIME_PER_CHUNK}s), skipping combined post-processing")
+            return
+
+        try:
+            # Single pass through all tables combining all operations
+            for table in doc.tables:
+                if not self._safe_table_iteration(table, "combined post-processing"):
+                    continue
+
+                for row in table.rows:
+                    if not hasattr(row, 'cells') or not row.cells:
+                        continue
+
+                    for cell in row.cells:
+                        try:
+                            for para in cell.paragraphs:
+                                # Process all runs in this paragraph
+                                for run in para.runs:
+                                    # 1. Apply font sizing (from _post_process_and_replace_content)
+                                    if hasattr(run, 'text') and run.text:
+                                        # Font sizing logic is already handled by markers
+                                        pass
+
+                                    # 2. Clean markers (from _final_marker_cleanup)
+                                    if hasattr(run, 'text'):
+                                        text = run.text
+                                        # Remove marker patterns
+                                        text = re.sub(r'\b\w+_(START|END)\b', '', text)
+                                        text = re.sub(r'^(?:[A-Z0-9_]+_)+', '', text)
+                                        run.text = text
+                        except Exception as cell_error:
+                            self.logger.warning(f"Error in combined post-processing cell: {cell_error}")
+                            continue
+
+            # 3. Apply lineage colors (single pass)
+            apply_lineage_colors(doc)
+
+        except Exception as e:
+            self.logger.warning(f"Error in combined post-processing: {e}")
+
     def _final_marker_cleanup(self, doc):
         """
         Final marker cleanup to ensure ALL markers are stripped from the final output.
@@ -5354,7 +3364,7 @@ class TemplateProcessor:
                 # Extract lineage content before removing markers
                 lineage_match = re.search(r'LINEAGE_START(.+?)LINEAGE_END', cleaned, re.IGNORECASE)
                 if lineage_match:
-                    lineage_content = lineage_match.group(1).strip()
+                    lineage_content = lineage_match.group(1)
                     # Replace the full lineage marker pattern with just the content
                     cleaned = re.sub(r'LINEAGE_START(.+?)LINEAGE_END', lineage_content, cleaned, flags=re.IGNORECASE)
                 
@@ -5362,7 +3372,7 @@ class TemplateProcessor:
                 # Extract product brand content before removing markers (handle both PRODUCTBRAND and PRODUCTBRAND_CENTER)
                 brand_match = re.search(r'PRODUCTBRAND(?:_CENTER)?_START(.+?)PRODUCTBRAND(?:_CENTER)?_END', cleaned, re.IGNORECASE)
                 if brand_match:
-                    brand_content = brand_match.group(1).strip()
+                    brand_content = brand_match.group(1)
                     # Now that Product Strain is separate, brand content is just the brand name
                     # No need to extract brand name from combined content
                     
@@ -5373,33 +3383,15 @@ class TemplateProcessor:
                 # Extract product strain content before removing markers
                 strain_match = re.search(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', cleaned, re.IGNORECASE)
                 if strain_match:
-                    strain_content = strain_match.group(1).strip()
+                    strain_content = strain_match.group(1)
                     # Replace the full product strain marker pattern with just the content
                     cleaned = re.sub(r'PRODUCTSTRAIN_START(.+?)PRODUCTSTRAIN_END', strain_content, cleaned, flags=re.IGNORECASE)
-
-                # CRITICAL FIX: Handle product vendor markers specially to preserve content
-                # Extract product vendor content before removing markers
-                vendor_content_extracted = None
-                vendor_match = re.search(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', cleaned, re.IGNORECASE)
-                if vendor_match:
-                    vendor_content_extracted = vendor_match.group(1).strip()
-                    # Replace the full product vendor marker pattern with a placeholder temporarily
-                    # to protect it from being removed by cleanup patterns
-                    cleaned = re.sub(r'PRODUCTVENDOR_START(.+?)PRODUCTVENDOR_END', '<<<VENDOR_PLACEHOLDER>>>', cleaned, flags=re.IGNORECASE)
-
-                # CRITICAL FIX: Handle price markers specially to preserve dollar amount
-                price_content_extracted = None
-                price_match = re.search(r'PRICE_START(.+?)PRICE_END', cleaned, re.IGNORECASE)
-                if price_match:
-                    price_content_extracted = price_match.group(1).strip()
-                    cleaned = re.sub(r'PRICE_START(.+?)PRICE_END', '<<<PRICE_PLACEHOLDER>>>', cleaned, flags=re.IGNORECASE)
-
+                
                 # Remove other marker patterns
                 for pattern in marker_patterns:
                     cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
-
+                
                 # CRITICAL FIX: Remove partial marker remnants like "bis" from "PRODUCTBRAND_END"
-                # NOTE: Do this BEFORE restoring vendor content to avoid removing words like "VENDOR" from vendor names
                 partial_remnants = [
                     r'\bbis\b',                    # "bis" from PRODUCTBRAND_END
                     r'PRODUCTBRAND_END',           # PRODUCTBRAND_END remnants (specific first)
@@ -5414,14 +3406,14 @@ class TemplateProcessor:
                     r'\bVENDOR\b',                 # Any remaining VENDOR
                     # REMOVED: r'\bLINEAGE\b' - Don't remove LINEAGE as it might be part of content
                     # REMOVED: r'\bCBD\b' - Don't remove CBD as it's part of lineage content like "CBD Blend"
-
+                    
                     # CRITICAL FIX: Handle corrupted marker text patterns
                     r'PRODUCTSTRR_STARTCONSTELL',  # Corrupted PRODUCTBRAND_CENTER_START + CONSTELLATION
                     r'PRODUCTSTRR_',               # Corrupted PRODUCTBRAND_ patterns
                     r'STARTCONSTELL',              # Corrupted START + CONSTELLATION
                     r'CONSTELLATION\$\s*',         # CONSTELLATION$ remnants
-                    r'(?<=[A-Z0-9_])\$[A-Za-z*]+', # Corrupted marker+$ patterns (like VICE$Star) but NOT standalone $16
-
+                    r'\$.*',                       # Any $ symbol remnants (like VICE$Star)
+                    
                     r'\bTHC\b',                    # Any remaining THC
                     # REMOVED: r'\bRATIO\b' - Don't remove RATIO as it's part of brand names like "Ratio"
                     r'\bWEIGHT\b',                 # Any remaining WEIGHT
@@ -5436,18 +3428,9 @@ class TemplateProcessor:
                     # r'\bC\b',                      # REMOVED: This could break legitimate words
                     # r'\bD\b',                      # REMOVED: This could break legitimate words
                 ]
-
+                
                 for remnant in partial_remnants:
                     cleaned = re.sub(remnant, '', cleaned, flags=re.IGNORECASE)
-
-                # CRITICAL: Restore vendor content after ALL cleanup to prevent removal
-                # This ensures vendor names containing words like "VENDOR" are preserved
-                if vendor_content_extracted:
-                    cleaned = cleaned.replace('<<<VENDOR_PLACEHOLDER>>>', vendor_content_extracted)
-
-                # CRITICAL: Restore price content after ALL cleanup to preserve dollar amounts
-                if price_content_extracted:
-                    cleaned = cleaned.replace('<<<PRICE_PLACEHOLDER>>>', price_content_extracted)
 
                 # Remove stray CENTER tokens left behind by split PRODUCTBRAND_CENTER markers.
                 # This specifically catches runs that only contain the marker fragment.
@@ -5607,9 +3590,8 @@ class TemplateProcessor:
         Uses the original font-sizing functions based on template type.
         """
         # Define marker processing for all template types (including double)
-        # CRITICAL: Process PRODUCTBRAND_CENTER FIRST to ensure brand font sizing is applied correctly
         markers = [
-            'DESC', 'PRODUCTBRAND_CENTER', 'PRODUCTBRAND', 'PRICE', 'LINEAGE', 
+            'DESC', 'PRODUCTBRAND', 'PRODUCTBRAND_CENTER', 'PRICE', 'LINEAGE', 
             'THC_CBD', 'THC_CBD_LABEL', 'RATIO', 'WEIGHTUNITS', 'PRODUCTSTRAIN', 'DOH', 'PRODUCTVENDOR'
         ]
         
@@ -5620,10 +3602,13 @@ class TemplateProcessor:
         if self.template_type in ['vertical', 'double']:
             self._optimize_vertical_template_spacing(doc)
             
-        # Apply unified font sizing to all text in vertical and double templates only (not just markers).
-        # Horizontal uses marker processing + apply_lineage_colors for sizing; do not run this pass for horizontal.
-        if self.template_type in ['vertical', 'double']:
+        # Apply unified font sizing to all text in vertical, double, and horizontal templates (not just markers)
+        if self.template_type in ['vertical', 'double', 'horizontal']:
             self._apply_unified_font_sizing_to_all_text(doc)
+        
+        # Style vendor text in vertical templates (italic and gray)
+        if self.template_type == 'vertical':
+            self._style_vendor_text_vertical(doc)
 
 
 
@@ -5635,35 +3620,31 @@ class TemplateProcessor:
         try:
             from src.core.generation.unified_font_sizing import get_font_size
             
-            # Use template_type directly as orientation - supports all template types including preroll, mini, etc.
-            template_orientation = self.template_type
+            # Use template-specific orientation when available so config matches (vertical, double, horizontal)
+            template_orientation = self.template_type if self.template_type in {'vertical', 'double', 'horizontal'} else 'vertical'
 
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            # CRITICAL FIX: Check for ProductStrain markers first before processing individual runs
-                            full_text = "".join(run.text for run in paragraph.runs)
-                            if 'PRODUCTSTRAIN_START' in full_text and 'PRODUCTSTRAIN_END' in full_text:
-                                # Process ProductStrain markers using the marker processing system
-                                self._process_paragraph_for_markers_template_specific(paragraph, ['PRODUCTSTRAIN'])
-                                continue
-                            
-                            # CRITICAL FIX: Check for PRODUCTBRAND_CENTER markers - these should use brand font sizing
-                            # Skip processing if markers are present (they've already been processed by marker system)
-                            if 'PRODUCTBRAND_CENTER_START' in full_text and 'PRODUCTBRAND_CENTER_END' in full_text:
-                                # Process PRODUCTBRAND_CENTER markers using the marker processing system
-                                self._process_paragraph_for_markers_template_specific(paragraph, ['PRODUCTBRAND_CENTER'])
-                                continue
-                            
-                            # Process other text normally
+                            # Paragraph-level reduction: same long-text rule we used on double template,
+                            # now applied to vertical & horizontal as well.
+                            full_text = "".join(r.text or "" for r in paragraph.runs)
+                            paragraph_reduce_pt = 0.0
+                            if template_orientation in ('double', 'vertical', 'horizontal') and full_text:
+                                if '$' not in full_text and '%' not in full_text:
+                                    words = full_text.split()
+                                    words_over_6 = sum(1 for w in words if len(w) > 6)  # 7+ letters
+                                    words_over_7 = sum(1 for w in words if len(w) > 7)  # 8+ letters
+                                    if words_over_6 >= 3:
+                                        paragraph_reduce_pt = 1.0
+                                    if len(words) >= 6 or words_over_7 >= 3:
+                                        paragraph_reduce_pt = 3.0
+
                             for run in paragraph.runs:
                                 run_text = run.text or ''
                                 if not run_text.strip():
                                     continue
-                                
-                                # Determine field type FIRST so we can use it in skip logic
-                                field_type = self._determine_field_type_for_template(run_text, paragraph, cell)
                                 
                                 existing_size = getattr(run.font, "size", None)
                                 if existing_size is not None:
@@ -5671,25 +3652,27 @@ class TemplateProcessor:
                                         if existing_size.pt <= 1.1:
                                             # Preserve already-minimized runs (e.g., ProductStrain at 1pt)
                                             continue
-                                        # CRITICAL FIX: Skip runs that already have brand font sizing (10-16pt for vertical)
-                                        # These were processed by PRODUCTBRAND_CENTER marker processing
-                                        if 10 <= existing_size.pt <= 16:
-                                            self.logger.debug(f"Skipping run with existing brand font size: {existing_size.pt}pt for '{run_text[:30]}...'")
-                                            continue
-                                        # CRITICAL: On horizontal, always resize description AND brand/lineage (bar text)
-                                        # so descriptions get variable sizing and bar text gets correct size (not stuck at 9pt)
-                                        if existing_size.pt > 1.1:
-                                            if self.template_type == 'horizontal' and field_type in ('description', 'brand', 'lineage'):
-                                                # Always resize - descriptions by length, brand/lineage per config
-                                                pass
-                                            else:
-                                                self.logger.debug(f"Skipping run with existing font size: {existing_size.pt}pt for '{run_text[:30]}...' (already sized)")
-                                                continue
                                     except AttributeError:
                                         pass
                                 
+                                # Determine field type based on text content and position
+                                field_type = self._determine_field_type_for_template(run_text, paragraph, cell)
+                                
                                 # Apply unified font sizing
                                 font_size = get_font_size(run_text, field_type, template_orientation, self.scale_factor)
+
+                                # Paragraph-based reduction for long description-like text:
+                                # use the same rule that we originally applied to double templates,
+                                # but extend it to vertical and horizontal as requested.
+                                if paragraph_reduce_pt and field_type in ('description', 'default', 'ratio'):
+                                    try:
+                                        from docx.shared import Pt
+                                        pt_val = getattr(font_size, 'pt', float(font_size))
+                                        # Don't let anything shrink below 10pt for readability.
+                                        new_pt = max(10.0, pt_val - float(paragraph_reduce_pt))
+                                        font_size = Pt(new_pt)
+                                    except (TypeError, ValueError, AttributeError):
+                                        pass
                                 # Apply at run and XML level to prevent Word from overriding
                                 from src.core.generation.unified_font_sizing import set_run_font_size
                                 set_run_font_size(run, font_size)
@@ -5698,6 +3681,76 @@ class TemplateProcessor:
                                     
         except Exception as e:
             self.logger.warning(f"Failed to apply unified font sizing to vertical template text: {e}")
+
+    def _style_vendor_text_vertical(self, doc):
+        """
+        Style vendor text in vertical templates to be italic and gray, matching Double and Horizontal templates.
+        Vendor text typically appears in paragraphs that contain lineage or are right-aligned.
+        """
+        try:
+            from docx.shared import RGBColor
+            from docx.oxml.ns import qn
+            from docx.oxml import OxmlElement
+            
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            full_text = "".join(run.text for run in paragraph.runs).strip()
+                            if not full_text:
+                                continue
+                            
+                            # Check if paragraph is right-aligned (vendor is typically right-aligned)
+                            is_right_aligned = paragraph.alignment == 2  # WD_ALIGN_PARAGRAPH.RIGHT = 2
+                            
+                            # Check if paragraph contains lineage indicators
+                            has_lineage_indicators = any(indicator in full_text.upper() for indicator in 
+                                                         ['SATIVA', 'INDICA', 'HYBRID', 'CBD', 'MIXED', 'PARA'])
+                            
+                            # Process runs to find and style vendor text
+                            for run in paragraph.runs:
+                                run_text = run.text or ''
+                                if not run_text.strip():
+                                    continue
+                                
+                                # Identify if this is vendor text using the existing identification logic
+                                marker_type = self._identify_marker_type(run_text)
+                                
+                                # Check if it's a lineage value (should not be styled as vendor)
+                                is_lineage_value = run_text.upper().strip() in [
+                                    'SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 
+                                    'CBD', 'MIXED', 'PARAPHERNALIA', 'PARA'
+                                ]
+                                
+                                # Style as vendor if:
+                                # 1. Identified as vendor type, OR
+                                # 2. Right-aligned paragraph with non-lineage text, OR
+                                # 3. In a paragraph with lineage indicators but not a lineage value itself
+                                should_style_as_vendor = (
+                                    marker_type == 'VENDOR' or
+                                    (is_right_aligned and not is_lineage_value and 
+                                     not any(word in run_text.upper() for word in ['$', '%', ':', 'THC', 'CBD', 'G', 'OZ'])) or
+                                    (has_lineage_indicators and not is_lineage_value and is_right_aligned)
+                                )
+                                
+                                if should_style_as_vendor:
+                                    # Apply italic and gray color
+                                    run.font.italic = True
+                                    run.font.color.rgb = RGBColor(128, 128, 128)  # #808080 gray
+                                    run.font.color.theme_color = None
+                                    
+                                    # Also set at XML level to ensure it sticks
+                                    rPr = run._element.get_or_add_rPr()
+                                    color = rPr.find(qn('w:color'))
+                                    if color is None:
+                                        color = OxmlElement('w:color')
+                                        rPr.append(color)
+                                    color.set(qn('w:val'), '808080')
+                                    
+                                    self.logger.debug(f"Styled vendor text in vertical template: '{run_text}'")
+                                        
+        except Exception as e:
+            self.logger.warning(f"Failed to style vendor text in vertical template: {e}")
 
     def _set_paragraph_cell_vertical_alignment(self, paragraph, alignment):
         """
@@ -5799,51 +3852,7 @@ class TemplateProcessor:
     def _determine_field_type_for_template(self, text, paragraph, cell):
         if self.template_type == 'double':
             return self._determine_field_type_for_double_template(text, paragraph, cell)
-        if self.template_type == 'horizontal':
-            return self._determine_field_type_for_horizontal_template(text, paragraph, cell)
         return self._determine_field_type_for_vertical_template(text, paragraph, cell)
-
-    def _determine_field_type_for_horizontal_template(self, text, paragraph, cell):
-        """
-        Determine field type for horizontal template. Critical: product names (description)
-        must be 'description' so they get large sizing; do NOT classify as 'ratio' just
-        because they contain "g" or "x" (e.g. "0.5g x 2 Pack").
-        """
-        text_lower = text.lower().strip()
-        text_stripped = text.strip()
-        words = text_stripped.split()
-
-        # Markers
-        if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
-            return 'brand'
-
-        # Price
-        if '$' in text:
-            return 'price'
-
-        # THC/CBD
-        if '%' in text or any(kw in text_lower for kw in ['thc:', 'cbd:', 'total thc', 'total cbd']):
-            return 'thc_cbd'
-
-        # Classic lineage bar: short, exact lineage or ALL CAPS short brand
-        classic_lineages = ['hybrid/sativa', 'hybrid/indica', 'sativa', 'indica', 'hybrid', 'cbd', 'mixed']
-        if text_stripped.upper() in [l.upper() for l in classic_lineages]:
-            return 'lineage'
-        if text_stripped.isupper() and len(words) <= 3 and len(text_stripped) <= 25 and all(c.isalpha() or c.isspace() or c in '/-' for c in text_stripped):
-            return 'brand'
-
-        # Ratio: only short ratio-like strings (e.g. "1:1", "2:1", "0.5g"), not full product names
-        if len(text_stripped) <= 12 and (':' in text or re.search(r'\d+g\b', text_lower)):
-            if not any(prod in text_lower for prod in ['pre-roll', 'roll', 'shot', 'pack', 'moonshot', 'infused', 'oz']):
-                return 'ratio'
-
-        # Description: product names (multi-word, contain product-type words or weights)
-        product_indicators = ['pre-roll', 'roll', 'shot', 'moonshot', 'pack', 'infused', 'edible', 'concentrate', 'cartridge', 'tincture', 'gummy', 'oz']
-        if len(words) >= 2 and any(ind in text_lower for ind in product_indicators):
-            return 'description'
-
-        # Default: treat as visible content
-        return 'default'
 
     def _determine_field_type_for_vertical_template(self, text, paragraph, cell):
         """
@@ -5855,26 +3864,10 @@ class TemplateProcessor:
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
         is_short_wordy = all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped)
 
-        # Marker-based overrides - check FIRST before any other logic
+        # Marker-based overrides
         if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
-            self.logger.debug(f"🎯 BRAND MARKER DETECTED: '{text_stripped[:50]}...' classified as brand (marker-based)")
+            self.logger.debug(f"🎯 BRAND MARKER DETECTED: '{text_stripped}' classified as brand (marker-based)")
             return 'brand'
-
-        # CRITICAL FIX: Check if this paragraph/cell already has brand font sizing applied
-        # This handles cases where PRODUCTBRAND_CENTER markers were processed and removed
-        # but the text should still be treated as brand content
-        if paragraph:
-            for run in paragraph.runs:
-                existing_size = getattr(run.font, "size", None)
-                if existing_size is not None:
-                    try:
-                        existing_pt = existing_size.pt if hasattr(existing_size, 'pt') else float(existing_size)
-                        # If font size is in brand range (10-16pt for vertical), treat as brand
-                        if 10 <= existing_pt <= 16:
-                            self.logger.debug(f"🎯 BRAND FONT SIZE DETECTED: '{text_stripped[:50]}...' has brand font size {existing_pt}pt, classified as brand")
-                            return 'brand'
-                    except (AttributeError, ValueError, TypeError):
-                        pass
 
         if '__LINEAGE_HINT_' in text:
             self.logger.debug(f"🎯 LINEAGE HINT DETECTED: '{text_stripped}' classified as lineage (marker-based)")
@@ -5939,11 +3932,6 @@ class TemplateProcessor:
         is_all_caps = (text_stripped.isupper() and any(c.isalpha() for c in text_stripped))
         is_short_wordy = (len(text_stripped) <= 18 and all(ch.isalpha() or ch.isspace() or ch in ['&','-','/'] for ch in text_stripped))
 
-        # CRITICAL FIX: Check for brand markers FIRST - double templates use PRODUCTBRAND_CENTER markers
-        if any(marker in text for marker in ['PRODUCTBRAND_CENTER_START', 'PRODUCTBRAND_CENTER_END', 'PRODUCTBRAND_START', 'PRODUCTBRAND_END']):
-            self.logger.debug(f"🎯 DOUBLE BRAND MARKER DETECTED: '{text_stripped}' classified as brand (marker-based)")
-            return 'brand'
-
         # Prices
         if '$' in text:
             return 'price'
@@ -5989,160 +3977,45 @@ class TemplateProcessor:
 
     def _optimize_vertical_template_spacing(self, doc):
         """
-        Apply spacing optimizations for vertical and double templates.
-        Vertical: 0pt before / 0pt after for non-classic; classic type (lineage cells) = Auto.
-        Double: 2pt before / 2pt after.
+        Apply minimal spacing optimizations specifically for vertical and double templates
+        to ensure all labels fit on one page.
         """
         try:
             from docx.shared import Pt
-            from docx.oxml import OxmlElement
-            from docx.oxml.ns import qn
-            from src.core.constants import VALID_CLASSIC_LINEAGES
             
-            def cell_text_is_classic_lineage(cell):
-                """True if cell text is a classic lineage value (INDICA, SATIVA, HYBRID, etc.)."""
-                if cell is None:
-                    return False
-                text = (''.join(p.text for p in cell.paragraphs)).strip().upper()
-                if not text:
-                    return False
-                # Exact match or single token that matches
-                return text in VALID_CLASSIC_LINEAGES or any(
-                    text == v or text.startswith(v + '/') or text.endswith('/' + v)
-                    for v in VALID_CLASSIC_LINEAGES
-                )
-            
-            def set_auto_spacing(paragraph):
-                """Set paragraph spacing to Auto (clear before/after)."""
-                paragraph.paragraph_format.space_before = None
-                paragraph.paragraph_format.space_after = None
-                pPr = paragraph._element.get_or_add_pPr()
-                spacing = pPr.find(qn('w:spacing'))
-                if spacing is None:
-                    spacing = OxmlElement('w:spacing')
-                    pPr.append(spacing)
-                if qn('w:before') in spacing.attrib:
-                    del spacing.attrib[qn('w:before')]
-                if qn('w:after') in spacing.attrib:
-                    del spacing.attrib[qn('w:after')]
-                spacing.set(qn('w:lineRule'), 'auto')
-            
-            def optimize_paragraph_spacing(paragraph, cell=None):
-                """Set spacing for all paragraphs in vertical and double templates.
-                Skip lineage/brand banner paragraphs (cells with colored background) so their spacing is preserved.
-                Classic type vertical: lineage cells use Auto spacing.
-                """
-                # If this paragraph is in a cell with a colored background (lineage/brand banner), keep existing spacing
-                if cell is not None:
-                    tc = cell._tc
-                    tcPr = tc.find(qn('w:tcPr'))
-                    if tcPr is not None:
-                        shd = tcPr.find(qn('w:shd'))
-                        if shd is not None:
-                            fill = shd.get(qn('w:fill'))
-                            if fill and fill != 'FFFFFF' and fill != 'auto':
-                                ttype = getattr(self, "template_type", None)
-                                if ttype == "vertical":
-                                    # Classic type vertical: lineage cells (INDICA, SATIVA, HYBRID, etc.) = Auto
-                                    if cell_text_is_classic_lineage(cell):
-                                        set_auto_spacing(paragraph)
-                                    else:
-                                        # Non-classic vertical: 0pt before/after
-                                        paragraph.paragraph_format.space_before = Pt(0)
-                                        paragraph.paragraph_format.space_after = Pt(0)
-                                        pPr = paragraph._element.get_or_add_pPr()
-                                        spacing = pPr.find(qn('w:spacing'))
-                                        if spacing is None:
-                                            spacing = OxmlElement('w:spacing')
-                                            pPr.append(spacing)
-                                        spacing.set(qn('w:before'), '0')  # 0pt = 0 twips
-                                        spacing.set(qn('w:after'), '0')    # 0pt = 0 twips
-                                        spacing.set(qn('w:lineRule'), 'auto')
-                                else:
-                                    paragraph.paragraph_format.space_before = Pt(6)
-                                    paragraph.paragraph_format.space_after = Pt(6)
-                                    pPr = paragraph._element.get_or_add_pPr()
-                                    spacing = pPr.find(qn('w:spacing'))
-                                    if spacing is None:
-                                        spacing = OxmlElement('w:spacing')
-                                        pPr.append(spacing)
-                                    spacing.set(qn('w:before'), '40')
-                                    spacing.set(qn('w:after'), '20')
-                                if ttype != "vertical" or not cell_text_is_classic_lineage(cell):
-                                    pPr = paragraph._element.get_or_add_pPr()
-                                    spacing = pPr.find(qn('w:spacing'))
-                                    if spacing is not None:
-                                        spacing.set(qn('w:lineRule'), 'auto')
-                                return
-                # Set template-specific paragraph spacing
-                # Vertical: 0pt before, 0pt after for non-classic; classic type (lineage cell) = Auto. Double: 2pt/2pt. Other: auto.
-                ttype = getattr(self, "template_type", None)
-                if ttype == "vertical":
-                    # Classic type vertical: any cell that shows lineage text gets Auto
-                    if cell is not None and cell_text_is_classic_lineage(cell):
-                        set_auto_spacing(paragraph)
-                    else:
-                        # Non-classic vertical: 0pt before/after
-                        before_pt, after_pt = 0, 0
-                        paragraph.paragraph_format.space_before = Pt(before_pt)
-                        paragraph.paragraph_format.space_after = Pt(after_pt)
-                        pPr = paragraph._element.get_or_add_pPr()
-                        spacing = pPr.find(qn('w:spacing'))
-                        if spacing is None:
-                            spacing = OxmlElement('w:spacing')
-                            pPr.append(spacing)
-                        spacing.set(qn('w:before'), str(int(before_pt * 20)))
-                        spacing.set(qn('w:after'), str(int(after_pt * 20)))
-                elif ttype == "double":
-                    before_pt, after_pt = 2, 2
-                    paragraph.paragraph_format.space_before = Pt(before_pt)
-                    paragraph.paragraph_format.space_after = Pt(after_pt)
-                    pPr = paragraph._element.get_or_add_pPr()
-                    spacing = pPr.find(qn('w:spacing'))
-                    if spacing is None:
-                        spacing = OxmlElement('w:spacing')
-                        pPr.append(spacing)
-                    spacing.set(qn('w:before'), str(int(before_pt * 20)))
-                    spacing.set(qn('w:after'), str(int(after_pt * 20)))
-                else:
-                    paragraph.paragraph_format.space_before = None
-                    paragraph.paragraph_format.space_after = None
-                    pPr = paragraph._element.get_or_add_pPr()
-                    spacing = pPr.find(qn('w:spacing'))
-                    if spacing is not None:
-                        if qn('w:before') in spacing.attrib:
-                            del spacing.attrib[qn('w:before')]
-                        if qn('w:after') in spacing.attrib:
-                            del spacing.attrib[qn('w:after')]
-                    else:
-                        spacing = OxmlElement('w:spacing')
-                        pPr.append(spacing)
+            def optimize_paragraph_spacing(paragraph):
+                """Set minimal spacing for all paragraphs in vertical and double templates."""
+                # Set absolute minimum spacing
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
                 
                 # All content now uses standard spacing
                 
                 # Default spacing for non-THC_CBD content
                 paragraph.paragraph_format.line_spacing = 1.0
                 
-                # Ensure line spacing is set at XML level
+                # Set at XML level for maximum compatibility
                 pPr = paragraph._element.get_or_add_pPr()
                 spacing = pPr.find(qn('w:spacing'))
                 if spacing is None:
                     spacing = OxmlElement('w:spacing')
                     pPr.append(spacing)
                 
+                spacing.set(qn('w:before'), '0')
+                spacing.set(qn('w:after'), '0')
                 spacing.set(qn('w:line'), '240')  # 1.0 line spacing
                 spacing.set(qn('w:lineRule'), 'auto')
             
-            # Process all tables (pass cell so lineage/brand banners keep their spacing)
+            # Process all tables
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            optimize_paragraph_spacing(paragraph, cell=cell)
+                            optimize_paragraph_spacing(paragraph)
             
-            # Process all paragraphs outside tables (no cell)
+            # Process all paragraphs outside tables
             for paragraph in doc.paragraphs:
-                optimize_paragraph_spacing(paragraph, cell=None)
+                optimize_paragraph_spacing(paragraph)
             
             self.logger.debug("Applied vertical/double template spacing optimizations")
             
@@ -6192,16 +4065,13 @@ class TemplateProcessor:
         if self._detect_and_process_combined_lineage_vendor(paragraph):
             return
         
-        # Check if any markers are present
+        # Check if any markers are present (optimized - no debug logging)
         found_markers = []
         for marker_name in markers:
             start_marker = f'{marker_name}_START'
             end_marker = f'{marker_name}_END'
             if start_marker in full_text and end_marker in full_text:
                 found_markers.append(marker_name)
-                # CRITICAL DEBUG: Log ProductStrain marker detection for vertical templates
-                if marker_name == 'PRODUCTSTRAIN':
-                    self.logger.info(f"✅ PRODUCTSTRAIN MARKER DETECTED: Found ProductStrain markers in {self.template_type} template paragraph: '{full_text[:150]}...'")
         
         if found_markers:
             # Process all markers and build the final content
@@ -6220,20 +4090,9 @@ class TemplateProcessor:
                     marker_start = final_content.find(start_marker) + len(start_marker)
                     marker_end = final_content.find(end_marker)
                     content = final_content[marker_start:marker_end]
-                    # Trim only leading/trailing invisible characters; preserve internal spacing.
-                    content = _trim_invisible_edges(content)
                     
-                    # Get font size for this marker using unified system
+                    # Get font size for this marker
                     font_size = self._get_template_specific_font_size(content, marker_name)
-                    font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
-                    
-                    # CRITICAL DEBUG: Log font sizing for horizontal template
-                    if self.template_type == 'horizontal' and marker_name in ('DESC', 'DESCRIPTION'):
-                        self.logger.info(f"🔍 HORIZONTAL DESC SIZE: '{content[:50]}...' -> {font_size_pt}pt (marker: {marker_name}, template: {self.template_type})")
-                    
-                    # CRITICAL DEBUG: Log ProductStrain font sizing
-                    if marker_name == 'PRODUCTSTRAIN':
-                        self.logger.info(f"✅ PRODUCTSTRAIN FONT SIZING: Content='{content}', FontSize={font_size_pt}pt, Template={self.template_type}")
                     
                     processed_content[marker_name] = {
                         'content': content,
@@ -6262,8 +4121,8 @@ class TemplateProcessor:
                 # Add any text before this marker
                 if marker_data['start_pos'] > current_pos:
                     text_before = full_text[current_pos:marker_data['start_pos']]
-                    # Drop whitespace-only/invisible fragments around markers.
-                    if _has_visible_text(text_before):
+                    # Preserve line breaks and whitespace, but skip if completely empty
+                    if text_before or text_before.strip():
                         run = paragraph.add_run(text_before)
                         run.font.name = "Arial"
                         run.font.bold = True
@@ -6283,16 +4142,7 @@ class TemplateProcessor:
                 
                 run.font.size = marker_data['font_size']
                 set_run_font_size(run, marker_data['font_size'])
-                applied_size_pt = marker_data['font_size'].pt if hasattr(marker_data['font_size'], 'pt') else float(marker_data['font_size'])
-                
-                # CRITICAL DEBUG: Log font sizing for horizontal template descriptions
-                if self.template_type == 'horizontal' and marker_name in ('DESC', 'DESCRIPTION'):
-                    self.logger.info(f"✅ HORIZONTAL DESC APPLIED: '{display_content[:50]}...' -> {applied_size_pt}pt")
-                
-                # CRITICAL DEBUG: Log ProductStrain processing
-                if marker_name == 'PRODUCTSTRAIN':
-                    self.logger.info(f"✅ PRODUCTSTRAIN PROCESSED: Added ProductStrain run with content='{display_content}', font_size={applied_size_pt}pt")
-                self.logger.debug(f"Added marker '{marker_name}': '{display_content}' -> {applied_size_pt}pt")
+                self.logger.debug(f"Added marker '{marker_name}': '{display_content}' -> {marker_data['font_size'].pt}pt")
                 
                 lines = display_content.splitlines()
                 for i, line in enumerate(lines):
@@ -6304,8 +4154,8 @@ class TemplateProcessor:
             # Add any remaining text
             if current_pos < len(full_text):
                 text_after = full_text[current_pos:]
-                # Drop whitespace-only/invisible fragments around markers.
-                if _has_visible_text(text_after):
+                # Preserve line breaks and whitespace, but skip if completely empty
+                if text_after or text_after.strip():
                     run = paragraph.add_run(text_after)
                     run.font.name = "Arial"
                     run.font.bold = True
@@ -6327,19 +4177,9 @@ class TemplateProcessor:
 
             # Apply special formatting for specific markers
             for marker_name, marker_data in processed_content.items():
-                # Always center ProductBrand markers for ALL templates; match lineage paragraph spacing
+                # Always center ProductBrand markers for ALL templates
                 if ('PRODUCTBRAND' in marker_name):
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
-                    pPr = paragraph._element.get_or_add_pPr()
-                    sp = pPr.find(qn('w:spacing'))
-                    if sp is None:
-                        sp = OxmlElement('w:spacing')
-                        pPr.append(sp)
-                    sp.set(qn('w:before'), '40')
-                    sp.set(qn('w:after'), '20')
-                    sp.set(qn('w:lineRule'), 'auto')
                     self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
                     for idx, run in enumerate(paragraph.runs):
                         # Get product type for font sizing
@@ -6380,20 +4220,9 @@ class TemplateProcessor:
                     elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                         product_type = self.label_context['ProductType']
                     
-                    from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
+                    from src.core.constants import CLASSIC_TYPES
                     product_type_normalized = (product_type or '').lower()
                     is_classic_product = product_type_normalized in CLASSIC_TYPES if product_type_normalized else False
-                    
-                    # CRITICAL FIX: Check if lineage content itself is a classic lineage value
-                    # Clean the content to check for classic lineage values
-                    clean_content = _trim_invisible_edges(content).upper()
-                    # Remove any marker remnants
-                    clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
-                    clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
-                    # Check if the cleaned content is a classic lineage value
-                    is_classic_lineage_value = clean_content in VALID_CLASSIC_LINEAGES or any(
-                        clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
-                    )
                     
                     if (not is_classic_product) and ('PRODUCTBRAND_CENTER' in content):
                         brand_text = re.sub(
@@ -6424,45 +4253,29 @@ class TemplateProcessor:
                         original_text = run.text or ''
                         set_run_font_size(run, font_size)
                         if brand_clean_regex:
-                            run.text = _trim_invisible_edges(brand_clean_regex.sub('', original_text))
+                            run.text = brand_clean_regex.sub('', original_text).strip()
                     
-                    # Handle alignment based on PRODUCT TYPE OR classic lineage value
-                    # CRITICAL FIX: If lineage content is a classic lineage value, always left-align
-                    # This ensures lineage values like HYBRID, SATIVA, INDICA are left-aligned
-                    # even if product type detection fails
-                    if is_classic_lineage_value:
-                        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        paragraph.paragraph_format.left_indent = Inches(0)
-                        # Vertical template: Equal spacing above and below for lineage
-                        if self.template_type == 'vertical':
-                            paragraph.paragraph_format.space_before = Pt(6)
-                            paragraph.paragraph_format.space_after = Pt(6)
-                        else:
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
-                        self.logger.debug(f"LINEAGE ALIGNMENT: Forced LEFT alignment for classic lineage value: '{clean_content}'")
-                    elif is_classic_product:
-                        # Classic product types should have LEFT alignment for lineage
+                    # Handle alignment based on PRODUCT TYPE, not just lineage content
+                    is_classic_product = product_type and product_type.lower() in CLASSIC_TYPES
+                    
+                    # Debug logging for vape cartridge lineage alignment
+                    if product_type and 'vape' in product_type.lower():
+                        self.logger.debug(f"VAPE CARTRIDGE DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
+                    
+                    # Classic product types should have LEFT alignment for lineage
+                    if is_classic_product:
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                         # NO LEFT INDENT - this was causing lineage indentation
                         paragraph.paragraph_format.left_indent = Inches(0)
-                        # Vertical template: Equal spacing above and below for lineage
-                        if self.template_type == 'vertical':
-                            paragraph.paragraph_format.space_before = Pt(6)
-                            paragraph.paragraph_format.space_after = Pt(6)
-                        else:
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                        # Ensure consistent spacing above lineage section for equal margins
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
                     else:
                         # Non-classic product types should have CENTER alignment for lineage
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Vertical template: Equal spacing above and below for lineage
-                        if self.template_type == 'vertical':
-                            paragraph.paragraph_format.space_before = Pt(6)
-                            paragraph.paragraph_format.space_after = Pt(6)
-                        else:
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(1)
+                        # Ensure consistent spacing above lineage section for equal margins
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
                     
                     # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage
                     if product_type and 'vape' in product_type.lower():
@@ -6474,13 +4287,9 @@ class TemplateProcessor:
                 # Always center ProductBrand and ProductBrand_Center markers
                 if marker_name in ('PRODUCTBRAND', 'PRODUCTBRAND_CENTER') or 'PRODUCTBRAND' in marker_name:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    # Vertical template: 6pt before/after; others: 2pt/1pt
-                    if self.template_type == 'vertical':
-                        paragraph.paragraph_format.space_before = Pt(6)
-                        paragraph.paragraph_format.space_after = Pt(6)
-                    else:
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
+                    # Ensure consistent spacing above product brand section for equal margins
+                    paragraph.paragraph_format.space_before = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
                     for run in paragraph.runs:
                         # Get product type for font sizing
                         product_type = None
@@ -6505,29 +4314,16 @@ class TemplateProcessor:
                         # Set vendor text to italic and gray color
                         run.font.italic = True
                         from docx.shared import RGBColor
-                        # Set gray color at both run level and XML level for consistency
                         run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
                         run.font.color.theme_color = None  # Clear any theme color
-                        # Also set color at XML level to ensure it sticks
-                        rPr = run._element.get_or_add_rPr()
-                        color = rPr.find(qn('w:color'))
-                        if color is None:
-                            color = OxmlElement('w:color')
-                            rPr.append(color)
-                        color.set(qn('w:val'), '808080')  # Gray color in hex without #
                     continue
                 elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
                     product_type = self.label_context['ProductType']
                 else:
                     product_type = None
                 
-                # Special handling for ProductStrain marker - use unified font sizing system and left alignment
+                # Special handling for ProductStrain marker - use unified font sizing system
                 if marker_name in ('PRODUCTSTRAIN', 'STRAIN'):
-                    # Left-align PRODUCTSTRAIN markers
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                    # Ensure consistent spacing above strain section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
                     strain_content = str(marker_data.get('content') or '').strip()
                     for run in paragraph.runs:
                         run_text = run.text or ''
@@ -6612,10 +4408,6 @@ class TemplateProcessor:
                 end_idx = full_text.find(end_marker)
                 content = full_text[start_idx:end_idx]
                 
-                # CRITICAL DEBUG: Log when processing LINEAGE markers to track font sizing
-                if marker_name == 'LINEAGE':
-                    self.logger.info(f"🔍 PROCESSING LINEAGE MARKER: content='{content[:100]}', has PRODUCTBRAND_CENTER markers: {'PRODUCTBRAND_CENTER_START' in content and 'PRODUCTBRAND_CENTER_END' in content}")
-                
                 # For THC_CBD markers, calculate font size before any splitting to ensure consistency
                 if marker_name in ['THC_CBD', 'RATIO', 'THC_CBD_LABEL'] and ('\n' in content or '|BR|' in content):
                     # Calculate font size based on the original unsplit content to ensure consistency
@@ -6640,44 +4432,10 @@ class TemplateProcessor:
                     # Convert line breaks to actual line breaks, passing the font size
                     self._convert_br_markers_to_line_breaks(paragraph, font_size)
                 else:
-                    # CRITICAL FIX: Check if LINEAGE marker contains PRODUCTBRAND_CENTER markers BEFORE calculating font size
-                    # This ensures brand content uses 'brand' font sizing, not 'lineage' font sizing
-                    actual_marker_name = marker_name
-                    final_content = content
-                    brand_content = None
-                    
-                    # Check for PRODUCTBRAND_CENTER markers in LINEAGE content (case-insensitive check)
-                    # Also check the original full_text to catch markers that might be in the paragraph but not in extracted content
-                    content_upper = content.upper()
-                    full_text_upper = full_text.upper()
-                    has_brand_markers = ('PRODUCTBRAND_CENTER_START' in content_upper and 'PRODUCTBRAND_CENTER_END' in content_upper) or \
-                                       ('PRODUCTBRAND_CENTER_START' in full_text_upper and 'PRODUCTBRAND_CENTER_END' in full_text_upper)
-                    
-                    if marker_name == 'LINEAGE' and has_brand_markers:
-                        # Extract brand content to calculate proper font size
-                        # Find markers case-insensitively but preserve original case
-                        import re
-                        brand_match = re.search(r'PRODUCTBRAND_CENTER_START(.+?)PRODUCTBRAND_CENTER_END', content, re.IGNORECASE)
-                        if brand_match:
-                            brand_content = brand_match.group(1)
-                            # Use PRODUCTBRAND_CENTER marker type to get brand font sizing
-                            actual_marker_name = 'PRODUCTBRAND_CENTER'
-                            # Use brand content for font size calculation
-                            font_size = self._get_template_specific_font_size(brand_content, actual_marker_name)
-                            # Use brand_content (without markers) as the final content
-                            final_content = brand_content
-                            font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
-                            self.logger.info(f"✅ LINEAGE contains PRODUCTBRAND_CENTER: Using 'brand' font sizing for '{brand_content}' -> {font_size_pt}pt (template: {self.template_type})")
-                        else:
-                            # Markers found but extraction failed - fall back to regular processing
-                            self.logger.warning(f"⚠️ Found PRODUCTBRAND_CENTER markers in LINEAGE but extraction failed, using lineage sizing")
-                            font_size = self._get_template_specific_font_size(content, marker_name)
-                    else:
-                        # Use template-type-specific font sizing based on original functions
-                        font_size = self._get_template_specific_font_size(content, marker_name)
+                    # Use template-type-specific font sizing based on original functions
+                    font_size = self._get_template_specific_font_size(content, marker_name)
                     import logging
-                    font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
-                    logging.debug(f"[FONT_DEBUG] Processing marker '{marker_name}' (actual: {actual_marker_name}) with content '{content[:50]}...' -> font_size: {font_size_pt}pt")
+                    logging.debug(f"[FONT_DEBUG] Processing marker '{marker_name}' with content '{content}' -> font_size: {font_size}")
                     
                     # Clear paragraph and re-add content with template-optimized formatting
                     paragraph.clear()
@@ -6690,36 +4448,11 @@ class TemplateProcessor:
                     # Apply template-specific font size setting
                     set_run_font_size(run, font_size)
                     
-                    # Add the final content to the run (brand_content if PRODUCTBRAND_CENTER was detected, otherwise original content)
-                    run.text = final_content  # Use assignment instead of add_text to avoid duplication
+                    # Add the content to the run
+                    run.text = content  # Use assignment instead of add_text to avoid duplication
                     
                     # Convert |BR| markers to actual line breaks for other markers
                     self._convert_br_markers_to_line_breaks(paragraph, font_size)
-                    
-                    # CRITICAL: If we detected PRODUCTBRAND_CENTER markers in LINEAGE, handle it as brand and return early
-                    # This prevents the later LINEAGE processing from overriding the brand font sizing
-                    if actual_marker_name == 'PRODUCTBRAND_CENTER' and marker_name == 'LINEAGE':
-                        # PRODUCTBRAND_CENTER content is always on colored background bars; keep all runs white
-                        # Set white AFTER set_run_font_size and _convert_br_markers_to_line_breaks to ensure it's not overwritten
-                        for r in paragraph.runs:
-                            _set_lineage_run_white(r)
-                        # Handle special formatting for brand content
-                        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Also ensure all runs in this paragraph are properly sized with brand font size
-                        for run in paragraph.runs:
-                            # Force brand font size - don't let anything override it
-                            run.font.size = font_size
-                            set_run_font_size(run, font_size)
-                        # Center the cell vertically so brand text sits mid-cell (e.g., CONSTELLATION CANNABIS)
-                        self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
-                        font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
-                        self.logger.info(f"✅ PROCESSED LINEAGE as PRODUCTBRAND_CENTER: '{final_content}' with brand font size {font_size_pt}pt (template: {self.template_type})")
-                        # Verify font size was actually set
-                        actual_font_size = run.font.size
-                        actual_font_pt = actual_font_size.pt if hasattr(actual_font_size, 'pt') else float(actual_font_size) if actual_font_size else None
-                        if actual_font_pt and abs(actual_font_pt - font_size_pt) > 0.1:
-                            self.logger.warning(f"⚠️ Font size mismatch! Expected {font_size_pt}pt but got {actual_font_pt}pt")
-                        return  # Exit early to prevent LINEAGE processing from overriding
                 
                 # Handle special formatting for specific markers
                 if marker_name in ['PRODUCTBRAND', 'PRODUCTBRAND_CENTER']:
@@ -6803,13 +4536,12 @@ class TemplateProcessor:
                     # This handles cases like "VICE$Star" where $ is a corrupted marker remnant
                     content = re.sub(r'\$.*', '', content)
                     
-                    content = _trim_invisible_edges(content)
+                    content = content.strip()
                     
                     if original_content != content:
                         self.logger.warning(f"Cleaned corrupted lineage content: '{original_content}' -> '{content}'")
                     
                     # CRITICAL FIX: If Lineage contains PRODUCTBRAND_CENTER markers, process it as PRODUCTBRAND_CENTER
-                    # Note: Font size was already calculated above using 'brand' field type if markers were detected
                     if 'PRODUCTBRAND_CENTER_START' in content and 'PRODUCTBRAND_CENTER_END' in content:
                         self.logger.debug(f"Lineage contains PRODUCTBRAND_CENTER markers, processing as PRODUCTBRAND_CENTER")
                         # Extract the brand content from the PRODUCTBRAND_CENTER markers
@@ -6817,12 +4549,9 @@ class TemplateProcessor:
                         brand_end = content.find('PRODUCTBRAND_CENTER_END')
                         brand_content = content[brand_start:brand_end]
                         
-                        # Font size was already calculated above using 'brand' field type, but recalculate to be safe
-                        # Use unified font sizing system directly
+                        # Calculate proper font size for brand content using 'brand' field type
                         from src.core.generation.unified_font_sizing import get_font_size
                         font_size = get_font_size(brand_content, 'brand', self.template_type, self.scale_factor)
-                        font_size_pt = font_size.pt if hasattr(font_size, 'pt') else float(font_size)
-                        self.logger.info(f"🔍 HORIZONTAL BRAND SIZE: '{brand_content}' -> {font_size_pt}pt (template: {self.template_type}, field: brand)")
                         
                         # Clear paragraph and recreate with brand content
                         paragraph.clear()
@@ -6832,28 +4561,10 @@ class TemplateProcessor:
                         run.font.size = font_size
                         set_run_font_size(run, font_size)
                         run.text = brand_content  # Use assignment instead of add_text to avoid duplication
-                        # CRITICAL: PRODUCTBRAND_CENTER content is always on colored background bars; keep text white
-                        # Set white AFTER set_run_font_size to ensure it's not overwritten
-                        _set_lineage_run_white(run)
                         
                         # Center the paragraph for nonclassic types (ProductBrand content)
                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Match lineage paragraph spacing so brand looks like lineage (generous vertical padding)
-                        paragraph.paragraph_format.space_before = Pt(2)
-                        paragraph.paragraph_format.space_after = Pt(1)
-                        # Set at XML level for maximum compatibility
-                        pPr = paragraph._element.get_or_add_pPr()
-                        spacing = pPr.find(qn('w:spacing'))
-                        if spacing is None:
-                            spacing = OxmlElement('w:spacing')
-                            pPr.append(spacing)
-                        spacing.set(qn('w:before'), '40')   # 2pt = 40 twips
-                        spacing.set(qn('w:after'), '20')    # 1pt = 20 twips
-                        spacing.set(qn('w:lineRule'), 'auto')
-                        # CRITICAL: Ensure all runs are white (PRODUCTBRAND_CENTER is always on colored background)
-                        for r in paragraph.runs:
-                            _set_lineage_run_white(r)
-                        self.logger.debug(f"Centered Lineage (ProductBrand) content: '{brand_content}' with brand font size: {font_size}pt, lineage-matching spacing (white text)")
+                        self.logger.debug(f"Centered Lineage (ProductBrand) content: '{brand_content}'")
                         return  # Exit early since we've handled this as PRODUCTBRAND_CENTER
                     
                     # Extract product type information from the content
@@ -6876,39 +4587,13 @@ class TemplateProcessor:
                                     is_classic_raw = is_classic_raw[:-len('PRODUCTBRAND_CENTER_END')]
                                 is_classic = is_classic_raw.lower() == 'true'
                                 
-                                # CRITICAL FIX: Check if lineage content itself is a classic lineage value
-                                from src.core.constants import VALID_CLASSIC_LINEAGES
-                                clean_lineage = _trim_invisible_edges(actual_lineage).upper()
-                                clean_lineage = re.sub(r'LINEAGE_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
-                                clean_lineage = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
-                                is_classic_lineage_value = clean_lineage in VALID_CLASSIC_LINEAGES or any(
-                                    clean_lineage.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
-                                )
-                                
                                 # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
                                 # For classic types, Lineage field contains actual lineage content which should be left-aligned
-                                # CRITICAL FIX: Also check if lineage content is a classic lineage value
-                                if is_classic or is_classic_lineage_value:
+                                # Only check product type, not content, to determine alignment
+                                if is_classic:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                                    paragraph.paragraph_format.left_indent = Inches(0)
-                                    # Vertical template: 6pt before/after; others: 2pt/1pt
-                                    if self.template_type == 'vertical':
-                                        paragraph.paragraph_format.space_before = Pt(6)
-                                        paragraph.paragraph_format.space_after = Pt(6)
-                                    else:
-                                        paragraph.paragraph_format.space_before = Pt(2)
-                                        paragraph.paragraph_format.space_after = Pt(1)
-                                    if is_classic_lineage_value:
-                                        self.logger.debug(f"Left-aligned lineage for classic lineage value: '{clean_lineage}'")
                                 else:
                                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                    # Vertical template: 6pt before/after; others: 2pt/1pt
-                                    if self.template_type == 'vertical':
-                                        paragraph.paragraph_format.space_before = Pt(6)
-                                        paragraph.paragraph_format.space_after = Pt(6)
-                                    else:
-                                        paragraph.paragraph_format.space_before = Pt(2)
-                                        paragraph.paragraph_format.space_after = Pt(1)
                                 
                                 # Update the content to only show the actual lineage (remove any markers)
                                 if actual_lineage.startswith('LINEAGE_START'):
@@ -6919,18 +4604,7 @@ class TemplateProcessor:
                     else:
                         # Fallback: check if this is a classic product type by using the context
                         # Import constants to check against CLASSIC_TYPES
-                        from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
-                        
-                        # CRITICAL FIX: Check if lineage content itself is a classic lineage value
-                        # Clean the content to check for classic lineage values
-                        clean_content = _trim_invisible_edges(content).upper()
-                        # Remove any marker remnants
-                        clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
-                        clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
-                        # Check if the cleaned content is a classic lineage value
-                        is_classic_lineage_value = clean_content in VALID_CLASSIC_LINEAGES or any(
-                            clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
-                        )
+                        from src.core.constants import CLASSIC_TYPES
                         
                         # Get product type from context, not from content
                         is_classic_product = False
@@ -6949,45 +4623,18 @@ class TemplateProcessor:
                                 self.logger.debug(f"VAPE CARTRIDGE FALLBACK DEBUG: product_type='{product_type}', is_classic_product={is_classic_product}, CLASSIC_TYPES={CLASSIC_TYPES}")
                         
                         # DEBUG: Log the centering decision for non-classic types
-                        self.logger.info(f"DEBUG: LINEAGE centering decision - product_type='{product_type}', is_classic_product={is_classic_product}, is_classic_lineage_value={is_classic_lineage_value}, content='{content}'")
+                        self.logger.info(f"DEBUG: LINEAGE centering decision - product_type='{product_type}', is_classic_product={is_classic_product}, content='{content}'")
                         
-                        # CRITICAL FIX: If lineage content is a classic lineage value, always left-align
-                        # This ensures lineage values like HYBRID, SATIVA, INDICA are left-aligned
-                        # even if product type detection fails
-                        if is_classic_lineage_value:
-                            # For Classic Lineage Values, left-justify the lineage text
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            paragraph.paragraph_format.left_indent = Inches(0)
-                            # Vertical template: Equal spacing above and below for lineage
-                            if self.template_type == 'vertical':
-                                paragraph.paragraph_format.space_before = Pt(6)
-                                paragraph.paragraph_format.space_after = Pt(6)
-                            else:
-                                paragraph.paragraph_format.space_before = Pt(2)
-                                paragraph.paragraph_format.space_after = Pt(1)
-                            self.logger.debug(f"Left-justified lineage for classic lineage value: '{clean_content}' (content: '{content}')")
-                        elif is_classic_product:
+                        # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
+                        # For classic types, Lineage field contains actual lineage content which should be left-aligned
+                        # Only check product type, not content, to determine alignment
+                        if is_classic_product:
                             # For Classic Types, left-justify the lineage text
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            paragraph.paragraph_format.left_indent = Inches(0)
-                            # Vertical template: Equal spacing above and below for lineage
-                            if self.template_type == 'vertical':
-                                paragraph.paragraph_format.space_before = Pt(6)
-                                paragraph.paragraph_format.space_after = Pt(6)
-                            else:
-                                paragraph.paragraph_format.space_before = Pt(2)
-                                paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Left-justified lineage for classic product type: '{content}' (product_type: {product_type})")
                         else:
                             # For non-classic types, center the ProductBrand content in Lineage field
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            # Vertical template: 6pt before/after; others: 2pt/1pt
-                            if self.template_type == 'vertical':
-                                paragraph.paragraph_format.space_before = Pt(6)
-                                paragraph.paragraph_format.space_after = Pt(6)
-                            else:
-                                paragraph.paragraph_format.space_before = Pt(2)
-                                paragraph.paragraph_format.space_after = Pt(1)
                             self.logger.debug(f"Centered lineage (ProductBrand) for non-classic product type: '{content}' (product_type: {product_type})")
                         
                         # SPECIFIC OVERRIDE: Ensure Vape Cartridge products always have LEFT-aligned lineage (fallback)
@@ -7057,67 +4704,43 @@ class TemplateProcessor:
             
             # Add each part as a separate run, with line breaks between them
             size_index = 0
-            previous_was_empty = False
             for i, part in enumerate(parts):
-                stripped_part = part.strip() if part else ''
-                is_empty = not stripped_part
-                
-                # CRITICAL FIX: Handle empty parts to ensure text starts on new lines
-                # If previous part was empty or this is the first part and it's empty,
-                # we need to ensure the next part starts on a new line
-                if is_empty:
-                    previous_was_empty = True
-                    # If there's a next part, we'll add a line break before it
-                    continue
-                
-                # If previous part was empty, add a line break before this part
-                if previous_was_empty:
-                    break_run = paragraph.add_run()
-                    break_run.add_break(WD_BREAK.LINE)
-                    previous_was_empty = False
-                
-                # This part has content - add it
-                # CRITICAL FIX: Preserve non-breaking hyphens when stripping whitespace
-                # Check for non-breaking hyphens before stripping
-                if '\u2011' in part:
-                    self.logger.debug(f"BR CONVERSION DEBUG: Found non-breaking hyphens in part: '{part}'")
-                # Strip whitespace for all content to remove extra spaces, but preserve non-breaking hyphens
-                # First, temporarily replace non-breaking hyphens with a placeholder
-                temp_part = part.replace('\u2011', '___NONBREAKING_HYPHEN___')
-                # Then strip whitespace
-                stripped_part = temp_part.strip()
-                # Finally, restore non-breaking hyphens
-                stripped_part = stripped_part.replace('___NONBREAKING_HYPHEN___', '\u2011')
-                # Check for non-breaking hyphens after stripping
-                if '\u2011' in stripped_part:
-                    self.logger.debug(f"BR CONVERSION DEBUG: Preserved non-breaking hyphens after strip: '{stripped_part}'")
-                else:
-                    self.logger.debug(f"BR CONVERSION DEBUG: Lost non-breaking hyphens after strip: '{stripped_part}'")
-                
-                run = paragraph.add_run(stripped_part)
-                run.font.name = "Arial"
-                
-                # ALL text should be Arial Bold - NO EXCEPTIONS
-                run.font.bold = True
-                
-                # Use consistent font size for all runs
-                if consistent_font_size:
-                    run.font.size = consistent_font_size
-                else:
-                    # Use unified font sizing for default size
-                    from src.core.generation.unified_font_sizing import get_font_size
-                    default_font_size = get_font_size(stripped_part, 'default', self.template_type, self.scale_factor)
-                    run.font.size = default_font_size
-                
-                # Add a line break after this part if there's a next part
-                # This ensures that text after |BR| or \n starts on a new line
-                if i < len(parts) - 1:
-                    # Check if next part is empty - if so, we'll handle it in the next iteration
-                    next_part = parts[i + 1].strip() if i + 1 < len(parts) else ''
-                    if next_part:
-                        # Next part has content - add line break after current part
+                if part.strip():  # Only add non-empty parts
+                    # CRITICAL FIX: Preserve non-breaking hyphens when stripping whitespace
+                    # Check for non-breaking hyphens before stripping
+                    if '\u2011' in part:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Found non-breaking hyphens in part: '{part}'")
+                    # Strip whitespace for all content to remove extra spaces, but preserve non-breaking hyphens
+                    # First, temporarily replace non-breaking hyphens with a placeholder
+                    temp_part = part.replace('\u2011', '___NONBREAKING_HYPHEN___')
+                    # Then strip whitespace
+                    stripped_part = temp_part.strip()
+                    # Finally, restore non-breaking hyphens
+                    stripped_part = stripped_part.replace('___NONBREAKING_HYPHEN___', '\u2011')
+                    # Check for non-breaking hyphens after stripping
+                    if '\u2011' in stripped_part:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Preserved non-breaking hyphens after strip: '{stripped_part}'")
+                    else:
+                        self.logger.debug(f"BR CONVERSION DEBUG: Lost non-breaking hyphens after strip: '{stripped_part}'")
+                    run = paragraph.add_run(stripped_part)
+                    run.font.name = "Arial"
+                    
+                    # ALL text should be Arial Bold - NO EXCEPTIONS
+                    run.font.bold = True
+                    
+                    # Use consistent font size for all runs
+                    if consistent_font_size:
+                        run.font.size = consistent_font_size
+                    else:
+                        # Use unified font sizing for default size
+                        from src.core.generation.unified_font_sizing import get_font_size
+                        default_font_size = get_font_size(stripped_part, 'default', self.template_type, self.scale_factor)
+                        run.font.size = default_font_size
+                    
+                    # Add a line break after this part only if the next part is not empty
+                    if i < len(parts) - 1 and parts[i + 1].strip():
+                        # Use add_break() with WD_BREAK.LINE to create proper line breaks within the same paragraph
                         run.add_break(WD_BREAK.LINE)
-                    # If next part is empty, we'll add the break before the part after that
             
             # All content now uses standard 1.0 line spacing
             
@@ -7138,25 +4761,18 @@ class TemplateProcessor:
                 # Check if this paragraph contains lineage or vendor content
                 text = paragraph.text.lower()
                 if any(keyword in text for keyword in ['indica', 'sativa', 'hybrid', 'cbd', 'alpha crux', 'constellation']):
-                    # Enforce equal spacing above/below lineage/brand banner text.
-                    # Vertical keeps the larger spacing; other templates use compact equal spacing.
-                    if self.template_type == 'vertical':
-                        spacing_pt = 6
-                    else:
-                        spacing_pt = 2
-
-                    paragraph.paragraph_format.space_before = Pt(spacing_pt)
-                    paragraph.paragraph_format.space_after = Pt(spacing_pt)
-
+                    # Set consistent spacing for lineage/brand sections
+                    paragraph.paragraph_format.space_before = Pt(2)
+                    paragraph.paragraph_format.space_after = Pt(1)
+                    
                     # Also set at XML level for maximum compatibility
                     pPr = paragraph._element.get_or_add_pPr()
                     spacing = pPr.find(qn('w:spacing'))
                     if spacing is None:
                         spacing = OxmlElement('w:spacing')
                         pPr.append(spacing)
-                    twips = str(int(spacing_pt * 20))
-                    spacing.set(qn('w:before'), twips)
-                    spacing.set(qn('w:after'), twips)
+                    spacing.set(qn('w:before'), '40')  # 2pt = 40 twips
+                    spacing.set(qn('w:after'), '20')   # 1pt = 20 twips
                     spacing.set(qn('w:lineRule'), 'auto')
             
             # Process all tables
@@ -7455,7 +5071,7 @@ class TemplateProcessor:
                 elif self.template_type == 'double':
                     # 4x3 grid = 12 cells max
                     max_cells = 12
-                elif self.template_type in ('mini', 'miniroll'):
+                elif self.template_type == 'mini':
                     # 4x5 grid = 20 cells max
                     max_cells = 20
                 else:
@@ -7582,149 +5198,6 @@ class TemplateProcessor:
                             
         except Exception as e:
             self.logger.warning(f"Error removing unmerged placeholders: {e}")
-
-    def _remove_empty_pages(self, doc):
-        """Remove completely empty pages (tables) from the document."""
-        try:
-            from docx.enum.text import WD_BREAK
-            
-            tables = doc.tables
-            if not tables:
-                return
-            
-            # Check each table to see if it has any meaningful content
-            empty_table_indices = []
-            for table_idx, table in enumerate(tables):
-                has_content = False
-                try:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            cell_text = cell.text.strip()
-                            # Check if cell has meaningful content
-                            # Empty if: whitespace only, empty placeholders, or unfilled template placeholders
-                            if not cell_text:
-                                continue
-                            
-                            # Check if it contains unfilled placeholders (these indicate rendering failed)
-                            if '{{Label' in cell_text and '}}' in cell_text:
-                                # Check if it's ONLY placeholders (not filled with actual content)
-                                import re
-                                # Pattern matches complete placeholder like {{Label1.ProductName}}
-                                placeholder_only_pattern = r'^(\{\{Label\d+\.\w+\}\}\s*)+$'
-                                if re.match(placeholder_only_pattern, cell_text):
-                                    # This is an unfilled placeholder, skip it
-                                    continue
-                                else:
-                                    # Has content beyond placeholders
-                                    has_content = True
-                                    break
-                            else:
-                                # Has actual content (not a placeholder)
-                                has_content = True
-                                break
-                        if has_content:
-                            break
-                except Exception as e:
-                    self.logger.warning(f"Error checking table {table_idx} for content: {e}")
-                    # If we can't check, assume it has content to be safe
-                    has_content = True
-                
-                if not has_content:
-                    empty_table_indices.append(table_idx)
-                    self.logger.info(f"🔍 BLANK PAGE DETECTION: Found empty table at index {table_idx}, will remove")
-            
-            # Remove empty tables in reverse order to maintain indices
-            for table_idx in reversed(empty_table_indices):
-                try:
-                    table = tables[table_idx]
-                    # Find and remove page breaks before this table
-                    table_element = table._element
-                    parent = table_element.getparent()
-                    table_index = parent.index(table_element)
-                    
-                    # Check the paragraph before the table for page breaks
-                    if table_index > 0:
-                        prev_element = parent[table_index - 1]
-                        if prev_element.tag.endswith('p'):  # It's a paragraph
-                            # Check if this paragraph contains a page break
-                            for run in prev_element.xpath('.//w:r', namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
-                                br = run.find('.//w:br', namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
-                                if br is not None:
-                                    br_type = br.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type')
-                                    if br_type == 'page':
-                                        # Remove the page break paragraph
-                                        parent.remove(prev_element)
-                                        self.logger.info(f"🔍 BLANK PAGE REMOVAL: Removed page break before empty table {table_idx}")
-                    
-                    # Remove the empty table
-                    parent.remove(table_element)
-                    self.logger.info(f"🔍 BLANK PAGE REMOVAL: Removed empty table at index {table_idx}")
-                    
-                except Exception as e:
-                    self.logger.warning(f"Error removing empty table {table_idx}: {e}")
-            
-            if empty_table_indices:
-                self.logger.info(f"🔍 BLANK PAGE REMOVAL: Removed {len(empty_table_indices)} empty page(s)")
-                
-        except Exception as e:
-            self.logger.warning(f"Error removing empty pages: {e}")
-
-    def _remove_trailing_blank_content(self, doc):
-        """Remove trailing blank paragraphs and page-break paragraphs after the last table.
-
-        Word always appends at least one paragraph after a table.  When that
-        paragraph is empty (or contains only a page break) it causes an extra
-        blank page to print.  We remove every such trailing paragraph, keeping
-        only the mandatory single paragraph that Word requires at the very end
-        of the body (we leave one empty paragraph so Word doesn't error).
-        """
-        from docx.oxml.ns import qn as _qn
-        body = doc.element.body
-
-        # Collect all direct children of <w:body>
-        children = list(body)
-        # The last child is always <w:sectPr>; work backwards from there
-        # to find paragraphs after the last table.
-        last_table_idx = -1
-        for i, child in enumerate(children):
-            if child.tag.endswith('}tbl'):
-                last_table_idx = i
-
-        if last_table_idx < 0:
-            return  # No tables — nothing to do
-
-        removed = 0
-        # Remove blank/page-break paragraphs that come after the last table,
-        # but always leave one paragraph (Word requires at least one).
-        trailing = [c for c in children[last_table_idx + 1:] if not c.tag.endswith('}sectPr')]
-        # Keep the last one as the required terminal paragraph
-        to_remove = trailing[:-1] if len(trailing) > 1 else []
-        # Also remove the kept paragraph's runs if they only contain page breaks
-        for para_el in to_remove:
-            if para_el.tag.endswith('}p'):
-                text = ''.join(t.text or '' for t in para_el.iter(_qn('w:t'))).strip()
-                # Only remove if truly blank or only a page break
-                has_page_break = any(
-                    br.get(_qn('w:type')) == 'page'
-                    for br in para_el.iter(_qn('w:br'))
-                )
-                if not text or has_page_break:
-                    body.remove(para_el)
-                    removed += 1
-
-        # Also strip page-break runs from the single kept trailing paragraph
-        if trailing:
-            kept = trailing[-1]
-            if kept.tag.endswith('}p'):
-                for run_el in list(kept.iter(_qn('w:r'))):
-                    for br in run_el.findall(_qn('w:br')):
-                        if br.get(_qn('w:type')) == 'page':
-                            run_el.getparent().remove(run_el)
-                            removed += 1
-                            break
-
-        if removed:
-            self.logger.info(f"🧹 TRAILING BLANK REMOVAL: Removed {removed} trailing blank/page-break element(s)")
 
     def _ensure_table_grids_exist(self, doc):
         """Ensure all tables have proper tblGrid elements."""
@@ -7853,7 +5326,7 @@ class TemplateProcessor:
                 expected_rows, expected_cols = 3, 3
             elif template_type == 'double':
                 expected_rows, expected_cols = 4, 3
-            elif template_type in ('mini', 'miniroll'):
+            elif template_type == 'mini':
                 expected_rows, expected_cols = 4, 5
             elif template_type == 'inventory':
                 expected_rows, expected_cols = 2, 2
@@ -8145,7 +5618,7 @@ class TemplateProcessor:
 
     def _add_brand_markers(self, doc):
         """
-        Add PRODUCTBRAND_CENTER markers around brand content for mini and preroll templates.
+        Add PRODUCTBRAND_CENTER markers around brand content for mini templates.
         This allows the post-processing to find and apply the correct font sizing.
         """
         try:
@@ -8167,14 +5640,13 @@ class TemplateProcessor:
             else:
                 self.logger.debug(f"No current_product_type available")
             
-            # For mini and preroll templates, always add brand markers regardless of product type
+            # For mini templates, always add brand markers regardless of product type
             # For other templates, skip brand marker addition for classic types (they should show lineage instead of brand)
-            if self.template_type not in ['mini', 'preroll'] and is_classic_type:
+            if self.template_type != 'mini' and is_classic_type:
                 self.logger.debug(f"Skipping brand marker addition for classic type: {current_product_type}")
                 return
             
-            template_name = 'mini/preroll template' if self.template_type in ['mini', 'preroll'] else f'non-classic type: {current_product_type}'
-            self.logger.debug(f"Processing brand markers for {template_name}")
+            self.logger.debug(f"Processing brand markers for {'mini template' if self.template_type == 'mini' else f'non-classic type: {current_product_type}'}")
             
             for table in doc.tables:
                 # Validate table structure before processing
@@ -8229,7 +5701,7 @@ class TemplateProcessor:
                                         self.logger.debug(f"BRAND MARKERS DEBUG: Lost non-breaking hyphens: '{run.text}'")
                                     
                                     # Ensure brand content is centered for mini templates
-                                    if self.template_type in ('mini', 'miniroll'):
+                                    if self.template_type == 'mini':
                                         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                         self.logger.debug(f"Set center alignment for mini template brand: {run_text}")
                                     
@@ -8244,9 +5716,9 @@ class TemplateProcessor:
         This method specifically handles mini template brand alignment.
         """
         try:
-            if self.template_type not in ('mini', 'miniroll'):
+            if self.template_type != 'mini':
                 return
-
+                
             self.logger.debug("Ensuring brand content centering for mini template")
             
             for table in doc.tables:
@@ -8267,7 +5739,7 @@ class TemplateProcessor:
                                 is_brand_content = True
                             
                             # For mini templates, also check for content that looks like brand names
-                            elif self.template_type in ('mini', 'miniroll'):
+                            elif self.template_type == 'mini':
                                 # Look for content that appears to be brand names (not empty, not numbers, not prices, not weights)
                                 clean_text = paragraph_text.strip()
                                 if (clean_text and 
@@ -8317,11 +5789,6 @@ class TemplateProcessor:
                             if not paragraph_text:
                                 continue
                             
-                            # CRITICAL FIX: Don't override LEFT-aligned paragraphs (classic lineage should stay left-aligned)
-                            # If paragraph is already left-aligned, skip it - this preserves classic type lineage alignment
-                            if paragraph.alignment == WD_ALIGN_PARAGRAPH.LEFT:
-                                continue
-                            
                             # Look for actual brand content that should be centered
                             # This includes all brand names regardless of case or length
                             is_brand_name = (
@@ -8331,7 +5798,7 @@ class TemplateProcessor:
                                 not paragraph_text.endswith('mg') and
                                 not paragraph_text.isdigit() and
                                 # Not classic lineage values
-                                paragraph_text.upper() not in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED", "PARA", "PARAPHERNALIA"] and
+                                paragraph_text.upper() not in ["SATIVA", "INDICA", "HYBRID", "HYBRID/SATIVA", "HYBRID/INDICA", "CBD", "MIXED"] and
                                 # Not THC/CBD content
                                 not ('THC:' in paragraph_text and 'CBD:' in paragraph_text) and
                                 # Not long product descriptions (those should be left-aligned)
@@ -8345,7 +5812,7 @@ class TemplateProcessor:
                             )
                             
                             if is_brand_name:
-                                # Force center alignment for brand names (only if not already left-aligned)
+                                # Force center alignment for brand names
                                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                                 # Centered brand name content
                                 
@@ -8479,81 +5946,6 @@ class TemplateProcessor:
                 self.logger.info(f"Final DOH positioning enforcement centered {fixed} cell(s)")
         except Exception as e:
             self.logger.warning(f"DOH centering enforcement skipped: {e}")
-
-    def _ensure_preroll_qr_centering(self, doc):
-        """Ensure QR code paragraphs are centered in preroll templates."""
-        try:
-            from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from docx.oxml.ns import qn
-            from docx.oxml import OxmlElement
-            from docx.shared import Pt
-
-            fixed = 0
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        qr_paragraphs = []
-                        has_qr_image = False
-                        cell_text = cell.text.strip().upper()
-                        
-                        # Check all paragraphs in the cell for images
-                        for paragraph in cell.paragraphs:
-                            paragraph_text = paragraph.text.strip().upper()
-                            for run in paragraph.runs:
-                                if hasattr(run, '_element') and (
-                                    run._element.find(qn('w:drawing')) is not None or
-                                    run._element.find(qn('w:pict')) is not None
-                                ):
-                                    # In preroll templates, QR codes are typically the only images
-                                    # (DOH images are handled separately if present)
-                                    # Center all images in preroll templates as they are likely QR codes
-                                    has_qr_image = True
-                                    qr_paragraphs.append(paragraph)
-                                    break
-                            if has_qr_image:
-                                break
-
-                        if not has_qr_image or not qr_paragraphs:
-                            continue
-
-                        fixed += 1
-                        # Center the cell content vertically
-                        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-                        
-                        # Center all QR code paragraphs
-                        for paragraph in qr_paragraphs:
-                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            
-                            # Set proper spacing for QR code
-                            paragraph.paragraph_format.space_before = Pt(2)
-                            paragraph.paragraph_format.space_after = Pt(2)
-                            paragraph.paragraph_format.line_spacing = 1.0
-                            
-                            try:
-                                # Ensure XML-level centering
-                                pPr = paragraph._element.get_or_add_pPr()
-                                
-                                # Set paragraph justification to center
-                                existing_jc = pPr.find(qn('w:jc'))
-                                if existing_jc is not None:
-                                    pPr.remove(existing_jc)
-                                jc = OxmlElement('w:jc')
-                                jc.set(qn('w:val'), 'center')
-                                pPr.append(jc)
-
-                                # Remove any indentation that might offset the QR code
-                                existing_ind = pPr.find(qn('w:ind'))
-                                if existing_ind is not None:
-                                    pPr.remove(existing_ind)
-                                    
-                            except Exception as xml_error:
-                                self.logger.warning(f"Error centering QR code paragraph: {xml_error}")
-
-            if fixed:
-                self.logger.info(f"PREROLL QR centering: centered {fixed} QR code cell(s)")
-        except Exception as e:
-            self.logger.warning(f"PREROLL QR centering enforcement skipped: {e}")
 
     def _ensure_standalone_cannabinoid_font_sizing(self, doc):
         """
@@ -8809,18 +6201,17 @@ class TemplateProcessor:
                     if count and count.isdigit():
                         count_int = int(count)
                         if count_int == 1:
-                            # For single units, use regular hyphen with spaces (matching template format)
-                            formatted = f"- {amount}g"
+                            # For single units, just show the weight with hyphen and non-breaking space
+                            formatted = f"-\u00A0{amount}g"
                         else:
-                            # For multiple units, use regular hyphen with spaces (matching template format)
-                            # CRITICAL FIX: Use regular hyphen (-) with regular spaces to match template format
-                            formatted = f"- {amount}g x {count} Pack"
+                            # For multiple units, show the full pack format with hyphen and non-breaking space
+                            formatted = f"-\u00A0{amount}g x {count} Pack"
                     else:
-                        # Only amount found (like "1g") - use regular hyphen with spaces
-                        formatted = f"- {amount}g"
+                        # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
+                        formatted = f"-\u00A0{amount}g"
                 except IndexError:
-                    # Only amount found (like "1g") - use regular hyphen with spaces
-                    formatted = f"- {amount}g"
+                    # Only amount found (like "1g") - show just the weight with hyphen and non-breaking space
+                    formatted = f"-\u00A0{amount}g"
                 return formatted
         
         # If no pattern matches, return the original text
@@ -8886,19 +6277,19 @@ class TemplateProcessor:
                                     # Identify the marker type from the text content for proper font sizing
                                     marker_type = self._identify_marker_type(run.text)
                                     
-                                    # Get appropriate font size using template_type (supports mini and preroll)
+                                    # Get appropriate font size for mini template using proper field type
                                     font_size = get_font_size_by_marker(
                                         run.text, 
                                         marker_type, 
-                                        template_type=self.template_type,  # Use actual template_type (mini or preroll)
+                                        template_type='mini', 
                                         scale_factor=self.scale_factor
                                     )
                                     set_run_font_size(run, font_size)
                                     
-            self.logger.info(f"Applied {self.template_type} template specific font sizing with proper field type identification")
+            self.logger.info("Applied mini template specific font sizing with proper field type identification")
             
         except Exception as e:
-            self.logger.warning(f"Error applying {self.template_type} template font sizing: {e}")
+            self.logger.warning(f"Error applying mini template font sizing: {e}")
 
     def _format_mini_template_text(self, text):
         """Format text for mini template to prevent improper line breaks."""
@@ -8947,7 +6338,7 @@ class TemplateProcessor:
             
             # Check if we need to split to multiple lines due to content length
             # Calculate approximate character limits based on template type
-            if self.template_type in ('mini', 'miniroll'):
+            if self.template_type == 'mini':
                 max_chars_per_line = 25
             elif self.template_type == 'vertical':
                 max_chars_per_line = 35
@@ -9001,33 +6392,28 @@ class TemplateProcessor:
             if vendor_content and vendor_content.strip():
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                vendor_run.font.bold = True
+                vendor_run.font.italic = True  # Make vendor text italic
+                
+                # Set vendor color to light gray (#CCCCCC)
+                from docx.shared import RGBColor
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                
+                # Ensure the color is applied by setting it explicitly
+                vendor_run.font.color.theme_color = None  # Clear any theme color
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
-
-                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
-                vendor_run.font.bold = True
-                vendor_run.font.italic = True  # Make vendor text italic
-
-                # Set vendor color to gray (#808080) at both run level and XML level
-                from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                vendor_run.font.color.theme_color = None  # Clear any theme color
-                # Also set color at XML level to ensure it sticks
-                rPr = vendor_run._element.get_or_add_rPr()
-                color = rPr.find(qn('w:color'))
-                if color is None:
-                    color = OxmlElement('w:color')
-                    rPr.append(color)
-                color.set(qn('w:val'), '808080')  # Gray color in hex without #
             
             # Set tab stops to position vendor on the right (only if vendor content exists)
             if vendor_content:
                 # Clear existing tab stops
                 paragraph.paragraph_format.tab_stops.clear_all()
                 # Add right-aligned tab stop at the right margin - positioned further right for full justification
-                if self.template_type in ('mini', 'miniroll'):
+                if self.template_type == 'mini':
                     tab_position = Inches(1.4)  # Increased for more aggressive right alignment
                 elif self.template_type == 'vertical':
                     tab_position = Inches(2.5)  # Increased for more aggressive right alignment
@@ -9046,7 +6432,7 @@ class TemplateProcessor:
                     # Add backup tab stop for vertical template too
                     backup_tab_position = Inches(2.7)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
-                elif self.template_type in ('mini', 'miniroll'):
+                elif self.template_type == 'mini':
                     # Add backup tab stop for mini template too
                     backup_tab_position = Inches(1.6)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
@@ -9128,30 +6514,25 @@ class TemplateProcessor:
                 
                 vendor_run = paragraph.add_run(vendor_content.strip())
                 vendor_run.font.name = "Arial"
+                vendor_run.font.bold = True
+                vendor_run.font.italic = True  # Make vendor text italic
+                
+                # Set vendor color to light gray (#CCCCCC)
+                from docx.shared import RGBColor
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                
+                # Ensure the color is applied by setting it explicitly
+                vendor_run.font.color.theme_color = None  # Clear any theme color
+                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
+                
                 # Get vendor font size using unified font sizing system
                 from src.core.generation.unified_font_sizing import get_font_size
                 vendor_font_size = get_font_size(vendor_content, 'vendor', self.template_type, self.scale_factor)
                 set_run_font_size(vendor_run, vendor_font_size)
-
-                # CRITICAL: Set vendor styling AFTER set_run_font_size to prevent it from being overridden
-                vendor_run.font.bold = True
-                vendor_run.font.italic = True  # Make vendor text italic
-
-                # Set vendor color to gray (#808080) at both run level and XML level
-                from docx.shared import RGBColor
-                vendor_run.font.color.rgb = RGBColor(128, 128, 128)  # #808080
-                vendor_run.font.color.theme_color = None  # Clear any theme color
-                # Also set color at XML level to ensure it sticks
-                rPr = vendor_run._element.get_or_add_rPr()
-                color = rPr.find(qn('w:color'))
-                if color is None:
-                    color = OxmlElement('w:color')
-                    rPr.append(color)
-                color.set(qn('w:val'), '808080')  # Gray color in hex without #
                 
                 # Set tab stops to position vendor on the right
                 paragraph.paragraph_format.tab_stops.clear_all()
-                if self.template_type in ('mini', 'miniroll'):
+                if self.template_type == 'mini':
                     tab_position = Inches(1.4)  # Increased for more aggressive right alignment
                 elif self.template_type == 'vertical':
                     tab_position = Inches(2.5)  # Increased for more aggressive right alignment
@@ -9167,7 +6548,7 @@ class TemplateProcessor:
                 elif self.template_type == 'vertical':
                     backup_tab_position = Inches(2.7)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
-                elif self.template_type in ('mini', 'miniroll'):
+                elif self.template_type == 'mini':
                     backup_tab_position = Inches(1.6)
                     paragraph.paragraph_format.tab_stops.add_tab_stop(backup_tab_position, WD_TAB_ALIGNMENT.RIGHT)
             
@@ -9232,7 +6613,7 @@ class TemplateProcessor:
                         break
                 
                 if is_classic_lineage:
-                    # This is a classic type with lineage content - show lineage AND vendor
+                    # This is a classic type with lineage content - don't combine with vendor
                     # Extract just the lineage part if it contains additional brand info
                     lineage_only = lineage_content
                     for classic_lineage in classic_lineages:
@@ -9240,15 +6621,31 @@ class TemplateProcessor:
                             # Extract just the lineage part
                             lineage_only = lineage_content[:len(classic_lineage)]
                             break
-
+                    
                     # Update the lineage content to only show the lineage part
                     lineage_content = lineage_only
                     self.logger.debug(f"Extracted classic lineage only: '{lineage_content}' from '{full_text[lineage_start_idx:lineage_end_idx]}'")
-
-                    # CRITICAL FIX: Process lineage AND vendor using the combined function
-                    # This ensures vendor is displayed on classic types
-                    self._process_combined_lineage_vendor(paragraph, lineage_content, vendor_content)
-
+                    
+                    # Process only the lineage part, not combined with vendor
+                    paragraph.clear()
+                    run = paragraph.add_run()
+                    run.font.name = "Arial"
+                    run.font.bold = True
+                    
+                    # Get proper lineage font size using unified font sizing system
+                    product_type = None
+                    if hasattr(self, 'current_product_type'):
+                        product_type = self.current_product_type
+                    elif hasattr(self, 'label_context') and 'ProductType' in self.label_context:
+                        product_type = self.label_context['ProductType']
+                    
+                    from src.core.generation.unified_font_sizing import get_font_size
+                    lineage_font_size = get_font_size(lineage_content, 'lineage', self.template_type, self.scale_factor)
+                    set_run_font_size(run, lineage_font_size)
+                    
+                    run.text = lineage_content  # Use assignment instead of add_text to avoid duplication
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT  # Left-align classic lineage
+                    
                     # Mark as processed to prevent re-processing
                     paragraph._combined_lineage_vendor_processed = True
                     return True

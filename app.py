@@ -23,13 +23,6 @@ from decimal import Decimal
 import pandas as pd  # Add this import
 import json
 
-# Load .env for local development (POSaBit, etc.). Safe: .env is in .gitignore.
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
-
 # Optional NumPy dependency: try to import and expose a flag so code
 # checks like `if NUMPY_AVAILABLE and np is not None:` are safe.
 NUMPY_AVAILABLE = False
@@ -122,6 +115,7 @@ else:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, 'uploads')
+VALID_STORES = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT_Seattle', 'AGT_Shoreline', 'AGT_Walla_Walla', 'Test']
 CACHE_DIR = os.path.join(UPLOADS_DIR, 'cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -686,6 +680,13 @@ CACHE_DURATION = 300  # Cache for 5 minutes
 _excel_processor = None
 _excel_processor_reset_flag = False  # Flag to track when processor has been explicitly reset
 
+# Unique identifier for this Flask server instance (changes on restart)
+SERVER_INSTANCE_ID = str(uuid.uuid4())
+
+# Global ProductDatabase instances (one per store)
+_product_databases = {}  # store_name -> ProductDatabase instance
+_product_database_lock = threading.Lock()
+
 # Global JSONMatcher instance
 _json_matcher = None
 
@@ -762,6 +763,127 @@ RATE_LIMIT_MAX_REQUESTS = 100  # Max requests per minute per IP (increased for l
 # Simple in-memory rate limiter
 rate_limit_data = defaultdict(list)
 
+# ============================================================================
+# IP-based Store Selection System
+# ============================================================================
+
+# In-memory store for IP-based store selections (12-hour expiration)
+_ip_store_selections = {}
+_ip_store_lock = threading.Lock()
+_store_selections_file = 'sessions/store_selections.pkl'
+
+def is_store_selection_valid(ip_address, store_selection):
+    """Check if store selection is still valid (within 12 hours)."""
+    if not store_selection:
+        return False
+
+    # Store selections persist across server restarts for 12 hours
+    # No need to invalidate based on server_id - time-based expiration is sufficient
+
+    selection_time = store_selection.get('timestamp')
+    if not selection_time:
+        return False
+
+    try:
+        selection_datetime = datetime.fromisoformat(selection_time)
+        expiration_time = selection_datetime + timedelta(hours=12)
+        return datetime.now() < expiration_time
+    except (ValueError, TypeError):
+        return False
+
+def save_store_selections():
+    """Save store selections to disk for persistence across restarts."""
+    try:
+        with _ip_store_lock:
+            os.makedirs('sessions', exist_ok=True)
+            with open(_store_selections_file, 'wb') as f:
+                pickle.dump(_ip_store_selections, f)
+            logging.debug(f"Saved {len(_ip_store_selections)} store selections to disk")
+    except Exception as e:
+        logging.warning(f"Failed to save store selections: {e}")
+
+def load_store_selections():
+    """Load store selections from disk."""
+    global _ip_store_selections
+    try:
+        if os.path.exists(_store_selections_file):
+            with open(_store_selections_file, 'rb') as f:
+                loaded = pickle.load(f)
+                # Only load non-expired selections
+                valid_selections = {}
+                for ip, data in loaded.items():
+                    if is_store_selection_valid(ip, data):
+                        valid_selections[ip] = data
+                _ip_store_selections = valid_selections
+                logging.info(f"Loaded {len(_ip_store_selections)} valid store selections from disk")
+                return True
+    except Exception as e:
+        logging.warning(f"Failed to load store selections: {e}")
+    return False
+
+# OPTION 1: Clear ALL store selections on server restart (uncomment to force selection every restart)
+def clear_all_on_startup():
+    """Clear all store selections when server restarts - forces users to select store every time."""
+    global _ip_store_selections
+    with _ip_store_lock:
+        count = len(_ip_store_selections)
+        _ip_store_selections.clear()
+
+    # Delete the persistence file to prevent reload
+    try:
+        if os.path.exists(_store_selections_file):
+            os.remove(_store_selections_file)
+            logging.warning(f"🔥 STARTUP: Deleted store selections file - {_store_selections_file}")
+    except Exception as e:
+        logging.warning(f"Failed to delete store selections file: {e}")
+
+    # CRITICAL: Also clear all caches to prevent wrong tags from previous session
+    try:
+        cache.clear()
+        logging.warning(f"🔥 STARTUP: Cleared all Flask caches - fresh start for all users")
+    except Exception as e:
+        logging.warning(f"Failed to clear cache on startup: {e}")
+
+    logging.warning(f"🔥 STARTUP: Cleared all {count} store selections - STORE MODAL WILL SHOW FOR ALL USERS")
+
+# OPTION 2: Load persisted selections and only clear expired ones (12-hour persistence)
+def load_and_cleanup_on_startup():
+    """Load persisted store selections and clear only expired ones."""
+    global _ip_store_selections
+    
+    # Load from disk
+    load_store_selections()
+    
+    # Clear expired ones
+    expired_count = 0
+    with _ip_store_lock:
+        expired_ips = []
+        for ip_address, store_selection in _ip_store_selections.items():
+            if not is_store_selection_valid(ip_address, store_selection):
+                expired_ips.append(ip_address)
+        
+        for ip_address in expired_ips:
+            del _ip_store_selections[ip_address]
+            expired_count += 1
+    
+    if expired_count > 0:
+        logging.info(f"Cleared {expired_count} expired store selection(s) on startup")
+        save_store_selections()  # Save after cleanup
+    else:
+        logging.info(f"Loaded {len(_ip_store_selections)} valid store selections from disk")
+
+# Choose which startup behavior you want:
+# Uncomment ONE of the following:
+
+# Force store selection on every server restart:
+clear_all_on_startup()
+
+# OR keep 12-hour persistence across restarts:
+# load_and_cleanup_on_startup()
+
+# ------------------------------------------------------------------------------
+# Storage cleanup (uploads + stray DB files)
+# ------------------------------------------------------------------------------
 def cleanup_old_uploads(max_age_hours: int = 12):
     """Remove Excel uploads older than max_age_hours to keep PythonAnywhere tidy."""
     try:
@@ -789,6 +911,48 @@ def cleanup_old_uploads(max_age_hours: int = 12):
         logging.warning(f"Cleanup: error pruning old uploads: {e}")
 
 
+def cleanup_non_store_databases():
+    """Delete product_database_*.db files that are not tied to known stores."""
+    try:
+        upload_folder = app.config.get('UPLOAD_FOLDER', UPLOADS_DIR)
+        if not os.path.exists(upload_folder):
+            return
+        allowed_filenames = {f"product_database_{store}.db" for store in VALID_STORES}
+        allowed_filenames.update({'product_database.db', 'product_database_backup.db'})
+        removed = 0
+        for fname in os.listdir(upload_folder):
+            path = os.path.join(upload_folder, fname)
+            if not os.path.isfile(path):
+                continue
+            if fname.startswith('product_database_') and fname.endswith('.db') and fname not in allowed_filenames:
+                try:
+                    os.remove(path)
+                    removed += 1
+                    logging.info(f"Cleanup: removed stray DB {fname}")
+                except Exception as db_err:
+                    logging.warning(f"Cleanup: failed to remove {path}: {db_err}")
+        if removed:
+            logging.info(f"Cleanup: removed {removed} non-store database file(s)")
+    except Exception as e:
+        logging.warning(f"Cleanup: error pruning non-store databases: {e}")
+
+
+def start_storage_cleanup_scheduler():
+    """Run periodic cleanup (hourly) to prune stray DBs."""
+    def _worker():
+        while True:
+            try:
+                cleanup_non_store_databases()
+            except Exception as e:
+                logging.warning(f"Cleanup scheduler error: {e}")
+            # Run hourly
+            time.sleep(3600)
+    try:
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        logging.info("Cleanup scheduler started (non-store DBs hourly)")
+    except Exception as e:
+        logging.warning(f"Failed to start cleanup scheduler: {e}")
 
 
 def start_daily_upload_cleanup_scheduler(run_hour: int = 0, run_minute: int = 0):
@@ -817,13 +981,200 @@ def start_daily_upload_cleanup_scheduler(run_hour: int = 0, run_minute: int = 0)
     except Exception as e:
         logging.warning(f"Failed to start daily upload cleanup scheduler: {e}")
 
+def get_client_ip():
+    """Get the client's IP address."""
+    from flask import has_request_context
+    if not has_request_context():
+        return None
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    elif request.headers.get('X-Real-IP'):
+        return request.headers.get('X-Real-IP')
+    else:
+        return request.remote_addr
+
 def get_current_store_name(allow_fallback=True):
-    """Always returns AGT_Bothell — single-store deployment."""
-    return 'AGT_Bothell'
+    """Get the current store name for the requesting client. Returns None if no valid selection."""
+    try:
+        # Check if we have a request context before accessing session/request
+        from flask import has_request_context
+        if not has_request_context():
+            # Outside request context - return None or fallback store
+            if allow_fallback:
+                return 'AGT_Bothell'  # Default fallback
+            return None
+        
+        # CRITICAL FIX: Check Flask session first (most reliable). Keep the value even if server instance changed.
+        if session.get('selected_store'):
+            return session.get('selected_store')
+        
+        # Fallback to IP-based selection
+        ip_address = get_client_ip()
+        if ip_address is not None:
+            with _ip_store_lock:
+                if ip_address in _ip_store_selections:
+                    store_data = _ip_store_selections[ip_address]
+                    # Check if the selection is still valid (not expired)
+                    if is_store_selection_valid(ip_address, store_data):
+                        # Store selection is valid - use it regardless of server instance
+                        # Also save to session for consistency
+                        session['selected_store'] = store_data['store']
+                        session['store_server_id'] = SERVER_INSTANCE_ID
+                        return store_data['store']
+                    else:
+                        # Remove expired selection
+                        del _ip_store_selections[ip_address]
+        
+        if allow_fallback:
+            # Simpler fallback: default to Bothell instead of auto-picking largest DB (avoids surprise switches)
+            return 'AGT_Bothell'
+    except Exception as e:
+        logging.warning(f"Error getting current store name: {e}")
+        return None
 
 def has_store_selection():
-    """Always True — single-store deployment."""
-    return True
+    """Check if current IP has a valid store selection."""
+    try:
+        # Quick check: if we're outside request context, return False immediately
+        from flask import has_request_context
+        if not has_request_context():
+            return False
+        
+        # CRITICAL FIX: Check Flask session FIRST (most reliable) and keep value even if server instance changed
+        if session.get('selected_store'):
+            return True
+        
+        # Fallback to IP-based selection
+        ip_address = get_client_ip()
+        
+        # Fast path: check without lock first
+        if ip_address not in _ip_store_selections:
+            return False
+        
+        # Only acquire lock if we found a potential match
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                store_data = _ip_store_selections[ip_address]
+                is_valid = is_store_selection_valid(ip_address, store_data)
+                if is_valid:
+                    # Also save to session for consistency
+                    session['selected_store'] = store_data['store']
+                    session['store_server_id'] = SERVER_INSTANCE_ID
+                return is_valid
+        
+        return False
+    except Exception as e:
+        # Silently fail outside request context
+        return False
+
+def cleanup_expired_store_selections():
+    """Remove expired store selections."""
+    current_time = datetime.now()
+    expired_ips = []
+    
+    with _ip_store_lock:
+        for ip_address, store_selection in _ip_store_selections.items():
+            if not is_store_selection_valid(ip_address, store_selection):
+                expired_ips.append(ip_address)
+        
+        for ip_address in expired_ips:
+            del _ip_store_selections[ip_address]
+    
+    # Save to disk after cleanup if any were removed
+    if expired_ips:
+        save_store_selections()
+
+def extract_store_from_filename(filename):
+    """Extract store name from filename if present. Handles variations like spaces, underscores, case."""
+    if not filename:
+        return None
+    
+    filename_upper = filename.upper()
+    # Normalize filename by replacing underscores and spaces for matching
+    filename_normalized = filename_upper.replace('_', ' ').replace('-', ' ')
+    
+    # Store mappings: (search_pattern, proper_store_name)
+    # Check both with "AGT" prefix and without (just store name)
+    store_patterns = [
+        # With AGT prefix
+        ('AGT BOTHELL', 'AGT_Bothell'),
+        ('AGT_BOTHELL', 'AGT_Bothell'),
+        ('AGT BURIEN', 'AGT_Burien'),
+        ('AGT_BURIEN', 'AGT_Burien'),
+        ('AGT GOLDBAR', 'AGT_Goldbar'),
+        ('AGT_GOLDBAR', 'AGT_Goldbar'),
+        ('AGT LYNNWOOD', 'AGT_Lynnwood'),
+        ('AGT_LYNNWOOD', 'AGT_Lynnwood'),
+        ('AGT SEATTLE', 'AGT_Seattle'),
+        ('AGT_SEATTLE', 'AGT_Seattle'),
+        ('AGT SHORELINE', 'AGT_Shoreline'),
+        ('AGT_SHORELINE', 'AGT_Shoreline'),
+        ('AGT WALLA WALLA', 'AGT_Walla_Walla'),
+        ('AGT_WALLA_WALLA', 'AGT_Walla_Walla'),
+        ('AGT WALLAWALLA', 'AGT_Walla_Walla'),
+        # Without AGT prefix (just store name) - check these after AGT versions
+        ('BOTHELL', 'AGT_Bothell'),
+        ('BURIEN', 'AGT_Burien'),
+        ('GOLDBAR', 'AGT_Goldbar'),
+        ('LYNNWOOD', 'AGT_Lynnwood'),
+        ('SEATTLE', 'AGT_Seattle'),
+        ('SHORELINE', 'AGT_Shoreline'),
+        ('WALLA WALLA', 'AGT_Walla_Walla'),
+        ('WALLAWALLA', 'AGT_Walla_Walla'),
+    ]
+    
+    # Check for store name in filename (case insensitive, handles spaces/underscores)
+    for pattern, store_name in store_patterns:
+        pattern_normalized = pattern.replace('_', ' ').replace('-', ' ')
+        if pattern_normalized in filename_normalized or pattern in filename_upper:
+            return store_name
+    
+    return None
+
+def validate_excel_filename_for_store(filename, selected_store):
+    """
+    Validate that Excel filename contains store name and matches selected store.
+    Returns (is_valid, warning_message, detected_store)
+    """
+    if not filename:
+        return False, "Filename is required", None
+    
+    detected_store = extract_store_from_filename(filename)
+    
+    if not detected_store:
+        return False, f"Excel filename must contain a store name (e.g., 'AGT_Bothell', 'AGT_Burien', etc.). Found filename: {filename}", None
+    
+    if detected_store != selected_store:
+        # CRITICAL FIX: Add diagnostic information to help debug store mismatch
+        from flask import session, has_request_context
+        session_store = None
+        ip_store = None
+        if has_request_context():
+            session_store = session.get('selected_store')
+            ip_address = get_client_ip()
+            with _ip_store_lock:
+                if ip_address in _ip_store_selections:
+                    ip_store = _ip_store_selections[ip_address].get('store')
+        
+        diagnostic_info = f"Detected store in filename: {detected_store}, Selected store: {selected_store}"
+        if session_store:
+            diagnostic_info += f", Session store: {session_store}"
+        if ip_store:
+            diagnostic_info += f", IP-based store: {ip_store}"
+        
+        logging.error(f"Store mismatch detected: {diagnostic_info}")
+        
+        # CRITICAL FIX: If session has the correct store but selected_store is wrong, suggest refreshing
+        if session_store == detected_store and selected_store != detected_store:
+            return False, f"Store mismatch: Your session shows '{session_store}' but the system selected '{selected_store}'. Please refresh the page and try again, or manually select '{detected_store}' store.", detected_store
+        
+        return False, f"Store mismatch: Cannot upload {detected_store} Excel file to {selected_store}. Please select the correct store or use the correct Excel file. (Session: {session_store}, IP: {ip_store})", detected_store
+    
+    return True, None, detected_store
+
+# ============================================================================
+# End of IP-based Store Selection System
+# ============================================================================
 
 def reset_excel_processor():
     """Reset the global ExcelProcessor to force reloading of the default file."""
@@ -965,11 +1316,42 @@ def force_reload_excel_processor(new_file_path):
             logging.warning("ExcelProcessor does not have _cache_dropdown_values method")
     else:
         logging.error(f"Failed to load new file in Excel processor: {new_file_path}")
-        # Do not fall back to default Excel; leave empty if load failed
-        if not hasattr(_excel_processor, 'df') or _excel_processor.df is None or _excel_processor.df.empty:
-            _excel_processor.df = pd.DataFrame()
-            _excel_processor.selected_tags = []
-            logging.warning("New file load failed; no default fallback (Excel optional). Tags empty until upload or POSaBit.")
+        # CRITICAL FIX: Don't create empty DataFrame - this causes the "no strains" issue
+        # Instead, try to load a default file as fallback
+        from src.core.data.excel_processor import get_default_upload_file
+        # Get store-specific default file
+        selected_store = get_current_store_name() if has_store_selection() else None
+        default_file = get_default_upload_file(selected_store)
+        if default_file and os.path.exists(default_file):
+            logging.info(f"Attempting to load default file as fallback: {default_file}")
+            fallback_success = _excel_processor.load_file(default_file)
+            if fallback_success:
+                _excel_processor._last_loaded_file = default_file
+                logging.info(f"Successfully loaded default file as fallback: {default_file}")
+                # Populate dropdown cache for fallback file
+                if hasattr(_excel_processor, '_cache_dropdown_values'):
+                    try:
+                        _excel_processor._cache_dropdown_values()
+                        logging.info(f"Successfully populated dropdown cache from fallback file")
+                    except Exception as e:
+                        logging.error(f"Failed to populate dropdown cache from fallback: {e}")
+            else:
+                logging.error(f"Failed to load default file as fallback: {default_file}")
+                if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
+                    logging.warning("Preserving existing DataFrame to avoid wiping loaded data")
+                else:
+                    # Only create empty DataFrame if there truly is no data loaded
+                    _excel_processor.df = pd.DataFrame()
+                    _excel_processor.selected_tags = []
+                    logging.warning("Created empty DataFrame as last resort - no prior data available")
+        else:
+            logging.error("No default file available as fallback")
+            if hasattr(_excel_processor, 'df') and _excel_processor.df is not None and not _excel_processor.df.empty:
+                logging.warning("Preserving existing DataFrame despite missing fallback file")
+            else:
+                _excel_processor.df = pd.DataFrame()
+                _excel_processor.selected_tags = []
+                logging.warning("Created empty DataFrame as last resort - this may cause 'no strains' issues")
 
 def cleanup_old_processing_status():
     """Clean up old processing status entries to prevent memory leaks."""
@@ -1010,9 +1392,8 @@ def get_excel_processor():
     """Return a fresh ExcelProcessor for the current store/session.
 
     Avoids sharing processors across requests while keeping callers intact.
-    Excel is optional; no default file is loaded.
     """
-    from src.core.data.excel_processor import ExcelProcessor
+    from src.core.data.excel_processor import ExcelProcessor, get_default_upload_file
 
     # Resolve store context
     store_name = None
@@ -1050,22 +1431,164 @@ def get_excel_processor():
     except Exception:
         pass
 
-    # Do not load default/cached Excel; Excel is optional (POSaBit or explicit upload only)
+    # If nothing loaded, optionally load default file for the store
+    if not getattr(processor, '_last_loaded_file', None):
+        try:
+            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
+            if default_file and os.path.exists(default_file):
+                if processor.load_file(default_file):
+                    processor._last_loaded_file = default_file
+        except Exception:
+            pass
+
     return processor
 
 # Ensure no stray indentation or orphaned blocks before function definition
-_product_database_instance = None
-_product_database_lock = threading.Lock()
+def _resolve_database_path_for_store(store_name: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Resolve the best available database path for a given store.
+    Returns (db_path, resolved_store_name) or (None, None) if no database exists.
+    """
+    uploads_dir = os.path.join(current_dir, 'uploads')
+    if not os.path.isdir(uploads_dir):
+        logging.warning(f"Uploads directory not found when resolving database path: {uploads_dir}")
+        return None, None
+
+    normalized_requested = ''
+    if store_name:
+        normalized_requested = store_name.replace('_', '').replace(' ', '').lower()
+
+    # 1. Exact match: product_database_{store_name}.db
+    if store_name:
+        exact_path = os.path.join(uploads_dir, f'product_database_{store_name}.db')
+        if os.path.exists(exact_path):
+            return exact_path, store_name
+
+    # 2. Fuzzy match: look for any product_database_* file containing the store token
+    candidate_paths = glob.glob(os.path.join(uploads_dir, 'product_database_*.db'))
+    if candidate_paths:
+        for candidate in candidate_paths:
+            candidate_store = os.path.basename(candidate).replace('product_database_', '').replace('.db', '')
+            candidate_normalized = candidate_store.replace('_', '').replace(' ', '').lower()
+            if normalized_requested and normalized_requested in candidate_normalized:
+                return candidate, candidate_store or store_name
+
+    # 3. Most recent database as final fallback
+    if candidate_paths:
+        newest_path = max(candidate_paths, key=os.path.getmtime)
+        inferred_store = os.path.basename(newest_path).replace('product_database_', '').replace('.db', '')
+        logging.warning(f"No database found for store '{store_name}'. Using most recent database: {newest_path}")
+        return newest_path, inferred_store or store_name
+
+    logging.error(f"No product database files found in uploads directory: {uploads_dir}")
+    return None, None
+
 
 def get_product_database(store_name=None):
-    """Lazy load the single ProductDatabase instance."""
-    global _product_database_instance, _product_database_lock
+    """Lazy load ProductDatabase per store to avoid startup delay and cross-store leakage.
+
+    Returns a ProductDatabase instance specific to the requested store. Instances are cached
+    in `_product_databases` keyed by resolved store name. A lock protects creation so
+    multiple concurrent requests won't race to initialize the same DB.
+    """
+    global _product_databases, _product_database_lock
+
+    if store_name is None:
+        logging.warning("get_product_database called without store name; attempting fallback resolution.")
+
+    db_path, resolved_store = _resolve_database_path_for_store(store_name)
+    if not db_path:
+        raise FileNotFoundError(f"No product database file available for store '{store_name}'. Upload the database via the admin tools.")
+
+    effective_store = resolved_store or (store_name or '')
+
+    # Use a per-store cached ProductDatabase
     with _product_database_lock:
-        if _product_database_instance is None:
+        product_db = _product_databases.get(effective_store)
+        current_db_path = getattr(product_db, 'db_path', None) if product_db else None
+
+        # If missing or points to a different file, (re)create
+        if product_db is None or current_db_path != db_path:
             from src.core.data.product_database import ProductDatabase
-            _product_database_instance = ProductDatabase()
-            _product_database_instance.init_database()
-    return _product_database_instance
+            product_db = ProductDatabase(db_path)
+            product_db._store_name = effective_store
+            # Ensure db_path attribute is set for future comparisons
+            try:
+                product_db.db_path = db_path
+            except Exception:
+                pass
+
+            if getattr(product_db, 'db_path', db_path) != db_path:
+                logging.warning(f"ProductDatabase db_path mismatch: {getattr(product_db,'db_path',None)} != {db_path}")
+
+            # Initialize DB (build indices/caches as needed)
+            product_db.init_database()
+            _product_databases[effective_store] = product_db
+
+    return _product_databases[effective_store]
+
+# Local override: always try to use the Bothell DB file if present
+def _get_bothell_product_db():
+    try:
+        from src.core.data.product_database import ProductDatabase
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # Helper: find most recent valid Bothell DB in uploads
+        def _find_best_bothell_db(base_dir: str) -> str:
+            import glob, os, sqlite3
+            candidates = []
+            # Prefer explicit AGT_Bothell naming
+            patterns = [
+                os.path.join(base_dir, 'uploads', 'product_database_AGT_Bothell*.db'),
+                os.path.join(base_dir, 'uploads', 'product_database*.db'),
+                os.path.join(base_dir, 'bothell_products.db')
+            ]
+            for pattern in patterns:
+                for path in glob.glob(pattern):
+                    try:
+                        with db_connection(path) as conn:
+                            cur = conn.cursor()
+                            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                            has_products = cur.fetchone() is not None
+                            if has_products:
+                                mtime = os.path.getmtime(path)
+                                candidates.append((mtime, path))
+                    except Exception:
+                        continue
+            if not candidates:
+                return ''
+            candidates.sort(reverse=True)
+            return candidates[0][1]
+        def has_required_tables(db_path: str) -> bool:
+            import sqlite3
+            try:
+                with db_connection(db_path) as conn:
+                    cur = conn.cursor()
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='products'")
+                    has_products = cur.fetchone() is not None
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='strains'")
+                    has_strains = cur.fetchone() is not None
+                    return has_products or has_strains
+            except Exception:
+                return False
+        # Preferred: best (most recent) valid Bothell DB
+        best = _find_best_bothell_db(current_dir)
+        if best:
+            from src.core.data.product_database import ProductDatabase
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # Always use Bothell store-specific database
+            db_filename = 'product_database_AGT_Bothell.db'
+            db_path = os.path.join(current_dir, 'uploads', db_filename)
+            if not os.path.exists(db_path):
+                logging.warning(f"Bothell store database not found: {db_path}")
+                return None
+            product_db = ProductDatabase(db_path)
+            product_db._store_name = 'AGT_Bothell'
+            product_db.init_database()
+            return product_db
+        return None
+    except Exception as e:
+        logging.error(f"Error in _get_bothell_product_db: {e}")
+        return None
 
 def get_enhanced_ai_matcher():
     """Lazy load Enhanced AI Product Matcher."""
@@ -1445,12 +1968,16 @@ def add_performance_headers(response):
         response.headers['X-Response-Time'] = f"{elapsed:.1f}ms"
     return response
 
-# Start periodic upload cleanup scheduler
+# Start periodic storage cleanup (uploads + stray DBs)
+# CRITICAL FIX: Disable background schedulers on PythonAnywhere to prevent startup timeout
+# Background schedulers cause the WSGI app to timeout during initialization (120s limit)
 if not PYTHONANYWHERE_OPTIMIZATION:
+    start_storage_cleanup_scheduler()
     start_daily_upload_cleanup_scheduler(run_hour=0, run_minute=0)
-    logging.info("Background cleanup scheduler started")
+    logging.info("Background cleanup schedulers started")
 else:
-    logging.info("⚠️  Background scheduler DISABLED on PythonAnywhere to prevent startup timeout")
+    logging.info("⚠️  Background schedulers DISABLED on PythonAnywhere to prevent startup timeout")
+    logging.info("   Run manual cleanup via /api/cleanup endpoint if needed")
 
 @app.before_request
 def start_request_timer():
@@ -1511,6 +2038,8 @@ def check_session_size():
             # Restore essential data after clearing
             if selected_tags:
                 session['selected_tags'] = selected_tags
+            if selected_store:
+                session['selected_store'] = selected_store
             if file_path:
                 session['file_path'] = file_path
             if uploaded_filename:
@@ -1578,6 +2107,8 @@ def optimize_session_data():
             # Restore essential data if they weren't in the optimized data
             if selected_tags and 'selected_tags' not in session_copy:
                 session['selected_tags'] = selected_tags
+            if selected_store and 'selected_store' not in session_copy:
+                session['selected_store'] = selected_store
             if file_path and 'file_path' not in session_copy:
                 session['file_path'] = file_path
             if uploaded_filename and 'uploaded_filename' not in session_copy:
@@ -1697,8 +2228,40 @@ def initialize_excel_processor():
         except Exception as session_check_error:
             logging.debug(f"Could not check session in initialize_excel_processor: {session_check_error}")
         
-        # Do not load default/cached Excel on startup; Excel is optional. Use POSaBit or upload.
-        logging.info("Skipping default file load on startup; tags from POSaBit or explicit Excel upload only")
+        # Only load default file if no session file was found/loaded
+        from src.core.data.excel_processor import get_default_upload_file
+        # CRITICAL FIX: Use allow_fallback=True for default file loading on startup
+        # This ensures default file loads even if store hasn't been selected yet
+        selected_store = get_current_store_name(allow_fallback=True)
+        default_file = get_default_upload_file(selected_store)
+        
+        if default_file and os.path.exists(default_file):
+            logging.info(f"Loading default file on startup: {default_file}")
+            try:
+                # CRITICAL FIX: Use safe_load_file_with_timeout for Windows compatibility
+                success = safe_load_file_with_timeout(excel_processor, default_file, timeout_seconds=30)
+                
+                if success:
+                    excel_processor._last_loaded_file = default_file
+                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
+                else:
+                    logging.warning("Failed to load default file")
+                    # Try to move corrupted file if timeout occurred
+                    try:
+                        corrupted_path = default_file + '.corrupted'
+                        if os.path.exists(default_file):
+                            os.rename(default_file, corrupted_path)
+                            logging.info(f"Moved potentially corrupted file to: {corrupted_path}")
+                    except Exception as move_err:
+                        logging.error(f"Could not move corrupted file: {move_err}")
+                        
+            except Exception as load_error:
+                logging.error(f"Error loading default file: {load_error}")
+                logging.error(f"Traceback: {traceback.format_exc()}")
+        else:
+            logging.info("No default file found, waiting for user upload")
+            if default_file:
+                logging.info(f"Default file path was found but file doesn't exist: {default_file}")
             
     except Exception as e:
         logging.error(f"Error initializing Excel processor: {e}")
@@ -1731,7 +2294,7 @@ def save_template_settings(template_type, font_settings):
         raise
 
 # --- User template uploads (designs per template type, per store) ---
-USER_TEMPLATE_TYPES = ['horizontal', 'vertical', 'mini', 'miniroll', 'double', 'new', 'preroll', 'inventory']
+USER_TEMPLATE_TYPES = ['horizontal', 'vertical', 'mini', 'miniroll', 'double', 'preroll', 'inventory']
 
 def _sanitize_store_for_path(store_name):
     """Return a filesystem-safe subdir name for the store (no slashes, no parent path)."""
@@ -2043,39 +2606,34 @@ def get_session_excel_processor():
             skip_default_load = getattr(g, '_skip_default_file_load', False)
             if not session_file_path and not skip_default_load:
                 if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                    # POSaBit: use menu feed when session prefers POSaBit and it's configured (or env override)
-                    try:
-                        from src.core.data.posabit_client import (
-                            is_posabit_configured,
-                            is_posabit_products_enabled,
-                            get_menu_feed_as_product_rows,
-                        )
-                        effective_source = session.get('data_source') or (
-                            'posabit' if is_posabit_configured() else 'excel'
-                        )
-                        use_posabit = (
-                            effective_source == 'posabit' and is_posabit_configured()
-                        ) or is_posabit_products_enabled()
-                        if use_posabit:
-                            rows = get_menu_feed_as_product_rows()
-                            if rows:
-                                g.excel_processor.df = pd.DataFrame(rows)
-                                normalize_product_name_columns(g.excel_processor.df)
-                                g.excel_processor._last_loaded_file = None
-                                g.excel_processor._store_context = 'posabit'
-                                logging.info(f"POSaBit: loaded {len(g.excel_processor.df)} products from menu feed")
-                            else:
-                                logging.warning("POSaBit products enabled but menu feed returned no rows; not showing tags")
+                    logging.info("CRITICAL FIX: No session file and DataFrame is empty, loading default file")
+                    from src.core.data.excel_processor import get_default_upload_file
+                    # CRITICAL FIX: Use allow_fallback=True for default file loading
+                    selected_store = get_current_store_name(allow_fallback=True)
+                    default_file = get_default_upload_file(selected_store)
+                    if default_file and os.path.exists(default_file):
+                        logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
+                        # Load file (fast_mode removed - not available on PythonAnywhere)
+                        success = g.excel_processor.load_file(default_file)
+                        if success:
+                            logging.info(f"CRITICAL FIX: Successfully loaded default file")
+                            # Mark that we loaded a fallback default file - UI should require explicit upload
+                            try:
+                                session['default_file_loaded'] = True
+                                logging.info("Marked session as having loaded a default fallback file")
+                            except Exception:
+                                logging.debug("Could not mark default_file_loaded in session")
+                            # Populate dropdown cache
+                            if hasattr(g.excel_processor, '_cache_dropdown_values'):
+                                try:
+                                    g.excel_processor._cache_dropdown_values()
+                                    logging.info(f"Successfully populated dropdown cache from default file")
+                                except Exception as e:
+                                    logging.error(f"Failed to populate dropdown cache from default file: {e}")
                         else:
-                            # Excel source but no session file: leave empty (Excel is optional)
-                            pass
-                    except Exception as posabit_err:
-                        logging.warning(f"POSaBit product load failed: {posabit_err}; not falling back to Excel")
-                    # Do not load default/cached Excel: Excel is optional. Tags only from POSaBit or explicit upload.
-                    if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                        logging.info("No session file and no POSaBit data; leaving tags empty (upload Excel or fix POSaBit)")
-                        if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None:
-                            g.excel_processor.df = pd.DataFrame()
+                            logging.error(f"CRITICAL FIX: Failed to load default file: {default_file}")
+                    else:
+                        logging.warning("CRITICAL FIX: No default file available")
             elif skip_default_load:
                 logging.info("⚡ Fast load: Skipping default file loading in get_session_excel_processor")
         
@@ -2546,122 +3104,6 @@ def api_status():
         logging.error(f"Error in status endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-
-@app.route('/api/posabit/status', methods=['GET'])
-def api_posabit_status():
-    """Return POSaBit config status and optionally test API connection (product count). No secrets."""
-    try:
-        from src.core.data.posabit_client import (
-            is_posabit_configured,
-            _get_config,
-            get_menu_feed_as_product_rows,
-        )
-        cfg = _get_config()
-        has_token = bool(cfg.get('token'))
-        has_feed_key = bool(cfg.get('feed_key'))
-        configured = is_posabit_configured()
-        out = {
-            'configured': configured,
-            'has_token': has_token,
-            'has_feed_key': has_feed_key,
-            'connection_ok': False,
-            'product_count': None,
-            'message': None,
-        }
-        if not configured:
-            missing = []
-            if not has_token:
-                missing.append('POSABIT_API_TOKEN')
-            if not has_feed_key:
-                missing.append('POSABIT_MENU_FEED_KEY')
-            out['message'] = f"Set in .env or server: {', '.join(missing)}"
-            return jsonify(out)
-        try:
-            rows = get_menu_feed_as_product_rows()
-            out['connection_ok'] = True
-            out['product_count'] = len(rows)
-            if len(rows) > 0:
-                out['message'] = f"OK — {len(rows)} products from menu feed"
-            else:
-                out['message'] = "Connected but feed has 0 products — in app.posabit.com set the menu feed to use the 'Active' product list, ensure POSABIT_MENU_FEED_KEY matches that feed, and that the menu has categories with items"
-        except Exception as e:
-            out['message'] = str(e) or "Connection failed"
-        return jsonify(out)
-    except Exception as e:
-        logging.warning(f"POSaBit status: {e}")
-        return jsonify({
-            'configured': False,
-            'has_token': False,
-            'has_feed_key': False,
-            'connection_ok': False,
-            'product_count': None,
-            'message': str(e) or 'Check server logs',
-        }), 200
-
-
-@app.route('/api/posabit/config', methods=['GET'])
-def api_posabit_config():
-    """Return POSaBit integration status (no secrets). data_source = session preference for product source."""
-    try:
-        from src.core.data.posabit_client import (
-            is_posabit_configured,
-            is_posabit_products_enabled,
-            is_posabit_manifests_enabled,
-            _get_config,
-        )
-        cfg = _get_config()
-        # Session override: data_source = 'posabit' | 'excel'. Default to POSaBit when configured.
-        default_source = 'posabit' if is_posabit_configured() else 'excel'
-        data_source = session.get('data_source') or default_source
-        return jsonify({
-            'data_source': data_source,
-            'use_products': is_posabit_products_enabled(),
-            'use_manifests': is_posabit_manifests_enabled(),
-            'has_token': bool(cfg.get('token')),
-            'has_feed_key': bool(cfg.get('feed_key')),
-            'posabit_configured': is_posabit_configured(),
-            'base_url': cfg.get('base_url') or '',
-        })
-    except Exception as e:
-        logging.warning(f"POSaBit config: {e}")
-        return jsonify({'data_source': 'excel', 'use_products': False, 'use_manifests': False, 'has_token': False, 'has_feed_key': False, 'posabit_configured': False}), 200
-
-
-@app.route('/api/posabit/data-source', methods=['POST'])
-def api_posabit_data_source():
-    """Set product source to POSaBit or Excel. Persists in session; page reload applies it."""
-    try:
-        data = request.get_json() or {}
-        source = (data.get('source') or '').strip().lower()
-        if source not in ('posabit', 'excel'):
-            return jsonify({'error': 'source must be "posabit" or "excel"'}), 400
-        session['data_source'] = source
-        if source == 'posabit':
-            # Clear Excel session so next load uses POSaBit menu feed
-            session.pop('file_path', None)
-            session.pop('uploaded_filename', None)
-            session.pop('upload_timestamp', None)
-            session.pop('file_store', None)
-            session.pop('default_file_loaded', None)
-        session.modified = True
-        return jsonify({'success': True, 'data_source': source})
-    except Exception as e:
-        logging.warning(f"POSaBit data-source: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/posabit/manifest', methods=['GET'])
-def api_posabit_manifest():
-    """Fetch manifest items from POSaBit and return as inventory_transfer_items for matching/labels."""
-    try:
-        from src.core.data.posabit_client import get_manifests_as_inventory_transfer_items
-        items = get_manifests_as_inventory_transfer_items()
-        return jsonify({'inventory_transfer_items': items})
-    except Exception as e:
-        logging.warning(f"POSaBit manifest: {e}")
-        return jsonify({'error': str(e), 'inventory_transfer_items': []}), 200
-
-
 @app.route('/favicon.ico')
 def favicon():
     """Serve the favicon."""
@@ -2954,17 +3396,62 @@ def upload_file():
     try:
         logging.info("=== UPLOAD START ===")
         
-        selected_store = 'AGT_Bothell'
-
+        # DIAGNOSTIC: Log IP and session state
+        ip_address = get_client_ip()
+        session_store = session.get('selected_store')
+        logging.info(f"🔍 Upload diagnostics: IP={ip_address}, Session store={session_store}")
+        logging.info(f"🔍 Request headers: X-Forwarded-For={request.headers.get('X-Forwarded-For')}, X-Real-IP={request.headers.get('X-Real-IP')}, Remote-Addr={request.remote_addr}")
+        
+        # CRITICAL: Require store selection before upload
+        # CRITICAL FIX: Use get_current_store_name with fallback instead of has_store_selection
+        # has_store_selection can be too strict and fail even when store is selected
+        selected_store = get_current_store_name(allow_fallback=True)
+        if not selected_store:
+            logging.error(f"❌ Upload attempted without store selection - IP: {ip_address}, Session: {session_store}")
+            logging.error(f"❌ IP store selections: {list(_ip_store_selections.keys())}")
+            return jsonify({'error': 'Please select a store before uploading files'}), 400
+        
         # Validate request
         if 'file' not in request.files:
             logging.error("No file in request")
             return jsonify({'error': 'No file provided'}), 400
-
+        
         file = request.files['file']
         if not file or file.filename == '':
             logging.error("Empty file or filename")
             return jsonify({'error': 'No file selected'}), 400
+        
+        # Get current store selection
+        selected_store = get_current_store_name()
+        ip_store = None
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                ip_store = _ip_store_selections[ip_address].get('store')
+        
+        logging.info(f"✅ Store selection found: {selected_store}")
+        logging.info(f"🔍 Store diagnostics - Session: {session_store}, IP-based: {ip_store}, Final: {selected_store}")
+        
+        # CRITICAL FIX: Allow store override from request body if provided (for UI consistency)
+        # CRITICAL FIX: Only try to get JSON if Content-Type is application/json (file uploads use multipart/form-data)
+        request_store = request.form.get('store')
+        if not request_store and request.is_json:
+            try:
+                json_data = request.get_json(silent=True)
+                if json_data:
+                    request_store = json_data.get('store')
+            except Exception:
+                pass  # Ignore JSON parsing errors for file uploads
+        if request_store:
+            logging.info(f"🔍 Request specifies store: {request_store}, current selected: {selected_store}")
+            # If request store matches detected store in filename, use it
+            detected_store_from_filename = extract_store_from_filename(file.filename)
+            if detected_store_from_filename == request_store:
+                logging.info(f"✅ Request store matches filename - using {request_store}")
+                selected_store = request_store
+                # Update session to match
+                session['selected_store'] = request_store
+                session['store_server_id'] = SERVER_INSTANCE_ID
+                session.modified = True
         
         logging.info(f"Uploading: {file.filename} for store: {selected_store}")
         
@@ -2973,7 +3460,7 @@ def upload_file():
             return jsonify({'error': 'Only Excel files allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -3650,7 +4137,7 @@ def upload_file_streaming():
             return jsonify({'error': 'No file selected'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -3894,7 +4381,7 @@ def upload_file_simple_pythonanywhere():
         if not file.filename.lower().endswith('.xlsx'):
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
 
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
             return jsonify({
@@ -4075,7 +4562,7 @@ def upload_instant():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
 
         # Validate filename
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         if not is_valid:
             return jsonify({
                 'error': warning_msg,
@@ -4195,7 +4682,7 @@ def upload_file_simple():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -5362,7 +5849,7 @@ def upload_lightning():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -6561,6 +7048,399 @@ def get_session_stats():
     except Exception as e:
         logging.error(f"Error getting session stats: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/set-store', methods=['POST'])
+@invalidate_cache_on_change([
+    '/api/status',
+    '/api/get-store',
+    '/api/check-store-required',
+    '/api/session-stats',
+    '/api/pending-changes'
+])
+def set_store():
+    """Set store selection for the current IP address."""
+    try:
+        data = request.get_json()
+        if not data or 'store' not in data:
+            return jsonify({'success': False, 'error': 'Store selection required'}), 400
+        
+        store_value = data['store']
+        ip_address = get_client_ip()
+        
+        # Validate store selection against global list
+        if store_value not in VALID_STORES:
+            return jsonify({'success': False, 'error': 'Invalid store selection'}), 400
+        
+        # CHECK: Warn if switching stores
+        current_store = session.get('selected_store')
+        if current_store and current_store != store_value:
+            logging.warning(f"⚠️ STORE SWITCH DETECTED: {current_store} → {store_value}")
+            logging.warning(f"⚠️ Request from: {request.referrer or 'unknown'}")
+            logging.warning(f"⚠️ User agent: {request.headers.get('User-Agent', 'unknown')}")
+        
+        # CRITICAL FIX: Save to Flask session first (most reliable on PythonAnywhere)
+        session['selected_store'] = store_value
+        session['store_server_id'] = SERVER_INSTANCE_ID
+        session['store_just_selected'] = True  # Flag to indicate store was just selected
+        session['store_selected_timestamp'] = datetime.now().isoformat()  # Timestamp for validation
+        session.permanent = True  # Mark session as permanent to persist across browser restarts
+        session.modified = True  # Force session to save
+        logging.info(f"✅ Store saved to session: {store_value}")
+        
+        # Also store in IP-based selection (backup method)
+        with _ip_store_lock:
+            _ip_store_selections[ip_address] = {
+                'store': store_value,
+                'timestamp': datetime.now().isoformat(),
+                'ip_address': ip_address,
+                'server_id': SERVER_INSTANCE_ID
+            }
+            # Reduced logging for speed
+            logging.debug(f"Store selection set for IP {ip_address}: {store_value}")
+        
+        # Persist the IP-based selections so future requests (and worker processes)
+        # can honor the remembered store.  Use a lightweight background thread so
+        # the response stays snappy even on PythonAnywhere's slower storage.
+        def _persist_store_selection():
+            try:
+                save_store_selections()
+            except Exception as persist_error:
+                logging.warning(f"Failed to persist store selections: {persist_error}")
+        try:
+            threading.Thread(target=_persist_store_selection, daemon=True).start()
+        except Exception:
+            _persist_store_selection()
+        
+        # CRITICAL FIX: Clear caches BEFORE clearing globals (cache key depends on _last_loaded_file)
+        # OPTIMIZATION: Run cache clearing in background thread to prevent blocking
+        def _clear_caches_async():
+            try:
+                initial_data_cache_key = get_session_cache_key('initial_data')
+                available_tags_cache_key = get_session_cache_key('available_tags')
+
+                # Delete the caches
+                cache.delete(initial_data_cache_key)
+                cache.delete(available_tags_cache_key)
+                logging.debug(f"Cleared initial_data and available_tags cache for new store: {store_value}")
+            except Exception as cache_error:
+                # If cache key generation fails, skip cache clearing
+                # It's not critical - caches will expire naturally
+                logging.warning(f"Cache clearing failed (non-critical): {cache_error}")
+        
+        # Run cache clearing in background to avoid blocking the response
+        try:
+            threading.Thread(target=_clear_caches_async, daemon=True).start()
+        except Exception:
+            # If threading fails, just skip cache clearing
+            pass
+
+        # CRITICAL: Clear other session data from previous store (but keep selected_store!)
+        # NOTE: We clear file_path and uploaded_filename to force reload with new store's database
+        # However, if the same file is valid for the new store, it will be reloaded automatically
+        old_file_path = session.get('file_path')
+        old_filename = session.get('uploaded_filename')
+        
+        session.pop('file_path', None)
+        session.pop('uploaded_filename', None)
+        session.pop('upload_timestamp', None)
+        session.pop('selected_tags', None)
+        
+        # Log what was cleared for debugging
+        if old_file_path or old_filename:
+            logging.info(f"Cleared file data for store switch: file_path={old_file_path}, filename={old_filename}")
+
+        # Clear the global product database instance to force reload with new store
+        global _product_database, _excel_processor
+        _product_database = None
+        _excel_processor = None
+
+        # OPTIMIZATION: File loading deferred to page reload for instant response
+        # Don't call get_product_database here - it's slow and can cause timeout
+        # Database will be loaded on first use after page reload
+        logging.debug(f"Store set to {store_value} - cleared session, globals & caches")
+        
+        return jsonify({
+            'success': True,
+            'store': store_value,
+            'expires_at': (datetime.now() + timedelta(hours=12)).isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error setting store: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/get-store', methods=['GET'])
+@cached_route(ttl=30, vary_by=['session_id'])
+def get_store():
+    """Get the current store selection for the IP address."""
+    try:
+        ip_address = get_client_ip()
+        logging.info(f"Getting store for IP: {ip_address}")
+        logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
+        
+        # First, check Flask session for a store selection tied to this server instance
+        session_store = session.get('selected_store')
+        session_server_id = session.get('store_server_id')
+        if session_store and session_server_id == SERVER_INSTANCE_ID:
+            logging.info("Returning store from session for get_store endpoint")
+            return jsonify({
+                'success': True,
+                'store': session_store,
+                'source': 'session'
+            })
+        
+        # Check if there's a stored selection for this IP
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                store_data = _ip_store_selections[ip_address]
+                # Check if the selection is still valid (not expired)
+                if is_store_selection_valid(ip_address, store_data):
+                    logging.info(f"Found valid store selection: {store_data['store']}")
+                    return jsonify({
+                        'success': True,
+                        'store': store_data['store'],
+                        'expires_at': (datetime.fromisoformat(store_data['timestamp']) + timedelta(hours=12)).isoformat()
+                    })
+                else:
+                    logging.info(f"Store selection expired for IP {ip_address}; removing")
+                    del _ip_store_selections[ip_address]
+        
+        # No valid selection found, return no store
+        logging.info(f"No store found for IP {ip_address}")
+        return jsonify({
+            'success': True,
+            'store': None
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting store: {str(e)}")
+        import traceback
+        logging.error(f"Get store error traceback: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/clear-store', methods=['POST'])
+@invalidate_cache_on_change([
+    '/api/status',
+    '/api/get-store',
+    '/api/check-store-required',
+    '/api/session-stats',
+    '/api/pending-changes'
+])
+def clear_store():
+    """Clear store selection for the current IP address AND Flask session."""
+    try:
+        ip_address = get_client_ip()
+        
+        logging.info(f"Attempting to clear store for IP {ip_address}")
+        logging.info(f"Current store selections: {list(_ip_store_selections.keys())}")
+        logging.info(f"Session store before clear: {session.get('selected_store')}")
+        
+        # CRITICAL: Clear Flask session FIRST (this is what has_store_selection checks first)
+        if 'selected_store' in session:
+            del session['selected_store']
+            logging.info("Cleared 'selected_store' from Flask session")
+        if 'store_server_id' in session:
+            del session['store_server_id']
+        
+        # Also clear IP-based storage
+        with _ip_store_lock:
+            if ip_address in _ip_store_selections:
+                del _ip_store_selections[ip_address]
+                logging.info(f"Store selection cleared for IP {ip_address}")
+                # Save to disk after clearing
+                save_store_selections()
+            else:
+                logging.info(f"No store selection found for IP {ip_address}")
+        
+        logging.info(f"Store selections after clear: {list(_ip_store_selections.keys())}")
+        logging.info(f"Session store after clear: {session.get('selected_store')}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Store selection cleared from both session and IP storage',
+            'ip_address': ip_address,
+            'remaining_selections': list(_ip_store_selections.keys())
+        })
+        
+    except Exception as e:
+        logging.error(f"Error clearing store: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/check-store-required', methods=['GET'])
+@cached_route(ttl=15, vary_by=['session_id'])
+def check_store_required():
+    """Check if store selection is required for the current IP address."""
+    try:
+        ip_address = get_client_ip()
+        logging.info(f"Check store required for IP: {ip_address}")
+        logging.info(f"Store selections in memory: {list(_ip_store_selections.keys())}")
+        
+        # CRITICAL DEBUG: Check session data
+        session_store = session.get('selected_store')
+        if session_store and session.get('store_server_id') != SERVER_INSTANCE_ID:
+            logging.warning(f"🔥 Session store from previous server instance detected - CLEARING IT to force store modal: {session_store}")
+            # Clear the session store to force user to select store again after server restart
+            session.pop('selected_store', None)
+            session.pop('store_server_id', None)
+            session.modified = True
+            session_store = None  # Update local variable so logic below works correctly
+        
+        # CRITICAL FIX: Check for force_store_modal parameter to force modal display
+        force_modal = request.args.get('force_store_modal', 'false').lower() == 'true'
+        if force_modal:
+            logging.info("🔧 Force store modal parameter detected - clearing session store")
+            session.pop('selected_store', None)
+            session.pop('store_server_id', None)
+            session.modified = True
+            session_store = None
+        
+        # CRITICAL FIX: Don't log full session - it contains massive preroll_original_records array
+        # that causes "OSError: Message too long" when logging
+        session_keys = list(session.keys())
+        logging.info(f"SESSION DEBUG: selected_store={session_store}")
+        logging.info(f"SESSION DEBUG: session keys={session_keys}")
+        logging.info(f"SESSION DEBUG: session.permanent={session.permanent}")
+        logging.info(f"SESSION DEBUG: force_modal={force_modal}")
+        
+        # CRITICAL FIX: Use store if it exists in session (more lenient check)
+        # If store exists, use it unless explicitly expired or from different server instance
+        store_just_selected = session.get('store_just_selected', False)
+        current_store = None
+        
+        # Use session store if it exists and:
+        # 1. Has valid flags (store_just_selected + timestamp), OR
+        # 2. Store exists and session is permanent (persisted across restarts)
+        if session_store:
+            store_timestamp = session.get('store_selected_timestamp')
+            
+            # If we have both flags, validate timestamp
+            if store_just_selected and store_timestamp:
+                try:
+                    from datetime import datetime, timedelta
+                    timestamp = datetime.fromisoformat(store_timestamp)
+                    # CRITICAL FIX: Increased from 10 minutes to 6 hours to match session lifetime
+                    # This prevents the modal from reappearing while user is actively using the app
+                    if datetime.now() - timestamp < timedelta(hours=6):
+                        current_store = session_store
+                        logging.info(f"Store found in session with valid flags: {current_store}")
+                    else:
+                        logging.info(f"Store timestamp expired (older than 6 hours), requiring new selection")
+                        # Clear all store-related session data
+                        session.pop('selected_store', None)
+                        session.pop('store_selected_timestamp', None)
+                        session.pop('store_just_selected', None)
+                        session.pop('store_server_id', None)
+                        session.modified = True
+                except Exception as e:
+                    # If timestamp parsing fails but store exists, use it anyway (session persistence)
+                    from datetime import datetime
+                    logging.info(f"Store timestamp invalid ({e}), but store exists - using it")
+                    current_store = session_store
+                    # Set flags to ensure persistence
+                    session['store_just_selected'] = True
+                    session['store_selected_timestamp'] = datetime.now().isoformat()
+                    session.modified = True
+            elif session.permanent:
+                # Session is permanent and store exists - use it (persisted session)
+                logging.info(f"Store found in permanent session (persisted): {session_store}")
+                current_store = session_store
+                # Ensure flags are set for future checks
+                if not store_just_selected:
+                    session['store_just_selected'] = True
+                if not store_timestamp:
+                    from datetime import datetime
+                    session['store_selected_timestamp'] = datetime.now().isoformat()
+                session.modified = True
+            else:
+                # Store exists but no flags and not permanent - might be stale, but use it anyway
+                logging.info(f"Store exists in session without flags - using it (lenient check)")
+                current_store = session_store
+                # Set flags to ensure persistence
+                session['store_just_selected'] = True
+                from datetime import datetime
+                session['store_selected_timestamp'] = datetime.now().isoformat()
+                session.modified = True
+        
+        # Log the low-level selection flag for debugging but do not gate on it
+        has_selection = has_store_selection()
+        logging.info(f"has_store_selection() returned: {has_selection}")
+        logging.info(f"FINAL DECISION: current_store={current_store}, will require_store={current_store is None}")
+        
+        if not current_store:
+            logging.warning(f"⚠️ NO VALID STORE - Requiring store selection for IP {ip_address}")
+            # CRITICAL: Make sure session is completely cleared
+            session.pop('selected_store', None)
+            session.pop('store_just_selected', None)
+            session.pop('store_selected_timestamp', None)
+            session.pop('store_server_id', None)
+            session.modified = True
+            
+            # Double-check session is cleared
+            remaining_store = session.get('selected_store')
+            if remaining_store:
+                logging.error(f"❌ ERROR: Session still has store after clearing: {remaining_store}")
+                # Force clear again
+                session.clear()
+                session.modified = True
+            
+            logging.info(f"✅ Session cleared, returning requires_store=True")
+            return {
+                'success': True,
+                'requires_store': True,  # CRITICAL: Must be True to show modal
+                'store': None,
+                'debug': {
+                    'session_store': session_store,
+                    'ip_address': ip_address,
+                    'has_selection': has_selection,
+                    'cleared_session': True,
+                    'current_store_after_check': current_store
+                }
+            }
+        
+        # If we found a store in session, make sure it is persisted with timestamp
+        # (This should already be set, but ensure it's there)
+        if current_store:
+            session['selected_store'] = current_store
+            if not session.get('store_just_selected'):
+                session['store_just_selected'] = True
+            if not session.get('store_selected_timestamp'):
+                from datetime import datetime
+                session['store_selected_timestamp'] = datetime.now().isoformat()
+            session.modified = True
+            
+            logging.info(f"✅ Store found in session for IP {ip_address}: {current_store}")
+            return {
+                'success': True,
+                'requires_store': False,  # CRITICAL: Must be False when store exists
+                'store': current_store,
+                'debug': {
+                    'session_store': session_store,
+                    'ip_address': ip_address,
+                    'has_selection': has_selection,
+                    'current_store_validated': True
+                }
+            }
+        else:
+            # This should never happen, but safety check
+            logging.error(f"❌ ERROR: current_store is None but we reached this point!")
+            session.pop('selected_store', None)
+            session.pop('store_just_selected', None)
+            session.pop('store_selected_timestamp', None)
+            session.modified = True
+            return {
+                'success': True,
+                'requires_store': True,
+                'store': None,
+                'debug': {
+                    'error': 'Unexpected state - no store found',
+                    'ip_address': ip_address
+                }
+            }
+        
+    except Exception as e:
+        logging.error(f"Error checking store requirement: {str(e)}")
+        logging.error(traceback.format_exc())
+        return {'success': False, 'error': str(e)}, 500
 
 @app.route('/api/clear-session', methods=['POST'])
 def clear_session():
@@ -9666,16 +10546,47 @@ def generate_labels():
                     if not isinstance(tag, dict):
                         continue
                     product_name = tag.get('Product Name*') or tag.get('ProductName') or tag.get('displayName')
-                    # Only treat sovereign_lineage as a true user override — it is the only field
-                    # that represents a manual edit. currentLineage, canonical_lineage, and Lineage
-                    # are all derived from the DB or Excel and should not block the DB lookup.
-                    sovereign = tag.get('sovereign_lineage')
-                    if not sovereign or str(sovereign).strip().upper() in ('', 'NONE', 'NULL', 'NAN'):
-                        continue
-                    if not product_name:
+                    # Use saved lineage first so manual edits are never lost.
+                    # Priority: sovereign_lineage > currentLineage > canonical_lineage > Lineage
+                    ui_lineage = (
+                        tag.get('sovereign_lineage')
+                        or tag.get('currentLineage')
+                        or tag.get('canonical_lineage')
+                        or tag.get('Lineage')
+                        or tag.get('lineage')
+                    )
+                    if not product_name or not ui_lineage:
                         continue
 
-                    ui_lineage_map[str(product_name).strip()] = str(sovereign).strip().upper()
+                    ui_lineage_clean = str(ui_lineage).strip().upper()
+
+                    # If we have the original Excel DF, compare the value in the sheet.
+                    # If the UI lineage equals the Excel sheet's lineage for that product,
+                    # it likely wasn't changed by the user and should not be treated as
+                    # a user override that trumps the database.
+                    treat_as_override = True
+                    try:
+                        if df is not None and 'Product Name*' in df.columns:
+                            # Find matching Excel rows by Product Name* (case-insensitive)
+                            matches = df[df['Product Name*'].astype(str).str.strip().str.lower() == str(product_name).strip().lower()]
+                            if matches is not None and len(matches) > 0:
+                                # Inspect the first matching row's lineage-like columns
+                                row = matches.iloc[0]
+                                excel_lineage = None
+                                for c in ['canonical_lineage', 'currentLineage', 'Lineage', 'lineage']:
+                                    if c in row and pd.notna(row[c]) and str(row[c]).strip() not in ['', 'None', 'nan']:
+                                        excel_lineage = str(row[c]).strip().upper()
+                                        break
+                                # If the Excel lineage is present and exactly equals the UI value,
+                                # then the UI did not change it and we should NOT treat it as an override.
+                                if excel_lineage and excel_lineage == ui_lineage_clean:
+                                    treat_as_override = False
+                    except Exception:
+                        # On any error, default to treating as override to avoid hiding explicit UI edits
+                        treat_as_override = True
+
+                    if treat_as_override:
+                        ui_lineage_map[str(product_name).strip()] = ui_lineage_clean
                 
                 # Apply UI lineage values - ALWAYS override database lineage with user's UI changes
                 # PERFORMANCE: Build case-insensitive map once for O(1) lookups
@@ -9737,7 +10648,6 @@ def generate_labels():
                             for db_record in db_records:
                                 pname = db_record.get('Product Name*', '')
                                 db_lineage = (
-                                    db_record.get('sovereign_lineage') or
                                     db_record.get('currentLineage') or
                                     db_record.get('canonical_lineage') or
                                     db_record.get('Lineage')
@@ -11220,11 +12130,11 @@ def process_database_product_for_api(db_product):
         if not processed_product.get('displayName'):
             processed_product['displayName'] = product_name_value
     
-    # CRITICAL FIX: Ensure lineage from database (including sovereign overrides) is preserved and normalized for UI
-    # The UI reads from multiple fields: sovereign_lineage, canonical_lineage, currentLineage, Lineage, lineage
-    # CRITICAL FIX: Prioritize sovereign_lineage (user overrides) over canonical_lineage and other fields
+    # CRITICAL FIX: Ensure lineage from database is preserved and normalized for UI
+    # The UI reads from multiple fields: canonical_lineage, currentLineage, Lineage, lineage
+    # CRITICAL FIX: Prioritize canonical_lineage (database source of truth) over Lineage field
+    # canonical_lineage is what the UI displays and should be used consistently
     db_lineage = (
-        processed_product.get('sovereign_lineage') or
         processed_product.get('canonical_lineage') or
         processed_product.get('currentLineage') or
         processed_product.get('Lineage') or
@@ -11238,7 +12148,6 @@ def process_database_product_for_api(db_product):
         processed_product['lineage'] = lineage_value
         processed_product['canonical_lineage'] = lineage_value
         processed_product['currentLineage'] = lineage_value
-        processed_product['sovereign_lineage'] = lineage_value
 
     return processed_product
 @app.route('/api/available-tags', methods=['GET'])
@@ -11440,17 +12349,6 @@ def get_available_tags():
             has_excel_data = True
             file_exists = True
             logging.info(f"✅ Using persisted file as Excel data source (verified exists): {os.path.basename(effective_file_path)}")
-
-        # POSaBit: if the processor was already populated from the menu feed, treat it as valid data
-        if not has_excel_data:
-            try:
-                _proc = getattr(g, 'excel_processor', None)
-                if _proc is not None and getattr(_proc, 'df', None) is not None and not _proc.df.empty:
-                    has_excel_data = True
-                    logging.info(f"✅ POSaBit data present in processor ({len(_proc.df)} rows) — skipping Excel-file gate")
-            except Exception:
-                pass
-
         logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)}, persisted_fallback={bool(persisted_fallback_path)})")
 
         # DISABLED: Do not automatically load default file - require explicit upload
@@ -11665,7 +12563,7 @@ def get_available_tags():
                 logging.warning(f"Cached tags stale-check failed: {stale_check_err}")
 
         # Respect nocache fully: only use file cache when nocache is not requested
-        if not cached_tags and fast_load and session_file_path and not nocache and not has_lineage_updates:
+        if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
             import hashlib
             cache_version = TAGS_CACHE_VERSION
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
@@ -12125,6 +13023,26 @@ def get_available_tags():
                 'force_frontend_cache_clear': force_frontend_cache_clear
             })
 
+        # CRITICAL: Validate that the session file matches the selected store
+        # This prevents wrong store data from being loaded
+        if session_file_path:
+            session_filename = os.path.basename(session_file_path)
+            detected_store = extract_store_from_filename(session_filename)
+
+            if detected_store and detected_store != store_name:
+                logging.error(f"❌ STORE MISMATCH DETECTED: Session has {detected_store} file but {store_name} store selected")
+                # Clear the bad session file
+                if 'file_path' in session:
+                    del session['file_path']
+                    session.modified = True
+                return jsonify({
+                    'tags': [],
+                    'total_count': 0,
+                    'source': 'store-mismatch-error',
+                    'error': f'Store mismatch detected: {detected_store} file loaded in {store_name} store. Please re-upload the correct file.',
+                    'detected_store': detected_store,
+                    'current_store': store_name
+                }), 400
 
         # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
         # PERFORMANCE: Check fast_load parameter to skip expensive database queries
@@ -20917,38 +21835,23 @@ def json_process():
         
 @app.route('/api/json-inventory', methods=['POST'])
 def json_inventory():
-    """Process JSON inventory data and generate inventory slips. Accepts url= or posabit=True."""
+    """Process JSON inventory data and generate inventory slips."""
     try:
-        data = request.get_json() or {}
+        data = request.get_json()
         url = data.get('url', '').strip()
-        use_posabit = data.get('posabit') is True
+        
+        if not url:
+            return jsonify({'error': 'URL is required'}), 400
+            
+        if not url.lower().startswith('http'):
+            return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
 
         # Always refresh JSON matching caches/state before running a new match.
         refresh_json_match_runtime_state('api/json-inventory')
-
-        if use_posabit:
-            from src.core.data.posabit_client import get_manifests_as_inventory_transfer_items
-            items = get_manifests_as_inventory_transfer_items()
-            if not items:
-                return jsonify({'error': 'No manifest items from POSaBit (check token and API)'}), 400
-            raw_date = datetime.now().strftime("%Y-%m-%d")
-            records_for_df = []
-            for itm in items:
-                records_for_df.append({
-                    "Product Name*": str(itm.get("product_name") or ""),
-                    "Barcode*": str(itm.get("inventory_id") or itm.get("Internal Product Identifier") or ""),
-                    "Quantity Received*": str(itm.get("Quantity*") or itm.get("quantity") or ""),
-                    "Accepted Date": raw_date,
-                    "Vendor/Supplier*": str(itm.get("product_brand") or "POSaBit"),
-                })
-            inventory_df = pd.DataFrame(records_for_df)
-        elif url:
-            if not url.lower().startswith('http'):
-                return jsonify({'error': 'Please provide a valid HTTP URL'}), 400
-            json_matcher = get_session_json_matcher()
-            inventory_df = json_matcher.process_json_inventory(url)
-        else:
-            return jsonify({'error': 'URL is required, or set posabit: true to use POSaBit manifest'}), 400
+            
+        # Process JSON inventory data
+        json_matcher = get_session_json_matcher()
+        inventory_df = json_matcher.process_json_inventory(url)
         
         if inventory_df.empty:
             return jsonify({'error': 'No inventory items found in JSON'}), 400
@@ -20974,9 +21877,9 @@ def json_inventory():
             excel_processor = None  # Inventory slips can work without ExcelProcessor
         
         fast_mode_threshold = int(os.environ.get('FAST_MODE_THRESHOLD', '500'))
-        fast_mode = len(inventory_df) >= fast_mode_threshold
+        fast_mode = len(records) >= fast_mode_threshold
         if fast_mode:
-            logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(inventory_df), fast_mode_threshold)
+            logging.info('Enabling TemplateProcessor fast_mode for %d records (threshold=%d)', len(records), fast_mode_threshold)
         processor = TemplateProcessor(template_type, font_scheme, 1.0, excel_processor, fast_mode=fast_mode)
         
         # CRITICAL: For mini, double, and preroll templates, NEVER force re-expansion as they have fixed capacity/exact dimensions
@@ -24284,7 +25187,7 @@ def upload_file_optimized():
             return jsonify({'error': 'Only .xlsx files are allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")
@@ -24462,7 +25365,7 @@ def upload_file_fast():
             return jsonify({'error': 'Only Excel files allowed'}), 400
         
         # Validate filename contains store name and matches selected store
-        is_valid, warning_msg, detected_store = True, None, None  # store validation removed
+        is_valid, warning_msg, detected_store = validate_excel_filename_for_store(file.filename, selected_store)
         
         if not is_valid:
             logging.error(f"Filename validation failed: {warning_msg}")

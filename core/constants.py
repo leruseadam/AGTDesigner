@@ -15,18 +15,14 @@ LINEAGE_COLOR_MAP: Dict[str, str] = {
 
 # Product type mapping
 TYPE_OVERRIDES: Dict[str, str] = {
-    "all-in-one": "Disposable Vape",
-    "aio": "Disposable Vape",
-    "disposable": "Disposable Vape",
+    "all-in-one": "Vape Cartridge",
     "rosin": "Concentrate",
     "mini buds": "Flower",
     "bud": "Flower",
-    "pre-roll": "Pre-Roll",  # Normalize to title case
-    "Pre-Roll": "Pre-Roll",  # Keep title case
-    "preroll": "Pre-Roll",  # Map variations to title case
-    "Infused Pre-Roll": "Infused Pre-Roll",  # Keep title case
-    "infused pre-roll": "Infused Pre-Roll",  # Map lowercase to title case
-    "infused preroll": "Infused Pre-Roll",  # Map variations to title case
+    "pre-roll": "pre-roll",  # Consistent lowercase for filtering
+    "Pre-Roll": "pre-roll",  # Map title case to lowercase for frontend filtering
+    "Infused Pre-Roll": "infused pre-roll",  # Map title case to lowercase for frontend filtering
+    "infused pre-roll": "infused pre-roll",  # Map lowercase to lowercase for frontend filtering
     "alcohol/ethanol extract": "RSO/CO2 Tankers",
     "Alcohol/Ethanol Extract": "RSO/CO2 Tankers",
     "alcohol ethanol extract": "RSO/CO2 Tankers",
@@ -92,8 +88,7 @@ CELL_DIMENSIONS: Dict[str, Dict[str, float]] = {
     'mini': {'width': 1.5, 'height': 1.5},        # Each cell is 1.5" wide, 1.5" tall
     'single': {'width': 3.0, 'height': 2.0},      # Single label template
     'double': {'width': 1.75, 'height': 2.5},     # Each cell is 1.75" wide, 2.5" tall (with 0.10" horizontal and 0.05" vertical gutters)
-    'inventory': {'width': 4.0, 'height': 2.0},   # Each cell is 4.0" wide, 2.0" tall
-    'preroll': {'width': 1.75, 'height': 2.5}     # Preroll now uses double-template dimensions
+    'inventory': {'width': 4.0, 'height': 2.0}    # Each cell is 4.0" wide, 2.0" tall
 }
 
 # Template grid layouts
@@ -103,8 +98,7 @@ GRID_LAYOUTS: Dict[str, Dict[str, int]] = {
     'mini': {'rows': 5, 'cols': 4},  # 4 columns across, 5 rows down
     'single': {'rows': 1, 'cols': 1},  # Single label template
     'double': {'rows': 3, 'cols': 4},  # 3 rows, 4 columns for 12 labels total
-    'inventory': {'rows': 2, 'cols': 2},
-    'preroll': {'rows': 3, 'cols': 4}  # 3 rows, 4 columns for 12 labels total (same as double)
+    'inventory': {'rows': 2, 'cols': 2}
 }
 
 # Product type classifications
@@ -113,12 +107,11 @@ CLASSIC_TYPES = {
     "flower", "bud",
     
     # Pre-roll types  
-    "pre-roll", "infused pre-roll", "preroll", "blunt", "flavored blunt",
+    "pre-roll", "infused pre-roll", "preroll",
     
     # Concentrate types (all variations)
     "concentrate", "solventless concentrate",
-    "live resin", "rosin", "cold cure rosin", "live rosin",
-    "wax", "shatter", "hash", "kief",
+    "live resin", "rosin", "wax", "shatter", "hash", "kief",
     "butane extract", "distillate", "rso", "co2 extract",
     "honey crystal", "liquid diamond", "caviar",
     
@@ -187,14 +180,3 @@ PRODUCT_TYPE_EMOJIS = {
     "rso/co2 tankers": "",
     # Add more as needed
 }
-
-# Allowed brands for preroll lists and output
-# Only preroll products with these brands will be included in lists and QR code pages
-# Set to None or empty list to allow all brands
-PREROLL_ALLOWED_BRANDS = [
-    # Add allowed brand names here (case-insensitive matching)
-    # Example:
-    # "DANK CZAR",
-    # "COOKIES",
-    # "PHAT PANDA",
-]
