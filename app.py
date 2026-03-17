@@ -11220,11 +11220,11 @@ def process_database_product_for_api(db_product):
         if not processed_product.get('displayName'):
             processed_product['displayName'] = product_name_value
     
-    # CRITICAL FIX: Ensure lineage from database is preserved and normalized for UI
-    # The UI reads from multiple fields: canonical_lineage, currentLineage, Lineage, lineage
-    # CRITICAL FIX: Prioritize canonical_lineage (database source of truth) over Lineage field
-    # canonical_lineage is what the UI displays and should be used consistently
+    # CRITICAL FIX: Ensure lineage from database (including sovereign overrides) is preserved and normalized for UI
+    # The UI reads from multiple fields: sovereign_lineage, canonical_lineage, currentLineage, Lineage, lineage
+    # CRITICAL FIX: Prioritize sovereign_lineage (user overrides) over canonical_lineage and other fields
     db_lineage = (
+        processed_product.get('sovereign_lineage') or
         processed_product.get('canonical_lineage') or
         processed_product.get('currentLineage') or
         processed_product.get('Lineage') or
@@ -11238,6 +11238,7 @@ def process_database_product_for_api(db_product):
         processed_product['lineage'] = lineage_value
         processed_product['canonical_lineage'] = lineage_value
         processed_product['currentLineage'] = lineage_value
+        processed_product['sovereign_lineage'] = lineage_value
 
     return processed_product
 @app.route('/api/available-tags', methods=['GET'])
@@ -11439,6 +11440,17 @@ def get_available_tags():
             has_excel_data = True
             file_exists = True
             logging.info(f"✅ Using persisted file as Excel data source (verified exists): {os.path.basename(effective_file_path)}")
+
+        # POSaBit: if the processor was already populated from the menu feed, treat it as valid data
+        if not has_excel_data:
+            try:
+                _proc = getattr(g, 'excel_processor', None)
+                if _proc is not None and getattr(_proc, 'df', None) is not None and not _proc.df.empty:
+                    has_excel_data = True
+                    logging.info(f"✅ POSaBit data present in processor ({len(_proc.df)} rows) — skipping Excel-file gate")
+            except Exception:
+                pass
+
         logging.info(f"🔍 AVAILABLE-TAGS: has_excel_data={has_excel_data} (file_exists={file_exists}, session_file_path={bool(session_file_path)}, persisted_fallback={bool(persisted_fallback_path)})")
 
         # DISABLED: Do not automatically load default file - require explicit upload
