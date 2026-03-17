@@ -1310,13 +1310,14 @@ def process_chunk(args):
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
             # Final hardening: normalize lineage text so LabelX.Lineage never carries extra/hidden spaces.
+            # IMPORTANT: Do NOT overwrite custom database lineages – only fill in when missing.
             lineage_val = _clean_lineage_text(lineage_val).upper()
-            # If classic type: enforce canonical classic lineages; anything unrecognized or empty => HYBRID
             if is_classic_type:
-                allowed_classic = {"SATIVA", "HYBRID/SATIVA", "HYBRID", "HYBRID/INDICA", "INDICA"}
-                if not lineage_val or lineage_val not in allowed_classic:
+                # Classic: if DB/Excel lineage is completely missing, fall back to HYBRID.
+                if not lineage_val:
                     lineage_val = "HYBRID"
             else:
+                # Nonclassic: if missing, fall back to MIXED.
                 if not lineage_val:
                     lineage_val = "MIXED"
 
