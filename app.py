@@ -23,6 +23,52 @@ from decimal import Decimal
 import pandas as pd  # Add this import
 import json
 
+# Load local `.env` (development only).
+# PythonAnywhere/production should set environment variables via WSGI/system config.
+def _load_local_dotenv_if_present() -> None:
+    try:
+        env_path = os.path.join(os.path.dirname(__file__), ".env")
+    except Exception:
+        return
+
+    if not os.path.exists(env_path):
+        return
+
+    # Prefer python-dotenv if installed; otherwise parse simple KEY=VALUE lines.
+    try:
+        from dotenv import load_dotenv  # type: ignore
+        load_dotenv(env_path, override=False)
+        logging.info("Loaded environment variables from .env (python-dotenv)")
+        return
+    except Exception:
+        pass
+
+    try:
+        loaded = 0
+        with open(env_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if not k:
+                    continue
+                if k in os.environ and os.environ[k] != "":
+                    continue  # do not override already-set env vars
+                os.environ[k] = v
+                loaded += 1
+        if loaded:
+            logging.info(f"Loaded {loaded} environment variables from .env (fallback parser)")
+    except Exception as e:
+        logging.warning(f"Failed to load .env: {e}")
+
+
+_load_local_dotenv_if_present()
+
 # Optional NumPy dependency: try to import and expose a flag so code
 # checks like `if NUMPY_AVAILABLE and np is not None:` are safe.
 NUMPY_AVAILABLE = False
@@ -99,7 +145,8 @@ if PYTHONANYWHERE_OPTIMIZATION:
     PERMANENT_SESSION_LIFETIME = 900  # 15 minutes instead of 30 minutes
     
     # Memory optimization settings (allow environment overrides for hosted deployments)
-    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '425'))  # Allow up to ~425MB unless overridden
+    # Bump default memory ceiling so POSaBit / DB-backed tag payloads are not dropped too aggressively.
+    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '650'))  # Allow up to ~650MB unless overridden
     CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '50'))  # Reduced cache size
     BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '250'))  # Smaller batch sizes
 else:
@@ -109,7 +156,7 @@ else:
     PERMANENT_SESSION_LIFETIME = 1800
     
     # More generous memory settings for local (still overridable)
-    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '500'))
+    MAX_MEMORY_MB = int(os.environ.get('MAX_MEMORY_MB', '900'))
     CACHE_SIZE_LIMIT = int(os.environ.get('CACHE_SIZE_LIMIT', '100'))
     BATCH_SIZE_LIMIT = int(os.environ.get('BATCH_SIZE_LIMIT', '500'))
 
@@ -1404,12 +1451,7 @@ def get_excel_processor():
 
     processor = ExcelProcessor(store_name=store_name)
 
-    # Enable product DB integration by default for lineage lookups
-    if hasattr(processor, 'enable_product_db_integration'):
-        try:
-            processor.enable_product_db_integration(True)
-        except Exception:
-            pass
+    # DB write-back disabled by default; lineage reads run independently
 
     # PERFORMANCE FIX: Check if caller wants to skip file loading (for tag-based generation)
     from flask import has_request_context, session
@@ -1431,15 +1473,7 @@ def get_excel_processor():
     except Exception:
         pass
 
-    # If nothing loaded, optionally load default file for the store
-    if not getattr(processor, '_last_loaded_file', None):
-        try:
-            default_file = get_default_upload_file(store_name or get_current_store_name(allow_fallback=True))
-            if default_file and os.path.exists(default_file):
-                if processor.load_file(default_file):
-                    processor._last_loaded_file = default_file
-        except Exception:
-            pass
+    # No Excel auto-load fallback — POSaBit or explicit upload only
 
     return processor
 
@@ -1775,9 +1809,11 @@ def create_app():
         elif request.path.startswith('/api/'):
             response.cache_control.max_age = 0
             response.cache_control.no_cache = True
-        # For HTML pages, short cache with revalidation
+        # For HTML pages, never cache (avoid stale UI after template edits)
         elif response.content_type and 'text/html' in response.content_type:
-            response.cache_control.max_age = 300  # 5 minutes
+            response.cache_control.max_age = 0
+            response.cache_control.no_store = True
+            response.cache_control.no_cache = True
             response.cache_control.must_revalidate = True
         return response
     
@@ -2143,13 +2179,7 @@ def simple_initialize_excel_processor():
             excel_processor.df = pd.DataFrame()
             logging.info("Initialized with empty DataFrame")
         
-        # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
-        # Even if disabled for performance, we still need database lineage queries to work
-        # The integration being disabled only affects background processing, not direct queries
-        if hasattr(excel_processor, 'enable_product_db_integration'):
-            # Keep enabled for lineage support - direct database queries still work
-            excel_processor.enable_product_db_integration(True)
-            logging.info("Product database integration enabled for lineage support")
+        # DB write-back disabled by default; _load_lineage_from_database still runs independently
         
         logging.info("Simple initialization completed successfully")
         return True
@@ -2181,10 +2211,7 @@ def initialize_excel_processor():
         else:
             excel_processor.logger.setLevel(logging.WARNING)
         
-        # Enable product database integration by default
-        if hasattr(excel_processor, 'enable_product_db_integration'):
-            excel_processor.enable_product_db_integration(True)
-            logging.info("Product database integration enabled by default")
+        # DB write-back disabled by default; _load_lineage_from_database still runs independently
         
         # CRITICAL FIX: Check for session file FIRST before loading default file
         # This ensures uploaded files persist across page reloads
@@ -2235,47 +2262,35 @@ def initialize_excel_processor():
         selected_store = get_current_store_name(allow_fallback=True)
         default_file = get_default_upload_file(selected_store)
         
-        if default_file and os.path.exists(default_file):
-            logging.info(f"Loading default file on startup: {default_file}")
-            try:
-                # CRITICAL FIX: Use safe_load_file_with_timeout for Windows compatibility
-                success = safe_load_file_with_timeout(excel_processor, default_file, timeout_seconds=30)
-                
-                if success:
-                    excel_processor._last_loaded_file = default_file
-                    logging.info(f"Default file loaded successfully with {len(excel_processor.df)} records")
-                else:
-                    logging.warning("Failed to load default file")
-                    # Try to move corrupted file if timeout occurred
-                    try:
-                        corrupted_path = default_file + '.corrupted'
-                        if os.path.exists(default_file):
-                            os.rename(default_file, corrupted_path)
-                            logging.info(f"Moved potentially corrupted file to: {corrupted_path}")
-                    except Exception as move_err:
-                        logging.error(f"Could not move corrupted file: {move_err}")
-                        
-            except Exception as load_error:
-                logging.error(f"Error loading default file: {load_error}")
-                logging.error(f"Traceback: {traceback.format_exc()}")
+        # Do not auto-load Excel files on startup — POSaBit or explicit upload only
+        if default_file:
+            logging.info(f"Skipping auto-load of default file on startup (POSaBit/upload only): {default_file}")
         else:
-            logging.info("No default file found, waiting for user upload")
-            if default_file:
-                logging.info(f"Default file path was found but file doesn't exist: {default_file}")
+            logging.info("No default file found, waiting for user upload or POSaBit")
             
     except Exception as e:
         logging.error(f"Error initializing Excel processor: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
 
-# Initialize on startup
-# Load Excel file on startup for immediate availability
-# Excel processor will be ready when user first visits the site
-if not os.environ.get('PYTHONANYWHERE_DOMAIN') and not os.environ.get('PYTHONANYWHERE_SITE'):
-    # Only initialize on local development
+# Startup Excel auto-load disabled — POSaBit or explicit upload only
+logging.info("Skipping startup Excel auto-load; data source is POSaBit or explicit upload")
+
+# Pre-warm POSaBit product cache in background so first UI request is instant
+def _prefetch_posabit_cache():
     try:
-        initialize_excel_processor()
-    except Exception as e:
-        logging.warning(f"Startup initialization failed (non-fatal): {e}")
+        from src.core.data.posabit_client import (
+            is_posabit_configured, is_posabit_products_enabled,
+            get_menu_feed_as_product_rows
+        )
+        if is_posabit_configured() or is_posabit_products_enabled():
+            logging.info("🔄 Pre-warming POSaBit product cache in background...")
+            rows = get_menu_feed_as_product_rows()
+            logging.info(f"✅ POSaBit cache pre-warmed: {len(rows)} products")
+    except Exception as _pw_err:
+        logging.warning(f"POSaBit cache pre-warm failed: {_pw_err}")
+
+import threading as _startup_threading
+_startup_threading.Thread(target=_prefetch_posabit_cache, daemon=True).start()
 
 # Add missing function
 def save_template_settings(template_type, font_settings):
@@ -2489,11 +2504,8 @@ def get_session_excel_processor():
                 g.excel_processor = ExcelProcessor(store_name='AGT_Bothell')  # Temporary fallback for initialization
                 g.excel_processor._no_default_load = True  # Flag to prevent auto-loading
 
-            # CRITICAL FIX: Keep ProductDB integration enabled for lineage support
-            # Direct database queries (get_product_lineage) still work even if integration is disabled
-            # But enabling it ensures lineage data is available when needed
-            if hasattr(g.excel_processor, 'enable_product_db_integration'):
-                g.excel_processor.enable_product_db_integration(True)
+            # DB write-back is disabled by default (_product_db_enabled=False).
+            # _load_lineage_from_database() runs independently and still enriches tags with DB lineage.
             
             # Ensure processor store context matches the active store selection
             try:
@@ -2508,13 +2520,26 @@ def get_session_excel_processor():
                     if hasattr(g.excel_processor, '_invalidate_caches'):
                         g.excel_processor._invalidate_caches()
             
+            # When POSaBit is the active data source, ignore any Excel file in session
+            _data_source = session.get('data_source', '')
+            _posabit_is_source = False
+            if not _data_source:
+                try:
+                    from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+                    _posabit_is_source = is_posabit_configured() or is_posabit_products_enabled()
+                except Exception:
+                    pass
+            else:
+                _posabit_is_source = (_data_source == 'posabit')
+
             # CRITICAL FIX: Check if we have an uploaded file in session
-            session_file_path = session.get('file_path')
+            session_file_path = None if _posabit_is_source else session.get('file_path')
             session_store = session.get('file_store', '')
             # Store context removed - using single database
 
             # CRITICAL FIX: If session doesn't have file_path, try to restore from persistent file
-            if not session_file_path:
+            # Skip restore when POSaBit is the active data source
+            if not session_file_path and not _posabit_is_source:
                 try:
                     import json
                     # CRITICAL FIX: Use UPLOADS_DIR constant instead of constructing path for Windows compatibility
@@ -2604,38 +2629,9 @@ def get_session_excel_processor():
             # Only load default file if we don't have a session file AND DataFrame is empty
             # PERFORMANCE: Skip default file loading if _skip_default_file_load flag is set (for fast_load)
             skip_default_load = getattr(g, '_skip_default_file_load', False)
-            if not session_file_path and not skip_default_load:
-                if not hasattr(g.excel_processor, 'df') or g.excel_processor.df is None or g.excel_processor.df.empty:
-                    logging.info("CRITICAL FIX: No session file and DataFrame is empty, loading default file")
-                    from src.core.data.excel_processor import get_default_upload_file
-                    # CRITICAL FIX: Use allow_fallback=True for default file loading
-                    selected_store = get_current_store_name(allow_fallback=True)
-                    default_file = get_default_upload_file(selected_store)
-                    if default_file and os.path.exists(default_file):
-                        logging.info(f"CRITICAL FIX: Loading default file: {default_file}")
-                        # Load file (fast_mode removed - not available on PythonAnywhere)
-                        success = g.excel_processor.load_file(default_file)
-                        if success:
-                            logging.info(f"CRITICAL FIX: Successfully loaded default file")
-                            # Mark that we loaded a fallback default file - UI should require explicit upload
-                            try:
-                                session['default_file_loaded'] = True
-                                logging.info("Marked session as having loaded a default fallback file")
-                            except Exception:
-                                logging.debug("Could not mark default_file_loaded in session")
-                            # Populate dropdown cache
-                            if hasattr(g.excel_processor, '_cache_dropdown_values'):
-                                try:
-                                    g.excel_processor._cache_dropdown_values()
-                                    logging.info(f"Successfully populated dropdown cache from default file")
-                                except Exception as e:
-                                    logging.error(f"Failed to populate dropdown cache from default file: {e}")
-                        else:
-                            logging.error(f"CRITICAL FIX: Failed to load default file: {default_file}")
-                    else:
-                        logging.warning("CRITICAL FIX: No default file available")
-            elif skip_default_load:
+            if skip_default_load:
                 logging.info("⚡ Fast load: Skipping default file loading in get_session_excel_processor")
+            # No Excel auto-load fallback — POSaBit or DB fallback already handled above
         
         # CRITICAL FIX: For new uploaded files, update the last processed file but DON'T clear tags
         if session_file_path and session_file_path != getattr(g.excel_processor, '_last_processed_file', None):
@@ -3332,6 +3328,7 @@ def index():
                              cache_bust=cache_bust,
                              user_has_store=user_has_store,
                              current_store=current_store,
+                             stores=VALID_STORES,
                              uploaded_filename=uploaded_filename)
         
     except Exception as e:
@@ -3345,7 +3342,7 @@ def index():
             current_store = None
             uploaded_filename = ''
             # Try to render template with error message
-            return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, uploaded_filename=uploaded_filename)
+            return render_template('index.html', error=str(e), cache_bust=cache_bust, user_has_store=user_has_store, current_store=current_store, stores=VALID_STORES, uploaded_filename=uploaded_filename)
         except Exception as template_error:
             # If template rendering also fails, return a simple error page
             logging.error(f"❌ Template rendering also failed: {template_error}")
@@ -5389,7 +5386,7 @@ def process_excel_background(filename, temp_path):
                 try:
                     logging.info("[BG] Attempting alternative database storage with ProductDatabase")
                     # Store context removed - using single database
-                    store_name = get_current_store_name()
+                    store_name = get_current_store_name(allow_fallback=True)
                     product_db = get_product_database(store_name)
                     logging.info(f"[BG] ProductDatabase obtained: {product_db}")
                     
@@ -5806,14 +5803,24 @@ def get_current_file():
             except Exception as e:
                 logging.warning(f"Error checking processor data: {e}")
         
+        # If no Excel file, check if POSaBit is configured — treat as "has file" so UI loads tags
+        posabit_active = False
+        if not file_exists:
+            try:
+                from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+                posabit_active = is_posabit_configured() or is_posabit_products_enabled()
+            except Exception:
+                pass
+
         return jsonify({
             'success': True,
-            'has_file': file_exists,
-            'filename': uploaded_filename,
+            'has_file': file_exists or posabit_active,
+            'filename': uploaded_filename if file_exists else ('POSaBit / API' if posabit_active else ''),
             'file_path': file_path if file_exists else None,
             'upload_timestamp': upload_timestamp,
-            'has_data': has_data,
-            'row_count': row_count
+            'has_data': has_data or posabit_active,
+            'row_count': row_count,
+            'posabit_active': posabit_active,
         })
     except Exception as e:
         logging.error(f"Error getting current file: {e}")
@@ -5822,6 +5829,153 @@ def get_current_file():
             'error': str(e),
             'has_file': False
         }), 500
+
+@app.route('/api/posabit/status', methods=['GET'])
+def api_posabit_status():
+    """Return POSaBit config status and optionally test API connection."""
+    try:
+        from src.core.data.posabit_client import (
+            is_posabit_configured,
+            _get_config,
+            get_menu_feed_as_product_rows,
+        )
+        store_for_status = get_current_store_name(allow_fallback=True)
+        cfg = _get_config(store_for_status)
+        has_token = bool(cfg.get('effective_token') or cfg.get('token'))
+        has_feed_key = bool(cfg.get('feed_key'))
+        configured = is_posabit_configured()
+        out = {
+            'configured': configured,
+            'has_token': has_token,
+            'has_feed_key': has_feed_key,
+            'connection_ok': False,
+            'product_count': None,
+            'message': None,
+        }
+        if not configured:
+            missing = []
+            if not has_token:
+                missing.append('POSABIT_API_TOKEN or POSABIT_ORDER_PAD_TOKEN')
+            if not has_feed_key:
+                missing.append('POSABIT_MENU_FEED_KEY (or POSABIT_USE_VENUE_INVENTORIES=1)')
+            out['message'] = f"Set in .env or server WSGI: {', '.join(missing)}" if missing else "Not configured"
+            return jsonify(out)
+        # IMPORTANT: Do not block the UI by testing the POSaBit API on every status poll.
+        # To explicitly test connection/products, call `/api/posabit/status?test=1`.
+        if request.args.get('test') in ('1', 'true', 'yes'):
+            store_for_test = get_current_store_name(allow_fallback=True)
+            def _call_with_timeout(fn, timeout_s: float):
+                result = {'ok': False, 'value': None, 'err': None, 'timed_out': False}
+                def runner():
+                    try:
+                        result['value'] = fn()
+                        result['ok'] = True
+                    except Exception as e:
+                        result['err'] = e
+                t = threading.Thread(target=runner, daemon=True)
+                t.start()
+                t.join(timeout_s)
+                if t.is_alive():
+                    result['timed_out'] = True
+                return result
+
+            # Allow a bit longer for a real product fetch (still bounded). Use current store's menu key.
+            r = _call_with_timeout(lambda: get_menu_feed_as_product_rows(store_name=store_for_test), timeout_s=20.0)
+            if r['timed_out']:
+                out['message'] = "Timed out testing POSaBit connection (try again)"
+            elif r['ok']:
+                rows = r['value'] or []
+                out['connection_ok'] = True
+                out['product_count'] = len(rows)
+                out['message'] = f"OK — {len(rows)} products" if rows else "Connected but 0 products returned"
+            else:
+                out['message'] = str(r['err']) or "Connection failed"
+        else:
+            out['message'] = "Configured"
+        return jsonify(out)
+    except Exception as e:
+        logging.warning(f"POSaBit status: {e}")
+        return jsonify({'configured': False, 'has_token': False, 'has_feed_key': False,
+                        'connection_ok': False, 'product_count': None, 'message': str(e)}), 200
+
+
+@app.route('/api/posabit/config', methods=['GET'])
+def api_posabit_config():
+    """Return POSaBit integration config (no secrets)."""
+    try:
+        from src.core.data.posabit_client import (
+            is_posabit_configured,
+            is_posabit_products_enabled,
+            is_posabit_manifests_enabled,
+        )
+        default_source = 'posabit' if is_posabit_configured() else 'excel'
+        data_source = session.get('data_source', default_source)
+        return jsonify({
+            'data_source': data_source,
+            'use_products': is_posabit_products_enabled(),
+            'use_manifests': is_posabit_manifests_enabled(),
+            'has_token': bool(os.environ.get('POSABIT_ORDER_PAD_TOKEN') or os.environ.get('POSABIT_API_TOKEN')),
+            'has_feed_key': bool(os.environ.get('POSABIT_MENU_FEED_KEY')),
+            'posabit_configured': is_posabit_configured(),
+        })
+    except Exception as e:
+        logging.warning(f"POSaBit config: {e}")
+        return jsonify({'data_source': 'excel', 'use_products': False, 'use_manifests': False,
+                        'has_token': False, 'has_feed_key': False, 'posabit_configured': False}), 200
+
+
+@app.route('/api/posabit/data-source', methods=['POST'])
+def api_posabit_data_source():
+    """Set product data source to 'posabit' or 'excel' for this session."""
+    try:
+        data = request.get_json(silent=True) or {}
+        source = data.get('source', '')
+        if source not in ('posabit', 'excel'):
+            return jsonify({'error': 'source must be "posabit" or "excel"'}), 400
+        session['data_source'] = source
+        if source == 'posabit':
+            session.pop('default_file_loaded', None)
+        session.modified = True
+        return jsonify({'success': True, 'data_source': source})
+    except Exception as e:
+        logging.warning(f"POSaBit data-source: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/posabit/refresh-cache', methods=['POST'])
+def api_posabit_refresh_cache():
+    """Synchronously fetch POSaBit products and save to disk cache. Call once after deploy."""
+    try:
+        from src.core.data.posabit_client import (
+            is_posabit_configured, is_posabit_products_enabled,
+            get_menu_feed_as_product_rows, _save_disk_cache,
+            _posabit_product_rows_cache as _cur_cache
+        )
+        import src.core.data.posabit_client as _pb
+        if not (is_posabit_configured() or is_posabit_products_enabled()):
+            return jsonify({'ok': False, 'message': 'POSaBit not configured'}), 400
+        # Force bypass in-process cache to get fresh data
+        _pb._posabit_product_rows_cache = None
+        _pb._posabit_product_rows_cache_time = 0
+        rows = get_menu_feed_as_product_rows()
+        count = len(rows)
+        return jsonify({'ok': True, 'count': count, 'message': f'Cache refreshed: {count} products'})
+    except Exception as e:
+        logging.exception("POSaBit cache refresh failed")
+        return jsonify({'ok': False, 'message': str(e)}), 500
+
+
+@app.route('/api/posabit/manifest', methods=['GET'])
+def api_posabit_manifest():
+    """Fetch manifest items from POSaBit."""
+    try:
+        from src.core.data.posabit_client import get_manifests_as_inventory_transfer_items
+        items = get_manifests_as_inventory_transfer_items()
+        return jsonify({'success': True, 'items': items, 'count': len(items)})
+    except Exception as e:
+        logging.warning(f"POSaBit manifest: {e}")
+        return jsonify({'success': False, 'error': str(e), 'items': []}), 200
+
 
 @app.route('/upload-lightning', methods=['POST'])
 def upload_lightning():
@@ -8927,6 +9081,26 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             
             # Handle both old format (string) and new format (dict with source info)
             if isinstance(lineage_info, dict):
+                # Non-cannabis product types (Paraphernalia/Accessories/Merch/etc.) should never show
+                # cannabis strain lineage (CBD/SATIVA/INDICA/HYBRID). Keep them neutral.
+                product_type_val = (tag.get('Product Type*') or tag.get('ProductType') or tag.get('productType') or '').strip()
+                product_type_lower = product_type_val.lower()
+                if (
+                    'paraphernalia' in product_type_lower or
+                    ('para' in product_type_lower and 'pre-roll' not in product_type_lower) or
+                    'accessor' in product_type_lower or
+                    'merch' in product_type_lower or
+                    'hardware' in product_type_lower
+                ):
+                    neutral = 'MIXED'
+                    tag['canonical_lineage'] = neutral
+                    tag['currentLineage'] = neutral
+                    tag['Lineage'] = neutral
+                    tag['Lineage*'] = neutral
+                    tag['lineage'] = neutral.lower()
+                    aligned_count += 1
+                    continue
+
                 # CRITICAL: Use EXACT same priority as DOCX generation:
                 # COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage)
                 # This matches template_processor.py line 7267
@@ -10078,11 +10252,10 @@ def generate_labels():
                                         # Batch query with both strain joins (same logic as get_product_lineage)
                                         cur.execute(f'''
                                             SELECT p."Product Name*",
-                                                   COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) as lineage
+                                                   COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) as lineage
                                             FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
                             WHERE p."Product Name*" IN ({placeholders})
                                         ''', product_names_for_batch)
                                         for row in cur.fetchall():
@@ -11276,12 +11449,48 @@ def generate_labels():
             logging.error("❌ No records available for generation after validation/deduplication")
             return jsonify({'error': 'No valid tags to generate. Please refresh and try again.'}), 400
 
+        def _needs_docx_post_formatting(settings: dict) -> bool:
+            """Return True if we must post-process the doc after generation."""
+            if not settings or not isinstance(settings, dict):
+                return False
+            # If user customized any of these away from defaults, we must apply formatting.
+            if settings.get('textColor') and settings.get('textColor') != '#000000':
+                return True
+            if settings.get('backgroundColor') and settings.get('backgroundColor') != '#ffffff':
+                return True
+            if settings.get('headerColor') and settings.get('headerColor') != '#333333':
+                return True
+            if settings.get('accentColor') and settings.get('accentColor') != '#007bff':
+                return True
+            if str(settings.get('lineSpacing', '1.0')) != '1.0':
+                return True
+            try:
+                if int(settings.get('paragraphSpacing', 0) or 0) != 0:
+                    return True
+            except Exception:
+                return True
+            if bool(settings.get('boldHeaders', False)) is True:
+                return True
+            # NOTE: italicDescriptions is intentionally ignored (we keep everything bold).
+            # autoResize/smartTruncation are already handled during template processing.
+            return False
+
+        needs_post_formatting = _needs_docx_post_formatting(template_settings)
+
         # Fast generation with caching
         fast_engine = FastGenerationEngine(processor)
         cache_hits_before = fast_engine.cache_hits
         generation_start = time.time()
         logging.info(f"🔧 Starting FAST generation of {len(records)} labels (cache-enabled)...")
-        final_doc = fast_engine.generate_with_cache(records, template_type, saved_scale_factor)
+
+        final_doc = None
+        docx_bytes = None
+        if not needs_post_formatting:
+            # Biggest speed win: avoid saving/reloading Document twice.
+            docx_bytes = fast_engine.generate_bytes_with_cache(records, template_type, saved_scale_factor)
+        else:
+            final_doc = fast_engine.generate_with_cache(records, template_type, saved_scale_factor)
+
         generation_time = time.time() - generation_start
         cache_hit = fast_engine.cache_hits > cache_hits_before
         update_generation_stats(len(records), generation_time, cache_hit)
@@ -11297,22 +11506,21 @@ def generate_labels():
                 f"✅ GENERATION COMPLETE: {len(records)} labels in {generation_time:.2f}s "
                 f"({generation_time/len(records):.3f}s per label, cache_hit={cache_hit})"
             )
-        if hasattr(final_doc, 'labels_rendered'):
+        if final_doc is not None and hasattr(final_doc, 'labels_rendered'):
             logging.info(f"🔍 LABEL RENDER: TemplateProcessor rendered {final_doc.labels_rendered} labels")
-        if final_doc is None:
-            logging.error("❌ Generation returned None document")
-            return jsonify({'error': 'Failed to generate document.'}), 500
-        if not hasattr(final_doc, 'save'):
-            logging.error(f"❌ Generation returned unexpected type without save(): {type(final_doc)}")
-            return jsonify({'error': 'Failed to generate document (invalid document type).'}), 500
 
-        # PERFORMANCE FIX: Font enforcement is already done in template processor
-        # Skip duplicate call to save expensive document iteration
-        # Only apply custom formatting if needed
-        if template_settings:
-            from src.core.generation.docx_formatting import apply_custom_formatting
-            apply_custom_formatting(final_doc, template_settings)
-            # Font enforcement already done in template processor - skip duplicate call
+        if docx_bytes is None:
+            if final_doc is None:
+                logging.error("❌ Generation returned None document")
+                return jsonify({'error': 'Failed to generate document.'}), 500
+            if not hasattr(final_doc, 'save'):
+                logging.error(f"❌ Generation returned unexpected type without save(): {type(final_doc)}")
+                return jsonify({'error': 'Failed to generate document (invalid document type).'}), 500
+
+            # Only apply custom formatting when it actually changes output (it is very expensive)
+            if needs_post_formatting:
+                from src.core.generation.docx_formatting import apply_custom_formatting
+                apply_custom_formatting(final_doc, template_settings)
 
         # For preroll templates, generate product list as a separate document (not attached to tags)
         product_list_doc = None
@@ -11320,9 +11528,13 @@ def generate_labels():
             product_list_doc = generate_preroll_product_list(records, cache)
 
         # Save the final document to a buffer
-        output_buffer = BytesIO()
-        final_doc.save(output_buffer)
-        output_buffer.seek(0)
+        if docx_bytes is not None:
+            output_buffer = BytesIO(docx_bytes)
+            output_buffer.seek(0)
+        else:
+            output_buffer = BytesIO()
+            final_doc.save(output_buffer)
+            output_buffer.seek(0)
 
         # Build a comprehensive informative filename
         today_str = datetime.now().strftime('%Y%m%d')
@@ -12135,6 +12347,7 @@ def process_database_product_for_api(db_product):
     # CRITICAL FIX: Prioritize canonical_lineage (database source of truth) over Lineage field
     # canonical_lineage is what the UI displays and should be used consistently
     db_lineage = (
+        processed_product.get('sovereign_lineage') or
         processed_product.get('canonical_lineage') or
         processed_product.get('currentLineage') or
         processed_product.get('Lineage') or
@@ -12471,14 +12684,102 @@ def get_available_tags():
                 except Exception:
                     pass
 
-        # No Excel file — return empty immediately. No DB fallback shown in UI.
+        # No Excel inventory file/data — try POSaBit first.
         if not has_excel_data:
-            logging.info("📦 No Excel file - returning empty tags (no DB fallback)")
+            try:
+                from src.core.data.posabit_client import (
+                    is_posabit_configured, is_posabit_products_enabled,
+                    get_cached_product_rows, get_menu_feed_as_product_rows
+                )
+                if is_posabit_configured() or is_posabit_products_enabled():
+                    store_for_posabit = get_current_store_name(allow_fallback=True)
+                    cached_rows = get_cached_product_rows(store_name=store_for_posabit)
+                    if cached_rows:
+                        logging.info(f"📦 Serving {len(cached_rows)} POSaBit products from cache")
+                        safe_posabit_tags = make_json_safe(cached_rows)
+                        # Ensure POSaBit tags use DB lineage overrides (sovereign_lineage wins).
+                        try:
+                            store_name_align = get_current_store_name(allow_fallback=True)
+                            safe_posabit_tags = _align_tags_with_db_lineage(
+                                safe_posabit_tags,
+                                store_name_align,
+                                skip_if_aligned=False,
+                                force_overwrite=True
+                            )
+                        except Exception as align_err:
+                            logging.warning(f"POSaBit tag lineage alignment skipped: {align_err}")
+                        return jsonify({
+                            'tags': safe_posabit_tags,
+                            'total_count': len(safe_posabit_tags),
+                            'source': 'posabit',
+                            'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
+                        }), 200
+
+                    # Cache is cold — try a bounded blocking fetch first (works on PythonAnywhere
+                    # where daemon threads are killed between requests).
+                    # Cap at 20 s so the browser doesn't abort; if it times out we fall back to
+                    # the background-thread / retry approach for local dev.
+                    import threading as _pb_threading
+                    _cold_result = {'rows': None, 'done': False}
+                    def _cold_fetch():
+                        try:
+                            _cold_result['rows'] = get_menu_feed_as_product_rows()
+                        except Exception as _cf_err:
+                            logging.warning(f"Cold POSaBit fetch failed: {_cf_err}")
+                        finally:
+                            _cold_result['done'] = True
+                    _cold_t = _pb_threading.Thread(target=_cold_fetch, daemon=True)
+                    _cold_t.start()
+                    _cold_t.join(timeout=20.0)  # wait up to 20 s
+                    if _cold_result['rows']:
+                        posabit_rows = _cold_result['rows']
+                        safe_posabit_tags = make_json_safe(posabit_rows)
+                        try:
+                            store_name_align = get_current_store_name(allow_fallback=True)
+                            safe_posabit_tags = _align_tags_with_db_lineage(
+                                safe_posabit_tags, store_name_align,
+                                skip_if_aligned=False, force_overwrite=True
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            cache.set(_posabit_flask_cache_key, safe_posabit_tags, timeout=300)
+                        except Exception:
+                            pass
+                        return jsonify({
+                            'tags': safe_posabit_tags,
+                            'total_count': len(safe_posabit_tags),
+                            'source': 'posabit',
+                            'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
+                        }), 200
+                    # Still not done — start background fetch (local dev) and tell UI to retry
+                    if not _cold_result['done']:
+                        # thread is still running in background — let it finish and warm the cache
+                        pass
+                    else:
+                        # fetch finished but returned 0 rows — kick off a fresh retry in background
+                        def _bg_fetch():
+                            try:
+                                get_menu_feed_as_product_rows()
+                            except Exception as _bg_err:
+                                logging.warning(f"Background POSaBit prefetch failed: {_bg_err}")
+                        _pb_threading.Thread(target=_bg_fetch, daemon=True).start()
+                    logging.info("📦 POSaBit cache cold — returning loading signal, retry in 5 s")
+                    return jsonify({
+                        'tags': [],
+                        'total_count': 0,
+                        'source': 'posabit-loading',
+                        'message': 'POSaBit inventory is loading, please wait...',
+                        'retry_after': 5
+                    }), 200
+            except Exception as posabit_err:
+                logging.warning(f"POSaBit fallback in available-tags failed: {posabit_err}")
+            logging.info("📦 No Excel inventory and no POSaBit products available - returning empty tags")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
-                'source': 'no-excel-file',
-                'message': 'No Excel file uploaded. Please upload an Excel file to see available tags.'
+                'source': 'no-excel-or-posabit',
+                'message': 'No inventory loaded yet. Configure POSaBit or upload an Excel file to see available tags.'
             }), 200
 
         # CRITICAL: Check if lineage was updated recently BEFORE checking cache.
@@ -13024,25 +13325,21 @@ def get_available_tags():
             })
 
         # CRITICAL: Validate that the session file matches the selected store
-        # This prevents wrong store data from being loaded
+        # This prevents wrong store data from being loaded. However, if there is
+        # a mismatch we now LOG and IGNORE the Excel file instead of blocking tags:
+        # the UI should still be able to use POSaBit / database products.
         if session_file_path:
             session_filename = os.path.basename(session_file_path)
             detected_store = extract_store_from_filename(session_filename)
 
             if detected_store and detected_store != store_name:
-                logging.error(f"❌ STORE MISMATCH DETECTED: Session has {detected_store} file but {store_name} store selected")
-                # Clear the bad session file
+                logging.error(f"❌ STORE MISMATCH DETECTED: Session has {detected_store} file but {store_name} store selected; ignoring Excel and falling back to DB")
+                # Clear the bad session file so future requests don't reuse it
                 if 'file_path' in session:
                     del session['file_path']
                     session.modified = True
-                return jsonify({
-                    'tags': [],
-                    'total_count': 0,
-                    'source': 'store-mismatch-error',
-                    'error': f'Store mismatch detected: {detected_store} file loaded in {store_name} store. Please re-upload the correct file.',
-                    'detected_store': detected_store,
-                    'current_store': store_name
-                }), 400
+                session_file_path = ''
+                has_excel_data = False
 
         # CRITICAL: SIMPLE PATH - When Excel exists, load ONLY from Excel, skip ALL other logic
         # PERFORMANCE: Check fast_load parameter to skip expensive database queries
@@ -14045,12 +14342,11 @@ def get_available_tags():
                         # Also handle case where normalized_product_strain is NULL - fall back to name-based join
                         lineage_query_join_by_name = '''
                             SELECT 
-                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS current_lineage,
-                                COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain
+                                COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) AS current_lineage,
+                                COALESCE(s1.strain_name, s2.strain_name, p."Product Strain") AS current_strain
                             FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
                 WHERE p."Product Name*" = ? OR p.normalized_name = ?
                             ORDER BY p.id DESC
                             LIMIT 1
@@ -14115,14 +14411,13 @@ def get_available_tags():
                                             # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                             chunk_query = f'''
                                                 SELECT DISTINCT
-                                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS current_lineage,
-                                                    COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain,
+                                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) AS current_lineage,
+                                                    COALESCE(s1.strain_name, s2.strain_name, p."Product Strain") AS current_strain,
                                                     p."Product Name*" AS product_name,
                                                     p.normalized_name AS normalized_name
                                                 FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
                             WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
                               AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
                                                 ORDER BY p.id DESC
@@ -14140,14 +14435,13 @@ def get_available_tags():
                                     # One row per product (latest by id) to avoid redundant DB rows slowing tag load
                                     batch_query = f'''
                                         SELECT DISTINCT
-                                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS current_lineage,
-                                            COALESCE(s1.strain_name, s2.strain_name, s3.strain_name, p."Product Strain") AS current_strain,
+                                            COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) AS current_lineage,
+                                            COALESCE(s1.strain_name, s2.strain_name, p."Product Strain") AS current_strain,
                                             p."Product Name*" AS product_name,
                                             p.normalized_name AS normalized_name
                                         FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
+                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
                             WHERE (p."Product Name*" IN ({placeholders}) OR p.normalized_name IN ({placeholders}))
                               AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) OR normalized_name IN ({placeholders}) GROUP BY normalized_name)
                                         ORDER BY p.id DESC
@@ -14757,7 +15051,7 @@ def get_available_tags():
                     'tags': [],
                     'total_count': 0,
                     'source': 'no-excel-no-fallback',
-                    'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
+                    'message': 'No inventory loaded yet. Use POSaBit / API or upload an Excel file to see products.'
                 }), 200
         # EXCEL-ONLY MODE: NEVER merge database tags - use ONLY Excel tags
         logging.info(f"⚡ EXCEL-ONLY MODE: Using {len(all_tags)} Excel tags - skipping ALL database merging")
@@ -14875,13 +15169,12 @@ def get_available_tags():
                                 SELECT
                                     p."Product Name*" AS product_name,
                                     p.normalized_name AS normalized_name,
-                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
+                                    COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) AS lineage
                                 FROM products p
                                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
-                                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
+                                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) IS NOT NULL
+                                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) != ''
                             '''
                             cur.execute(lineage_query)
                             rows = cur.fetchall()
@@ -15839,6 +16132,44 @@ def update_lineage():
                             logging.info(f"✅ Seeded DB from Excel then updated lineage for '{tag_name}' ({seeded_updated} row(s))")
                     except Exception as seed_err:
                         logging.warning(f"Could not seed product from Excel before lineage update for '{tag_name}': {seed_err}")
+                
+                # CRITICAL POSaBit-only fallback:
+                # When using POSaBit as the product source, there may be no Excel rows loaded,
+                # so we may not have a DB row to update. Seed a minimal product row from
+                # the tag name + selected lineage so the sovereign_lineage update persists.
+                if products_updated == 0:
+                    try:
+                        seed_data = {
+                            "Product Name*": tag_name,
+                            "ProductName": tag_name,
+                            # Ensure both fields are set so the verification query sees the edit.
+                            "Lineage": new_lineage,
+                            "sovereign_lineage": new_lineage,
+                        }
+                        # If the frontend included additional context, use it to improve matching/strain linking.
+                        for k in (
+                            "Product Type*", "Product Strain", "ProductBrand", "Product Brand",
+                            "Vendor/Supplier*", "Vendor", "vendor", "Supplier", "supplier",
+                            "Weight*", "Weight", "Units", "DOH", "THC test result", "CBD test result"
+                        ):
+                            if k in data and data.get(k) not in (None, ""):
+                                seed_data[k] = data.get(k)
+                        
+                        seeded_product_id = product_db.add_or_update_product(seed_data)
+                        if seeded_product_id:
+                            conn.commit()
+                            seeded_updated = _update_product_lineage_by_variants(cursor, product_db, tag_name, new_lineage)
+                            products_updated += max(0, seeded_updated)
+                            if products_updated == 0:
+                                # Safety: if the follow-up UPDATE didn't report rowcount,
+                                # treat the seed as successful so the UI doesn't fail.
+                                products_updated = 1
+                            logging.info(
+                                f"✅ Seeded DB from tag payload then updated lineage for '{tag_name}' "
+                                f"(seed_id={seeded_product_id}, db_updated={seeded_updated})"
+                            )
+                    except Exception as seed_db_err:
+                        logging.warning(f"Could not seed DB from tag payload for '{tag_name}': {seed_db_err}")
 
             if products_updated > 0:
                 logging.info(f"✅ Updated lineage for {products_updated} product row(s) with lineage '{new_lineage}'")
@@ -15960,57 +16291,35 @@ def update_lineage():
                 strains_updated += 1
                 logging.info(f"✅ Updated strain '{strain_name}' (id: {strain_id}) lineage to '{new_lineage}'")
         
-        # Step 4: CROSS-PRODUCT-TYPE SYNCING - Update products with same strain across CLASSIC TYPES only
-        # This syncs lineage across Flower, Preroll, Concentrate, and Edible (Classic Types only)
+        # Step 4: CROSS-PRODUCT SYNCING — sync lineage only to same-strain, same-product-type products.
+        # Look up the product type of the tag being edited so we restrict syncing to identical types.
+        # This prevents a Pre-Roll edit from touching Capsules or Edibles that share the same strain.
+        edited_product_type = None
+        try:
+            cursor.execute("""
+                SELECT "Product Type*" FROM products
+                WHERE LOWER(TRIM("Product Name*")) = LOWER(TRIM(?))
+                ORDER BY id DESC LIMIT 1
+            """, (tag_name,))
+            _type_row = cursor.fetchone()
+            if _type_row:
+                edited_product_type = (_type_row[0] or '').strip()
+        except Exception:
+            pass
+
         similar_products_updated = 0
-        if strains_updated > 0:
+        if strains_updated > 0 and edited_product_type:
             for strain_id, strain_name in strain_rows:
-                # Update products linked to this strain_id (Classic Types only)
                 cursor.execute("""
                     UPDATE products
                     SET Lineage = ?, sovereign_lineage = ?
                     WHERE strain_id = ?
-                    AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
-                """, (new_lineage, new_lineage, strain_id))
-                strain_linked_count = cursor.rowcount
-
-                # CRITICAL: Also update products with matching strain name but no strain_id link
-                # This catches products across different Classic Type categories (prerolls, concentrates, etc.)
-                cursor.execute("""
-                    UPDATE products
-                    SET Lineage = ?, sovereign_lineage = ?
-                    WHERE LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
-                    AND (strain_id IS NULL OR strain_id != ?)
-                    AND "Product Type*" IN ('Flower', 'Preroll', 'Concentrate', 'Edible')
-                """, (new_lineage, new_lineage, strain_name, strain_id))
-                name_match_count = cursor.rowcount
-
-                similar_products_updated = strain_linked_count + name_match_count
-                if similar_products_updated > 0:
-                    logging.info(f"✅ Updated {similar_products_updated} Classic Type products with strain '{strain_name}' (linked: {strain_linked_count}, name-matched: {name_match_count})")
-        
-        # CRITICAL FIX: Also copy canonical/sovereign lineage to products for ALL product types
-        # This ensures the main products table has the canonical lineage set so downstream
-        # queries and UI lookups that rely on p."Lineage" reflect the strain canonical value.
-        try:
-            total_copied = 0
-            for strain_id, strain_name in strain_rows:
-                try:
-                    cursor.execute("""
-                        UPDATE products
-                        SET "Lineage" = ?, sovereign_lineage = ?
-                        WHERE strain_id = ? OR LOWER(TRIM("Product Strain")) = LOWER(TRIM(?))
-                    """, (new_lineage, new_lineage, strain_id, strain_name))
-                    copied = cursor.rowcount
-                    total_copied += copied
-                    if copied > 0:
-                        logging.info(f"✅ Copied canonical lineage to {copied} product(s) for strain '{strain_name}' (id: {strain_id})")
-                except Exception as copy_err:
-                    logging.warning(f"⚠️ Could not copy canonical lineage to products for strain '{strain_name}' (id: {strain_id}): {copy_err}")
-            if total_copied > 0:
-                logging.info(f"✅ Total products updated with canonical/sovereign lineage copy: {total_copied}")
-        except Exception as overall_copy_err:
-            logging.warning(f"⚠️ Failed to copy canonical lineage to products (overall): {overall_copy_err}")
+                    AND LOWER(TRIM("Product Type*")) = LOWER(TRIM(?))
+                    AND LOWER(TRIM("Product Name*")) != LOWER(TRIM(?))
+                """, (new_lineage, new_lineage, strain_id, edited_product_type, tag_name))
+                similar_products_updated += cursor.rowcount
+                if cursor.rowcount > 0:
+                    logging.info(f"✅ Synced lineage to {cursor.rowcount} same-type ('{edited_product_type}') same-strain ('{strain_name}') product(s)")
         # CRITICAL: Explicitly commit the transaction
         conn.commit()
 
@@ -16739,10 +17048,13 @@ def update_doh():
         if doh_storage_value is None or doh_storage_value == 'None' or str(doh_storage_value).lower() == 'none':
             doh_storage_value = 'No'
         
-        # Get the excel processor from session
+        # Excel is optional: POSaBit-only sessions may not have an Excel DataFrame loaded.
+        # We still update DOH in the database (best-effort) and persist the user's selection
+        # into session overrides so generation reflects the change immediately.
         excel_processor = get_excel_processor()
-        if not excel_processor or excel_processor.df is None:
-            return jsonify({'error': 'No data loaded'}), 400
+        has_excel_df = bool(excel_processor is not None and getattr(excel_processor, 'df', None) is not None)
+        if not has_excel_df:
+            logging.info("⚡ DOH update: no Excel loaded; updating DB + session overrides only")
         
         # Update the DOH in the current data
         # CRITICAL FIX: Update database FIRST, then update Excel processor from database
@@ -16801,6 +17113,35 @@ def update_doh():
         except Exception as db_error:
             logging.error(f"Error updating DOH in database: {db_error}")
             # Don't fail the whole request - continue with Excel update
+
+        # POSaBit-only fallback: if the product isn't present in DB yet (no Excel seeding),
+        # seed a minimal product row so DOH persists and db_update_success becomes true.
+        if not db_update_success:
+            try:
+                seed_data = {
+                    "Product Name*": str(tag_name).strip(),
+                    "ProductName": str(tag_name).strip(),
+                    # Lineage is required by add_or_update_product; set a safe default.
+                    "Lineage": "MIXED",
+                    # DOH values: frontend -> backend mapping already converted NONE->No
+                    "DOH": doh_storage_value,
+                    "DOH Compliant (Yes/No)": doh_storage_value,
+                }
+                seeded_id = product_db.add_or_update_product(seed_data)
+                if seeded_id:
+                    db_update_success = product_db.update_product_doh(
+                        tag_name,
+                        doh_storage_value,
+                        vendor=vendor,
+                        brand=brand
+                    )
+                    if db_update_success:
+                        logging.info(
+                            f"✅ DOH seeded + persisted for '{tag_name}' "
+                            f"(seed_id={seeded_id}, doh='{doh_storage_value}')"
+                        )
+            except Exception as seed_err:
+                logging.warning(f"⚠️ Could not seed DB DOH for '{tag_name}': {seed_err}")
         
         # Check if this is a JSON matched tag (not in Excel DataFrame)
         is_json_matched_tag = False
@@ -16824,9 +17165,13 @@ def update_doh():
             logging.debug(f"Could not check JSON matched status: {json_check_err}")
         
         # Now update the Excel processor DataFrame (skip for JSON matched tags)
-        excel_update_success = False
-        if excel_processor and not is_json_matched_tag:
+        # If we don't have Excel, we consider "Excel update" successful because DOH persistence
+        # is handled via DB + session overrides.
+        excel_update_success = True if not has_excel_df else False
+        # Only attempt Excel DataFrame updates when we truly have an Excel df.
+        if excel_processor and not is_json_matched_tag and has_excel_df:
             logging.info(f"🔍 DOH UPDATE: Attempting to update Excel for variants: {name_variants}")
+            excel_update_success = False  # will flip to True after a successful DataFrame update
             for candidate in name_variants:
                 # Ensure DOH columns exist before attempting update (defensive)
                 try:
@@ -16877,14 +17222,19 @@ def update_doh():
         except Exception as ov_err:
             logging.warning(f"Could not save DOH override in session: {ov_err}")
 
-        # CRITICAL FIX: For JSON matched tags, database update is sufficient (Excel update not required)
-        # For regular tags, require Excel update to succeed
-        if not is_json_matched_tag and not excel_update_success:
-            return jsonify({'error': 'Failed to update DOH in Excel data'}), 500
-        
-        # For JSON matched tags, database update is sufficient
-        if is_json_matched_tag and not db_update_success:
-            return jsonify({'error': 'Failed to update DOH in database'}), 500
+        # CRITICAL FIX: DOH persistence in POSaBit-only sessions doesn't rely on Excel.
+        # - If we have Excel loaded, require it succeed for non-JSON tags.
+        # - If Excel is missing, require DB update success.
+        if is_json_matched_tag:
+            if not db_update_success:
+                return jsonify({'error': 'Failed to update DOH in database'}), 500
+        else:
+            if has_excel_df:
+                if not excel_update_success:
+                    return jsonify({'error': 'Failed to update DOH in Excel data'}), 500
+            else:
+                if not db_update_success:
+                    return jsonify({'error': 'Failed to update DOH in database'}), 500
         
         # CRITICAL FIX: Aggressively clear ALL caches to force fresh data AND reload DataFrame
         try:
@@ -17115,7 +17465,7 @@ def get_web_available_tags():
                 'tags': [],
                 'total_count': 0,
                 'source': 'web-no-excel',
-                'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
+                'message': 'No inventory loaded yet. Use POSaBit / API or upload an Excel file to see products.'
             })
         
         # Check cache only after verifying Excel file exists (unless nocache is set or recent lineage update)
@@ -17342,13 +17692,12 @@ def get_web_filter_options():
                         cursor = conn.cursor()
                         # Query unique lineage values directly using COALESCE logic (same as _get_filter_options_from_database)
                         cursor.execute('''
-                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
+                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) AS lineage
                             FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
-                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
+                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) IS NOT NULL
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) != ''
                         ''')
                         db_lineages = [str(row[0]).strip().upper() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
                         if db_lineages:
@@ -17418,13 +17767,12 @@ def _get_filter_options_from_database(store_name=None):
             conn = product_db._get_connection()
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
+                SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) AS lineage
                 FROM products p
                 LEFT JOIN strains s1 ON p.strain_id = s1.id
-                LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
-                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
+                LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) IS NOT NULL
+                  AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) != ''
             ''')
             db_lineages = [str(row[0]).strip() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
             lineages = set(db_lineages)
@@ -17836,13 +18184,12 @@ def get_filter_options():
                         cursor = conn.cursor()
                         # Query unique lineage values directly using COALESCE logic (same as _get_filter_options_from_database)
                         cursor.execute('''
-                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) AS lineage
+                            SELECT DISTINCT COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) AS lineage
                             FROM products p
                             LEFT JOIN strains s1 ON p.strain_id = s1.id
-                            LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
-                            LEFT JOIN strains s3 ON p.normalized_product_strain IS NULL AND LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s3.strain_name))
-                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) IS NOT NULL
-                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage) != ''
+                            LEFT JOIN strains s2 ON LOWER(TRIM(p."Product Strain")) = LOWER(TRIM(s2.strain_name))
+                            WHERE COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) IS NOT NULL
+                              AND COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s1.canonical_lineage, s2.canonical_lineage) != ''
                         ''')
                         db_lineages = [str(row[0]).strip().upper() for row in cursor.fetchall() if row[0] and str(row[0]).strip()]
                         if db_lineages:
@@ -23037,7 +23384,7 @@ def get_available_tags_lite():
             'tags': [],
             'total_count': 0,
             'source': 'no-excel-file',
-            'message': 'No Excel file uploaded. Please upload an Excel file to see products.'
+            'message': 'No inventory loaded yet. Use POSaBit / API or upload an Excel file to see products.'
         })
         
     except Exception as e:
@@ -23255,7 +23602,15 @@ def get_initial_data():
         logging.info(f"⏱️ /api/initial-data request started at {start_time}")
 
         # PERFORMANCE: Check cache first
+        # POSaBit-first: avoid reusing cached initial_data that may have been built
+        # from a default Excel autoload in a previous run/session.
         cache_key = get_session_cache_key('initial_data')
+        try:
+            from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+            if is_posabit_configured() or is_posabit_products_enabled():
+                cache_key = get_session_cache_key('initial_data_posabit')
+        except Exception:
+            pass
         cached_response = cache.get(cache_key)
         if cached_response and request.args.get('nocache') != '1':
             elapsed = (time.time() - start_time) * 1000
@@ -23321,69 +23676,113 @@ def get_initial_data():
                     response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
                     return response
 
-            # No cached data - check if no file in session, try loading default file (and cache it)
+            # No cached data - if no Excel file in session, do NOT auto-load default Excel.
+            # POSaBit-first: prefer POSaBit products on initial load. Default Excel autoload is opt-in.
             if not session_file_path or not os.path.exists(session_file_path):
-                logging.info("⚡ Fast load: No file in session - trying to load default Excel file...")
                 try:
                     store_name = get_current_store_name()
-                    from src.core.data.excel_processor import get_default_upload_file, ExcelProcessor
-                    default_file = get_default_upload_file(store_name)
-                    if default_file and os.path.exists(default_file):
-                        logging.info(f"⚡ Fast load: Found default file: {default_file} - loading it")
-                        default_processor = ExcelProcessor(store_name=store_name)
-                        if default_processor.load_file(default_file):
-                            default_tags = default_processor.get_available_tags(filters=None)
-                            if default_tags and len(default_tags) > 0:
-                                # Update session with default file
-                                session['file_path'] = default_file
-                                session['uploaded_filename'] = os.path.basename(default_file)
-                                session.modified = True
-                                
-                                # Build filters from Excel tags
+                    # POSaBit-first initial data
+                    try:
+                        from src.core.data.posabit_client import (
+                            is_posabit_configured, is_posabit_products_enabled, get_menu_feed_as_product_rows
+                        )
+                        if is_posabit_configured() or is_posabit_products_enabled():
+                            logging.info("⚡ Fast load: No Excel in session - loading products from POSaBit for initial data")
+                            posabit_rows = get_menu_feed_as_product_rows(store_name=store_name)
+                            if posabit_rows and len(posabit_rows) > 0:
+                                safe_rows = make_json_safe(posabit_rows)
                                 filters = {
-                                    'vendor': sorted(set(tag.get('Vendor/Supplier*', '') for tag in default_tags if tag.get('Vendor/Supplier*'))),
-                                    'brand': sorted(set(tag.get('Product Brand', '') for tag in default_tags if tag.get('Product Brand'))),
-                                    'productType': sorted(set(tag.get('Product Type*', '') for tag in default_tags if tag.get('Product Type*'))),
-                                    'lineage': sorted(set(tag.get('Lineage', '') or tag.get('lineage', '') or tag.get('canonical_lineage', '') for tag in default_tags if tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage'))),
-                                    'weight': sorted(set(tag.get('Weight*', '') for tag in default_tags if tag.get('Weight*'))),
-                                    'strain': sorted(set(tag.get('Product Strain', '') for tag in default_tags if tag.get('Product Strain'))),
-                                    'doh': sorted(set(tag.get('DOH', '') for tag in default_tags if tag.get('DOH'))),
+                                    'vendor': sorted(set(tag.get('Vendor/Supplier*', '') for tag in safe_rows if tag.get('Vendor/Supplier*'))),
+                                    'brand': sorted(set(tag.get('Product Brand', '') for tag in safe_rows if tag.get('Product Brand'))),
+                                    'productType': sorted(set(tag.get('Product Type*', '') for tag in safe_rows if tag.get('Product Type*'))),
+                                    'lineage': sorted(set((tag.get('Lineage', '') or tag.get('lineage', '') or tag.get('canonical_lineage', '')).strip() for tag in safe_rows if (tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage')))),
+                                    'weight': sorted(set(tag.get('Weight*', '') for tag in safe_rows if tag.get('Weight*'))),
+                                    'strain': sorted(set(tag.get('Product Strain', '') for tag in safe_rows if tag.get('Product Strain'))),
+                                    'doh': sorted(set(tag.get('DOH', '') for tag in safe_rows if tag.get('DOH'))),
                                     'highCbd': []
                                 }
-                                
-                                # CRITICAL FIX: Always align tags with database lineage before returning
-                                # This ensures UI shows current database lineage, not stale Excel lineage
-                                aligned_default_tags = _align_tags_with_db_lineage(default_tags, store_name) if default_tags else []
-                                
+
+                                aligned_rows = _align_tags_with_db_lineage(
+                                    safe_rows,
+                                    store_name,
+                                    skip_if_aligned=False,
+                                    force_overwrite=True
+                                ) if safe_rows else []
                                 initial_data = {
                                     'success': True,
                                     'data_loaded': True,
-                                    'filename': os.path.basename(default_file),
-                                    'filepath': default_file,
+                                    'filename': 'posabit',
+                                    'filepath': '',
                                     'columns': [],
                                     'filters': filters,
-                                    'available_tags': make_json_safe(aligned_default_tags),
+                                    'available_tags': make_json_safe(aligned_rows),
                                     'selected_tags': [],
-                                    'total_records': len(aligned_default_tags),
-                                    'source': 'default-file-fast-load'
+                                    'total_records': len(aligned_rows),
+                                    'source': 'posabit-fast-load'
                                 }
                                 elapsed = (time.time() - start_time) * 1000
-                                logging.info(f"⚡ Fast load default file data returned in {elapsed:.0f}ms")
-                                # PERFORMANCE FIX: Cache ALIGNED tags (with lineage) for future fast_load hits
-                                # This avoids re-enrichment on every request
-                                try:
-                                    cache.set(get_session_cache_key(f'available_tags_{default_file}'), make_json_safe(aligned_default_tags), timeout=3600)
-                                except Exception:
-                                    pass
+                                logging.info(f"⚡ Fast load POSaBit data returned in {elapsed:.0f}ms")
                                 response = make_response(jsonify(initial_data))
-                                response.headers['X-Cache'] = 'DEFAULT_FILE'
+                                response.headers['X-Cache'] = 'POSABIT'
                                 response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
                                 return response
+                            logging.warning("Fast load initial-data: POSaBit configured but returned 0 products")
+                    except Exception as posabit_init_err:
+                        logging.warning(f"Fast load initial-data POSaBit failed: {posabit_init_err}")
+
+                    # Optional legacy behavior: auto-load default Excel only if explicitly enabled
+                    allow_default_excel = os.environ.get("AUTOLOAD_DEFAULT_EXCEL", "").strip().lower() in ("1", "true", "yes")
+                    if allow_default_excel:
+                        logging.info("⚡ Fast load: AUTOLOAD_DEFAULT_EXCEL enabled - trying to load default Excel file")
+                        from src.core.data.excel_processor import get_default_upload_file, ExcelProcessor
+                        default_file = get_default_upload_file(store_name)
+                        if default_file and os.path.exists(default_file):
+                            logging.info(f"⚡ Fast load: Found default file: {default_file} - loading it")
+                            default_processor = ExcelProcessor(store_name=store_name)
+                            if default_processor.load_file(default_file):
+                                default_tags = default_processor.get_available_tags(filters=None)
+                                if default_tags and len(default_tags) > 0:
+                                    session['file_path'] = default_file
+                                    session['uploaded_filename'] = os.path.basename(default_file)
+                                    session.modified = True
+                                    filters = {
+                                        'vendor': sorted(set(tag.get('Vendor/Supplier*', '') for tag in default_tags if tag.get('Vendor/Supplier*'))),
+                                        'brand': sorted(set(tag.get('Product Brand', '') for tag in default_tags if tag.get('Product Brand'))),
+                                        'productType': sorted(set(tag.get('Product Type*', '') for tag in default_tags if tag.get('Product Type*'))),
+                                        'lineage': sorted(set(tag.get('Lineage', '') or tag.get('lineage', '') or tag.get('canonical_lineage', '') for tag in default_tags if tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage'))),
+                                        'weight': sorted(set(tag.get('Weight*', '') for tag in default_tags if tag.get('Weight*'))),
+                                        'strain': sorted(set(tag.get('Product Strain', '') for tag in default_tags if tag.get('Product Strain'))),
+                                        'doh': sorted(set(tag.get('DOH', '') for tag in default_tags if tag.get('DOH'))),
+                                        'highCbd': []
+                                    }
+                                    aligned_default_tags = _align_tags_with_db_lineage(default_tags, store_name) if default_tags else []
+                                    initial_data = {
+                                        'success': True,
+                                        'data_loaded': True,
+                                        'filename': os.path.basename(default_file),
+                                        'filepath': default_file,
+                                        'columns': [],
+                                        'filters': filters,
+                                        'available_tags': make_json_safe(aligned_default_tags),
+                                        'selected_tags': [],
+                                        'total_records': len(aligned_default_tags),
+                                        'source': 'default-file-fast-load'
+                                    }
+                                    elapsed = (time.time() - start_time) * 1000
+                                    logging.info(f"⚡ Fast load default file data returned in {elapsed:.0f}ms")
+                                    try:
+                                        cache.set(get_session_cache_key(f'available_tags_{default_file}'), make_json_safe(aligned_default_tags), timeout=3600)
+                                    except Exception:
+                                        pass
+                                    response = make_response(jsonify(initial_data))
+                                    response.headers['X-Cache'] = 'DEFAULT_FILE'
+                                    response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                                    return response
                 except Exception as default_err:
-                    logging.warning(f"Failed to load default file in fast_load: {default_err}")
+                    logging.warning(f"Fast load initial-data (no Excel) failed: {default_err}")
                 
                 # Fallback: return empty if default file load failed
-                logging.info("⚡ Fast load: No file and default file load failed - returning empty data")
+                logging.info("⚡ Fast load: No Excel file and no POSaBit data - returning empty data")
                 initial_data = {
                     'success': True,
                     'data_loaded': False,
@@ -23460,27 +23859,73 @@ def get_initial_data():
                     session.pop('file_path', None)
                     session.pop('uploaded_filename', None)
             
-            # If still no data after checking session, try default file
-            # PERFORMANCE: Skip default file loading for fast_load to avoid slow file I/O
+            # If still no data after checking session, POSaBit-first behavior:
+            # - Try POSaBit products
+            # - Only auto-load default Excel if explicitly enabled (AUTOLOAD_DEFAULT_EXCEL=1)
             if excel_processor.df is None or excel_processor.df.empty:
                 if fast_load:
-                    # For fast_load, still try to load default file (don't skip it)
-                    logging.info("⚡ Fast load: Attempting to load default file...")
-                    from src.core.data.excel_processor import get_default_upload_file
-                    store_name = get_current_store_name()
-                    default_file = get_default_upload_file(store_name)
-                    if default_file and os.path.exists(default_file):
-                        try:
-                            logging.info(f"⚡ Fast load: Found default file: {default_file} - loading it")
-                            success = excel_processor.load_file(default_file)
-                            if success:
-                                excel_processor._last_loaded_file = default_file
-                                logging.info(f"✅ Fast load: Default file loaded successfully")
-                                # Continue processing below instead of returning empty
-                            else:
-                                logging.warning("⚡ Fast load: Default file load failed")
-                        except Exception as e:
-                            logging.warning(f"⚡ Fast load: Error loading default file: {e}")
+                    # Try POSaBit first
+                    try:
+                        from src.core.data.posabit_client import (
+                            is_posabit_configured, is_posabit_products_enabled, get_menu_feed_as_product_rows
+                        )
+                        if is_posabit_configured() or is_posabit_products_enabled():
+                            logging.info("⚡ Fast load: No Excel rows - trying POSaBit products instead of default Excel")
+                            store_name_fast = get_current_store_name(allow_fallback=True)
+                            posabit_rows = get_menu_feed_as_product_rows(store_name=store_name_fast)
+                            if posabit_rows and len(posabit_rows) > 0:
+                                safe_rows = make_json_safe(posabit_rows)
+                                store_name = get_current_store_name()
+                                aligned_rows = _align_tags_with_db_lineage(safe_rows, store_name) if safe_rows else []
+                                initial_data = {
+                                    'success': True,
+                                    'data_loaded': True,
+                                    'filename': 'posabit',
+                                    'filepath': '',
+                                    'columns': [],
+                                    'filters': {
+                                        'vendor': sorted(set(tag.get('Vendor/Supplier*', '') for tag in safe_rows if tag.get('Vendor/Supplier*'))),
+                                        'brand': sorted(set(tag.get('Product Brand', '') for tag in safe_rows if tag.get('Product Brand'))),
+                                        'productType': sorted(set(tag.get('Product Type*', '') for tag in safe_rows if tag.get('Product Type*'))),
+                                        'lineage': sorted(set((tag.get('Lineage', '') or tag.get('lineage', '') or tag.get('canonical_lineage', '')).strip() for tag in safe_rows if (tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage')))),
+                                        'weight': sorted(set(tag.get('Weight*', '') for tag in safe_rows if tag.get('Weight*'))),
+                                        'strain': sorted(set(tag.get('Product Strain', '') for tag in safe_rows if tag.get('Product Strain'))),
+                                        'doh': sorted(set(tag.get('DOH', '') for tag in safe_rows if tag.get('DOH'))),
+                                        'highCbd': []
+                                    },
+                                    'available_tags': make_json_safe(aligned_rows),
+                                    'selected_tags': [],
+                                    'total_records': len(aligned_rows),
+                                    'source': 'posabit-fast-load'
+                                }
+                                elapsed = (time.time() - start_time) * 1000
+                                logging.info(f"⚡ Fast load POSaBit returned in {elapsed:.0f}ms (no Excel)")
+                                response = make_response(jsonify(initial_data))
+                                response.headers['X-Cache'] = 'POSABIT'
+                                response.headers['X-Response-Time'] = f"{elapsed:.0f}ms"
+                                return response
+                            logging.warning("⚡ Fast load: POSaBit configured but returned 0 products (no Excel)")
+                    except Exception as posabit_err:
+                        logging.warning(f"⚡ Fast load: POSaBit fallback failed (no Excel): {posabit_err}")
+
+                    # Only if explicitly enabled, attempt default Excel
+                    allow_default_excel = os.environ.get("AUTOLOAD_DEFAULT_EXCEL", "").strip().lower() in ("1", "true", "yes")
+                    if allow_default_excel:
+                        logging.info("⚡ Fast load: AUTOLOAD_DEFAULT_EXCEL enabled - attempting to load default file...")
+                        from src.core.data.excel_processor import get_default_upload_file
+                        store_name = get_current_store_name()
+                        default_file = get_default_upload_file(store_name)
+                        if default_file and os.path.exists(default_file):
+                            try:
+                                logging.info(f"⚡ Fast load: Found default file: {default_file} - loading it")
+                                success = excel_processor.load_file(default_file)
+                                if success:
+                                    excel_processor._last_loaded_file = default_file
+                                    logging.info("✅ Fast load: Default file loaded successfully")
+                                else:
+                                    logging.warning("⚡ Fast load: Default file load failed")
+                            except Exception as e:
+                                logging.warning(f"⚡ Fast load: Error loading default file: {e}")
                     
                     # If still no data after trying default file, return empty
                     if excel_processor.df is None or excel_processor.df.empty:
