@@ -92,7 +92,8 @@ MENU_FEED_PRODUCTION = "https://app.posabit.com/api/v1/menu_feeds"
 def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallback_category: str) -> str:
     """
     Normalize POSaBit's product_type/category into the app's expected display headers.
-    Name-based detection runs first (most reliable), then raw type / category.
+    Priority: API type/category fields first, then name only for format-specific indicators
+    (pre-roll hyphen format, disposable/AIO branding) that POSaBit stores inconsistently.
     """
     raw = (raw_product_type or "").strip()
     name = (item_name or "").strip()
@@ -102,55 +103,41 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
     lower_raw = raw.lower()
     lower_cat = cat.lower()
 
-    # --- Name-based detection (highest priority) ---
-
-    # Beverage / drink / shot (liquid edibles)
-    if any(x in lower_name for x in [" shot", "shot ", "lemonade", " drink", "drink ", "beverage", " soda", " juice"]):
-        return "Edible (Liquid)"
-
-    # Infused pre-rolls
-    if (
-        "infused pre-roll" in lower_name
-        or "terp infused pre-roll" in lower_name
-        or ("infused" in lower_name and ("pre-roll" in lower_name or "preroll" in lower_name))
-    ):
-        return "Infused Pre-Roll"
-
-    # Regular pre-rolls
-    if "pre-roll" in lower_name or "preroll" in lower_name or "pre roll" in lower_name:
-        return "Pre-Roll"
-
-    # Disposable vapes (name wins over category)
-    if "disposable" in lower_name or "aio" in lower_name:
-        return "Disposable"
-
-    # Vape cartridges
-    if "cartridge" in lower_name or "cart" in lower_name:
-        return "Vape Cartridge"
-
-    # --- Type/category-based detection ---
-
+    # --- API type/category fields first (authoritative) ---
     for s in (lower_raw, lower_cat):
+        if not s:
+            continue
         if "infused pre-roll" in s or "terp infused pre-roll" in s:
             return "Infused Pre-Roll"
-        if "pre-roll" in s or "preroll" in s:
+        if "pre-roll" in s or "preroll" in s or "pre roll" in s:
             return "Pre-Roll"
         if "disposable" in s:
             return "Disposable"
-        if "vape cartridge" in s or "cartridge" in s:
+        if "vape cartridge" in s or "cartridge" in s or "vape" in s:
             return "Vape Cartridge"
-        if "concentrate" in s or "extract" in s:
+        if "concentrate" in s or "extract" in s or "wax" in s or "shatter" in s or "rosin" in s or "resin" in s or "hash" in s or "kief" in s or "distillate" in s:
             return "Concentrate"
-        if "shot" in s or "beverage" in s or "drink" in s or "liquid edible" in s:
+        if "liquid edible" in s or "beverage" in s or "drink" in s or "shot" in s or "soda" in s or "lemonade" in s:
             return "Edible (Liquid)"
-        if "edible" in s or "gummy" in s or "gummi" in s or "candy" in s or "chocolate" in s or "tincture" in s or "capsule" in s:
+        if "edible" in s or "gummy" in s or "gummi" in s or "candy" in s or "chocolate" in s or "tincture" in s or "capsule" in s or "cookie" in s or "brownie" in s:
             return "Edible (Solid)"
-        if "topical" in s or "lotion" in s or "salve" in s or "balm" in s or "cream" in s or "gel" in s or "patch" in s:
+        if "topical" in s or "lotion" in s or "salve" in s or "balm" in s or "cream" in s or "patch" in s:
             return "Topical"
-        if "flower" in s or "bud" in s:
+        if "flower" in s or "bud" in s or "nug" in s:
             return "Flower"
         if "pre-roll" in s or "preroll" in s:
             return "Pre-Roll"
+
+    # --- Name-based detection only for format indicators POSaBit stores inconsistently ---
+    # (pre-roll hyphenation, disposable/AIO branding in product name)
+    if "infused pre-roll" in lower_name or ("infused" in lower_name and ("pre-roll" in lower_name or "preroll" in lower_name)):
+        return "Infused Pre-Roll"
+    if "pre-roll" in lower_name or "preroll" in lower_name or "pre roll" in lower_name:
+        return "Pre-Roll"
+    if "disposable" in lower_name or " aio" in lower_name or lower_name.endswith(" aio"):
+        return "Disposable"
+    if "cartridge" in lower_name or " cart " in lower_name or lower_name.endswith(" cart"):
+        return "Vape Cartridge"
 
     # Pass through the raw type if it's meaningful
     return raw or cat or "Uncategorized"
@@ -295,6 +282,12 @@ def _menu_item_to_product_row(item: Dict, price_variant: Optional[Dict], categor
         if unit is not None:
             weight_val = str(unit)
         unit_type = (price_variant.get("unit_type") or "").strip()
+
+    # Combine weight + unit_type into a display string (e.g. "1" + "g" -> "1g")
+    _unit_display_map = {"g": "g", "gram": "g", "grams": "g", "oz": "oz", "mg": "mg", "ml": "ml", "each": "each"}
+    _unit_norm = _unit_display_map.get(unit_type.lower(), unit_type)
+    if weight_val and _unit_norm:
+        weight_val = f"{weight_val}{_unit_norm}"
 
     thc_low = (item.get("thc") or {}).get("low") or ""
     thc_high = (item.get("thc") or {}).get("high") or ""

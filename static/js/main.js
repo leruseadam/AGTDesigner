@@ -380,13 +380,20 @@ const PRODUCT_TYPE_OVERRIDES = {
   "capsule": "Capsule",
   "topical": "Topical",
   "paraphernalia": "Paraphernalia",
-  "alcohol/ethanol extract": "rso/co2 tankers",
-  "Alcohol/Ethanol Extract": "rso/co2 tankers",
-  "alcohol ethanol extract": "rso/co2 tankers",
-  "Alcohol Ethanol Extract": "rso/co2 tankers",
-  "c02/ethanol extract": "rso/co2 tankers",
-  "CO2 Concentrate": "rso/co2 tankers",
-  "co2 concentrate": "rso/co2 tankers"
+  "alcohol/ethanol extract": "RSO",
+  "Alcohol/Ethanol Extract": "RSO",
+  "alcohol ethanol extract": "RSO",
+  "Alcohol Ethanol Extract": "RSO",
+  "c02/ethanol extract": "RSO",
+  "co2/ethanol extract": "RSO",
+  "co2 concentrate": "RSO",
+  "CO2 Concentrate": "RSO",
+  "rso": "RSO",
+  "rso/co2 tanker": "RSO",
+  "rso/co2 tanker ": "RSO",
+  "rso/co2 tankers": "RSO",
+  "rso / co2 tanker": "RSO",
+  "rso / co2 tankers": "RSO"
 };
 
 // Function to normalize product types (same as backend)
@@ -411,8 +418,11 @@ function normalizeProductType(productType) {
 
 function formatProductTypeLabel(value) {
   if (!value) return value;
-  if (value === 'rso/co2 tankers') {
-    return 'RSO/CO2 Tanker';
+  if (value.toString().trim().toLowerCase() === 'rso') {
+    return 'RSO';
+  }
+  if (value === 'rso/co2 tankers' || value === 'rso/co2 tanker') {
+    return 'RSO';
   }
   return value.split(' ').map(word => {
     if (word.includes('/')) {
@@ -2411,7 +2421,7 @@ const TagManager = {
                 if (!isDeactivated &&
                     !ptLower.includes('trade sample') &&
                     !excludedTypesLower.some(ex => ptLower.includes(ex))) {
-                    productTypes.add(pt.trim());
+                    productTypes.add(normalizeProductType(pt.trim()));
                 }
             }
             if (tag.Lineage) lineages.add(tag.Lineage);
@@ -2473,12 +2483,10 @@ const TagManager = {
             highCbd: filters.highCbd?.length || 0,
             preserveExistingValues
         };
-        console.log('🔧🔧🔧 updateFilters called with:', filterCounts);
-        try {
-            const stack = new Error().stack;
-            console.log('📍 updateFilters call stack:', stack);
-        } catch (e) {
-            console.error('Failed to get stack trace:', e);
+        // Avoid expensive console logging/stack traces on every filter update.
+        verboseLog('🔧🔧🔧 updateFilters called with:', filterCounts);
+        if (TAG_MANAGER_DEBUG_ENABLED) {
+            verboseLog('📍 updateFilters call stack:', new Error().stack);
         }
         verboseLog('Updating filters with:', filters, 'preserveExistingValues:', preserveExistingValues);
 
@@ -2919,7 +2927,7 @@ const TagManager = {
                     if (!isDeactivated && 
                         !ptLower.includes('trade sample') && 
                         !excludedTypesLower.includes(ptLower)) {
-                        filterOptions.productType.add(productType.trim());
+                        filterOptions.productType.add(normalizeProductType(productType.trim()));
                     }
                 }
                 
@@ -3324,7 +3332,8 @@ const TagManager = {
                 if (currentFilters.productType && currentFilters.productType.trim() !== '' && currentFilters.productType.toLowerCase() !== 'all') {
                     const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                     const normalizedTagProductType = normalizeProductType(tagProductType);
-                    if (normalizedTagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) {
+                    const normalizedFilterType = normalizeProductType(currentFilters.productType || '').toLowerCase();
+                    if (normalizedTagProductType.toLowerCase() !== normalizedFilterType) {
                         return false;
                     }
                 }
@@ -3579,7 +3588,8 @@ const TagManager = {
             if (currentFilters.productType && currentFilters.productType.trim() !== '' && currentFilters.productType.toLowerCase() !== 'all') {
                 const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
                 const normalizedTagProductType = normalizeProductType(tagProductType);
-                if (normalizedTagProductType.toLowerCase() !== currentFilters.productType.toLowerCase()) return false;
+                const normalizedFilterType = normalizeProductType(currentFilters.productType || '').toLowerCase();
+                if (normalizedTagProductType.toLowerCase() !== normalizedFilterType) return false;
             }
             if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
                 // CRITICAL: Prioritize manual edits, then use DOCX output lineage
@@ -3897,7 +3907,8 @@ const TagManager = {
                     match: normalizedTagProductType.toLowerCase() === productTypeFilter.toLowerCase()
                 });
                 
-                if (normalizedTagProductType.toLowerCase() !== productTypeFilter.toLowerCase()) {
+                const normalizedFilterType = normalizeProductType(productTypeFilter || '').toLowerCase();
+                if (normalizedTagProductType.toLowerCase() !== normalizedFilterType) {
                     return false;
                 }
             }
@@ -4494,8 +4505,11 @@ const TagManager = {
     organizeBrandCategories(tags) {
         // Defensive: ensure tags is always an array to avoid runtime errors
         tags = tags || [];
-        console.log('🔧 organizeBrandCategories() called with', tags.length, 'tags');
-        console.log('📍 Call stack:', new Error().stack);
+        // Avoid expensive console logging/stack traces on every render.
+        verboseLog('🔧 organizeBrandCategories() called with', tags.length, 'tags');
+        if (TAG_MANAGER_DEBUG_ENABLED) {
+            verboseLog('📍 Call stack:', new Error().stack);
+        }
 
         const vendorGroups = new Map();
         let skippedTags = 0;
@@ -6006,8 +6020,11 @@ const TagManager = {
             }
         }
         
-        console.log('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
-        console.log('📍 Call stack:', new Error().stack);
+        // Avoid expensive stack trace generation on every render (can cause minor freezes).
+        verboseLog('🔄 _updateAvailableTags() called with', originalTags?.length || 0, 'tags');
+        if (TAG_MANAGER_DEBUG_ENABLED) {
+            verboseLog('📍 Call stack:', new Error().stack);
+        }
         
         // CRITICAL FIX: Ensure vendor data is preserved before organizing
         // This prevents "Unknown Vendor" from appearing when tags are organized
@@ -6027,23 +6044,51 @@ const TagManager = {
         }
         
         // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
-        // Tags need to appear immediately after upload, not on next frame
+        // Tags need to appear immediately after upload, not on next frame.
+        // However, filter changes can trigger many rapid re-renders; deferring those
+        // slightly reduces the small "freeze" you described.
+        const skipMergeFromDom = options && options.skipMergeFromDom === true;
+        const shouldDefer = (skipMergeFromDom || (options && options.deferRender === true)) &&
+            tagsToProcess && tagsToProcess.length > 0;
+
+        const refreshDohBadgesAfterRender = () => {
+            // CRITICAL FIX: Refresh DOH badges after filters are applied
+            // Use requestAnimationFrame to ensure DOM is fully updated before refreshing badges
+            requestAnimationFrame(() => {
+                setTimeout(() => this.refreshAllDohBadges(), 50);
+                setTimeout(() => this.refreshAllDohBadges(), 200);
+                setTimeout(() => this.refreshAllDohBadges(), 500);
+            });
+        };
+
+        if (shouldDefer) {
+            this._pendingAvailableTagsUpdate = { originalTags, filteredTags, options };
+            if (!this._availableTagsUpdateRaf) {
+                // Show a quick splash so the user sees "something is happening"
+                if (typeof this.showActionSplash === 'function') {
+                    this.showActionSplash('Updating tags...');
+                }
+
+                this._availableTagsUpdateRaf = requestAnimationFrame(() => {
+                    this._availableTagsUpdateRaf = null;
+                    const next = this._pendingAvailableTagsUpdate;
+                    this._pendingAvailableTagsUpdate = null;
+
+                    try {
+                        this._performUpdateAvailableTags(next.originalTags, next.filteredTags, next.options);
+                    } finally {
+                        if (typeof this.hideActionSplash === 'function') {
+                            this.hideActionSplash();
+                        }
+                    }
+                    refreshDohBadgesAfterRender();
+                });
+            }
+            return;
+        }
+
         this._performUpdateAvailableTags(originalTags, filteredTags, options);
-        
-        // CRITICAL FIX: Refresh DOH badges after filters are applied
-        // This ensures badges appear when filters trigger re-rendering
-        // Use requestAnimationFrame to ensure DOM is fully updated before refreshing badges
-        requestAnimationFrame(() => {
-            setTimeout(() => {
-                this.refreshAllDohBadges();
-            }, 50);
-            setTimeout(() => {
-                this.refreshAllDohBadges();
-            }, 200);
-            setTimeout(() => {
-                this.refreshAllDohBadges();
-            }, 500);
-        });
+        refreshDohBadgesAfterRender();
     },
     
     _performUpdateAvailableTags(originalTags, filteredTags = null, options = null) {
@@ -6079,11 +6124,11 @@ const TagManager = {
             return;
         }
         
-        // CRITICAL FIX: Preserve checkbox selections from DOM before re-rendering
-        // This prevents selections made during initial load from being lost
-        // When skipMergeFromDom is true (e.g. filter dropdown change), do NOT merge DOM into selection -
-        // otherwise every visible (filtered) item would be treated as selected and all get added.
+        // CRITICAL FIX: Preserve checkbox selections from DOM before re-rendering ONLY when explicitly requested.
+        // Unconditional DOM merge can accidentally add visible filtered items as selected
+        // (reported as "random tags" being added when changing supplier/vendor filter).
         const skipMergeFromDom = options && options.skipMergeFromDom === true;
+        const mergeSelectionsFromDom = options && options.mergeSelectionsFromDom === true;
         const currentlyCheckedCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox:checked');
         const currentlySelectedTagNames = Array.from(currentlyCheckedCheckboxes).map(cb => cb.value).filter(Boolean);
         
@@ -6093,12 +6138,12 @@ const TagManager = {
             verboseLog(`🔒 Preserving ${this.state.persistentSelectedTags.length} persistent selected tags before re-render`);
         }
         
-        // Merge DOM selections with persistentSelectedTags to ensure nothing is lost (skip when filter change to avoid "all filtered items selected")
-        if (!skipMergeFromDom && currentlySelectedTagNames.length > 0) {
+        // Merge DOM selections with persistentSelectedTags only for targeted flows that opt-in.
+        if (mergeSelectionsFromDom && !skipMergeFromDom && currentlySelectedTagNames.length > 0) {
             const currentSet = new Set(this.state.persistentSelectedTags || []);
             currentlySelectedTagNames.forEach(tagName => {
                 if (!currentSet.has(tagName)) {
-                    console.log(`🔍 Preserving selection from DOM: ${tagName}`);
+                    verboseLog(`🔍 Preserving selection from DOM: ${tagName}`);
                     this.state.persistentSelectedTags.push(tagName);
                 }
             });
@@ -10517,8 +10562,18 @@ const TagManager = {
     },
 
     updateSelectedTags(tags) {
-        // PERFORMANCE: Skip batching - update immediately for responsive UI
-        this._performUpdateSelectedTags(tags);
+        // PERFORMANCE: Yield to the browser first, and batch rapid calls into one update.
+        // This reduces small UI freezes that happen when many actions trigger
+        // selected-tags re-renders in the same frame.
+        this._pendingSelectedTagsUpdate = tags;
+        if (this._selectedTagsUpdateRaf) return;
+
+        this._selectedTagsUpdateRaf = requestAnimationFrame(() => {
+            this._selectedTagsUpdateRaf = null;
+            const next = this._pendingSelectedTagsUpdate;
+            this._pendingSelectedTagsUpdate = null;
+            this._performUpdateSelectedTags(next);
+        });
     },
     
     _performUpdateSelectedTags(tags) {
@@ -12845,8 +12900,10 @@ const TagManager = {
             
             // CRITICAL FIX: Always update UI after loading tags to ensure lineage dropdowns reflect database values
             // This is especially important when lineage alignment happened on the backend
-            console.log(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
-            console.log('📍 Call stack for tag update:', new Error().stack);
+            verboseLog(`🔄 Updating UI with ${tags.length} tags (source: ${responseData?.source || 'unknown'})`);
+            if (TAG_MANAGER_DEBUG_ENABLED) {
+                verboseLog('📍 Call stack for tag update:', new Error().stack);
+            }
             this._backgroundProcessingRetries = 0; // reset after successful load
 
             // PERFORMANCE: Build filters immediately from loaded tags (instant population)
@@ -16524,8 +16581,10 @@ const TagManager = {
 
     async clearSelected() {
         // CRITICAL DEBUG: Log who's calling clearSelected
-        console.log('🗑️ clearSelected() called - USER INTENTIONALLY CLEARING TAGS');
-        console.log('📍 Call stack:', new Error().stack);
+        verboseLog('🗑️ clearSelected() called - USER INTENTIONALLY CLEARING TAGS');
+        if (TAG_MANAGER_DEBUG_ENABLED) {
+            verboseLog('📍 Call stack:', new Error().stack);
+        }
 
         // CRITICAL FIX: Prevent multiple simultaneous calls - check both state flag and add debounce
         if (this.state.isClearing) {
@@ -18022,38 +18081,42 @@ const TagManager = {
                         if (tagsData.tags && tagsData.tags.length > 0) {
                             verboseLog(`✅ Loaded ${tagsData.tags.length} tags instantly after upload (attempt ${attempt + 1})`);
 
-                            // Update tags immediately
+                            // Update tags state immediately, but phase heavy UI work across frames
+                            // to avoid a brief freeze right after upload.
                             this.state.tags = [...tagsData.tags];
                             this.state.originalTags = [...tagsData.tags];
-                            this._updateAvailableTags(tagsData.tags);
+                            this._updateAvailableTags(tagsData.tags, null, { deferRender: true });
 
-                            // CRITICAL: Extract and populate filters from tags data immediately
-                            // This ensures filters appear instantly without waiting for separate API call
+                            // CRITICAL: Extract and populate filters from tags data, but defer to
+                            // the next frame so rendering can paint first.
                             if (tagsData.tags && tagsData.tags.length > 0) {
-                                const extractedFilters = this._extractFiltersFromTags(tagsData.tags);
-                                this.updateFilters(extractedFilters);
-                                verboseLog('✅ Filters extracted from tags immediately:', extractedFilters);
+                                requestAnimationFrame(() => {
+                                    const extractedFilters = this._extractFiltersFromTags(tagsData.tags);
+                                    this.updateFilters(extractedFilters);
+                                    verboseLog('✅ Filters extracted from tags immediately:', extractedFilters);
 
-                                // CRITICAL: Reset all filters to "All" after new file upload
-                                // This ensures users see all products from the new file
-                                if (this.clearAllFilters) {
-                                    this.clearAllFilters();
-                                    verboseLog('✅ All filters reset to default after upload');
-                                }
+                                    // Reset filters after new file upload in a separate task to reduce jank.
+                                    setTimeout(() => {
+                                        if (this.clearAllFilters) {
+                                            this.clearAllFilters();
+                                            verboseLog('✅ All filters reset to default after upload');
+                                        }
 
-                                // CRITICAL FIX: Ensure filter row container is visible
-                                const filterRow = document.querySelector('.filter-row');
-                                if (filterRow) {
-                                    filterRow.style.display = 'flex';
-                                    filterRow.style.visibility = 'visible';
-                                    verboseLog('✅ Filter row container made visible');
-                                }
+                                        // Ensure filter row container is visible
+                                        const filterRow = document.querySelector('.filter-row');
+                                        if (filterRow) {
+                                            filterRow.style.display = 'flex';
+                                            filterRow.style.visibility = 'visible';
+                                            verboseLog('✅ Filter row container made visible');
+                                        }
 
-                                // CRITICAL FIX: Ensure filters are rendered after upload
-                                if (this.renderActiveFilters) {
-                                    this.renderActiveFilters();
-                                    verboseLog('✅ Filters rendered after upload');
-                                }
+                                        // Ensure active filter chips are rendered
+                                        if (this.renderActiveFilters) {
+                                            this.renderActiveFilters();
+                                            verboseLog('✅ Filters rendered after upload');
+                                        }
+                                    }, 0);
+                                });
                             }
 
                             // Load filters and selected tags in parallel (non-blocking) to refresh with full options
@@ -19257,8 +19320,10 @@ const TagManager = {
     // Clear all UI state when a new file is uploaded
     clearUIStateForNewFile(preserveFilters = false) {
         // CRITICAL DEBUG: Log stack trace to track who's calling this
-        console.log('⚠️ clearUIStateForNewFile called, preserveFilters:', preserveFilters);
-        console.log('📍 Call stack:', new Error().stack);
+        verboseLog('⚠️ clearUIStateForNewFile called, preserveFilters:', preserveFilters);
+        if (TAG_MANAGER_DEBUG_ENABLED) {
+            verboseLog('📍 Call stack:', new Error().stack);
+        }
 
         verboseLog('Clearing UI state for new file upload, preserveFilters:', preserveFilters);
 
@@ -19399,9 +19464,11 @@ const TagManager = {
         // This prevents clearing when data is still loading
         if (invalidTags.length > 0 && invalidTags.length > this.state.persistentSelectedTags.length * 0.5) {
             // More than 50% invalid - likely a data mismatch, clean up
-            console.log('🗑️ validateSelectedTags - CLEARING TAGS due to >50% invalid');
-            console.log('📍 Invalid tags:', invalidTags);
-            console.log('📍 Call stack:', new Error().stack);
+            verboseLog('🗑️ validateSelectedTags - CLEARING TAGS due to >50% invalid');
+            verboseLog('📍 Invalid tags:', invalidTags);
+            if (TAG_MANAGER_DEBUG_ENABLED) {
+                verboseLog('📍 Call stack:', new Error().stack);
+            }
             verboseLog(`Cleaning up ${invalidTags.length} invalid tags (${(invalidTags.length / this.state.persistentSelectedTags.length * 100).toFixed(1)}% of selections)`);
 
             // Remove invalid tags and update with corrected case

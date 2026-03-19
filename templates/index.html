@@ -5812,7 +5812,7 @@
 
   </style>
 </head>
-<body class="{% if not (user_has_store and current_store) %}modal-open{% endif %}">
+<body class="{% if not current_store %}modal-open{% endif %}">
   <!-- Application Loading Splash Screen -->
   <div id="appLoadingSplash" class="app-loading-splash">
     <div class="app-loading-container">
@@ -5852,7 +5852,7 @@
   <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" async></script>
 
   <!-- Main Content (hidden until store is selected) - backend adds store-selected when user_has_store -->
-  <div class="main-content{% if user_has_store %} store-selected{% endif %}" id="mainContent" style="padding-top: 0.5rem;">
+  <div class="main-content{% if current_store %} store-selected{% endif %}" id="mainContent" style="padding-top: 0.5rem;{% if not current_store %} visibility: hidden; pointer-events: none;{% endif %}">
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
       <div class="orb"></div>
@@ -6019,152 +6019,6 @@
               </div>
             </div>
 
-            <!-- Store Selection Modal -->
-            <!-- Force visible immediately; we hide it synchronously below if server says a store is already selected. -->
-            <div
-              class="modal fade show"
-              id="storeSelectionModal"
-              tabindex="-1"
-              aria-labelledby="storeSelectionModalLabel"
-              aria-hidden="false"
-              aria-modal="true"
-              role="dialog"
-              style="display: block; z-index: 2000;"
-              data-bs-backdrop="static"
-              data-bs-keyboard="false"
-            >
-              <div class="modal-dialog modal-dialog-centered">
-                <div class="modal-content">
-                  <div class="modal-header border-0">
-                    <h5 class="modal-title text-white fw-bold" id="storeSelectionModalLabel">Select Store</h5>
-                  </div>
-                  <div class="modal-body text-white">
-                    <p class="text-secondary mb-2" style="font-size: 0.95rem;">Choose which store database to use for tag data.</p>
-                    <div class="store-options-grid" id="storeOptionsGrid">
-                      {% for store in stores %}
-                        <button
-                          type="button"
-                          class="btn btn-store-option"
-                          onclick="selectStore('{{ store }}')"
-                          {% if current_store == store %}style="border-color: rgba(74,222,128,0.9) !important; box-shadow: 0 0 0 2px rgba(74,222,128,0.25) !important;"{% endif %}
-                        >
-                          <span class="store-option-content">
-                            <span class="store-name">{{ store|replace("_", " ") }}</span>
-                            <span class="store-location">Inventory</span>
-                          </span>
-                        </button>
-                      {% endfor %}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="modal-backdrop fade show" id="storeSelectionBackdrop" style="z-index: 1990;"></div>
-            <style>
-              body.modal-open { overflow: hidden; }
-            </style>
-
-            <script>
-              // Hide the store modal immediately if server already has a store selected.
-              (function () {
-                const hasCurrentStore = {{ 'true' if user_has_store and current_store else 'false' }};
-                if (hasCurrentStore) {
-                  const modalEl = document.getElementById('storeSelectionModal');
-                  if (modalEl) {
-                    modalEl.classList.remove('show');
-                    modalEl.style.display = 'none';
-                    modalEl.setAttribute('aria-hidden', 'true');
-                  }
-                  const backdrop = document.getElementById('storeSelectionBackdrop');
-                  if (backdrop) backdrop.remove();
-                  document.body.classList.remove('modal-open');
-                } else {
-                  document.body.classList.add('modal-open');
-                }
-              })();
-            </script>
-
-            <script>
-              // Store selection: called by store option buttons in the modal
-              window.selectStore = async function selectStore(storeValue) {
-                try {
-                  const response = await fetch('/api/set-store', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ store: storeValue })
-                  });
-                  const data = await response.json();
-
-                  if (!response.ok || !data.success) {
-                    console.error('Store selection failed:', data);
-                    alert(data.error || data.message || 'Failed to set store.');
-                    return;
-                  }
-
-                  // Reload is the most reliable way to sync backend-cleared session + JS state.
-                  setTimeout(() => window.location.reload(), 400);
-                } catch (e) {
-                  console.error('selectStore error:', e);
-                  alert('Failed to set store. Please try again.');
-                }
-              };
-
-              // Ensure the modal is shown ASAP if no store is selected.
-              // The template renders it visible immediately; this block "upgrades" it once Bootstrap is ready.
-              (function ensureStoreModalShown() {
-                const hasCurrentStore = {{ 'true' if user_has_store and current_store else 'false' }};
-                if (hasCurrentStore) return;
-
-                const modalEl = document.getElementById('storeSelectionModal');
-                if (!modalEl) return;
-
-                const alreadyVisible = modalEl.classList.contains('show') || modalEl.style.display === 'block';
-
-                // When bootstrap is available, show via Bootstrap to ensure focus trapping etc.
-                const tryBootstrapShow = () => {
-                  if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return false;
-
-                  // Remove our manual backdrop to prevent double-backdrop when bootstrap shows
-                  const manualBackdrop = document.getElementById('storeSelectionBackdrop');
-                  if (manualBackdrop) manualBackdrop.remove();
-
-                  const modal = bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false });
-                  if (!alreadyVisible) modal.show();
-                  return true;
-                };
-
-                // Try now, then retry for a short time until bootstrap loads.
-                if (tryBootstrapShow()) return;
-                let tries = 0;
-                const tick = () => {
-                  tries += 1;
-                  if (tryBootstrapShow() || tries > 60) return; // ~1s at 60fps
-                  requestAnimationFrame(tick);
-                };
-                requestAnimationFrame(tick);
-
-                // Optional safety check: if backend says store isn't required (unexpected), hide.
-                fetch('/api/check-store-required', { method: 'GET' })
-                  .then(r => r.json())
-                  .then(payload => {
-                    if (payload && payload.requires_store === false) {
-                      modalEl.classList.remove('show');
-                      modalEl.style.display = 'none';
-                      document.body.classList.remove('modal-open');
-                      const manualBackdrop = document.getElementById('storeSelectionBackdrop');
-                      if (manualBackdrop) manualBackdrop.remove();
-                    }
-                  })
-                  .catch(() => {});
-              })();
-            </script>
-
-            <!-- IMMEDIATE STORE SETTING SCRIPT -->
-            <script>
-              // Set Bothell as default store IMMEDIATELY after elements are created
-              // REMOVED: No longer auto-setting Bothell - user must select store first
-              // Store selection is now required and handled by checkStoreRequired()
-            </script>
           </div>
         </div>
       </div>
@@ -8683,7 +8537,7 @@
 
       // Store check handled by backend template rendering
       console.log('Store selection status from backend: {{ "has store" if user_has_store else "no store" }}');
-      {% if user_has_store %}
+      {% if current_store %}
       console.log('✅ Store already selected: {{ current_store }} - Content visible by default');
       // Update the display immediately
       setTimeout(() => {
@@ -14145,6 +13999,145 @@
   })();
   </script>
   
+  <!-- Store Selection Modal — outside #mainContent so visibility:hidden doesn't affect it -->
+  <div
+    class="modal fade show"
+    id="storeSelectionModal"
+    tabindex="-1"
+    aria-labelledby="storeSelectionModalLabel"
+    aria-hidden="false"
+    aria-modal="true"
+    role="dialog"
+    style="display: block; z-index: 2000;"
+    data-bs-backdrop="static"
+    data-bs-keyboard="false"
+  >
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header border-0">
+          <h5 class="modal-title text-white fw-bold" id="storeSelectionModalLabel">Select Store</h5>
+        </div>
+        <div class="modal-body text-white">
+          <p class="text-secondary mb-2" style="font-size: 0.95rem;">Choose which store database to use for tag data.</p>
+          <div class="store-options-grid" id="storeOptionsGrid">
+            {% for store in stores %}
+              <button
+                type="button"
+                class="btn btn-store-option"
+                onclick="selectStore('{{ store }}')"
+                {% if current_store == store %}style="border-color: rgba(74,222,128,0.9) !important; box-shadow: 0 0 0 2px rgba(74,222,128,0.25) !important;"{% endif %}
+              >
+                <span class="store-option-content">
+                  <span class="store-name">{{ store|replace("_", " ") }}</span>
+                  <span class="store-location">Inventory</span>
+                </span>
+              </button>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div
+    id="storeSelectionShield"
+    aria-hidden="true"
+    style="position: fixed; inset: 0; z-index: 1999; background: rgba(18, 12, 30, 0.82); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); pointer-events: auto; display: block;"
+  ></div>
+  <script>
+    // Hard-enforce store modal visibility when no store is selected.
+    (function() {
+      const modalEl = document.getElementById('storeSelectionModal');
+      const shieldEl = document.getElementById('storeSelectionShield');
+      if (!modalEl) return;
+
+      const hasStoreFromServer = {{ 'true' if current_store else 'false' }};
+      const storeLabel = (document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase();
+      const hasStoreFromUi = storeLabel && !storeLabel.includes('no store selected');
+      const needsStoreModal = !hasStoreFromServer || !hasStoreFromUi;
+
+      const enforceVisible = () => {
+        modalEl.style.display = 'block';
+        modalEl.classList.add('show');
+        modalEl.setAttribute('aria-hidden', 'false');
+        modalEl.setAttribute('aria-modal', 'true');
+        modalEl.setAttribute('role', 'dialog');
+        document.body.classList.add('modal-open');
+        document.body.style.overflow = 'hidden';
+        if (shieldEl) shieldEl.style.display = 'block';
+      };
+
+      if (needsStoreModal) {
+        enforceVisible();
+        // Re-assert for cases where later scripts/modal cleanup hide it.
+        let attempts = 0;
+        const maxAttempts = 12; // ~3 seconds total
+        const t = setInterval(() => {
+          attempts += 1;
+          const stillNoStore = !((document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase().trim()) ||
+                               (document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase().includes('no store selected');
+          if (!stillNoStore || attempts >= maxAttempts) {
+            clearInterval(t);
+            return;
+          }
+          enforceVisible();
+        }, 250);
+      } else {
+        modalEl.style.display = 'none';
+        modalEl.classList.remove('show');
+        modalEl.setAttribute('aria-hidden', 'true');
+        if (shieldEl) shieldEl.style.display = 'none';
+      }
+    })();
+  </script>
+
+  <!-- Hard fallback: visible store picker if scripts/bootstrap modal fail -->
+  <div
+    id="storeSelectionFallback"
+    style="{% if current_store %}display:none;{% else %}display:block;{% endif %} position:fixed; inset:0; z-index:2100; background:rgba(14,10,24,0.9); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);"
+  >
+    <div style="position:absolute; left:50%; top:50%; transform:translate(-50%, -50%); width:min(900px, 92vw); background:rgba(40,30,56,0.96); border:1px solid rgba(160,132,232,0.38); border-radius:14px; box-shadow:0 20px 50px rgba(0,0,0,0.45); padding:18px 16px 14px 16px;">
+      <div style="color:#fff; font-weight:700; font-size:1.25rem; margin-bottom:6px;">Select Store</div>
+      <div style="color:rgba(255,255,255,0.74); font-size:0.95rem; margin-bottom:12px;">Choose which store database to use for tag data.</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px;">
+        {% for store in stores %}
+          <button
+            type="button"
+            onclick="selectStore('{{ store }}')"
+            style="background:rgba(59,47,83,0.95); color:#fff; border:1px solid rgba(160,132,232,0.4); border-radius:10px; padding:10px 10px; font-weight:700; text-align:center;"
+          >
+            <div>{{ store|replace("_", " ") }}</div>
+            <div style="font-size:0.75rem; color:rgba(255,255,255,0.7); font-weight:500;">Inventory</div>
+          </button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  <script>
+    (function(){
+      // Keep fallback synced in case store is restored dynamically after load.
+      const fallback = document.getElementById('storeSelectionFallback');
+      if (!fallback) return;
+      const storeLabel = (document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase();
+      const hasStore = storeLabel && !storeLabel.includes('no store selected');
+      fallback.style.display = hasStore ? 'none' : 'block';
+    })();
+  </script>
+
+  <script>
+    window.selectStore = async function(storeValue) {
+      try {
+        const r = await fetch('/api/set-store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ store: storeValue })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.success) { alert(d.error || 'Failed to set store.'); return; }
+        window.location.reload();
+      } catch(e) { alert('Failed to set store. Please try again.'); }
+    };
+  </script>
+
   </body>
 </html> 
 

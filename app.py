@@ -1040,7 +1040,7 @@ def get_client_ip():
     else:
         return request.remote_addr
 
-def get_current_store_name(allow_fallback=True):
+def get_current_store_name(allow_fallback=False):
     """Get the current store name for the requesting client. Returns None if no valid selection."""
     try:
         # Check if we have a request context before accessing session/request
@@ -1051,9 +1051,10 @@ def get_current_store_name(allow_fallback=True):
                 return 'AGT_Bothell'  # Default fallback
             return None
         
-        # CRITICAL FIX: Check Flask session first (most reliable). Keep the value even if server instance changed.
-        if session.get('selected_store'):
-            return session.get('selected_store')
+        # CRITICAL FIX: Check Flask session first (most reliable), but only accept valid stores.
+        session_store = session.get('selected_store')
+        if session_store and session_store in VALID_STORES:
+            return session_store
         
         # Fallback to IP-based selection
         ip_address = get_client_ip()
@@ -1067,13 +1068,15 @@ def get_current_store_name(allow_fallback=True):
                         # Also save to session for consistency
                         session['selected_store'] = store_data['store']
                         session['store_server_id'] = SERVER_INSTANCE_ID
-                        return store_data['store']
+                        store_value = store_data.get('store')
+                        if store_value in VALID_STORES:
+                            return store_value
                     else:
                         # Remove expired selection
                         del _ip_store_selections[ip_address]
         
         if allow_fallback:
-            # Simpler fallback: default to Bothell instead of auto-picking largest DB (avoids surprise switches)
+            # Explicit fallback only when caller asks for it.
             return 'AGT_Bothell'
     except Exception as e:
         logging.warning(f"Error getting current store name: {e}")
@@ -1087,8 +1090,9 @@ def has_store_selection():
         if not has_request_context():
             return False
         
-        # CRITICAL FIX: Check Flask session FIRST (most reliable) and keep value even if server instance changed
-        if session.get('selected_store'):
+        # CRITICAL FIX: Check Flask session FIRST, but only if it's a valid store key
+        session_store = session.get('selected_store')
+        if session_store and session_store in VALID_STORES:
             return True
         
         # Fallback to IP-based selection
@@ -3318,8 +3322,10 @@ def index():
                     if last is None:
                         raise ValueError("Could not parse persistent upload JSON")
                     last_store = last.get('store')
-                    current_store = get_current_store_name(allow_fallback=True)
-                    if last.get('file_path') and (not current_store or last_store == current_store):
+                    # IMPORTANT: Do not overwrite page-level current_store with fallback values here.
+                    # Using allow_fallback=True can inject AGT_Bothell and incorrectly suppress the store modal.
+                    current_store_for_recovery = get_current_store_name(allow_fallback=False)
+                    if last.get('file_path') and (not current_store_for_recovery or last_store == current_store_for_recovery):
                         logging.info(f"🔁 Index recovery: Restoring upload info from {persistence_file}")
                         session['file_path'] = _sanitize_persisted_path(last.get('file_path'))
                         session['uploaded_filename'] = last.get('filename')
@@ -8517,9 +8523,16 @@ def _enforce_nonclassic_lineage_rules(tags):
         
         # Check if this is a classic type
         is_classic = product_type in [ct.lower() for ct in CLASSIC_TYPES] or any(ct.lower() in product_type for ct in CLASSIC_TYPES)
-        
-        # Skip classic types - they can have any valid classic lineage
+
         if is_classic:
+            # Classic types can have any classic lineage, but NOT paraphernalia-specific values
+            invalid_classic_lineages = {'PARA', 'PARAPHERNALIA'}
+            current_lineage = tag.get('Lineage') or tag.get('currentLineage') or tag.get('canonical_lineage') or ''
+            if str(current_lineage).strip().upper() in invalid_classic_lineages:
+                tag['Lineage'] = 'HYBRID'
+                tag['currentLineage'] = 'HYBRID'
+                tag['canonical_lineage'] = 'HYBRID'
+                fixed_count += 1
             continue
         
         # For non-classic types, enforce MIXED or CBD only
@@ -20790,9 +20803,16 @@ def clear_cache():
             cache.clear()
             logging.info("Cleared Flask cache")
         
-        # Clear session data
+        # Clear session data but preserve store selection so tags can reload immediately.
+        preserved_store = session.get('selected_store')
+        preserved_server_id = session.get('store_server_id')
         session.clear()
-        logging.info("Cleared session data")
+        if preserved_store and preserved_store in VALID_STORES:
+            session['selected_store'] = preserved_store
+            if preserved_server_id:
+                session['store_server_id'] = preserved_server_id
+            logging.info(f"Preserved store selection during cache clear: {preserved_store}")
+        logging.info("Cleared session data (with store preservation)")
         
         # Clear global variables
         global _initial_data_cache, _cache_timestamp
