@@ -40,15 +40,18 @@
   }
 }
 
-/* Ensure Template selects show a bright turquoise border in all contexts */
+/* Ensure Template selects show a bright turquoise border in all contexts, but keep them compact */
 .center-column-wrapper #templateSelect,
 .center-column-wrapper #templateGroupSelect,
 #templateSelect,
 #templateGroupSelect {
-  border: 3px solid #00d4aa !important;
-  box-shadow: 0 0 24px rgba(0,212,170,0.55) !important;
+  border: 2px solid #00d4aa !important;
+  box-shadow: 0 0 16px rgba(0,212,170,0.45) !important;
   background-color: rgba(44,34,58,0.9) !important;
   color: #ffffff !important;
+  font-size: 0.9rem !important;
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.4rem !important;
 }
 
 .center-column-wrapper #templateSelect:focus,
@@ -2812,7 +2815,7 @@ body.modal-open #mainContent.store-selection-disabled,
   .center-column-wrapper .btn-secondary-modern,
   .center-column-wrapper .btn-control {
     width: 100% !important;
-    max-width: 100% !important;
+    max-width: 210px !important; /* keep buttons visually compact */
     box-sizing: border-box !important;
     padding-left: 0.4rem !important;
     padding-right: 0.4rem !important;
@@ -2820,9 +2823,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Size adjustments specific to center column generate button */
   .center-column-wrapper #generateBtn {
-    font-size: 1.05rem !important;
-    padding: 0.9rem 1.1rem !important;
-    min-height: 64px !important; /* increased height for prominence */
+    font-size: 0.95rem !important;
+    padding: 0.6rem 0.9rem !important;
+    min-height: 44px !important; /* more compact */
     border-radius: 10px !important;
   }
 
@@ -2868,9 +2871,9 @@ body.modal-open #mainContent.store-selection-disabled,
   .center-column-wrapper .control-group-modern button.btn-primary-modern,
   .center-column-wrapper .control-group-modern button#generateBtn {
     width: 100% !important;
-    max-width: 100% !important;
+    max-width: 210px !important;
     height: auto !important;
-    max-height: 48px !important; /* cap height so button stays rectangular */
+    max-height: 44px !important; /* smaller cap height */
     padding: 0.45rem 0.65rem !important;
     font-size: 0.95rem !important;
     display: inline-flex !important;
@@ -3284,11 +3287,10 @@ body.modal-open #mainContent.store-selection-disabled,
     display: none !important;
   }
   
-  /* Generate button - Professional and Prominent */
-  /* Override btn-primary-modern width for generate button */
+  /* Generate button - keep width aligned with other center-column controls */
   .control-panel #generateBtn.btn-primary-modern {
-    width: 45% !important; /* Further reduced for narrow center column */
-    max-width: 45% !important; /* Further reduced for narrow center column */
+    width: 100% !important;
+    max-width: 210px !important;
   }
 
   .control-panel #generateBtn {
@@ -8026,10 +8028,14 @@ body.modal-open #mainContent.store-selection-disabled,
   width: 100% !important;
   padding: 0 0.5rem !important;
   margin-bottom: 0.5rem !important;
+  display: flex !important;
+  justify-content: center !important;
 }
 
 .top-tools-bar {
   width: 100% !important;
+  max-width: none !important;
+  margin: 0 auto !important;
   background: rgba(45, 34, 58, 0.85);
   border-radius: 14px !important;
   -webkit-backdrop-filter: blur(14px);
@@ -8037,9 +8043,9 @@ body.modal-open #mainContent.store-selection-disabled,
   border: 1px solid rgba(160, 132, 232, 0.28);
   box-shadow: 0 8px 24px rgba(0,0,0,0.14);
   padding: 0.5rem 0.6rem !important;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
 }
 
 .top-tools-title {
@@ -8049,7 +8055,7 @@ body.modal-open #mainContent.store-selection-disabled,
   margin-left: auto;
   margin-right: auto;
   align-self: center;
-  justify-self: center;
+  order: 0;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: rgba(255,255,255,0.92);
@@ -8060,10 +8066,20 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .top-tools-buttons {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  order: 1;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: stretch;
+  justify-content: flex-start;
+}
+
+.top-tools-buttons .btn-tool-modern,
+.top-tools-buttons .filter-action-button,
+.top-tools-buttons .btn-help-modern {
+  flex: 1 1 auto;
+  min-width: 110px;
+  max-width: 180px;
 }
 
 .top-tools-buttons .btn-tool-modern,
@@ -8118,19 +8134,20 @@ body.modal-open #mainContent.store-selection-disabled,
 /* Left sidebar filter (vertical) */
 .main-content-row > [data-container-type="filter"] {
   align-self: stretch !important;
-  height: 100% !important;
   display: flex !important;
   flex-direction: column !important;
+  max-height: var(--tag-list-height) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
 }
 
 .main-content-row > [data-container-type="filter"] .enhanced-filter-bar {
   flex-direction: column !important;
   align-items: stretch !important;
   flex: 1 1 auto !important;
-  height: 100% !important;
-  min-height: var(--tag-list-height) !important;
+  min-height: 0 !important;
   max-height: none !important;
-  overflow-y: auto !important;
+  overflow-y: visible !important;
   overflow-x: hidden !important;
   margin-top: 0 !important;
 }
