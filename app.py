@@ -7718,6 +7718,43 @@ def debug_product_lineage():
 # This simpler version has been replaced by a more complete implementation
 # that also updates strain lineage and includes verification
 
+@app.route('/api/posabit-debug', methods=['GET'])
+def posabit_debug():
+    """Diagnostic endpoint to test POSaBit API connectivity from the server."""
+    import traceback
+    result = {}
+    try:
+        from src.core.data.posabit_client import (
+            is_posabit_configured, is_posabit_products_enabled,
+            _get_config, get_cached_product_rows, get_menu_feed_as_product_rows
+        )
+        cfg = _get_config()
+        result['configured'] = is_posabit_configured()
+        result['products_enabled'] = is_posabit_products_enabled()
+        result['has_token'] = bool(cfg.get('effective_token'))
+        result['token_prefix'] = (cfg.get('effective_token') or '')[:6] + '...' if cfg.get('effective_token') else None
+        result['has_feed_key'] = bool(cfg.get('feed_key'))
+        result['feed_key_prefix'] = (cfg.get('feed_key') or '')[:8] + '...' if cfg.get('feed_key') else None
+        result['base_url'] = cfg.get('base_url')
+        store_name = get_current_store_name(allow_fallback=True)
+        result['store_name'] = store_name
+        cached = get_cached_product_rows(store_name=store_name)
+        result['disk_cache_rows'] = len(cached) if cached else 0
+        # Try a live fetch
+        try:
+            rows = get_menu_feed_as_product_rows(store_name=store_name)
+            result['live_fetch_rows'] = len(rows) if rows else 0
+            result['live_fetch_ok'] = True
+        except Exception as fe:
+            result['live_fetch_ok'] = False
+            result['live_fetch_error'] = f"{type(fe).__name__}: {fe}"
+            result['live_fetch_trace'] = traceback.format_exc()
+    except Exception as e:
+        result['error'] = f"{type(e).__name__}: {e}"
+        result['trace'] = traceback.format_exc()
+    return jsonify(result)
+
+
 @app.route('/api/debug-database', methods=['GET'])
 def debug_database():
     """Debug endpoint to check database state and session info."""
@@ -17484,9 +17521,11 @@ def get_web_available_tags():
                     # Cache cold — direct synchronous fetch (no thread; PA kills daemon threads)
                     _web_cold_rows = None
                     try:
+                        logging.error(f"WEB POSaBit: starting cold fetch for store={store_for_posabit!r}")
                         _web_cold_rows = get_menu_feed_as_product_rows(store_name=store_for_posabit)
+                        logging.error(f"WEB POSaBit: cold fetch returned {len(_web_cold_rows) if _web_cold_rows else 0} rows")
                     except Exception as _e:
-                        logging.warning(f"WEB cold POSaBit fetch failed: {_e}")
+                        logging.error(f"WEB cold POSaBit fetch EXCEPTION: {type(_e).__name__}: {_e}")
                     if _web_cold_rows:
                         safe_posabit_tags = make_json_safe(_web_cold_rows)
                         try:
