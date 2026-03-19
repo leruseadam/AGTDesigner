@@ -12715,24 +12715,13 @@ def get_available_tags():
                             'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
                         }), 200
 
-                    # Cache is cold — try a bounded blocking fetch first (works on PythonAnywhere
-                    # where daemon threads are killed between requests).
-                    # Cap at 20 s so the browser doesn't abort; if it times out we fall back to
-                    # the background-thread / retry approach for local dev.
-                    import threading as _pb_threading
-                    _cold_result = {'rows': None, 'done': False}
-                    def _cold_fetch():
-                        try:
-                            _cold_result['rows'] = get_menu_feed_as_product_rows()
-                        except Exception as _cf_err:
-                            logging.warning(f"Cold POSaBit fetch failed: {_cf_err}")
-                        finally:
-                            _cold_result['done'] = True
-                    _cold_t = _pb_threading.Thread(target=_cold_fetch, daemon=True)
-                    _cold_t.start()
-                    _cold_t.join(timeout=20.0)  # wait up to 20 s
-                    if _cold_result['rows']:
-                        posabit_rows = _cold_result['rows']
+                    # Cache is cold — direct synchronous fetch (no thread; PA kills daemon threads)
+                    posabit_rows = None
+                    try:
+                        posabit_rows = get_menu_feed_as_product_rows()
+                    except Exception as _cf_err:
+                        logging.warning(f"Cold POSaBit fetch failed: {_cf_err}")
+                    if posabit_rows:
                         safe_posabit_tags = make_json_safe(posabit_rows)
                         try:
                             store_name_align = get_current_store_name(allow_fallback=True)
@@ -12752,19 +12741,8 @@ def get_available_tags():
                             'source': 'posabit',
                             'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
                         }), 200
-                    # Still not done — start background fetch (local dev) and tell UI to retry
-                    if not _cold_result['done']:
-                        # thread is still running in background — let it finish and warm the cache
-                        pass
-                    else:
-                        # fetch finished but returned 0 rows — kick off a fresh retry in background
-                        def _bg_fetch():
-                            try:
-                                get_menu_feed_as_product_rows()
-                            except Exception as _bg_err:
-                                logging.warning(f"Background POSaBit prefetch failed: {_bg_err}")
-                        _pb_threading.Thread(target=_bg_fetch, daemon=True).start()
-                    logging.info("📦 POSaBit cache cold — returning loading signal, retry in 5 s")
+                    # Fetch returned 0 rows — return loading signal and let client retry
+                    logging.info("📦 POSaBit fetch returned 0 rows — returning loading signal, retry in 5 s")
                     return jsonify({
                         'tags': [],
                         'total_count': 0,
@@ -17503,19 +17481,14 @@ def get_web_available_tags():
                         }))
                         return compress_response(resp)
 
-                    # Cache cold — blocking fetch (PA-safe)
-                    import threading as _web_pb_threading
-                    _web_cold = {'rows': None}
-                    def _web_cold_fetch():
-                        try:
-                            _web_cold['rows'] = get_menu_feed_as_product_rows(store_name=store_for_posabit)
-                        except Exception as _e:
-                            logging.warning(f"WEB cold POSaBit fetch failed: {_e}")
-                    _wt = _web_pb_threading.Thread(target=_web_cold_fetch, daemon=True)
-                    _wt.start()
-                    _wt.join(timeout=20.0)
-                    if _web_cold['rows']:
-                        safe_posabit_tags = make_json_safe(_web_cold['rows'])
+                    # Cache cold — direct synchronous fetch (no thread; PA kills daemon threads)
+                    _web_cold_rows = None
+                    try:
+                        _web_cold_rows = get_menu_feed_as_product_rows(store_name=store_for_posabit)
+                    except Exception as _e:
+                        logging.warning(f"WEB cold POSaBit fetch failed: {_e}")
+                    if _web_cold_rows:
+                        safe_posabit_tags = make_json_safe(_web_cold_rows)
                         try:
                             safe_posabit_tags = _align_tags_with_db_lineage(
                                 safe_posabit_tags, store_for_posabit,
