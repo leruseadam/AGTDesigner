@@ -12754,16 +12754,13 @@ def get_available_tags():
 
                     # Cache is cold — direct synchronous fetch (no thread; PA kills daemon threads)
                     posabit_rows = None
+                    _posabit_auth_failed = False
                     try:
                         from src.core.data.posabit_client import PosabitAuthError as _PosabitAuthError2
                         posabit_rows = get_menu_feed_as_product_rows()
                     except _PosabitAuthError2 as _auth_err2:
-                        logging.error(f"POSaBit: 401 Unauthorized — token invalid/expired. Update POSABIT_API_TOKEN.")
-                        return jsonify({
-                            'tags': [], 'total_count': 0,
-                            'source': 'posabit-error',
-                            'message': 'POSaBit API token is invalid or expired (401). Update POSABIT_API_TOKEN in PythonAnywhere WSGI configuration.',
-                        }), 200
+                        logging.error(f"POSaBit: 401 Unauthorized — falling back to database.")
+                        _posabit_auth_failed = True
                     except Exception as _cf_err:
                         logging.warning(f"Cold POSaBit fetch failed: {_cf_err}")
                     if posabit_rows:
@@ -12786,23 +12783,37 @@ def get_available_tags():
                             'source': 'posabit',
                             'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
                         }), 200
-                    # Fetch returned 0 rows — return loading signal and let client retry
-                    logging.info("📦 POSaBit fetch returned 0 rows — returning loading signal, retry in 5 s")
-                    return jsonify({
-                        'tags': [],
-                        'total_count': 0,
-                        'source': 'posabit-loading',
-                        'message': 'POSaBit inventory is loading, please wait...',
-                        'retry_after': 5
-                    }), 200
+                    # POSaBit failed or empty — fall through to DB below
+                    logging.info("📦 POSaBit unavailable — falling back to database products")
             except Exception as posabit_err:
                 logging.warning(f"POSaBit fallback in available-tags failed: {posabit_err}")
-            logging.info("📦 No Excel inventory and no POSaBit products available - returning empty tags")
+
+            # DB fallback when POSaBit is unconfigured, auth-failed, or returned 0 rows
+            try:
+                _fb_store = get_current_store_name(allow_fallback=True)
+                _fb_db = get_product_database(_fb_store) if _fb_store else None
+                if _fb_db:
+                    _fb_df = _fb_db.get_products_dataframe(limit=10000)
+                    if _fb_df is not None and not _fb_df.empty:
+                        _fb_records = _fb_df.to_dict('records')
+                        _fb_tags = [process_database_product_for_api(p) for p in _fb_records]
+                        _fb_tags = make_json_safe(_fb_tags)
+                        logging.info(f"✅ DB fallback: serving {len(_fb_tags)} products from {_fb_store}")
+                        return jsonify({
+                            'tags': _fb_tags,
+                            'total_count': len(_fb_tags),
+                            'source': 'db-fallback',
+                            'message': f'Loaded {len(_fb_tags)} products from database (POSaBit unavailable)'
+                        }), 200
+            except Exception as _fb_err:
+                logging.warning(f"DB fallback failed: {_fb_err}")
+
+            logging.info("📦 No inventory from POSaBit or database — returning empty tags")
             return jsonify({
                 'tags': [],
                 'total_count': 0,
-                'source': 'no-excel-or-posabit',
-                'message': 'No inventory loaded yet. Configure POSaBit or upload an Excel file to see available tags.'
+                'source': 'no-inventory',
+                'message': 'No inventory loaded. Configure POSaBit or upload an Excel file.'
             }), 200
 
         # CRITICAL: Check if lineage was updated recently BEFORE checking cache.

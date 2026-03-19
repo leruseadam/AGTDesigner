@@ -11456,13 +11456,17 @@ const TagManager = {
                         
                         // Flatten price groups Map into a single array (selected list doesn't show price headers)
                         const flatTags = (tags instanceof Map) ? Array.from(tags.values()).flat() : (tags || []);
-                        // Always render tags as leaf nodes - sort alphabetically by product name
+                        // Render tags in the order they were added (persistentSelectedTags), not alphabetically
                         if (flatTags.length > 0) {
-                            // Sort tags alphabetically by product name
                             const orderedTags = [...flatTags].sort((a, b) => {
-                                const nameA = (a['Product Name*'] || '').toLowerCase();
-                                const nameB = (b['Product Name*'] || '').toLowerCase();
-                                return nameA.localeCompare(nameB);
+                                const nameA = a['Product Name*'] || '';
+                                const nameB = b['Product Name*'] || '';
+                                const idxA = this.state.persistentSelectedTags.indexOf(nameA);
+                                const idxB = this.state.persistentSelectedTags.indexOf(nameB);
+                                if (idxA === -1 && idxB === -1) return 0;
+                                if (idxA === -1) return 1;
+                                if (idxB === -1) return -1;
+                                return idxA - idxB;
                             });
 
                             orderedTags.forEach(tag => {
@@ -12626,9 +12630,10 @@ const TagManager = {
 
                     // Auto-retry when backend is still loading (POSaBit cache warming or file processing)
                     const lowerMsg = (errorMsg || '').toLowerCase();
-                    const isBackgroundLoading = responseData.source !== 'posabit-error' && (
+                    const _noRetrySource = ['posabit-error', 'db-fallback', 'no-inventory', 'no-excel-or-posabit'].includes(responseData.source);
+                    const isBackgroundLoading = !_noRetrySource && (
                         lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly')
-                        || lowerMsg.includes('loading, please wait') || lowerMsg.includes('posabit') || responseData.source === 'posabit-loading');
+                        || lowerMsg.includes('loading, please wait') || responseData.source === 'posabit-loading');
                     if (isBackgroundLoading) {
                         this._backgroundProcessingRetries += 1;
                         const maxBgRetries = 30; // ~60s if 2s delay — enough for POSaBit cold start
