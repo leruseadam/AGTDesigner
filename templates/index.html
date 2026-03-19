@@ -72,169 +72,11 @@
     // Store selection is now required and handled by checkStoreRequired()
     
     // Define selectStore function EARLY so it's available when modal loads
-    window.selectStore = function(storeValue) {
-      console.log('=== STORE SELECTION CLICKED ===');
-      console.log('Store value:', storeValue);
-      console.log('About to send fetch request to /api/set-store');
-
-      // IMMEDIATE FEEDBACK: Show loading splash right away
-      const modalElement = document.getElementById('storeSelectionModal');
-      const modalBody = modalElement ? modalElement.querySelector('.modal-body') : null;
-      
-      if (modalBody) {
-        // Store original content
-        const originalContent = modalBody.innerHTML;
-        modalBody.dataset.originalContent = originalContent;
-        
-        // Show loading state
-        const storeDisplayName = storeValue.replace(/_/g, ' ');
-        modalBody.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 300px; padding: 2rem;">
-            <div class="spinner-border text-primary" role="status" style="width: 4rem; height: 4rem; border-width: 0.4rem; margin-bottom: 1.5rem;">
-              <span class="visually-hidden">Loading...</span>
-            </div>
-            <h4 style="color: #ffffff; font-weight: 600; margin-bottom: 0.5rem; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">Switching to ${storeDisplayName}...</h4>
-            <p style="color: rgba(255, 255, 255, 0.8); font-size: 1rem; margin: 0;">Please wait while we load your store data</p>
-          </div>
-        `;
-      }
-
-      // Get reference to main content
-      const mainContent = document.getElementById('mainContent');
-
-      // Don't check if it's the same store - just always proceed
-      // This ensures the selection always works even if there's a mismatch
-      console.log('Processing store selection:', storeValue);
-      
-      // Set the store via API
-      fetch('/api/set-store', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify({ store: storeValue })
-      })
-      .then(response => {
-        console.log('✅ Fetch completed - Response status:', response.status);
-        if (!response.ok) {
-          console.error('❌ Response not OK:', response.status, response.statusText);
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        console.log('About to parse JSON response...');
-        return response.json();
-      })
-      .then(data => {
-        console.log('✅ JSON parsed successfully');
-        console.log('Response data:', data);
-        console.log('data.success =', data.success);
-        if (data.success) {
-          console.log('✅ Store set successfully:', storeValue);
-
-          // CRITICAL FIX: Mark store as confirmed to prevent modal reappearing after uploads
-          window.storeConfirmed = true;
-          window.STORE_MODAL_BLOCKING = false; // Clear blocking flag immediately
-
-          // Persist context so the modal stays hidden after reload
-          sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
-          sessionStorage.setItem('store_just_selected', 'true');
-          sessionStorage.setItem('selected_store', storeValue);
-
-          // CRITICAL FIX: Prevent checkStoreRequired from running again
-          window.checkingStoreRequired = false;
-          
-          // CRITICAL FIX: Don't wait for TagManager - reload immediately
-          // TagManager will initialize after page reloads with the new store
-          console.log('🔄 Store selected - reloading immediately (TagManager will init after reload)...');
-
-          // Give the user quick visual feedback while we prep the reload
-          if (window.Toast && typeof window.Toast.show === 'function') {
-            window.Toast.show('success', `Switching to ${storeValue.replace(/_/g, ' ')}...`);
-          }
-
-          // Briefly remove the modal so we don't flash it on reload
-          const modalElement = document.getElementById('storeSelectionModal');
-          if (modalElement) {
-            try {
-              const modalInstance = (typeof bootstrap !== 'undefined')
-                ? bootstrap.Modal.getInstance(modalElement)
-                : null;
-              if (modalInstance) {
-                modalInstance.hide();
-              }
-            } catch (hideError) {
-              console.warn('⚠️ Failed to hide modal via Bootstrap before reload', hideError);
-            }
-            modalElement.classList.remove('show');
-            modalElement.style.display = 'none';
-            document.body.classList.remove('modal-open');
-            document.body.style.overflow = '';
-            const backdrop = document.getElementById('storeModalBackdrop') || document.querySelector('.modal-backdrop');
-            if (backdrop) {
-              backdrop.remove();
-            }
-          }
-
-          // CRITICAL FIX: Reload the page so backend + frontend state stay in sync
-          console.log('🔄 Reloading page to apply store change...');
-          setTimeout(() => {
-            window.location.reload();
-          }, 500);
-        } else {
-          console.error('❌ Error setting store:', data.error || 'Unknown error');
-          
-          // Restore original modal content on error
-          if (modalBody && modalBody.dataset.originalContent) {
-            modalBody.innerHTML = modalBody.dataset.originalContent;
-          }
-          
-          alert('Error setting store: ' + (data.error || 'Please try again.'));
-        }
-      })
-      .catch(error => {
-        console.error('❌ Fetch error:', error);
-        console.error('Error stack:', error.stack);
-        
-        // Restore original modal content on error
-        if (modalBody && modalBody.dataset.originalContent) {
-          modalBody.innerHTML = modalBody.dataset.originalContent;
-        }
-        
-        alert('Error saving store selection: ' + error.message + '\nPlease check the console for details.');
-      });
-    };
-    
-    // Don't add backdrop by default - let checkStoreRequired add it only if needed
-    // This prevents the backdrop from appearing when a store is already selected
 
     // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
-    // Apply a one-time zoom correction on load (never on resize) so that
-    // non-Mac monitors (e.g. 1920x1080 with Windows scaling) match the
-    // MacBook Pro appearance. Resize events will only update CSS vars.
+    // Simplified: only maintain CSS viewport variables; do NOT change browser zoom.
     (function() {
       'use strict';
-
-      function applyZoomOnce() {
-        try {
-          const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
-          const dpr = window.devicePixelRatio || 1;
-          // Only correct for common Windows scaling scenarios (1.25, 1.5)
-          if (!isMac && dpr > 1.0 && dpr < 2.0) {
-            // Use innerWidth (CSS pixels) as the effective viewport reference
-            const targetCssWidth = 1512; // MacBook Pro effective CSS width baseline
-            const currentCssWidth = window.innerWidth;
-            if (currentCssWidth > targetCssWidth) {
-              const zoom = Math.max(Math.min(targetCssWidth / currentCssWidth, 1.0), 0.7);
-              document.body.style.zoom = zoom;
-              console.log(`Applied one-time zoom=${zoom.toFixed(3)} to normalize non-Mac display (dpr=${dpr})`);
-            }
-          } else {
-            document.body.style.zoom = '';
-          }
-        } catch (e) {
-          console.warn('applyZoomOnce failed', e);
-        }
-      }
 
       function normalizeViewportVars() {
         const vw = window.innerWidth / 100;
@@ -252,9 +94,8 @@
       }
 
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() { applyZoomOnce(); normalizeViewportVars(); });
+        document.addEventListener('DOMContentLoaded', function() { normalizeViewportVars(); });
       } else {
-        applyZoomOnce();
         normalizeViewportVars();
       }
 
@@ -399,684 +240,6 @@
     };
     window.showError = window.showError || function() { console.log('showError not yet loaded'); };
     
-    
-    // Store Management Functions
-    function changeStore(storeValue) {
-      if (!storeValue) {
-        updateStoreStatus('Please select a store', 'inactive');
-        return;
-      }
-      
-      // Save store selection to localStorage
-      localStorage.setItem('selectedStore', storeValue);
-      
-      // Update store status
-      updateStoreStatus(`Store: ${storeValue.replace(/_/g, ' ')}`, 'active');
-      
-      // Send store selection to backend
-      fetch('/api/set-store', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify({ store: storeValue })
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.success) {
-          console.log('Store selection saved to backend:', storeValue);
-          // Clear any existing data to ensure fresh start with new store
-          clearExistingData();
-        } else {
-          console.error('Failed to save store selection:', data.error);
-          updateStoreStatus('Failed to save store selection', 'inactive');
-        }
-      })
-      .catch(error => {
-        console.error('Error saving store selection:', error);
-        updateStoreStatus('Error saving store selection', 'inactive');
-      });
-    }
-    
-    // selectStore is already defined globally in head - this is just a reference/override if needed
-    // The function is defined early in the head section to ensure it's available when modal loads
-    if (!window.selectStore) {
-      window.selectStore = function(storeValue) {
-        console.log('Store selected (fallback):', storeValue);
-        // Fallback implementation if somehow not defined
-        alert('Please refresh the page and try again.');
-      };
-    }
-
-    // Debug helper function - call from console: window.forceShowStoreModal()
-    window.forceShowStoreModal = function() {
-      console.log('🔧 Forcing store modal to show via debug helper...');
-      showStoreSelectionModal(true);
-    };
-
-    // Debug helper - simulate first load by clearing all store data and reloading
-    window.simulateFirstLoad = function() {
-      console.log('🔄 Simulating first load - clearing all store data...');
-
-      // Clear client-side storage
-      window.storeConfirmed = false;
-      sessionStorage.clear();
-      localStorage.clear();
-
-      // Clear server-side session
-      fetch('/api/clear-store', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        credentials: 'same-origin'
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('✅ Server store cleared:', data);
-        console.log('🔄 Reloading page to show first-time experience...');
-        // Reload page after clearing to show modal
-        setTimeout(() => {
-          window.location.href = window.location.pathname + '?force_store_modal=true';
-        }, 500);
-      })
-      .catch(error => {
-        console.error('❌ Error clearing store:', error);
-        // Reload anyway with force flag
-        window.location.href = window.location.pathname + '?force_store_modal=true';
-      });
-    };
-    
-    // Helper to force show store modal immediately
-    window.forceShowStoreModalNow = function() {
-      console.log('🔧 Force showing store modal immediately...');
-      // Clear all flags
-      window.storeConfirmed = false;
-      sessionStorage.removeItem('store_just_selected');
-      sessionStorage.removeItem('selected_store');
-      sessionStorage.removeItem('store_selected_timestamp');
-      // Show modal
-      if (typeof showStoreSelectionModal === 'function') {
-        showStoreSelectionModal(true);
-      } else {
-        console.error('showStoreSelectionModal function not available');
-      }
-    };
-
-    function showStoreSelectionModal(forceClear = false) {
-      try {
-        console.log('=== SHOWING STORE SELECTION MODAL ===');
-        console.log('forceClear:', forceClear);
-        console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
-
-        // If forceClear is true, clear all session flags first
-        if (forceClear) {
-          console.log('🧹 Clearing all store session flags...');
-          window.storeConfirmed = false;
-          sessionStorage.removeItem('store_just_selected');
-          sessionStorage.removeItem('selected_store');
-        }
-
-        const modalElement = document.getElementById('storeSelectionModal');
-        console.log('Modal element found:', modalElement !== null);
-        if (!modalElement) {
-          console.error('❌ Store selection modal element not found - retrying in 500ms');
-          setTimeout(showStoreSelectionModal, 500);
-          return;
-        }
-        
-        // CRITICAL: Ensure modal is visible (remove any hidden states)
-        modalElement.style.visibility = 'visible';
-        modalElement.style.display = 'block';
-        
-        // Check if Bootstrap is available
-        if (typeof bootstrap === 'undefined') {
-          console.error('❌ Bootstrap not available, using fallback method');
-          // Fallback: Show modal manually if Bootstrap isn't loaded
-          modalElement.classList.add('show');
-          modalElement.setAttribute('aria-hidden', 'false');
-          modalElement.setAttribute('aria-modal', 'true');
-          document.body.classList.add('modal-open');
-          document.body.style.overflow = 'hidden';
-          
-          // Add backdrop manually
-          if (!document.querySelector('.modal-backdrop')) {
-            const backdrop = document.createElement('div');
-            backdrop.className = 'modal-backdrop fade show';
-            backdrop.style.zIndex = '10000';
-            document.body.appendChild(backdrop);
-          }
-          
-          console.log('✅ Modal shown using fallback method');
-          return;
-        }
-        
-        // Try to get existing instance first
-        let modal = bootstrap.Modal.getInstance(modalElement);
-        
-        // If no instance exists, create a new one
-        if (!modal) {
-          console.log('Creating new Bootstrap modal instance...');
-          modal = new bootstrap.Modal(modalElement, {
-            backdrop: 'static',
-            keyboard: false
-          });
-        } else {
-          console.log('Using existing Bootstrap modal instance');
-        }
-        
-        console.log('Calling modal.show()...');
-        modal.show();
-        console.log('✅ Store selection modal shown successfully');
-      } catch (error) {
-        console.error('❌ Error showing store selection modal:', error);
-        console.error('Error details:', error.stack);
-        // Fallback to manual show
-        try {
-          const modalElement = document.getElementById('storeSelectionModal');
-          if (modalElement) {
-            modalElement.style.visibility = 'visible';
-            modalElement.style.display = 'block';
-            modalElement.classList.add('show');
-            modalElement.setAttribute('aria-hidden', 'false');
-            document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
-            console.log('✅ Modal shown using error fallback');
-          }
-        } catch (fallbackError) {
-          console.error('❌ Even fallback failed:', fallbackError);
-        }
-      }
-    }
-    
-    // Make function globally available for main.js
-    window.showStoreSelectionModal = showStoreSelectionModal;
-    
-    // Function to verify modal element exists
-    function verifyModalExists() {
-      const modalElement = document.getElementById('storeSelectionModal');
-      if (modalElement) {
-        console.log('✅ Store selection modal element found');
-        return true;
-      } else {
-        console.error('❌ Store selection modal element NOT found');
-        return false;
-      }
-    }
-    
-    // Function to force modal display
-    function forceShowModal() {
-      console.log('Force showing modal...');
-      const modalElement = document.getElementById('storeSelectionModal');
-      if (modalElement) {
-        modalElement.style.display = 'block';
-        modalElement.classList.add('show');
-        modalElement.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('modal-open');
-        
-        // Add backdrop
-        const backdrop = document.createElement('div');
-        backdrop.className = 'modal-backdrop fade show';
-        document.body.appendChild(backdrop);
-        
-        console.log('Modal forced to show');
-      } else {
-        console.error('Cannot force show modal - element not found');
-      }
-    }
-    
-    function updateCurrentStoreDisplay(storeValue) {
-      console.log('updateCurrentStoreDisplay called with:', storeValue);
-      const displayElement = document.getElementById('currentStoreDisplay');
-      console.log('displayElement found:', !!displayElement);
-      if (displayElement) {
-        if (storeValue) {
-          displayElement.textContent = storeValue.replace(/_/g, ' ');
-          displayElement.style.color = '#4ade80';
-          console.log('Set display to:', storeValue.replace(/_/g, ' '));
-        } else {
-          displayElement.textContent = 'No store selected';
-          displayElement.style.color = '#f87171';
-          console.log('Set display to: No store selected');
-        }
-      } else {
-        console.error('currentStoreDisplay element not found!');
-      }
-    }
-    
-    function updateStoreStatus(message, status) {
-      const statusElement = document.getElementById('storeStatus');
-      if (statusElement) {
-        statusElement.textContent = message;
-        statusElement.className = `store-status ${status}`;
-      }
-    }
-    
-    function clearExistingData() {
-      // Clear selected tags
-      if (window.excelProcessor && window.excelProcessor.selected_tags) {
-        window.excelProcessor.selected_tags = [];
-      }
-      
-      // Clear session data
-      sessionStorage.removeItem('selectedTags');
-      
-      // Clear any cached data
-      if (window.clearJsonMatches) {
-        window.clearJsonMatches();
-      }
-      
-      // Clear tag lists if TagManager is available
-      if (window.TagManager && typeof window.TagManager.clearUIStateForNewFile === 'function') {
-        window.TagManager.clearUIStateForNewFile(true);
-      }
-      
-      console.log('Cleared existing data for new store selection');
-    }
-    
-    // Make clearExistingData globally available
-    window.clearExistingData = clearExistingData;
-    
-    function loadSavedStore() {
-      // Check backend for current store status instead of defaulting to Bothell
-      console.log('Checking for saved store selection...');
-      
-      // Check backend for current store status
-      updateStoreStatusFromBackend();
-    }
-    
-    function updateStoreStatusFromBackend() {
-      fetch('/api/get-store', {
-        credentials: 'same-origin',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      })
-        .then(response => {
-          // Check if response is OK
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-          // Check content type
-          const contentType = response.headers.get('content-type');
-          if (!contentType || !contentType.includes('application/json')) {
-            console.warn('⚠️ Expected JSON response but got:', contentType);
-            // Return null to indicate no store (fail gracefully)
-            return null;
-          }
-          return response.json();
-        })
-        .then(data => {
-          if (data && data.success && data.store) {
-            // Update the display
-            updateCurrentStoreDisplay(data.store);
-            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
-            console.log('Store found in backend:', data.store);
-          } else {
-            // No store set in backend - will be handled by checkStoreRequired()
-            console.log('No store in backend - user will be prompted to select');
-          }
-        })
-        .catch(error => {
-          // Silently handle errors - don't spam console with expected errors
-          if (error.name !== 'AbortError' && !error.message.includes('Failed to fetch')) {
-            console.log('Error checking backend for store:', error.message);
-          }
-          // Don't auto-set Bothell, let checkStoreRequired handle it
-        });
-    }
-    
-    function checkStoreRequired(onStoreConfirmed) {
-      // Backend handles IP-based persistence (12 hour expiration)
-      // Frontend simply trusts the backend's /api/check-store-required response
-      // No frontend caching - always check with backend to get accurate IP-based store status
-
-      // CRITICAL FIX: Prevent multiple calls if store is already confirmed
-      if (window.storeConfirmed === true && sessionStorage.getItem('store_just_selected') === 'true') {
-        console.log('✅ Store already confirmed - skipping checkStoreRequired');
-        if (typeof onStoreConfirmed === 'function') {
-          setTimeout(onStoreConfirmed, 100);
-        }
-        return;
-      }
-
-      // Prevent multiple simultaneous calls
-      if (window.checkingStoreRequired) {
-        console.log('⚠️ checkStoreRequired already in progress, skipping...');
-        return;
-      }
-      window.checkingStoreRequired = true;
-      
-      console.log('=== CHECKING STORE REQUIREMENT ===');
-
-      const modalElement = document.getElementById('storeSelectionModal');
-      const mainContent = document.getElementById('mainContent');
-
-      console.log('Modal element exists:', modalElement !== null);
-
-      if (!modalElement) {
-        console.error('❌ Modal element not found! Retrying in 500ms...');
-        window.checkingStoreRequired = false;
-        setTimeout(checkStoreRequired, 500);
-        return;
-      }
-
-      // Check for force_store_modal URL parameter
-      const urlParams = new URLSearchParams(window.location.search);
-      const forceModal = urlParams.get('force_store_modal') === 'true';
-
-      console.log('URL search params:', window.location.search);
-      console.log('force_store_modal parameter:', urlParams.get('force_store_modal'));
-      console.log('forceModal boolean:', forceModal);
-
-      if (forceModal) {
-        console.log('🔧 Force store modal flag detected - showing modal immediately');
-        showStoreSelectionModal(true); // Pass true to force clear session flags
-        window.checkingStoreRequired = false;
-        return;
-      }
-
-      // CRITICAL: Always check backend first - sessionStorage may be stale after server restart
-      // Don't trust client-side storage alone
-      if (modalElement) {
-        modalElement.style.display = 'none';
-      }
-
-      console.log('Fetching store status from backend...');
-      const cacheBust = `ts=${Date.now()}`;
-      
-      // Add timeout to prevent hanging
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-      
-      fetch(`/api/check-store-required?${cacheBust}&_=${Date.now()}`, {
-        credentials: 'same-origin',
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        },
-        signal: controller.signal
-      })
-        .then(response => {
-          clearTimeout(timeoutId);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          return response.json();
-        })
-        .catch(error => {
-          clearTimeout(timeoutId);
-          if (error.name === 'AbortError') {
-            console.error('❌ Store check timed out after 5 seconds');
-            // Fallback: show modal anyway to allow user to proceed
-            console.log('⚠️ Showing store selection modal as fallback');
-            if (typeof showStoreSelectionModal === 'function') {
-              showStoreSelectionModal();
-            } else {
-              // If function doesn't exist, manually show modal
-              if (modalElement) {
-                modalElement.style.display = 'block';
-                modalElement.classList.add('show');
-                document.body.classList.add('modal-open');
-              }
-            }
-            window.checkingStoreRequired = false;
-            return null; // Return null to skip data processing
-          }
-          throw error;
-        })
-        .then(data => {
-          if (!data) return; // Skip if error was handled (timeout)
-          console.log('✅ BACKEND RESPONSE:', JSON.stringify(data));
-          console.log('Conditions: success=' + data.success + ', requires_store=' + data.requires_store + ', store=' + data.store);
-          console.log('DEBUG INFO:', data.debug || 'no debug info');
-          
-          // CRITICAL: Check requires_store flag first
-          if (data.requires_store === true) {
-            console.log('🔴 REQUIRES_STORE IS TRUE - Modal should show!');
-          } else {
-            console.log('🟢 REQUIRES_STORE IS FALSE - Modal should NOT show');
-          }
-          
-          // Clear logic: show content if user has a store, otherwise show modal
-          const userHasStore = (data.success && !data.requires_store && data.store);
-          console.log('USER HAS STORE?', userHasStore);
-          
-          // CRITICAL FIX: Ensure we have a valid store before proceeding
-          const hasValidStore = userHasStore && data.store && data.store.trim() !== '';
-          console.log('HAS VALID STORE?', hasValidStore);
-          
-          if (hasValidStore) {
-            // USER HAS STORE - Show content, hide modal
-            console.log('🎉 STORE FOUND:', data.store);
-            
-            // CRITICAL FIX: Mark store as confirmed to prevent re-checking after uploads or reloads
-            window.storeConfirmed = true;
-            window.STORE_MODAL_BLOCKING = false; // Clear blocking flag immediately
-            // Also persist in sessionStorage to survive page reloads
-            sessionStorage.setItem('store_just_selected', 'true');
-            sessionStorage.setItem('selected_store', data.store);
-            sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
-            
-            // CRITICAL FIX: Prevent checkStoreRequired from running again
-            window.checkingStoreRequired = false;
-            
-            updateCurrentStoreDisplay(data.store);
-            updateStoreStatus(`Store: ${data.store.replace(/_/g, ' ')}`, 'active');
-            
-            // Hide modal
-            if (modalElement) {
-              modalElement.style.display = 'none';
-              modalElement.classList.remove('show');
-            }
-            
-            // Remove all backdrops
-            document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
-            document.body.classList.remove('modal-open');
-            document.body.style.overflow = '';
-            
-            // Show content
-            if (mainContent) {
-              mainContent.style.display = 'block';
-              mainContent.style.visibility = 'visible';
-              mainContent.style.pointerEvents = 'auto';
-              mainContent.classList.remove('store-selection-disabled');
-              // Add both classes immediately to prevent opacity:0 flicker
-              mainContent.classList.add('store-selected', 'loaded');
-            }
-            
-            // Clear blocking flag if it exists
-            if (window.STORE_MODAL_BLOCKING) {
-              console.log('✅ Clearing STORE_MODAL_BLOCKING - TagManager can initialize');
-              window.STORE_MODAL_BLOCKING = false;
-            }
-            
-            // CRITICAL FIX: Retry file upload initialization after store is confirmed
-            // This ensures file upload is initialized even if it failed earlier
-            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-              console.log('🔄 Store confirmed - retrying file upload initialization...');
-              window.fileUploadInitAttempts = 0; // Reset counter
-              setTimeout(window.initializeFileUpload, 200);
-            }
-            
-            console.log('✅ Content shown, modal hidden');
-            
-            // CRITICAL FIX: Call callback to initialize TagManager ONLY when store is confirmed
-            if (typeof onStoreConfirmed === 'function') {
-              console.log('🔄 Store confirmed, calling initialization callback...');
-              setTimeout(() => {
-                try {
-                  onStoreConfirmed();
-                } catch (initError) {
-                  console.error('❌ Error in onStoreConfirmed callback:', initError);
-                }
-              }, 100);
-            } else {
-              console.warn('⚠️ No onStoreConfirmed callback provided - TagManager may not initialize');
-            }
-            
-            // CRITICAL FIX: Also trigger TagManager initialization directly if callback didn't work
-            // This ensures TagManager initializes even if the callback path fails
-            setTimeout(() => {
-              if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state?.initialized) {
-                console.log('🔄 Store confirmed - directly initializing TagManager...');
-                try {
-                  // Check if store modal is no longer blocking
-                  if (window.STORE_MODAL_BLOCKING === false || window.STORE_MODAL_BLOCKING === undefined) {
-                    window.TagManager.init();
-                    console.log('✅ TagManager initialized successfully after store selection');
-                  } else {
-                    console.log('⏳ Store modal still blocking, will retry initialization...');
-                    // Retry after a short delay
-                    setTimeout(() => {
-                      if (window.TagManager && typeof window.TagManager.init === 'function') {
-                        window.TagManager.init();
-                        console.log('✅ TagManager initialized on retry');
-                      }
-                    }, 500);
-                  }
-                } catch (initError) {
-                  console.error('❌ Error directly initializing TagManager:', initError);
-                }
-              } else if (!window.TagManager) {
-                console.warn('⚠️ TagManager not available yet after store selection - will retry');
-                // Retry initialization after TagManager loads
-                setTimeout(() => {
-                  if (window.initializeTagManagerSafely && typeof window.initializeTagManagerSafely === 'function') {
-                    window.initializeTagManagerSafely();
-                  }
-                }, 1000);
-              }
-            }, 300);
-          } else {
-            // NO STORE - Show modal
-            // CRITICAL FIX: Check if modal is already visible to prevent duplicate modals
-            if (modalElement && (modalElement.classList.contains('show') || modalElement.style.display === 'block')) {
-              console.log('⚠️ Modal already visible - skipping duplicate show');
-              window.checkingStoreRequired = false;
-              return;
-            }
-            
-            console.log('⚠️ NO STORE - Showing modal');
-            console.log('⚠️ Store check details:', {
-              success: data.success,
-              requires_store: data.requires_store,
-              store: data.store,
-              userHasStore: userHasStore
-            });
-
-            // CRITICAL: Clear stale sessionStorage when backend says no store
-            // This handles the case where server restarted but browser has old sessionStorage
-            sessionStorage.removeItem('store_just_selected');
-            sessionStorage.removeItem('selected_store');
-            sessionStorage.removeItem('store_selected_timestamp');
-            window.storeConfirmed = false;
-            console.log('🧹 Cleared stale sessionStorage flags');
-
-            // CRITICAL FIX: Set blocking flag BEFORE showing modal
-            window.STORE_MODAL_BLOCKING = true;
-            
-            if (modalElement) {
-              console.log('🔴 SHOWING MODAL - Setting display and classes...');
-              modalElement.style.display = 'block';
-              modalElement.style.visibility = 'visible';
-              modalElement.style.opacity = '1';
-              modalElement.classList.add('show');
-              modalElement.setAttribute('aria-hidden', 'false');
-              modalElement.setAttribute('aria-modal', 'true');
-              document.body.classList.add('modal-open');
-              document.body.style.overflow = 'hidden';
-              
-              // Add backdrop
-              if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-                const backdrop = document.createElement('div');
-                backdrop.id = 'storeModalBackdrop';
-                backdrop.className = 'modal-backdrop fade show';
-                backdrop.style.zIndex = '1040';
-                document.body.appendChild(backdrop);
-                console.log('✅ Added modal backdrop');
-              }
-              
-              // CRITICAL FIX: Try to show modal using Bootstrap if available
-              if (typeof bootstrap !== 'undefined') {
-                try {
-                  console.log('🔴 Using Bootstrap to show modal...');
-                  const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement, {
-                    backdrop: 'static',
-                    keyboard: false
-                  });
-                  modalInstance.show();
-                  console.log('✅ Bootstrap modal.show() called');
-                } catch (bootstrapError) {
-                  console.warn('⚠️ Bootstrap modal show failed, using fallback:', bootstrapError);
-                  // Fallback: ensure modal is visible
-                  modalElement.style.display = 'block';
-                  modalElement.style.visibility = 'visible';
-                  modalElement.style.zIndex = '9999';
-                }
-              } else {
-                console.warn('⚠️ Bootstrap not available, using manual display');
-                // Ensure modal is visible without Bootstrap
-                modalElement.style.display = 'block';
-                modalElement.style.visibility = 'visible';
-                modalElement.style.zIndex = '9999';
-              }
-              
-              // Double-check modal is visible after a short delay
-              setTimeout(() => {
-                const isVisible = modalElement.offsetParent !== null || 
-                                 modalElement.style.display !== 'none' ||
-                                 modalElement.classList.contains('show');
-                console.log('🔍 Modal visibility check:', {
-                  offsetParent: modalElement.offsetParent !== null,
-                  display: modalElement.style.display,
-                  hasShowClass: modalElement.classList.contains('show'),
-                  isVisible: isVisible
-                });
-                if (!isVisible) {
-                  console.error('❌ Modal is not visible! Forcing display...');
-                  modalElement.style.display = 'block';
-                  modalElement.style.visibility = 'visible';
-                  modalElement.style.opacity = '1';
-                  modalElement.style.zIndex = '9999';
-                  modalElement.classList.add('show');
-                }
-              }, 100);
-            } else {
-              console.error('❌ Modal element not found when trying to show store selection modal');
-              console.error('❌ Attempting to find modal element...');
-              const foundModal = document.getElementById('storeSelectionModal');
-              console.error('❌ Found modal element:', foundModal !== null);
-            }
-            
-            if (mainContent) {
-              mainContent.style.pointerEvents = 'none';
-              mainContent.classList.add('store-selection-disabled');
-            }
-            
-            console.log('✅ Modal shown, content hidden');
-            
-            // CRITICAL FIX: Don't call callback if no store - wait for user to select
-            console.log('⏳ Waiting for store selection before initializing TagManager');
-          }
-        })
-        .catch(error => {
-          console.error('❌ Error checking store requirement:', error);
-          // If there's an error, show modal as fallback to require store selection
-          console.log('Showing modal as fallback due to error');
-          if (typeof bootstrap === 'undefined') {
-            setTimeout(() => showStoreSelectionModal(), 500);
-          } else {
-            showStoreSelectionModal();
-          }
-        })
-        .finally(() => {
-          // Always reset the flag
-          window.checkingStoreRequired = false;
-        });
-    }
     
     function generateJsonInventory() {
       const url = document.getElementById('jsonInventoryUrlInput').value.trim();
@@ -1642,18 +805,6 @@
                           </div>
                         </div>
                       </div>
-                    </div>
-                    <div class="d-flex justify-content-end mb-3">
-                      <button class="btn btn-glass btn-control btn-color-purple" onclick="openEnhancedLineageEditor()" id="openFullLineageEditorBtn" title="Open full Lineage Editor">
-                        <span class="icon-btn">
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                            <path d="M2 17l10 5 10-5"></path>
-                            <path d="M2 12l10 5 10-5"></path>
-                          </svg>
-                          Open Lineage Editor
-                        </span>
-                      </button>
                     </div>
 
                     <!-- Strains List Panel -->
@@ -2422,8 +1573,9 @@
               initializeEnhancedLineageEditor: typeof window.initializeEnhancedLineageEditor
             });
             // Enhanced Product Database Manager
-            window.showProductDatabaseManager = function() {
-              console.log('showProductDatabaseManager function called!');
+            window.showProductDatabaseManager = function(opts) {
+              const scrollToPosabit = opts && opts.scrollToPosabit === true;
+              console.log('showProductDatabaseManager function called!', scrollToPosabit ? '(scroll to POSaBit)' : '');
               
               // Show loading state first
               const loadingHtml = `
@@ -2744,7 +1896,7 @@
                                 <!-- Settings, Actions, and Tools -->
                                 <div class="row">
                                                                      <div class="col-md-4 mb-2">
-                                     <div class="card border-0" style="
+                                     <div class="card border-0" id="posabitIntegrationSection" style="
                                        background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(15, 23, 42, 0.6) 100%); 
                                        border: 1px solid rgba(0, 212, 170, 0.3); 
                                        border-radius: 12px;
@@ -2779,6 +1931,27 @@
                                   </div>
                                 </div>
                               </div>
+                                    <div class="form-check form-switch mb-3" id="posabitDataSourceWrap">
+                                           <div class="d-flex align-items-start">
+                                             <input class="form-check-input mt-1 me-3" type="checkbox" id="posabitDataSource" title="Use POSaBit menu as product source">
+                                             <div class="flex-grow-1">
+                                               <label class="form-check-label fw-bold text-white d-block" for="posabitDataSource">
+                                                 <i class="bi bi-cloud-arrow-down me-2 text-info"></i>Use POSaBit as product source (default)
+                                      </label>
+                                               <div class="form-text text-white-50 mt-1">
+                                                 Load products from POSaBit API instead of Excel when no file is uploaded
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                                    <div class="mb-2 mt-2 pt-2" style="border-top: 1px solid rgba(0,212,170,0.3);">
+                                      <div class="d-flex align-items-center flex-wrap gap-2">
+                                        <span class="text-white-50 small">POSaBit:</span>
+                                        <span id="posabitStatusText" class="small text-white">—</span>
+                                        <button type="button" class="btn btn-sm btn-outline-info" id="posabitVerifyBtn" title="Test API and show product count" onclick="window.runPosabitVerify(this)">Verify connection</button>
+                                      </div>
+                                      <p class="text-white-50 small mt-1 mb-0">Use the main page filter bar (Vendor, Brand, Product Type, etc.) to filter the product list.</p>
+                                    </div>
                                          <button class="btn btn-modern w-100" onclick="saveIntegrationSettings()" style="
                                            background: linear-gradient(135deg, #17a2b8, #20c997); 
                                            border: none; 
@@ -2881,6 +2054,8 @@
                       unique_brands: stats.unique_brands,
                       unique_product_types: stats.unique_product_types
                     });
+                    loadPosabitDataSource();
+                    updatePosabitStatus();
                   }
                 })
                 .catch(error => {
@@ -3016,6 +2191,8 @@
             window.saveIntegrationSettings = function() {
               const databaseIntegration = document.getElementById('databaseIntegration').checked;
               const autoRefresh = document.getElementById('autoRefresh').checked;
+              const posabitDataSource = document.getElementById('posabitDataSource');
+              const posabitChecked = posabitDataSource ? posabitDataSource.checked : false;
               const saveBtn = document.querySelector('button[onclick="saveIntegrationSettings()"]');
               
               // Show loading state
@@ -3032,44 +2209,50 @@
               localStorage.setItem('databaseIntegration', databaseIntegration);
               localStorage.setItem('autoRefresh', autoRefresh);
               
+              // Save POSaBit data source first (session); reload if changed so product list updates
+              const posabitPromise = posabitDataSource && document.getElementById('posabitDataSourceWrap').style.display !== 'none'
+                ? fetch('/api/posabit/config').then(r => r.json()).then(function(prev) {
+                    const newSource = posabitChecked ? 'posabit' : 'excel';
+                    if (prev.data_source === newSource) return null;
+                    return fetch('/api/posabit/data-source', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ source: newSource })
+                    }).then(r => r.json()).then(function() { return true; });
+                  })
+                : Promise.resolve(null);
+              
               // Send settings to backend if endpoint exists
-              fetch('/api/product-db/settings', {
+              const dbPromise = fetch('/api/product-db/settings', {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(settings)
-              })
-              .then(response => {
-                if (response.ok) {
-                  return response.json();
-                }
+              }).then(response => {
+                if (response.ok) return response.json();
                 throw new Error('Failed to save settings');
-              })
-              .then(data => {
-                  // Show success message
-                  const modalBody = document.querySelector('#databaseModal .modal-body');
-                  if (modalBody) {
-                    const successDiv = document.createElement('div');
-                    successDiv.className = 'alert alert-success alert-dismissible fade show';
-                    successDiv.innerHTML = `
+              });
+              
+              Promise.all([posabitPromise, dbPromise])
+              .then(function([reload]) {
+                if (reload === true) {
+                  window.location.reload();
+                  return;
+                }
+                const modalBody = document.querySelector('#databaseModal .modal-body');
+                if (modalBody) {
+                  const successDiv = document.createElement('div');
+                  successDiv.className = 'alert alert-success alert-dismissible fade show';
+                  successDiv.innerHTML = `
                     <i class="bi bi-check-circle me-2"></i>
                     <strong>Settings Saved!</strong> Integration preferences have been updated successfully.
-                      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    `;
-                    modalBody.insertBefore(successDiv, modalBody.firstChild);
-                    
-                    // Auto-dismiss after 3 seconds
-                    setTimeout(() => {
-                      if (successDiv.parentNode) {
-                        successDiv.remove();
-                      }
-                    }, 3000);
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                  `;
+                  modalBody.insertBefore(successDiv, modalBody.firstChild);
+                  setTimeout(function() { if (successDiv.parentNode) successDiv.remove(); }, 3000);
                 }
               })
-              .catch(error => {
+              .catch(function(error) {
                 console.error('Error saving settings:', error);
-                // Show warning that settings were saved locally
                 const modalBody = document.querySelector('#databaseModal .modal-body');
                 if (modalBody) {
                   const warningDiv = document.createElement('div');
@@ -3080,17 +2263,10 @@
                     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
                   `;
                   modalBody.insertBefore(warningDiv, modalBody.firstChild);
-                  
-                  // Auto-dismiss after 5 seconds
-                  setTimeout(() => {
-                    if (warningDiv.parentNode) {
-                      warningDiv.remove();
-                    }
-                  }, 5000);
+                  setTimeout(function() { if (warningDiv.parentNode) warningDiv.remove(); }, 5000);
                 }
               })
-              .finally(() => {
-                // Reset button state
+              .finally(function() {
                 saveBtn.innerHTML = originalBtnText;
                 saveBtn.disabled = false;
               });
@@ -3215,7 +2391,130 @@
               
               // Try to load settings from backend
               loadBackendSettings();
+              // POSaBit data source switch (server session)
+              loadPosabitDataSource();
+              // POSaBit status (Verify button uses inline onclick runPosabitVerify)
+              updatePosabitStatus();
+              // If opened from POSaBit / API button, scroll to Integration Settings
+              if (scrollToPosabit) {
+                setTimeout(function() {
+                  var el = document.getElementById('posabitIntegrationSection');
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    el.classList.add('posabit-highlight');
+                    setTimeout(function() { el.classList.remove('posabit-highlight'); }, 1800);
+                  }
+                }, 150);
+              }
             });
+            
+            window.runPosabitVerify = function(btn) {
+              var statusEl = document.getElementById('posabitStatusText');
+              if (statusEl) statusEl.textContent = 'Checking…';
+              if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+              updatePosabitStatus(function() {
+                if (btn) { btn.disabled = false; btn.textContent = 'Verify connection'; }
+              });
+            };
+            // Delegated handler so Verify works when button is inside dynamically filled modal
+            document.addEventListener('click', function(e) {
+              var btn = e.target.id === 'posabitVerifyBtn' ? e.target : (e.target.closest && e.target.closest('#posabitVerifyBtn'));
+              if (btn && typeof window.runPosabitVerify === 'function') {
+                window.runPosabitVerify(btn);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
+            }, true);
+            function updatePosabitStatus(done) {
+              var el = document.getElementById('posabitStatusText');
+              if (!el) { if (typeof done === 'function') done(); return; }
+              fetch('/api/posabit/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                  if (data.connection_ok === true) {
+                    el.textContent = data.message || ('OK — ' + (data.product_count != null ? data.product_count : '') + ' products');
+                    el.style.color = '#4ade80';
+                  } else if (data.configured) {
+                    el.textContent = data.message || 'Connection failed';
+                    el.style.color = '#f87171';
+                  } else {
+                    el.textContent = data.message || 'Not configured';
+                    el.style.color = 'rgba(255,255,255,0.6)';
+                  }
+                })
+                .catch(function() {
+                  el.textContent = 'Could not check status';
+                  el.style.color = '#f87171';
+                })
+                .finally(function() { if (typeof done === 'function') done(); });
+            }
+
+            function loadPosabitDataSource() {
+              fetch('/api/posabit/config')
+                .then(r => r.json())
+                .then(data => {
+                  const wrap = document.getElementById('posabitDataSourceWrap');
+                  const cb = document.getElementById('posabitDataSource');
+                  if (wrap && cb) {
+                    if (!data.posabit_configured) {
+                      wrap.style.display = 'none';
+                    } else {
+                      wrap.style.display = '';
+                      cb.checked = data.data_source === 'posabit';
+                    }
+                  }
+                  // Main page indicator: show "Data source: Excel" or "POSaBit" and link to settings
+                  const indicatorWrap = document.getElementById('dataSourceIndicatorWrap');
+                  const indicator = document.getElementById('dataSourceIndicator');
+                  const link = document.getElementById('dataSourceSettingsLink');
+                  if (indicatorWrap && indicator) {
+                    indicatorWrap.style.display = '';
+                    indicator.textContent = data.data_source === 'posabit' ? 'POSaBit' : 'Excel';
+                    indicator.style.color = data.data_source === 'posabit' ? '#4ade80' : '#a084e8';
+                  }
+                  var barIndicator = document.getElementById('dataSourceIndicatorBar');
+                  if (barIndicator) {
+                    barIndicator.textContent = data.data_source === 'posabit' ? 'POSaBit' : 'Excel';
+                    barIndicator.style.color = data.data_source === 'posabit' ? '#4ade80' : '#a084e8';
+                  }
+                  function openPosabitSettings(e) {
+                    if (e) e.preventDefault();
+                    if (typeof showProductDatabaseManager === 'function') showProductDatabaseManager({ scrollToPosabit: true });
+                  }
+                  if (link && !link.dataset.listenerAdded) {
+                    link.dataset.listenerAdded = '1';
+                    link.addEventListener('click', openPosabitSettings);
+                  }
+                  var linkBar = document.getElementById('dataSourceSettingsLinkBar');
+                  if (linkBar && !linkBar.dataset.listenerAdded) {
+                    linkBar.dataset.listenerAdded = '1';
+                    linkBar.addEventListener('click', openPosabitSettings);
+                  }
+                })
+                .catch(() => {
+                  const wrap = document.getElementById('posabitDataSourceWrap');
+                  if (wrap) wrap.style.display = 'none';
+                  const indicator = document.getElementById('dataSourceIndicator');
+                  if (indicator) indicator.textContent = 'Excel';
+                  const barIndicator = document.getElementById('dataSourceIndicatorBar');
+                  if (barIndicator) barIndicator.textContent = 'Excel';
+                  function openPosabitSettings(e) {
+                    if (e) e.preventDefault();
+                    if (typeof showProductDatabaseManager === 'function') showProductDatabaseManager({ scrollToPosabit: true });
+                  }
+                  const link = document.getElementById('dataSourceSettingsLink');
+                  if (link && !link.dataset.listenerAdded) {
+                    link.dataset.listenerAdded = '1';
+                    link.addEventListener('click', openPosabitSettings);
+                  }
+                  const linkBar = document.getElementById('dataSourceSettingsLinkBar');
+                  if (linkBar && !linkBar.dataset.listenerAdded) {
+                    linkBar.dataset.listenerAdded = '1';
+                    linkBar.addEventListener('click', openPosabitSettings);
+                  }
+                });
+            }
             
             // Load settings from backend
             function loadBackendSettings() {
@@ -3568,10 +2867,6 @@
     }
     
     /* Store Selection Modal Styles */
-    #storeSelectionModal .modal-dialog {
-      max-width: 720px;
-    }
-    
     #storeSelectionModal .modal-content {
       border-radius: 18px;
     }
@@ -5216,6 +4511,33 @@
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(160, 132, 232, 0.5);
       border: 2px solid rgba(160, 132, 232, 0.6) !important;
     }
+
+    /* Keep filter column within viewport (no inner scrolling) */
+    [data-container-type="filter"] .filter-advanced {
+      display: none !important;
+    }
+
+    [data-container-type="filter"] .enhanced-filter-bar {
+      max-height: calc(100dvh - 180px);
+      overflow: visible !important;
+    }
+
+    [data-container-type="filter"] .filter-label {
+      font-size: 12px !important;
+      margin-bottom: 4px !important;
+      line-height: 1.2 !important;
+      letter-spacing: 0.35px !important;
+    }
+
+    [data-container-type="filter"] .filter-select,
+    [data-container-type="filter"] .form-select.filter-select,
+    [data-container-type="filter"] select.filter-select {
+      min-height: 44px !important;
+      font-size: 14px !important;
+      padding: 8px 44px 8px 12px !important;
+      border-width: 2px !important;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+    }
     
     .filter-group {
       display: flex !important;
@@ -5455,6 +4777,16 @@
       padding: 1.2rem 2.5rem 1.2rem 1.1rem !important;  /* More vertical padding for taller look */
       max-width: 280px !important;
       width: 100% !important;
+      box-sizing: border-box !important; /* prevent padding overflow */
+    }
+
+    /* Center column modern selects must not overflow container */
+    .control-panel-modern .form-select-modern {
+      width: 100% !important;
+      max-width: 280px !important;
+      margin-left: auto !important;
+      margin-right: auto !important;
+      box-sizing: border-box !important;
     }
 
     #templateGroupSelect {
@@ -5934,21 +5266,8 @@
     }
     
     /* Store modal backdrop - ensure it's visible and ON TOP */
-    #storeSelectionModal.show {
-      display: block !important;
-    }
-    
     /* Force store modal and its backdrop to be on top of everything */
-    #storeSelectionModal {
-      z-index: 9999 !important;
-    }
-    
     /* Store modal backdrop should be just below the modal */
-    #storeSelectionModal + .modal-backdrop,
-    #storeModalBackdrop {
-      z-index: 9998 !important;
-    }
-    
     /* Ensure JSON match modal stays below store selection */
     #jsonMatchModal {
       z-index: 1050 !important;
@@ -6302,6 +5621,21 @@
       min-height: var(--center-panel-height) !important;
     }
 
+    /* Filter column should also reach the bottom */
+    div[data-container-type="filter"] {
+      height: var(--center-panel-height) !important;
+      min-height: var(--center-panel-height) !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    div[data-container-type="filter"] .enhanced-filter-bar {
+      height: 100% !important;
+      max-height: none !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
     /* Ensure glass cards in side columns fill their containers */
     div[data-container-type="available"] .glass-card,
     div[data-container-type="selected"] .glass-card {
@@ -6408,6 +5742,52 @@
       }
     }
 
+    /* Top "DATABASE TOOLS" bar width fix */
+    .top-tools-row {
+      display: flex;
+      justify-content: center;
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
+
+    /* Header alignment: shift title card so it's centered on the center column */
+    #appHeaderCard {
+      transform: translateX(var(--header-align-shift-x, 0px));
+      will-change: transform;
+    }
+
+    @media (max-width: 992px) {
+      #appHeaderCard {
+        transform: none;
+      }
+    }
+
+    .top-tools-bar {
+      width: 100%;
+      max-width: 750px; /* match title card width */
+      margin: 0 auto;
+    }
+
+    /* Keep Database Tools buttons on ONE line (scroll instead of wrap) */
+    .top-tools-buttons {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 0.5rem;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 6px; /* room for scrollbar overlay */
+      scrollbar-width: thin; /* Firefox */
+    }
+
+    .top-tools-buttons > button,
+    .top-tools-buttons > a {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
 
   </style>
 </head>
@@ -6450,8 +5830,8 @@
   <!-- CRITICAL FIX: Load lava-lamp.js immediately after canvas element (async for non-blocking) -->
   <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" async></script>
 
-  <!-- Main Content (hidden until store is selected) - JavaScript controls visibility -->
-  <div class="main-content" id="mainContent">
+  <!-- Main Content (hidden until store is selected) - backend adds store-selected when user_has_store -->
+  <div class="main-content{% if user_has_store %} store-selected{% endif %}" id="mainContent">
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
       <div class="orb"></div>
@@ -6509,7 +5889,7 @@
 
       <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
         <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.75rem;">
-          <div style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 2rem 3rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 750px; position: relative; overflow: hidden;">
+          <div id="appHeaderCard" style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 2rem 3rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 750px; position: relative; overflow: hidden;">
             <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 20%, rgba(160, 132, 232, 0.1) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%); pointer-events: none;"></div>
             <div style="position: relative; z-index: 2;">
               <h1 class="vibrant-title">
@@ -6525,11 +5905,17 @@
 
             <!-- Store Selection -->
             <div class="store-selection-container" style="margin-top: 0.5rem;">
-              <div class="d-flex align-items-center justify-content-center gap-2">
+              <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap">
                 <div class="d-flex align-items-center gap-2">
                   <span class="store-label">Store:</span>
                   <span class="current-store-display" id="currentStoreDisplay" style="{% if user_has_store %}color: #4ade80;{% else %}color: #f87171;{% endif %}">{% if user_has_store and current_store %}{{ current_store|replace("_", " ") }}{% else %}No store selected{% endif %}</span>
-                  <button class="btn btn-sm btn-outline-primary" onclick="showStoreSelectionModal()" title="Change store">
+                </div>
+                <div class="d-flex align-items-center gap-2" id="dataSourceIndicatorWrap">
+                  <span class="store-label">Data source:</span>
+                  <span id="dataSourceIndicator" class="current-store-display" style="color: #a084e8;">Excel</span>
+                  <a href="#" class="btn btn-sm btn-outline-secondary" id="dataSourceSettingsLink" title="POSaBit API &amp; Excel/API source">API / POSaBit</a>
+                </div>
+                  <button class="btn btn-sm btn-outline-primary" style="display:none">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
@@ -6540,6 +5926,153 @@
                 </div>
               </div>
             </div>
+
+            <!-- Database Tools (moved into title card; no full-width toolbar) -->
+            <div class="top-tools-row fade-in" style="animation-delay: 0.4s; margin-top: 1rem;">
+              <div class="top-tools-bar">
+                <div class="top-tools-title">DATABASE TOOLS</div>
+                <div class="top-tools-buttons">
+                  <button type="button" class="btn filter-action-button" data-bs-toggle="modal" data-bs-target="#excelUploadModal" title="Upload Excel or Match JSON" aria-label="Excel upload and match">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Excel / Upload</span>
+                  </button>
+
+                  <button class="btn-tool-modern btn-export" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Export Data</span>
+                  </button>
+
+                  <button class="btn-tool-modern btn-analytics" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <path d="M12 8v8"></path>
+                      <path d="M8 12h8"></path>
+                    </svg>
+                    <span>Data &amp; Analytics</span>
+                  </button>
+
+                  <button class="btn-tool-modern btn-analytics" onclick="showProductDatabaseManager({scrollToPosabit:true})" title="POSaBit API &amp; switch Excel/POSaBit source">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                    </svg>
+                    <span>POSaBit / API</span>
+                  </button>
+
+                  <button class="btn-tool-modern btn-analytics" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="JSON Match - Match products from Cultivera JSON">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    <span>JSON Match</span>
+                  </button>
+
+                  <button class="btn-tool-modern btn-cache" onclick="resetAllCaches()" title="Reset Cache - Clear all cached data and refresh">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                      <path d="M21 3v5h-5"></path>
+                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                      <path d="M3 21v-5h5"></path>
+                    </svg>
+                    <span>Reset Cache</span>
+                  </button>
+
+                  <button class="btn-help-modern" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
+                    <span class="help-icon">?</span>
+                    <span class="help-text">Help &amp; Support</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Store Selection Modal (missing in current build) -->
+            <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" aria-hidden="true">
+              <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                  <div class="modal-header border-0">
+                    <h5 class="modal-title text-white fw-bold" id="storeSelectionModalLabel">Select Store</h5>
+                  </div>
+                  <div class="modal-body text-white">
+                    <p class="text-secondary mb-2" style="font-size: 0.95rem;">Choose which store database to use for tag data.</p>
+                    <div class="store-options-grid" id="storeOptionsGrid">
+                      {% for store in stores %}
+                        <button
+                          type="button"
+                          class="btn btn-store-option"
+                          onclick="selectStore('{{ store }}')"
+                          {% if current_store == store %}style="border-color: rgba(74,222,128,0.9) !important; box-shadow: 0 0 0 2px rgba(74,222,128,0.25) !important;"{% endif %}
+                        >
+                          <span class="store-option-content">
+                            <span class="store-name">{{ store|replace("_", " ") }}</span>
+                            <span class="store-location">Inventory</span>
+                          </span>
+                        </button>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <script>
+              // Store selection: called by store option buttons in the modal
+              window.selectStore = async function selectStore(storeValue) {
+                try {
+                  const response = await fetch('/api/set-store', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ store: storeValue })
+                  });
+                  const data = await response.json();
+
+                  if (!response.ok || !data.success) {
+                    console.error('Store selection failed:', data);
+                    alert(data.error || data.message || 'Failed to set store.');
+                    return;
+                  }
+
+                  // Reload is the most reliable way to sync backend-cleared session + JS state.
+                  setTimeout(() => window.location.reload(), 400);
+                } catch (e) {
+                  console.error('selectStore error:', e);
+                  alert('Failed to set store. Please try again.');
+                }
+              };
+
+              // Show the modal immediately on first load if no store is selected.
+              document.addEventListener('DOMContentLoaded', async () => {
+                const modalEl = document.getElementById('storeSelectionModal');
+                if (!modalEl || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
+
+                // If the template already knows store is set, skip the fetch.
+                const hasCurrentStore = {{ 'true' if user_has_store and current_store else 'false' }};
+                if (hasCurrentStore) return;
+
+                // Immediate show (no API wait) for first-load UX
+                const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
+                modal.show();
+
+                try {
+                  const res = await fetch('/api/check-store-required', { method: 'GET' });
+                  const payload = await res.json();
+                  // If backend says store isn't required (unexpected), hide it.
+                  if (payload && payload.requires_store === false) modal.hide();
+                } catch (e) {
+                  // Fallback: if the check fails, still show the modal so the user can proceed.
+                  // (already shown)
+                }
+              });
+            </script>
 
             <!-- IMMEDIATE STORE SETTING SCRIPT -->
             <script>
@@ -6553,41 +6086,14 @@
 
       <!-- Main Content Area -->
       <div class="w-100">
-        <!-- Tag-list containers row (now includes filter bar for alignment) -->
-        <div class="row fade-in g-1" style="animation-delay: 0.4s; padding-left: 0.5rem; padding-right: 0.5rem;">
-          <!-- Filter Bar as a column -->
-          <div class="col-12 mb-4" data-container-type="filter">
-              <div class="enhanced-filter-bar d-flex align-items-center gap-2 p-3" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 120px;">
-                  <!-- Left Side: Clear Button and Upload Section -->
-                  <div class="left-section d-flex flex-column gap-2" style="flex-shrink: 0; min-height: 80px; justify-content: center;">
-                    <!-- File Path Display (Above buttons) -->
-                    <div class="file-path-display text-center">
-                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px !important; font-weight: 600; display: block; padding: 6px 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; border: 1px solid rgba(160, 132, 232, 0.3); min-height: 32px; line-height: 1.4;">
-                        {% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}
-                      </span>
-                    </div>
-                    <!-- Buttons Row -->
-                    <div class="buttons-row d-flex align-items-center gap-2">
-                      <!-- Upload Button -->
-                      <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
-                      <button type="button" class="btn filter-action-button" id="uploadTriggerBtn" onclick="handleFileUploadClick();" aria-label="Upload Excel file">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                          <polyline points="7 10 12 15 17 10"></polyline>
-                          <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                        Upload Excel
-                      </button>
-                      <!-- Match JSON Button -->
-                      <button class="btn filter-action-button" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="Match products from JSON URL" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5)) !important; border-color: rgba(59, 130, 246, 0.8) !important;">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                          <polyline points="7 10 12 15 17 10"></polyline>
-                          <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                        Match JSON
-                      </button>
-                      <!-- Clear Button -->
+        <!-- Main Content Row -->
+        <div class="main-content-row fade-in d-flex flex-wrap" style="animation-delay: 0.6s;">
+          <!-- Filter Bar (left column) -->
+          <div class="mb-2 mt-0" data-container-type="filter">
+              <div class="enhanced-filter-bar d-flex flex-column align-items-stretch gap-2 p-3" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 72px;">
+                  <!-- Top: Clear -->
+                  <div class="left-section d-flex align-items-center gap-2" style="flex-shrink: 0; width: 100%; flex-wrap: wrap;">
+                    <!-- Clear Button -->
                       <button id="clearFiltersBtn" class="btn btn-danger filter-action-button" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
                           <polyline points="3 6 5 6 21 6"></polyline>
@@ -6595,54 +6101,63 @@
                         </svg>
                         Clear Filters
                       </button>
-                    </div>
                   </div>
                   
-                  <!-- Filter Dropdowns Row - Left Aligned, Fits Within Container -->
-                  <div class="filter-row d-flex align-items-center justify-content-start gap-1 flex-grow-1" style="margin-left: 0.5rem;">
-                    <div class="filter-group">
-                      <label for="vendorFilter" class="filter-label">VENDOR</label>
+                  <!-- Filter dropdowns (stacked vertically) -->
+                  <div class="filter-row d-flex flex-column align-items-stretch justify-content-start gap-1 flex-grow-1" style="margin-left: 0;">
+                    <div class="filter-group" id="filterGroup_productName">
+                      <label for="productNameFilter" class="filter-label">PRODUCT NAME</label>
+                      <input id="productNameFilter" class="form-control filter-select" type="text" placeholder="Search product name..." aria-label="Filter by product name">
+                    </div>
+
+                    <div class="filter-group" id="filterGroup_manifestRef">
+                      <label for="manifestRefFilter" class="filter-label">MANIFEST REF #</label>
+                      <input id="manifestRefFilter" class="form-control filter-select" type="text" placeholder="Manifest ref..." aria-label="Filter by manifest ref number">
+                    </div>
+
+                    <div class="filter-group" id="filterGroup_vendor">
+                      <label for="vendorFilter" class="filter-label">SUPPLIER</label>
                       <select id="vendorFilter" class="form-select filter-select" aria-label="Filter by vendor" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="filterGroup_brand">
                       <label for="brandFilter" class="filter-label">BRAND</label>
                       <select id="brandFilter" class="form-select filter-select" aria-label="Filter by brand" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="filterGroup_productType">
                       <label for="productTypeFilter" class="filter-label">PRODUCT TYPE</label>
                       <select id="productTypeFilter" class="form-select filter-select" aria-label="Filter by product type" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="filterGroup_lineage">
                       <label for="lineageFilter" class="filter-label">LINEAGE</label>
                       <select id="lineageFilter" class="form-select filter-select" aria-label="Filter by lineage" style="min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; width: 100% !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="filterGroup_weight">
                       <label for="weightFilter" class="filter-label">WEIGHT</label>
                       <select id="weightFilter" class="form-select filter-select" aria-label="Filter by weight" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="filterGroup_price">
                       <label for="priceFilter" class="filter-label">PRICE</label>
                       <select id="priceFilter" class="form-select filter-select" aria-label="Filter by price" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="filterGroup_doh">
                       <label for="dohFilter" class="filter-label">DOH COMPLIANCE</label>
                       <select id="dohFilter" class="form-select filter-select doh-empty" aria-label="Filter by DOH compliance" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
                       </select>
                     </div>
-                    <div class="filter-group">
+                    <div class="filter-group" id="filterGroup_highCbd">
                       <label for="highCbdFilter" class="filter-label">HIGH CBD</label>
                       <select id="highCbdFilter" class="form-select filter-select" aria-label="Filter by High CBD products" style="width: 100% !important; min-height: 60px !important; border: 3px solid #00d4aa !important; box-shadow: 0 0 20px rgba(0, 212, 170, 0.5) !important; padding: 1rem 40px 1rem 1.25rem !important; font-size: 20px !important; line-height: 1.5 !important; text-align: left !important; text-align-last: left !important;">
                         <!-- Options populated dynamically by JavaScript -->
@@ -6651,10 +6166,7 @@
                   </div>
               </div>
           </div>
-        </div>
-        
-        <!-- Main Content Row -->
-        <div class="main-content-row fade-in d-flex flex-wrap" style="animation-delay: 0.6s;">
+          
           <!-- Available Tags -->
           <div class="mb-2" data-container-type="available" id="availableTagsContainer">
             <div class="glass-card d-flex flex-column h-100">
@@ -6721,6 +6233,7 @@
                     <option value="mini">Mini</option>
                     <option value="miniroll">Mini-roll</option>
                     <option value="double">Double</option>
+                    <option value="new">New (1.75×2.25)</option>
                     <option value="preroll">Preroll</option>
                     <option value="inventory">Inventory</option>
                   </select>
@@ -6803,60 +6316,6 @@
                 </div>
               </div>
 
-<!-- Database Tools Section -->
-              <div class="control-section-modern control-section-database">
-                <div class="section-header-modern">
-                  <h6 class="section-title">Database Tools</h6>
-                </div>
-
-                <div class="button-grid-modern">
-                  <button class="btn-tool-modern btn-export" onclick="TagManager.downloadExcel()" title="Download selected tags as Excel file">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="7 10 12 15 17 10"></polyline>
-                      <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    <span>Export Data</span>
-                  </button>
-
-                  <button class="btn-tool-modern btn-analytics" onclick="showProductDatabaseManager()" title="Open Data & Analytics">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                      <path d="M12 8v8"></path>
-                      <path d="M8 12h8"></path>
-                    </svg>
-                    <span>Data & Analytics</span>
-                  </button>
-
-                  <button class="btn-tool-modern btn-cache" onclick="resetAllCaches()" title="Reset Cache - Clear all cached data and refresh">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
-                      <path d="M21 3v5h-5"></path>
-                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
-                      <path d="M3 21v-5h5"></path>
-                    </svg>
-                    <span>Reset Cache</span>
-                  </button>
-                  
-                  <button class="btn-tool-modern btn-lineage" onclick="openLineageEditor()" title="Open Lineage Editor">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M12 2v6" />
-                      <path d="M12 22v-6" />
-                      <path d="M4 6c4 2 8 2 16 0" />
-                      <path d="M4 18c4-2 8-2 16 0" />
-                    </svg>
-                    <span>Lineage Editor</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Help Section -->
-              <div class="control-section-modern control-section-help">
-                <button class="btn-help-modern" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
-                  <span class="help-icon">?</span>
-                  <span class="help-text">Help & Support</span>
-                </button>
-              </div>
             </div>
           </div>
           
@@ -6917,337 +6376,6 @@
   <div id="initialData" data-initial='{{ initial_data|tojson if initial_data else "{}" }}'></div>
 
   <!-- Modals -->
-  
-  <!-- Store Selection Modal - JavaScript controls visibility after checking session -->
-  <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" style="display: none; z-index: 10001 !important;">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
-      <div class="modal-content glass-card">
-        <div class="modal-header border-0" style="padding: 1.6rem 1.8rem 1rem;">
-          <h5 class="modal-title" id="storeSelectionModalLabel" style="font-size: 2.2rem; font-weight: 700; display: flex; align-items: center; color: #ffffff; letter-spacing: 0.8px; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" class="me-3 text-primary" style="filter: drop-shadow(0 2px 4px rgba(160, 132, 232, 0.35));">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-              <polyline points="9 22 9 12 15 12 15 22"></polyline>
-            </svg>
-            Select Your Store
-          </h5>
-        </div>
-        <div class="modal-body text-center" style="padding: 1.1rem 1.6rem 1.8rem; max-height: 70vh; overflow-y: auto;">
-          <p class="mb-4 text-light" style="font-size: 1rem; font-weight: 500; color: rgba(255, 255, 255, 0.88);">Please select your store location to continue. This selection will be saved and remembered for future visits.</p>
-          
-          <div class="store-options-grid">
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Bothell')">
-              <div class="store-option-content">
-                <div class="store-name">AGT Bothell</div>
-                <div class="store-location">Bothell, WA</div>
-              </div>
-            </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Burien')">
-              <div class="store-option-content">
-                <div class="store-name">AGT Burien</div>
-                <div class="store-location">Burien, WA</div>
-              </div>
-            </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Goldbar')">
-              <div class="store-option-content">
-                <div class="store-name">AGT Goldbar</div>
-                <div class="store-location">Goldbar, WA</div>
-              </div>
-            </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Lynnwood')">
-              <div class="store-option-content">
-                <div class="store-name">AGT Lynnwood</div>
-                <div class="store-location">Lynnwood, WA</div>
-              </div>
-            </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Shoreline')">
-              <div class="store-option-content">
-                <div class="store-name">AGT Shoreline</div>
-                <div class="store-location">Shoreline, WA</div>
-              </div>
-            </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Seattle')">
-              <div class="store-option-content">
-                <div class="store-name">AGT Seattle</div>
-                <div class="store-location">Seattle, WA</div>
-              </div>
-            </button>
-            
-            <button class="btn btn-store-option" onclick="selectStore('AGT_Walla_Walla')">
-              <div class="store-option-content">
-                <div class="store-name">AGT Walla Walla</div>
-                <div class="store-location">Walla Walla, WA</div>
-              </div>
-            </button>
-
-            <button class="btn btn-store-option" onclick="selectStore('Test')">
-              <div class="store-option-content">
-                <div class="store-name">Test Store</div>
-                <div class="store-location">Unspecified, WA</div>
-              </div>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  
-  <!-- MODAL CONTROL - Checks backend on every page load -->
-  <script>
-    // ===== MODAL CONTROL - RUNS IMMEDIATELY ON PAGE LOAD =====
-    // FIXED: Always check backend instead of relying on sessionStorage
-    (function() {
-      console.log('🚀 FIRST SCRIPT - Modal control starting (checking backend)');
-      
-      // CRITICAL: Ensure store modal is hidden initially to prevent flash over loading splash
-      const modalElement = document.getElementById('storeSelectionModal');
-      if (modalElement) {
-        modalElement.style.display = 'none';
-        modalElement.style.visibility = 'hidden';
-        modalElement.classList.remove('show');
-      }
-      
-      // CRITICAL: Don't clear sessionStorage on page load - trust backend session
-      // Backend session is the source of truth, sessionStorage is just for frontend validation
-      const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
-      if (sessionTimestamp) {
-        const timestamp = parseInt(sessionTimestamp, 10);
-        const age = Date.now() - timestamp;
-        console.log('✅ sessionStorage exists (age:', age, 'ms) - will validate with backend');
-      }
-      
-      // CRITICAL: Hide main content initially until we know store status
-      const mainContent = document.getElementById('mainContent');
-      if (mainContent) {
-        mainContent.style.display = 'none';
-        mainContent.style.visibility = 'hidden';
-      }
-      
-      // Always check backend for store selection (don't rely on sessionStorage)
-      // CRITICAL: Add force_store_modal parameter to ensure fresh check
-      const cacheBust = `ts=${Date.now()}&force_store_modal=false`;
-      fetch(`/api/check-store-required?${cacheBust}`, {
-        method: 'GET',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        }
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('Backend store check response:', data);
-        console.log('🔍 Early check - requires_store:', data.requires_store, 'store:', data.store);
-        
-        // CRITICAL: Backend returns 'requires_store' - if true, we MUST show modal
-        // Only trust store if requires_store is explicitly false AND store exists
-        const requiresStore = data.requires_store === true;
-        const hasValidStore = data.requires_store === false && data.store && data.store.trim() !== '';
-        const storeName = hasValidStore ? data.store : null;
-        
-        console.log('🔍 Early check decision:', {
-          requiresStore: requiresStore,
-          hasValidStore: hasValidStore,
-          storeName: storeName
-        });
-        
-        const forceShowModal = () => {
-          console.log('🔄 Forcing store modal to display...');
-
-          window.STORE_MODAL_BLOCKING = true;
-
-          let attemptCount = 0;
-          const MAX_ATTEMPTS = 50; // 10 seconds max (50 * 200ms)
-          
-          const attemptShow = () => {
-            attemptCount++;
-            
-            // CRITICAL FIX: Prevent infinite loop - timeout after max attempts
-            if (attemptCount > MAX_ATTEMPTS) {
-              console.warn('⚠️ Loading splash check timeout - showing modal anyway');
-              // Force hide loading splash if it exists
-              const loadingSplash = document.getElementById('appLoadingSplash');
-              if (loadingSplash) {
-                loadingSplash.style.display = 'none';
-                loadingSplash.classList.add('fade-out');
-              }
-              // Continue to show modal
-            }
-            
-            // Check for loading splash (try multiple possible IDs)
-            const loadingSplash = document.getElementById('appLoadingSplash') || 
-                                 document.getElementById('loadingOverlay') ||
-                                 document.querySelector('#loadingOverlay');
-            
-            if (loadingSplash && loadingSplash.style.display !== 'none' && !loadingSplash.classList.contains('fade-out')) {
-              // Loading splash is still visible, wait a bit longer
-              if (attemptCount % 5 === 0 || attemptCount <= 2) {
-                console.log(`⏳ Waiting for loading splash to hide... (attempt ${attemptCount}/${MAX_ATTEMPTS})`);
-              }
-              setTimeout(attemptShow, 200);
-              return;
-            }
-            
-            // Loading splash is hidden or doesn't exist - proceed to show modal
-            if (typeof window.showStoreSelectionModal === 'function') {
-              window.showStoreSelectionModal();
-            } else {
-              const modalElement = document.getElementById('storeSelectionModal');
-              if (modalElement) {
-                try {
-                  const modalInstance = (typeof bootstrap !== 'undefined')
-                    ? bootstrap.Modal.getOrCreateInstance(modalElement, { backdrop: 'static', keyboard: false })
-                    : null;
-                  modalElement.style.visibility = 'visible';
-                  modalElement.style.display = 'block';
-                  modalElement.classList.add('show');
-                  modalElement.setAttribute('aria-hidden', 'false');
-                  document.body.classList.add('modal-open');
-                  document.body.style.overflow = 'hidden';
-                  if (!document.querySelector('.modal-backdrop, #storeModalBackdrop')) {
-                    const backdrop = document.createElement('div');
-                    backdrop.id = 'storeModalBackdrop';
-                    backdrop.className = 'modal-backdrop fade show';
-                    backdrop.style.zIndex = '10000';
-                    document.body.appendChild(backdrop);
-                  }
-                  if (modalInstance) {
-                    modalInstance.show();
-                  }
-                } catch (err) {
-                  console.warn('⚠️ Failed to show modal via bootstrap, falling back:', err);
-                  setTimeout(attemptShow, 100);
-                  return;
-                }
-              } else {
-                setTimeout(attemptShow, 100);
-                return;
-              }
-            }
-
-            // CRITICAL FIX: Hide main content when modal is shown (don't show it behind modal)
-            const mainContent = document.getElementById('mainContent');
-            if (mainContent) {
-              mainContent.style.display = 'none';
-              mainContent.style.visibility = 'hidden';
-              mainContent.style.pointerEvents = 'none';
-              mainContent.classList.add('store-selection-disabled');
-            }
-          };
-
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', attemptShow);
-          } else {
-            attemptShow();
-          }
-        };
-        
-        // CRITICAL: Check BOTH backend AND sessionStorage
-        // Even if backend has a store, if sessionStorage doesn't match, show modal
-        const sessionStore = sessionStorage.getItem('selected_store');
-        const sessionJustSelected = sessionStorage.getItem('store_just_selected') === 'true';
-        const sessionTimestamp = sessionStorage.getItem('store_selected_timestamp');
-        
-        // CRITICAL FIX: Trust backend session - if backend says store is valid, use it
-        // Only check sessionStorage as a secondary validation, not a blocker
-        // Backend session is the source of truth
-        let sessionStoreValid = true; // Default to valid if backend says so
-        if (sessionStore && sessionJustSelected && sessionTimestamp) {
-          const timestamp = parseInt(sessionTimestamp, 10);
-          const age = Date.now() - timestamp;
-          // Only invalidate if sessionStorage is very old (more than 24 hours) AND doesn't match backend
-          sessionStoreValid = (age < 86400000) || (sessionStore === storeName); // 24 hours or matches backend
-          console.log('🔍 sessionStorage check:', {
-            sessionStore,
-            sessionJustSelected,
-            sessionAge: age,
-            sessionStoreValid,
-            backendStore: storeName
-          });
-        }
-        
-        // CRITICAL FIX: Trust backend - if backend says store is valid, show content
-        // Only show modal if backend explicitly requires it
-        if (requiresStore || (!hasValidStore && !sessionStore)) {
-          console.log('❗ No valid store match - showing modal');
-          console.log('❗ Details:', {
-            requiresStore,
-            hasValidStore,
-            backendStore: data.store,
-            sessionStore,
-            sessionStoreValid,
-            storesMatch: sessionStore === storeName
-          });
-          forceShowModal();
-          return;
-        }
-
-        console.log('✅ Valid store match (backend + sessionStorage):', storeName, '- showing content');
-        // Ensure sessionStorage is set (should already be, but ensure it)
-        sessionStorage.setItem('selected_store', storeName);
-        sessionStorage.setItem('store_just_selected', 'true');
-        sessionStorage.setItem('store_selected_timestamp', Date.now().toString());
-
-        window.STORE_MODAL_BLOCKING = false;
-
-        const modalElement = document.getElementById('storeSelectionModal');
-        if (modalElement) {
-          modalElement.style.display = 'none';
-          modalElement.classList.remove('show');
-          modalElement.setAttribute('aria-hidden', 'true');
-        }
-        document.querySelectorAll('.modal-backdrop, #storeModalBackdrop').forEach(b => b.remove());
-        document.body.classList.remove('modal-open');
-        document.body.style.overflow = '';
-
-        if (mainContent) {
-          mainContent.style.display = 'block';
-          mainContent.style.visibility = 'visible';
-          mainContent.style.pointerEvents = 'auto';
-          mainContent.classList.remove('store-selection-disabled');
-          mainContent.classList.add('store-selected', 'loaded');
-        }
-
-        if (typeof updateCurrentStoreDisplay === 'function') {
-          updateCurrentStoreDisplay(storeName);
-        }
-        if (typeof updateStoreStatus === 'function') {
-          updateStoreStatus(`Store: ${storeName.replace(/_/g, ' ')}`, 'active');
-        }
-      })
-      .catch(err => {
-        console.error('Error checking store status:', err);
-        // On error, default to showing modal (safer)
-        console.log('⚠️ Error checking store - defaulting to show modal');
-        window.STORE_MODAL_BLOCKING = true;
-        
-        const showModal = () => {
-          const modalElement = document.getElementById('storeSelectionModal');
-          if (modalElement) {
-            modalElement.style.display = 'block';
-            modalElement.classList.add('show');
-            document.body.classList.add('modal-open');
-            document.body.style.overflow = 'hidden';
-          } else {
-            setTimeout(showModal, 50);
-          }
-        };
-        
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', showModal);
-        } else {
-          showModal();
-        }
-      });
-    })();
-  </script>
-
   <!-- Saved Tag Lists Modal -->
   <div class="modal fade" id="savedTagListsModal" tabindex="-1" aria-labelledby="savedTagListsModalLabel">
     <div class="modal-dialog modal-dialog-centered">
@@ -7323,12 +6451,12 @@
               <div class="p-3 h-100" style="background: linear-gradient(135deg, rgba(79, 70, 229, 0.18), rgba(0, 212, 170, 0.14)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 30px rgba(0,0,0,0.25);">
                 <h6 class="text-info mb-3">🚀 Quick Start (Current Flow)</h6>
                 <ol class="mb-3 ps-3">
-                  <li class="mb-2">Upload product data: use <strong>Upload Excel</strong> (POSaBIT LOTs CSV) or <strong>Match JSON</strong> to merge database records.</li>
-                  <li class="mb-2">Choose your <strong>Store</strong> (top center) to load the right inventory.</li>
-                  <li class="mb-2">Filter by <strong>Vendor, Brand, Product Type, Lineage, Weight, DOH, High CBD</strong>.</li>
+                  <li class="mb-2">Select your <strong>Store</strong> (top center). Inventory loads automatically &mdash; <strong>no Excel upload needed</strong>.</li>
+                  <li class="mb-2">Use the left sidebar to search and filter products (ex: <strong>Product Name</strong>, <strong>Supplier</strong>, <strong>Brand</strong>, <strong>Product Type</strong>, <strong>Lineage</strong>, <strong>Weight</strong>).</li>
+                  <li class="mb-2"><strong>Masking tags (automatic):</strong> product names/descriptions are cleaned during loading/generation to remove extra noise (ex: removing trailing “by &lt;vendor&gt;” / weight fragments when present) so labels print clean.</li>
                   <li class="mb-2">Select tags: check items on the left, or use <strong>Select All</strong> for a vendor/category. Drag to reorder in Selected.</li>
-                  <li class="mb-2">Pick a <strong>Template</strong> (Horizontal, Vertical, Mini, Double, Preroll, Inventory) and click <strong>Generate Tags</strong>.</li>
-                  <li class="mb-2">Export or manage data with <strong>Export Data</strong>, <strong>Data & Analytics</strong> (includes Edit DB), <strong>Reset Cache</strong>, and <strong>Lineage Editor</strong>.</li>
+                  <li class="mb-2">Pick a <strong>Template</strong> and click <strong>Generate Tags</strong>.</li>
+                  <li class="mb-2">Use the top buttons for <strong>Export Data</strong>, <strong>Data & Analytics</strong>, <strong>POSaBit / API</strong>, and <strong>Reset Cache</strong>.</li>
                 </ol>
                 <div class="d-flex flex-wrap gap-2">
                   <span class="badge bg-info text-dark px-3 py-2">Batch Undo/Redo saves full selection snapshots</span>
@@ -7369,7 +6497,7 @@
               <div class="p-3 h-100" style="background: rgba(0,0,0,0.25); border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
                 <h6 class="text-warning mb-2">🛠️ Troubleshooting</h6>
                 <ul class="mb-2 small">
-                  <li class="mb-1">Upload stalled? Reclick <strong>Upload Excel</strong> and choose the CSV; refresh if TagManager isn’t ready.</li>
+                  <li class="mb-1">Inventory not showing? Confirm your <strong>Store</strong> is selected, then try <strong>Reset Cache</strong> and refresh.</li>
                   <li class="mb-1">Missing tags? Clear filters or reload current store from the store selector.</li>
                   <li class="mb-1">Undo/Redo not responding? Confirm the latest action saved—snapshot depth is 5.</li>
                   <li class="mb-1">Lineage colors off? Open <strong>Lineage Editor</strong> to re-map strains.</li>
@@ -8793,7 +7921,7 @@
       if (contentEl) contentEl.classList.add('d-none');
 
       try {
-        const store = sessionStorage.getItem('selected_store') || '';
+        const store = null || '';
         const response = await fetch(`/api/saved-tag-lists?store=${encodeURIComponent(store)}`);
 
         if (!response.ok) {
@@ -8894,7 +8022,7 @@
       }
 
       try {
-        const store = sessionStorage.getItem('selected_store') || '';
+        const store = null || '';
         const response = await fetch('/api/saved-tag-lists', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -9231,9 +8359,6 @@
     window.addEventListener('load', function () {
       scrollToTop();
       
-      // Don't sync store here - let checkStoreRequired() handle it
-      // This prevents old store selections from being restored
-      console.log('Window load: Skipping store sync - letting checkStoreRequired() handle it');
     });
     
     // Scroll to top on page show (handles back/forward navigation)
@@ -9329,79 +8454,22 @@
     
     function initializeTagManagerSafely() {
       console.log('🚀 initializeTagManagerSafely called');
-      
-      // CHECK: Is store modal blocking initialization?
-      if (window.STORE_MODAL_BLOCKING === true) {
-        console.log('🚫 TagManager initialization BLOCKED - store modal is active');
-        console.log('⏳ Waiting for store selection before initializing...');
-        
-        // CRITICAL FIX: Add timeout to force initialization if store check hangs
-        if (!window._storeCheckTimeout) {
-          window._storeCheckTimeout = setTimeout(() => {
-            console.log('⚡ Store check timeout - forcing initialization anyway');
-            window.STORE_MODAL_BLOCKING = false; // Clear blocking flag
-            proceedWithInitialization(); // Force initialization
-          }, 10000); // 10 second timeout
-        }
-        return;
-      }
-      
-      // Modal forcing is now handled by IIFE above, just proceed with store check
-      proceedWithStoreCheck();
-      
-      function proceedWithStoreCheck() {
-        // Check store FIRST before initializing tags
-        setTimeout(() => {
-          console.log('🔄 Checking store requirement BEFORE initializing TagManager...');
-          checkStoreRequired(function() {
-            // This callback only runs when store is confirmed
-            console.log('✅ Store confirmed! Initializing TagManager...');
-            
-            // Clear timeout if store check completed
-            if (window._storeCheckTimeout) {
-              clearTimeout(window._storeCheckTimeout);
-              window._storeCheckTimeout = null;
+      if (window.TagManager && typeof window.TagManager.init === 'function') {
+        console.log('🚀 Calling TagManager.init()...');
+        try {
+          TagManager.init();
+          console.log('✅ TagManager.init() called successfully');
+          setTimeout(() => {
+            if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
+              window.fileUploadInitAttempts = 0;
+              setTimeout(window.initializeFileUpload, 200);
             }
-            
-            // CRITICAL FIX: Ensure STORE_MODAL_BLOCKING is cleared before initialization
-            window.STORE_MODAL_BLOCKING = false;
-            
-            proceedWithInitialization();
-          });
-        }, 100);
-      }
-      
-      function proceedWithInitialization() {
-        // CRITICAL FIX: Ensure STORE_MODAL_BLOCKING is cleared
-        window.STORE_MODAL_BLOCKING = false;
-        
-        if (window.TagManager && typeof window.TagManager.init === 'function') {
-          console.log('🚀 Calling TagManager.init()...');
-          try {
-            TagManager.init();
-            console.log('✅ TagManager.init() called successfully');
-            
-            // CRITICAL FIX: Retry file upload initialization after TagManager.init() completes
-            // Give it a moment for init to complete
-            setTimeout(() => {
-              if (typeof window.initializeFileUpload === 'function' && !window.fileUploadInitialized) {
-                console.log('🔄 TagManager initialized - retrying file upload initialization...');
-                window.fileUploadInitAttempts = 0; // Reset counter
-                setTimeout(window.initializeFileUpload, 200);
-              }
-            }, 500);
-          } catch (initError) {
-            console.error('❌ Error calling TagManager.init():', initError);
-            console.error('Stack trace:', initError.stack);
-          }
-        } else {
-          console.error('❌ TagManager.init is not available');
-          console.error('TagManager exists:', !!window.TagManager);
-          if (window.TagManager) {
-            console.error('TagManager.init type:', typeof window.TagManager.init);
-            console.error('TagManager keys:', Object.keys(window.TagManager).slice(0, 20));
-          }
+          }, 500);
+        } catch (initError) {
+          console.error('❌ Error calling TagManager.init():', initError);
         }
+      } else {
+        console.error('❌ TagManager.init is not available');
       }
     }
     
@@ -12244,6 +11312,78 @@
     #matchedProductsList::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
   </style>
 
+  <!-- Excel & JSON Upload modal (upload and match moved here from filter bar) -->
+  <div class="modal fade" id="excelUploadModal" tabindex="-1" aria-labelledby="excelUploadModalLabel">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content glass-card" style="background: rgba(45, 34, 58, 0.98); border: 1px solid rgba(160, 132, 232, 0.5); border-radius: 16px;">
+        <div class="modal-header border-0 pb-0">
+          <h5 class="modal-title text-white" id="excelUploadModalLabel">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2" style="vertical-align: -0.25em;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Excel &amp; JSON
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body pt-2">
+          <p class="text-white-50 small mb-3">Upload a product Excel file or match from a JSON URL. When using POSaBit, Excel is optional.</p>
+          <div class="mb-3">
+            <label class="form-label text-white-50 small mb-1">Current file</label>
+            <div class="rounded p-2" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(160, 132, 232, 0.3);">
+              <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; font-size: 15px; font-weight: 600;">{% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}</span>
+            </div>
+          </div>
+          <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
+          <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn filter-action-button" id="uploadTriggerBtn" onclick="handleFileUploadClick();" aria-label="Upload Excel file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              Upload Excel
+            </button>
+            <button type="button" class="btn filter-action-button" id="excelModalMatchJsonBtn" title="Match products from JSON URL" style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.5)) !important; border-color: rgba(59, 130, 246, 0.8) !important;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              Match JSON
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    (function() {
+      function wireExcelModalMatchJson() {
+        var btn = document.getElementById('excelModalMatchJsonBtn');
+        var excelModalEl = document.getElementById('excelUploadModal');
+        var jsonModalEl = document.getElementById('jsonMatchModal');
+        if (!btn || !excelModalEl || !jsonModalEl) return;
+        if (btn.dataset.wired) return;
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', function() {
+          var excelModal = bootstrap.Modal.getInstance(excelModalEl);
+          if (excelModal) excelModal.hide();
+          setTimeout(function() {
+            var m = bootstrap.Modal.getOrCreateInstance(jsonModalEl);
+            m.show();
+          }, 280);
+        });
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', wireExcelModalMatchJson);
+      } else {
+        wireExcelModalMatchJson();
+      }
+    })();
+  </script>
+
   <div class="modal fade" id="jsonMatchModal" tabindex="-1" aria-labelledby="jsonMatchModalLabel" data-bs-backdrop="static" data-bs-keyboard="false" inert>
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content" style="background:#1e2128!important;color:#d0d4de!important;border:1px solid rgba(255,255,255,0.12);border-radius:16px;overflow:hidden;">
@@ -12426,8 +11566,16 @@
               <label for="jsonInventoryUrlInput" class="form-label">JSON URL:</label>
               <input type="text" inputmode="url" class="form-control form-control-modern" id="jsonInventoryUrlInput"
                      placeholder="https://example.com/inventory-transfer.json"
-                     autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other" required>
+                     autocomplete="new-password" data-lpignore="true" data-1p-ignore data-form-type="other">
               <div class="form-text">Must be a valid HTTP/HTTPS URL containing inventory transfer JSON data</div>
+            </div>
+            
+            <div class="mb-3" id="posabitManifestSection">
+              <label class="form-label">POSaBit</label>
+              <p class="form-text small">Load manifest items directly from POSaBit. Set <code>POSABIT_API_TOKEN</code> and <code>POSABIT_API_BASE_URL</code> in your environment.</p>
+              <button type="button" class="btn btn-outline-info btn-sm" id="btnPosabitManifest" onclick="generateJsonInventoryFromPosabit()">
+                <span class="posabit-btn-text">Load manifest from POSaBit</span>
+              </button>
             </div>
             
             <button type="button" class="btn btn-modern2" onclick="generateJsonInventory()">
