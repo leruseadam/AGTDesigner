@@ -12755,7 +12755,15 @@ def get_available_tags():
                     # Cache is cold — direct synchronous fetch (no thread; PA kills daemon threads)
                     posabit_rows = None
                     try:
+                        from src.core.data.posabit_client import PosabitAuthError as _PosabitAuthError2
                         posabit_rows = get_menu_feed_as_product_rows()
+                    except _PosabitAuthError2 as _auth_err2:
+                        logging.error(f"POSaBit: 401 Unauthorized — token invalid/expired. Update POSABIT_API_TOKEN.")
+                        return jsonify({
+                            'tags': [], 'total_count': 0,
+                            'source': 'posabit-error',
+                            'message': 'POSaBit API token is invalid or expired (401). Update POSABIT_API_TOKEN in PythonAnywhere WSGI configuration.',
+                        }), 200
                     except Exception as _cf_err:
                         logging.warning(f"Cold POSaBit fetch failed: {_cf_err}")
                     if posabit_rows:
@@ -17521,9 +17529,17 @@ def get_web_available_tags():
                     # Cache cold — direct synchronous fetch (no thread; PA kills daemon threads)
                     _web_cold_rows = None
                     try:
+                        from src.core.data.posabit_client import PosabitAuthError as _PosabitAuthError
                         logging.error(f"WEB POSaBit: starting cold fetch for store={store_for_posabit!r}")
                         _web_cold_rows = get_menu_feed_as_product_rows(store_name=store_for_posabit)
                         logging.error(f"WEB POSaBit: cold fetch returned {len(_web_cold_rows) if _web_cold_rows else 0} rows")
+                    except _PosabitAuthError as _auth_e:
+                        logging.error(f"WEB POSaBit: 401 Unauthorized — token is invalid or expired. Update POSABIT_API_TOKEN in PA WSGI config.")
+                        return jsonify({
+                            'tags': [], 'total_count': 0,
+                            'source': 'posabit-error',
+                            'message': 'POSaBit API token is invalid or expired (401). Update POSABIT_API_TOKEN in PythonAnywhere WSGI configuration.',
+                        }), 200
                     except Exception as _e:
                         logging.error(f"WEB cold POSaBit fetch EXCEPTION: {type(_e).__name__}: {_e}")
                     if _web_cold_rows:

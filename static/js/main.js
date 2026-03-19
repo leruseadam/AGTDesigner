@@ -12094,7 +12094,10 @@ const TagManager = {
             if (this._fetchingAvailableTags) {
                 console.warn('⚠️ Tag fetch timeout - resetting flag after 60 seconds');
                 this._fetchingAvailableTags = false;
-                // CRITICAL: Clear loading UI when timeout occurs
+                // CRITICAL: Clear loading UI when timeout occurs (including the "Loading tags..." overlay)
+                if (this.hideTagRenderModal) {
+                    this.hideTagRenderModal();
+                }
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -12219,11 +12222,12 @@ const TagManager = {
                 const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
-                    // Just hide the splash, don't show error message
+                    if (this.hideTagRenderModal) {
+                        this.hideTagRenderModal();
+                    }
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
-                    // Don't show error message - let the app continue working
                 }, safetyTimeoutMs);
             }
 
@@ -12622,8 +12626,9 @@ const TagManager = {
 
                     // Auto-retry when backend is still loading (POSaBit cache warming or file processing)
                     const lowerMsg = (errorMsg || '').toLowerCase();
-                    const isBackgroundLoading = lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly')
-                        || lowerMsg.includes('loading, please wait') || lowerMsg.includes('posabit') || responseData.source === 'posabit-loading';
+                    const isBackgroundLoading = responseData.source !== 'posabit-error' && (
+                        lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly')
+                        || lowerMsg.includes('loading, please wait') || lowerMsg.includes('posabit') || responseData.source === 'posabit-loading');
                     if (isBackgroundLoading) {
                         this._backgroundProcessingRetries += 1;
                         const maxBgRetries = 30; // ~60s if 2s delay — enough for POSaBit cold start
