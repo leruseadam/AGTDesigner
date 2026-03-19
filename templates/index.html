@@ -5625,6 +5625,10 @@
     div[data-container-type="filter"] {
       height: var(--center-panel-height) !important;
       min-height: var(--center-panel-height) !important;
+      width: 175px !important;
+      min-width: 175px !important;
+      max-width: 175px !important;
+      flex-shrink: 0 !important;
       display: flex !important;
       flex-direction: column !important;
     }
@@ -5838,12 +5842,13 @@
       </div>
     </div>
 
-    <div class="w-100 py-1" style="z-index:1; position:relative;">
-      <!-- Title and Subtitle centered above tag panels -->
-
-      <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
-        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.25rem;">
-          <div id="appHeaderCard" style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 0.6rem 2rem 0.7rem 2rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 750px; position: relative; overflow: hidden;">
+    <div class="header-grid-row" style="z-index:1; position:relative;">
+      <!-- Header aligned over CURRENT INVENTORY column -->
+      <div class="header-grid-spacer" aria-hidden="true"></div>
+      <div class="header-grid-cell">
+        <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
+          <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.25rem;">
+            <div id="appHeaderCard" style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 0.6rem 2rem 0.7rem 2rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 750px; position: relative; overflow: hidden;">
             <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 20%, rgba(160, 132, 232, 0.1) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%); pointer-events: none;"></div>
             <div style="position: relative; z-index: 2;">
               <h1 class="vibrant-title">
@@ -5917,6 +5922,13 @@
                       <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
                     </svg>
                     <span>POSaBit / API</span>
+                  </button>
+
+                  <button type="button" class="btn-tool-modern btn-analytics" id="manageTemplatesBtn" title="Add, replace, or view your custom template designs">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                    </svg>
+                    <span>Manage Templates</span>
                   </button>
 
                   <button class="btn-tool-modern btn-analytics" data-bs-toggle="modal" data-bs-target="#jsonMatchModal" title="JSON Match - Match products from Cultivera JSON">
@@ -6243,28 +6255,7 @@
                   </button>
                 </div>
 
-                <div class="control-group-modern">
-                  <label class="control-label-modern">Design Set</label>
-                  <div class="radio-group-modern">
-                    <div class="radio-option-modern">
-                      <input type="radio" id="templateGroupClassic" name="templateGroup" value="classic" checked>
-                      <label for="templateGroupClassic" class="radio-label-modern">Classic</label>
-                    </div>
-                    <div class="radio-option-modern">
-                      <input type="radio" id="templateGroupUser" name="templateGroup" value="user">
-                      <label for="templateGroupUser" class="radio-label-modern">User</label>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="control-group-modern">
-                  <button type="button" id="manageTemplatesBtn" class="btn-secondary-modern" title="Add, replace, or view your custom template designs">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-                    </svg>
-                    Manage Templates
-                  </button>
-                </div>
+                <!-- Design Set and Manage Templates removed per new UX -->
 
                 <select id="fontSelect" class="d-none" aria-label="Font">
                   <option value="Arial">Arial</option>
@@ -6347,6 +6338,10 @@
           </div>
         </div>
       </div>
+        </div>
+      </div>
+      <div class="header-grid-spacer" aria-hidden="true"></div>
+      <div class="header-grid-spacer" aria-hidden="true"></div>
     </div>
   </div>
 
@@ -6443,33 +6438,25 @@
           <div class="row gy-3">
             <div class="col-lg-7">
               <div class="p-3 h-100" style="background: linear-gradient(135deg, rgba(79, 70, 229, 0.18), rgba(0, 212, 170, 0.14)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 30px rgba(0,0,0,0.25);">
-                <h6 class="text-info mb-3">🚀 Quick Start (Current Flow)</h6>
-                <ol class="mb-3 ps-3">
-                  <li class="mb-2">Select your <strong>Store</strong> (top center). Inventory loads automatically &mdash; <strong>no Excel upload needed</strong>.</li>
-                  <li class="mb-2">Use the left sidebar to search and filter products (ex: <strong>Product Name</strong>, <strong>Supplier</strong>, <strong>Brand</strong>, <strong>Product Type</strong>, <strong>Lineage</strong>, <strong>Weight</strong>).</li>
-                  <li class="mb-2"><strong>Masking tags (automatic):</strong> product names/descriptions are cleaned during loading/generation to remove extra noise (ex: removing trailing “by &lt;vendor&gt;” / weight fragments when present) so labels print clean.</li>
-                  <li class="mb-2">Select tags: check items on the left, or use <strong>Select All</strong> for a vendor/category. Drag to reorder in Selected.</li>
-                  <li class="mb-2">Pick a <strong>Template</strong> and click <strong>Generate Tags</strong>.</li>
-                  <li class="mb-2">Use the top buttons for <strong>Export Data</strong>, <strong>Data & Analytics</strong>, <strong>POSaBit / API</strong>, and <strong>Reset Cache</strong>.</li>
-                </ol>
-                <div class="d-flex flex-wrap gap-2">
-                  <span class="badge bg-info text-dark px-3 py-2">Batch Undo/Redo saves full selection snapshots</span>
-                  <span class="badge bg-secondary px-3 py-2">Global filters stay while switching templates</span>
-                </div>
+                <h6 class="text-info mb-3">🚀 Using Filters</h6>
+                <ul class="mb-3 ps-3">
+                  <li class="mb-2">Use the left filter bar (Product, Brand, Vendor, Product Type, Lineage, etc.) to narrow the product list.</li>
+                  <li class="mb-2">Combine filters (for example Brand + Product Type) to drill down to the exact items you want.</li>
+                  <li class="mb-2">Clear filters from the chips row above the list when you want to see everything again.</li>
+                  <li class="mb-2">Check the boxes next to products to add them to the Selected list; drag inside Selected to change print order.</li>
+                </ul>
               </div>
             </div>
             <div class="col-lg-5">
               <div class="p-3 h-100" style="background: linear-gradient(135deg, rgba(255, 193, 7, 0.16), rgba(160, 132, 232, 0.14)); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 12px 30px rgba(0,0,0,0.25);">
-                <h6 class="text-warning mb-3">🎯 Key Features</h6>
+                <h6 class="text-warning mb-3">🎯 Switching Templates</h6>
                 <ul class="mb-3">
-                  <li class="mb-2"><strong>Smart Filters</strong>: stacked filter bar with live counts.</li>
-                  <li class="mb-2"><strong>Batch Selection</strong>: vendor/category select-all, drag reorder.</li>
-                  <li class="mb-2"><strong>Templates</strong>: multiple label layouts with color-coded controls.</li>
-                  <li class="mb-2"><strong>Lineage Editor</strong>: edit lineage/colors directly from the center column.</li>
-                  <li class="mb-2"><strong>Data Tools</strong>: Export, Analytics (with Edit DB), Reset Cache, JSON matching.</li>
-                  <li class="mb-2"><strong>Undo/Redo</strong>: snapshot-based—restores whole batches, not single tags.</li>
+                  <li class="mb-2">Use the <strong>Template</strong> dropdown in the center column to choose a label layout (e.g. Shelf, Jar, Inventory).</li>
+                  <li class="mb-2">Your filters and Selected tags stay in place when you change templates.</li>
+                  <li class="mb-2">If a layout feels too tight or too large, switch templates and click <strong>Generate Labels</strong> again.</li>
+                  <li class="mb-2">Template settings (fonts, fields, size) are applied automatically per template; you only need to re-generate.</li>
                 </ul>
-                <div class="small text-muted">Tip: Keep the help overlay handy—press the “?” button anytime.</div>
+                <div class="small text-muted">Tip: You can adjust filters first, then try different templates until the preview looks right.</div>
               </div>
             </div>
           </div>

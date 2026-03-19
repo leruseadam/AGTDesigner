@@ -8025,6 +8025,27 @@ body.modal-open #mainContent.store-selection-disabled,
   max-width: 100% !important;
 }
 
+/* Header row aligned to CURRENT INVENTORY column without affecting list widths */
+.header-grid-row {
+  display: grid !important;
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(170px, 210px) minmax(0, 1fr);
+  gap: 1rem !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  padding: 0 0.5rem !important; /* match main-content horizontal breathing room */
+  box-sizing: border-box !important;
+  align-items: start !important;
+}
+
+.header-grid-row .header-grid-cell {
+  grid-column: 2 !important;
+  min-width: 0 !important;
+}
+
+.header-grid-row .header-grid-spacer {
+  min-width: 0 !important;
+}
+
 /* Top tools bar (where filter bar used to be) */
 .top-tools-row {
   width: 100% !important;
@@ -8131,20 +8152,28 @@ body.modal-open #mainContent.store-selection-disabled,
   align-self: stretch !important;
   display: flex !important;
   flex-direction: column !important;
+  width: 175px !important;
+  min-width: 175px !important;
+  max-width: 175px !important;
+  flex-shrink: 0 !important;
   max-height: var(--tag-list-height) !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
+  box-sizing: border-box !important;
 }
 
 .main-content-row > [data-container-type="filter"] .enhanced-filter-bar {
   flex-direction: column !important;
   align-items: stretch !important;
   flex: 1 1 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
   min-height: 0 !important;
   max-height: none !important;
   overflow-y: visible !important;
   overflow-x: hidden !important;
   margin-top: 0 !important;
+  box-sizing: border-box !important;
 }
 
 .main-content-row > [data-container-type="filter"] .enhanced-filter-bar .filter-row {
