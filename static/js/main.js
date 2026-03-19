@@ -329,8 +329,9 @@ if (typeof Toast === 'undefined') {
 
 // Classic types that should show "Lineage" instead of "Brand"
 const CLASSIC_TYPES = [
-    "flower", "pre-roll", "concentrate", "infused pre-roll", 
-    "solventless concentrate", "vape cartridge", "rso/co2 tankers"
+    "flower", "pre-roll", "concentrate", "infused pre-roll",
+    "solventless concentrate", "vape cartridge", "rso/co2 tankers",
+    "disposable", "vape pen", "preroll"
 ];
 
 // Add this near the top of the file, before any code that uses it

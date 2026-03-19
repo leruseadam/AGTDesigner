@@ -7,6 +7,11 @@ import time
 import logging
 from typing import List, Dict, Any, Optional
 
+from src.core.utils.product_weight_inference import (
+    infer_weight_display_from_texts,
+    is_generic_single_unit_weight,
+)
+
 logger = logging.getLogger(__name__)
 
 # Cache for product list (keyed by store so switching store uses correct feed key). TTL in seconds.
@@ -326,6 +331,18 @@ def _menu_item_to_product_row(item: Dict, price_variant: Optional[Dict], categor
         "CBD test result": cbd_str,
         "Description": (item.get("description") or "").strip(),
     }
+    # Parent menu name + variant name often carry real grams; variant price unit is frequently "1".
+    hint = f"{(item.get('name') or '').strip()} {name}".strip()
+    if is_generic_single_unit_weight(weight_val):
+        inferred = infer_weight_display_from_texts(
+            hint, row["Description"], normalized_product_type
+        )
+        if inferred:
+            row["Weight*"] = inferred
+            row["Weight"] = inferred
+            row["CombinedWeight"] = inferred
+            row["weight_with_units"] = inferred
+            logger.debug("POSaBit inferred weight for %r: %r -> %r", name, weight_val, inferred)
     return row
 
 
@@ -403,7 +420,8 @@ def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
     unit = (unit or "").strip()
     thc_str = (sku.get("thc_measure") or "").strip()
     cbd_str = (sku.get("cbd_measure") or "").strip()
-    return {
+    desc = (sku.get("description") or "").strip()
+    row = {
         "Product Name*": name,
         "ProductName": name,
         "Product Type*": normalized_product_type,
@@ -427,8 +445,17 @@ def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
         "Units": "",
         "THC test result": thc_str,
         "CBD test result": cbd_str,
-        "Description": (sku.get("description") or "").strip(),
+        "Description": desc,
     }
+    if is_generic_single_unit_weight(unit):
+        inferred = infer_weight_display_from_texts(name, desc, normalized_product_type)
+        if inferred:
+            row["Weight*"] = inferred
+            row["Weight"] = inferred
+            row["CombinedWeight"] = inferred
+            row["weight_with_units"] = inferred
+            logger.debug("POSaBit venue inferred weight for %r: %r -> %r", name, unit, inferred)
+    return row
 
 
 def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[Dict[str, Any]]:

@@ -2975,7 +2975,7 @@ class TemplateProcessor:
             if not is_classic and label_context.get('WeightUnits'):
                 weight_str = str(label_context['WeightUnits']).strip()
                 # Check if weight is in grams (g, gram, grams)
-                gram_match = re.match(r'^([\d.]+)\s*(g|gram|grams)\s*$', weight_str, re.IGNORECASE)
+                gram_match = re.match(r'^([\d.]+)\s*(?:grams?|gm|g)\s*$', weight_str, re.IGNORECASE)
                 if gram_match:
                     grams_val = float(gram_match.group(1))
                     oz_val = round(grams_val / 28.3495, 2)
@@ -2988,6 +2988,21 @@ class TemplateProcessor:
                         label_context['Weight*'] = str(oz_val)
                     if 'Units' in label_context:
                         label_context['Units'] = 'oz'
+
+        # Universal WeightUnits cleanup for ALL product types (pre-roll path skips the else-only block above).
+        # Fixes labels showing '- 1 gm' when POS/Excel embeds 'gm' or spaced grams.
+        _wu_all = label_context.get('WeightUnits')
+        if _wu_all:
+            _wus = str(_wu_all)
+            _wus = re.sub(r'\b(grams?|gms?)\b', 'g', _wus, flags=re.IGNORECASE)
+            _wus = re.sub(r'\bgm\b', 'g', _wus, flags=re.IGNORECASE)
+            _wus = re.sub(
+                r'(\d+\.?\d*)\s+(oz|g|gm|mg|kg|lb|lbs)\b',
+                r'\1\2',
+                _wus,
+                flags=re.IGNORECASE,
+            ).replace('gm', 'g').replace('GM', 'g')
+            label_context['WeightUnits'] = _wus
 
         # Define product type sets for use throughout the method
         from src.core.constants import CLASSIC_TYPES
@@ -3059,6 +3074,13 @@ class TemplateProcessor:
                 if is_already_wrapped(desc_and_weight, 'DESC'):
                     desc_and_weight = unwrap_marker(desc_and_weight, 'DESC')
                 
+                # Fix ' - 1 gm' / ' - 1 g' from POS or JSON matcher (classic types skipped gram→oz below)
+                try:
+                    if getattr(self, 'excel_processor', None):
+                        desc_and_weight = self.excel_processor._canonical_embedded_weight_display(desc_and_weight)
+                except Exception as _dw_canon_err:
+                    self.logger.debug(f"DescAndWeight weight canonicalize skipped: {_dw_canon_err}")
+                
                 # CRITICAL FIX: Convert grams to ounces in existing DescAndWeight for nonclassic types
                 from src.core.constants import CLASSIC_TYPES
                 product_type_check = (label_context.get('Product Type*', '') or 
@@ -3085,7 +3107,7 @@ class TemplateProcessor:
                 
                 if not is_classic_for_existing:
                     # Check if DescAndWeight contains grams (e.g., "Pink Lemonade Hash Gummies - 32g")
-                    gram_pattern = r'([\d.]+)\s*(g|gram|grams)\b'
+                    gram_pattern = r'([\d.]+)\s*(?:grams?|gm|g)\b'
                     gram_match = re.search(gram_pattern, desc_and_weight, re.IGNORECASE)
                     if gram_match:
                         grams_val = float(gram_match.group(1))
@@ -3184,7 +3206,7 @@ class TemplateProcessor:
                 
                 if not is_classic_for_desc and weight:
                     # Check if weight contains grams (e.g., "32g", "1g", "1.12g")
-                    gram_pattern = r'([\d.]+)\s*(g|gram|grams)\b'
+                    gram_pattern = r'([\d.]+)\s*(?:grams?|gm|g)\b'
                     gram_match = re.search(gram_pattern, weight, re.IGNORECASE)
                     if gram_match:
                         grams_val = float(gram_match.group(1))
@@ -3282,8 +3304,15 @@ class TemplateProcessor:
                         if weight_units and weight_units.strip():
                             # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
                             clean_weight = weight_units.strip()
-                            # Remove space between number and unit (e.g. "3.5 oz" -> "3.5oz")
-                            clean_weight = re.sub(r'(\d+\.?\d*)\s+(oz|g|mg|kg|lb|lbs)\b', r'\1\2', clean_weight, flags=re.IGNORECASE)
+                            clean_weight = re.sub(r'\b(grams?|gms?)\b', 'g', clean_weight, flags=re.IGNORECASE)
+                            clean_weight = re.sub(r'\bgm\b', 'g', clean_weight, flags=re.IGNORECASE)
+                            # Remove space between number and unit (e.g. "3.5 oz" -> "3.5oz", "1 g" -> "1g")
+                            clean_weight = re.sub(
+                                r'(\d+\.?\d*)\s+(oz|g|gm|mg|kg|lb|lbs)\b',
+                                r'\1\2',
+                                clean_weight,
+                                flags=re.IGNORECASE,
+                            ).replace('gm', 'g').replace('GM', 'g')
                             
                             # CRITICAL FIX: Clean weight duplication patterns directly in template processor
                             # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"

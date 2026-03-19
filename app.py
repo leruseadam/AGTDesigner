@@ -166,6 +166,27 @@ VALID_STORES = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT
 CACHE_DIR = os.path.join(UPLOADS_DIR, 'cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+
+def _is_preserved_disk_cache_filename(filename):
+    """When wiping CACHE_DIR, keep snapshots so the UI can still show tags after Reset Cache.
+
+    The browser Reset Cache button calls /api/performance/cache/clear, which used to delete
+    everything here — including POSaBit disk cache and last available-tags JSON. That
+    forced a cold network fetch; on PythonAnywhere failures/timeouts looked like
+    tags disappeared with no fallback.
+    """
+    if not filename or filename.startswith('.'):
+        return False
+    lower = filename.lower()
+    if lower.startswith('available_tags_') and lower.endswith('.json'):
+        return True
+    if lower == 'posabit_products.json':
+        return True
+    if lower.startswith('posabit_products_') and lower.endswith('.json'):
+        return True
+    return False
+
+
 # Memory monitoring and optimization
 def get_memory_usage():
     """Get current memory usage in MB."""
@@ -28476,10 +28497,13 @@ def clear_cache_route():
             except Exception as e:
                 logging.debug(f'Import {m} failed during cache clear: {e}')
 
-        # 4) Remove files and directories in CACHE_DIR
+        # 4) Remove files and directories in CACHE_DIR (preserve tag/POS disk fallbacks)
         try:
             if os.path.exists(CACHE_DIR):
                 for fname in os.listdir(CACHE_DIR):
+                    if _is_preserved_disk_cache_filename(fname):
+                        logging.info(f'Preserving disk cache file during reset: {fname}')
+                        continue
                     fpath = os.path.join(CACHE_DIR, fname)
                     try:
                         if os.path.isfile(fpath) or os.path.islink(fpath):
@@ -29016,10 +29040,13 @@ def admin_clear_caches():
         except Exception as e:
             logging.warning(f'Failed to clear Flask cache: {e}')
 
-        # Remove files in CACHE_DIR
+        # Remove files in CACHE_DIR (preserve tag/POS disk fallbacks — same as /api/performance/cache/clear)
         try:
             if os.path.exists(CACHE_DIR):
                 for fname in os.listdir(CACHE_DIR):
+                    if _is_preserved_disk_cache_filename(fname):
+                        logging.info(f'Preserving disk cache file during admin clear: {fname}')
+                        continue
                     fpath = os.path.join(CACHE_DIR, fname)
                     try:
                         if os.path.isfile(fpath):

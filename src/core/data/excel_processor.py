@@ -5248,6 +5248,53 @@ class ExcelProcessor:
 
         return normalized_weight_str, preferred_unit
 
+    def _canonical_embedded_weight_display(self, raw: str) -> str:
+        """Collapse values like '1 gm', '1 g', '3.5 gram', '3.5 grams' -> '1g', '3.5g'.
+
+        When Weight* already contains unit text, _format_weight_units used to return it unchanged,
+        which produced labels like 'Product - 1 gm'."""
+        if raw is None:
+            return ''
+        s = str(raw).strip()
+        if not s:
+            return s
+
+        def _fmt_num(x: float) -> str:
+            if x == int(x):
+                return str(int(x))
+            t = f"{x:.3f}".rstrip('0').rstrip('.')
+            return t
+
+        # Simple numeric + gram unit (whole string)
+        m = re.match(r'^([\d.]+)\s*(grams?|gm|g)\s*$', s, re.IGNORECASE)
+        if m:
+            try:
+                num = float(m.group(1))
+                return f"{_fmt_num(num)}g"
+            except ValueError:
+                return s
+
+        # Ounces
+        m = re.match(r'^([\d.]+)\s*(ounces?|oz)\s*$', s, re.IGNORECASE)
+        if m:
+            try:
+                num = float(m.group(1))
+                return f"{_fmt_num(num)}oz"
+            except ValueError:
+                return s
+
+        # Otherwise replace inline tokens (e.g. trailing ' - 1 gm')
+        def repl_gram(mo):
+            try:
+                num = float(mo.group(1))
+                return f"{_fmt_num(num)}g"
+            except ValueError:
+                return mo.group(0)
+
+        out = re.sub(r'([\d.]+)\s*(?:grams?|gm)\b', repl_gram, s, flags=re.IGNORECASE)
+        out = re.sub(r'([\d.]+)\s+g\b(?!\w)', repl_gram, out, flags=re.IGNORECASE)
+        return out
+
     def _format_weight_units(self, record, excel_priority=True):
         # Handle pandas Series and NA values properly
         def safe_get_value(value, default=''):
@@ -5345,13 +5392,13 @@ class ExcelProcessor:
         preroll_types = {"pre-roll", "infused pre-roll"}
 
         # FIRST: Check if Weight* already contains units (like "1g", "3.5oz", etc.)
-        if weight_val and any(unit in weight_val.lower() for unit in ['g', 'oz', 'gram', 'ounce']):
+        if weight_val and any(unit in weight_val.lower() for unit in ['g', 'oz', 'gram', 'ounce', 'gm']):
             # Special override for Moonshot products - force to 2.5oz
             if allow_nonclassic_conversion and 'moonshot' in product_name.lower() and 'g' in weight_val.lower():
                 self.logger.info(f"FORCING Moonshot conversion: {product_name} {weight_val} -> 2.5oz")
                 return "2.5oz"
-            # Weight* already has units embedded, return as-is
-            result = weight_val
+            # Weight* already has units embedded — canonicalize '1 gm' / '1 g' -> '1g' (was returned raw before)
+            result = self._canonical_embedded_weight_display(weight_val)
         elif product_type in preroll_types:
             # For pre-rolls and infused pre-rolls, use JointRatio if available
             joint_ratio = safe_get_value(record.get('JointRatio', ''))
@@ -5434,6 +5481,31 @@ class ExcelProcessor:
             else:
                 result = ""
         
+        # When POS sends unit=1 for every SKU, infer package weight from name/description
+        try:
+            from src.core.utils.product_weight_inference import (
+                infer_weight_display_from_texts,
+                is_generic_single_unit_weight,
+            )
+
+            if is_generic_single_unit_weight(result):
+                name_hint = f"{product_name} {safe_get_value(record.get('Product Name*', ''))}".strip()
+                inferred = infer_weight_display_from_texts(
+                    name_hint,
+                    safe_get_value(record.get('Description', '')),
+                    product_type,
+                )
+                if inferred:
+                    self.logger.info(
+                        "Inferred weight from product text for %r: %r -> %r",
+                        product_name,
+                        result,
+                        inferred,
+                    )
+                    result = inferred
+        except Exception as _infer_err:
+            self.logger.debug(f"Weight inference skipped: {_infer_err}")
+
         # Debug: Log result for first few records
         if self._debug_count <= 5:
             self.logger.info(f"Record {self._debug_count} result: '{result}'")
