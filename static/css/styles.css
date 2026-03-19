@@ -27,17 +27,16 @@
   --spacing-lg: 1.5rem;
   --spacing-xl: 2rem;
   
-  --tag-list-height: max(var(--tag-list-min-height), calc(110vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
+  --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
   --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-  --center-panel-height: 64rem;   /* Center column - natural content height */
+  --center-panel-height: 52rem;   /* Center column - natural content height */
   --tag-list-scroll-padding: 1rem;
 }
 
-/* On wide screens make the tag lists slightly taller than the center column
-   so they visually extend beyond the center card without changing aspect ratio. */
+/* On wide screens tag lists use viewport height to avoid overflowing */
 @media (min-width: 1000px) {
   :root {
-    --tag-list-height: calc(var(--center-panel-height) + 2rem);
+    --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));
   }
 }
 
@@ -267,10 +266,10 @@ body > *:not(#availableTags):not(#selectedTags):not(.tag-list-container) {
 [data-container-type="selected"],
 .glass-card,
 .card {
-  /* Use transform: scale for smooth zoom transitions */
-  transform-origin: top left;
-  /* Ensure proper zoom behavior */
-  zoom: reset;
+  /* Do not apply any zoom/transform scaling at the component level.
+     Global scaling/zoom rules can cause "squished" rendering on some displays. */
+  transform-origin: initial;
+  zoom: 1;
 }
 
 /* Ensure CURRENT INVENTORY and tag lists show a vertical scrollbar when content overflows. */
@@ -723,13 +722,13 @@ canvas#lava-lamp-canvas {
 @supports (height: 100svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
 }
 @supports (height: 100dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
 }
 
@@ -737,7 +736,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1svh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100svh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
   #availableTags,
   #selectedTags {
@@ -748,7 +747,7 @@ canvas#lava-lamp-canvas {
 @supports (height: 1dvh) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), calc(100dvh - var(--tag-list-vertical-offset)));
-    --center-panel-height: 64rem;
+    --center-panel-height: 52rem;
   }
   #availableTags,
   #selectedTags {
@@ -774,6 +773,11 @@ body.modal-open #mainContent.store-selection-disabled,
     transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
+/* UI sizing
+   Avoid global transforms/zoom (they can make the layout feel "squished" on some displays).
+   Instead, slightly reduce the base font size on large screens. */
+#mainContent { transform: none; zoom: 1; width: 100%; }
+
 #mainContent.loaded {
     opacity: 1 !important;
     visibility: visible !important;
@@ -793,10 +797,10 @@ body.modal-open #mainContent.store-selection-disabled,
 @media (max-height: 700px) {
   :root {
     --tag-list-height: max(var(--tag-list-min-height), 74vh);
-    --center-panel-height: 57rem;
+    --center-panel-height: 46rem;
   }
   @supports (height: 100dvh) {
-  :root { --tag-list-height: max(var(--tag-list-min-height), 74dvh); --center-panel-height: 64rem; }
+  :root { --tag-list-height: max(var(--tag-list-min-height), 74dvh); --center-panel-height: 52rem; }
   }
   .control-panel,
   .center-panel,
@@ -971,7 +975,7 @@ body.modal-open #mainContent.store-selection-disabled,
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
     --filter-height: auto;           /* Height of filter bar (auto or specific px) */
-    --center-panel-height: 64rem;     /* Height of center control panel */
+    --center-panel-height: 52rem;     /* Height of center control panel */
     --tag-list-scroll-padding: 1rem;
 
     /* Dynamic filter border sizing */
@@ -4137,8 +4141,8 @@ body.modal-open #mainContent.store-selection-disabled,
   .tag-item.high-units .tag-text {
     -webkit-text-stroke: 0.8px rgba(0, 0, 0, 0.8) !important; /* dark outline for visibility on yellow */
     text-shadow:
-      0 0 3px rgba(0, 0, 0, 0.9) !important,
-      0 0 6px rgba(0, 0, 0, 0.7) !important,
+      0 0 3px rgba(0, 0, 0, 0.9),
+      0 0 6px rgba(0, 0, 0, 0.7),
       0 1px 4px rgba(0, 0, 0, 0.6) !important;
     color: white !important;
   }
@@ -5595,13 +5599,13 @@ body.modal-open #mainContent.store-selection-disabled,
 
 /* Filter Action Buttons */
 .filter-action-button {
-  min-width: 168px;
-  width: 168px;
-  min-height: 46px;
-  padding: 0.6rem 1rem;
-  border-radius: 8px;
-  font-weight: 700;
-  font-size: 13px;
+  min-width: 130px;
+  width: auto;
+  min-height: 38px;
+  padding: 0.45rem 0.8rem;
+  border-radius: 7px;
+  font-weight: 600;
+  font-size: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6852,6 +6856,12 @@ body.modal-open #mainContent.store-selection-disabled,
   padding: 0.75rem;
 }
 
+/* Brief highlight when scrolling to POSaBit Integration Settings */
+#databaseModal .posabit-highlight {
+  box-shadow: 0 0 0 2px rgba(0, 212, 170, 0.9), 0 0 20px rgba(0, 212, 170, 0.4);
+  transition: box-shadow 0.3s ease;
+}
+
 #databaseModal .card {
   margin-bottom: 0.75rem;
 }
@@ -7996,9 +8006,10 @@ body.modal-open #mainContent.store-selection-disabled,
   width: 100% !important;
   max-width: 100% !important;
   min-height: 80vh;
-  align-items: center !important;
+  align-items: start !important;
   display: grid !important;
-  grid-template-columns: 1fr minmax(280px, 360px) 1fr;
+  /* Left vertical filter sidebar + 2 side lists + center controls */
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(170px, 210px) minmax(0, 1fr);
   gap: 1rem !important;
   padding-top: 0 !important;
   margin-top: 0 !important;
@@ -8008,6 +8019,199 @@ body.modal-open #mainContent.store-selection-disabled,
 .main-content-row > [data-container-type] {
   width: 100% !important;
   max-width: 100% !important;
+}
+
+/* Top tools bar (where filter bar used to be) */
+.top-tools-row {
+  width: 100% !important;
+  padding: 0 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.top-tools-bar {
+  width: 100% !important;
+  background: rgba(45, 34, 58, 0.85);
+  border-radius: 14px !important;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(160, 132, 232, 0.28);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  padding: 0.5rem 0.6rem !important;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.top-tools-title {
+  width: 100%;
+  display: block;
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+  align-self: center;
+  justify-self: center;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.92);
+  text-transform: uppercase;
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  text-shadow: 0 1px 6px rgba(0,0,0,0.25);
+}
+
+.top-tools-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.top-tools-buttons .btn-tool-modern,
+.top-tools-buttons .filter-action-button {
+  padding: 0.55rem 0.7rem !important;
+  border-radius: 12px !important;
+  font-size: 0.95rem !important;
+  min-height: 44px !important;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.16) !important;
+}
+
+.top-tools-buttons .btn-tool-modern svg,
+.top-tools-buttons .filter-action-button svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.top-tools-buttons .btn-help-modern {
+  width: 100% !important;
+  height: auto !important;
+  border-radius: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  padding: 0.55rem 0.7rem !important;
+}
+
+.top-tools-buttons .btn-help-modern .help-text {
+  display: inline-block !important;
+  font-weight: 700 !important;
+}
+
+@media (max-width: 768px) {
+  .top-tools-bar {
+    padding: 0.45rem 0.55rem !important;
+  }
+  .top-tools-title {
+    font-size: 0.8rem;
+  }
+  .top-tools-buttons {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Allow center column to shrink with the new filter sidebar */
+.main-content-row > [data-container-type="center"] {
+  min-width: 0 !important;
+  max-width: 210px !important;
+}
+
+/* Left sidebar filter (vertical) */
+.main-content-row > [data-container-type="filter"] {
+  align-self: stretch !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  min-height: var(--tag-list-height) !important;
+  max-height: none !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  margin-top: 0 !important;
+}
+
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .filter-row {
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  margin-left: 0 !important;
+  align-items: stretch !important;
+  gap: 0.5rem !important;
+}
+
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .filter-group {
+  width: 100% !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .left-section {
+  width: 100% !important;
+  flex-wrap: wrap !important;
+}
+
+/* Override global fixed-width `.filter-group` rules inside the left sidebar */
+.main-content-row > [data-container-type="filter"] .filter-group {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  flex: 1 1 auto !important;
+}
+
+.main-content-row > [data-container-type="filter"] .filter-group .filter-label {
+  white-space: normal !important;
+}
+
+/* Prevent sidebar filter controls from overflowing their column */
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .filter-select,
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .form-select,
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .form-control {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .filter-group .d-flex {
+  max-width: 100% !important;
+}
+
+.main-content-row > [data-container-type="filter"] .enhanced-filter-bar .filter-group .d-flex > * {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+/* Ensure top filter bar never overflows horizontally on main page */
+.enhanced-filter-bar {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.enhanced-filter-bar .filter-row {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.enhanced-filter-bar .filter-group {
+  flex: 1 1 140px;
+  min-width: 120px;
+}
+
+/* On narrower screens, allow the bar to wrap so it doesn't overflow */
+@media (max-width: 1200px) {
+  .enhanced-filter-bar {
+    flex-wrap: wrap;
+  }
 }
 
 /* Center column should be shorter than the side tag list columns */
@@ -8554,8 +8758,8 @@ body.modal-open #mainContent.store-selection-disabled,
 
 /* Let main content containers shrink without overlapping when viewport narrows */
 .main-content-row > [data-container-type] {
-  flex: 1 1 360px !important;
-  min-width: 300px !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
 }
 .main-content-row .glass-card {
   min-height: 0 !important;

@@ -91,35 +91,37 @@
                 return;
             }
 
-            // CRITICAL FIX: Check for uploaded file FIRST before trying to load tags
+            // CRITICAL FIX: Check for uploaded file OR POSaBit data source before trying to load tags
             let hasFile = false;
+            let posabitActive = false;
             try {
                 const fileResponse = await fetch('/api/current-file');
                 if (fileResponse.ok) {
                     const fileData = await fileResponse.json();
-                    if (fileData && fileData.success && fileData.has_file && fileData.filename) {
+                    if (fileData && fileData.success && fileData.has_file) {
                         hasFile = true;
-                        console.log(`📄 Found uploaded file: ${fileData.filename}`);
+                        posabitActive = !!fileData.posabit_active;
+                        const displayName = fileData.filename || (posabitActive ? 'POSaBit / API' : '');
+                        console.log(`📄 Found data source: ${displayName}`);
                         // Update file info
                         const fileInfoText = document.getElementById('fileInfoText');
-                        if (fileInfoText) {
-                            fileInfoText.textContent = fileData.filename;
+                        if (fileInfoText && displayName) {
+                            fileInfoText.textContent = displayName;
                         }
                         const currentFileInfo = document.getElementById('currentFileInfo');
-                        if (currentFileInfo) {
-                            currentFileInfo.textContent = fileData.filename;
+                        if (currentFileInfo && displayName) {
+                            currentFileInfo.textContent = displayName;
                         }
                     }
                 }
             } catch (error) {
                 console.log('Error checking for current file:', error);
             }
-            
-            // If no file exists, do NOT hydrate tag cache.
-            // Deterministic first-load behavior across machines: always show upload prompt.
+
+            // If no file and no POSaBit, show upload prompt.
             const availableTagsContainer = document.getElementById('availableTags');
             if (!hasFile && availableTagsContainer) {
-                console.log('📤 No file uploaded - showing upload prompt');
+                console.log('📤 No file uploaded and POSaBit not configured - showing upload prompt');
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
@@ -252,9 +254,8 @@
                     console.warn('⚠️ /api/available-tags timeout after 30 seconds, falling back...');
                 }, 30000);
                 
-                // CRITICAL FIX: Use fast_load=0 + nocache=1 so FIRST load always has database-aligned lineage
-                // This avoids Excel/stale lineage and the visible \"flip\" when background alignment runs later.
-                const quickResponse = await fetch('/api/available-tags?fast_load=0&nocache=1', {
+                // Use fast_load=1 and allow cache — POSaBit-aligned tags are cached server-side (300s TTL)
+                const quickResponse = await fetch('/api/available-tags?fast_load=1', {
                     signal: controller.signal
                 });
                 if (timeoutId) {
@@ -282,6 +283,18 @@
                 
                 if (quickResponse.ok) {
                     const quickData = await quickResponse.json();
+
+                    // POSaBit cache is warming — retry after a few seconds
+                    if (quickData && quickData.source === 'posabit-loading') {
+                        const retryAfter = (quickData.retry_after || 5) * 1000;
+                        console.log(`⏳ POSaBit inventory loading, retrying in ${retryAfter/1000}s...`);
+                        await new Promise(res => setTimeout(res, retryAfter));
+                        // Retry by re-entering the fast-load path
+                        if (this.loadInitialData) {
+                            return this.loadInitialData();
+                        }
+                    }
+
                     if (quickData && quickData.tags && Array.isArray(quickData.tags) && quickData.tags.length > 0) {
                         console.log(`✅ Fast load successful: ${quickData.tags.length} tags from /api/available-tags`);
 

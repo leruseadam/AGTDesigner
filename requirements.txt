@@ -37,6 +37,7 @@ psutil==5.9.6
 # Utilities
 python-dateutil==2.8.2
 pytz==2023.3
+python-dotenv==1.0.0
 
 # Document composition (use fork with fix or patch after install)
 # git+https://github.com/tvuotila/docxcompose.git

@@ -138,6 +138,15 @@ function createTagRow(tag) {
   const nameAndStrainLower = (productNameForCbd + ' ' + productStrainForCbd).toLowerCase();
   const hasCbdIndicator = ['cbd', 'cbn', 'cbg', 'cbc'].some(token => new RegExp('\\b' + token + '\\b').test(nameAndStrainLower));
 
+  // CRITICAL FIX (POSaBit): non-classic types must never display classic lineages.
+  // POSaBit/DB can carry SATIVA/INDICA/HYBRID into edible/liquid items; override to MIXED/CBD_BLEND.
+  if (!isClassicType) {
+    const classicLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
+    if (classicLineages.includes(lineage)) {
+      lineage = hasCbdIndicator ? 'CBD_BLEND' : 'MIXED';
+    }
+  }
+
   // CBD indicators override lineage only when no explicit classic lineage is already set
   if (hasCbdIndicator) {
     if (isClassicType) {

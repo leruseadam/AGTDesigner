@@ -153,7 +153,7 @@ def format_description_text(text, max_width=40):
     return '\n'.join(lines)
 
 def format_price(price):
-    """Format price value."""
+    """Format price value. Whole numbers show no decimal ($35 not $35.0); decimals show without trailing zeros ($35.5 not $35.50)."""
     if not price:
         return ""
     
@@ -163,7 +163,9 @@ def format_price(price):
         if price_float.is_integer():
             return f"${int(price_float)}"
         else:
-            return f"${price_float:.2f}"
+            # Show up to 2 decimals but strip trailing zeros (e.g. 35.50 -> $35.5, 35.0 -> $35)
+            formatted = f"${price_float:.2f}".rstrip('0').rstrip('.')
+            return formatted if formatted != '$' else f"${int(price_float)}"
     except (ValueError, TypeError):
         return str(price).strip()
 

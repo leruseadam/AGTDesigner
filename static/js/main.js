@@ -336,16 +336,50 @@ const CLASSIC_TYPES = [
 // Add this near the top of the file, before any code that uses it
 // Product type normalization mapping (same as backend TYPE_OVERRIDES)
 const PRODUCT_TYPE_OVERRIDES = {
-  "all-in-one": "vape cartridge",
-  "rosin": "concentrate",
-  "mini buds": "flower",
-  "bud": "flower",
-  "pre-roll": "Pre-Roll",  // Normalize to title case for display
-  "Pre-Roll": "Pre-Roll",  // Keep title case
-  "preroll": "Pre-Roll",  // Map variations to title case
-  "Infused Pre-Roll": "Infused Pre-Roll",  // Keep title case
-  "infused pre-roll": "Infused Pre-Roll",  // Map lowercase to title case
-  "infused preroll": "Infused Pre-Roll",  // Map variations to title case
+  "all-in-one": "Disposable",
+  "aio": "Disposable",
+  "disposable": "Disposable",
+  "disposable vape": "Disposable",
+  "vape pen": "Disposable",
+  "rosin": "Concentrate",
+  "live rosin": "Concentrate",
+  "live resin": "Concentrate",
+  "wax": "Concentrate",
+  "shatter": "Concentrate",
+  "sugar wax": "Concentrate",
+  "budder": "Concentrate",
+  "badder": "Concentrate",
+  "crumble": "Concentrate",
+  "hash": "Concentrate",
+  "kief": "Concentrate",
+  "distillate": "Concentrate",
+  "sauce": "Concentrate",
+  "diamonds": "Concentrate",
+  "cured resin": "Concentrate",
+  "mini buds": "Flower",
+  "bud": "Flower",
+  "flower": "Flower",
+  "pre-roll": "Pre-Roll",
+  "Pre-Roll": "Pre-Roll",
+  "preroll": "Pre-Roll",
+  "Infused Pre-Roll": "Infused Pre-Roll",
+  "infused pre-roll": "Infused Pre-Roll",
+  "infused preroll": "Infused Pre-Roll",
+  "terp infused pre-roll": "Infused Pre-Roll",
+  "vape cartridge": "Vape Cartridge",
+  "cartridge": "Vape Cartridge",
+  "Vape Cartridge": "Vape Cartridge",
+  "edible": "Edible (Solid)",
+  "edible solid": "Edible (Solid)",
+  "Edible Solid": "Edible (Solid)",
+  "edible (solid)": "Edible (Solid)",
+  "edible liquid": "Edible (Liquid)",
+  "Edible Liquid": "Edible (Liquid)",
+  "edible (liquid)": "Edible (Liquid)",
+  "tincture": "Tincture",
+  "capsule": "Capsule",
+  "topical": "Topical",
+  "paraphernalia": "Paraphernalia",
   "alcohol/ethanol extract": "rso/co2 tankers",
   "Alcohol/Ethanol Extract": "rso/co2 tankers",
   "alcohol ethanol extract": "rso/co2 tankers",
@@ -392,6 +426,24 @@ function formatProductTypeLabel(value) {
     }
     return word.charAt(0).toUpperCase() + word.slice(1);
   }).join(' ');
+}
+
+/**
+ * Normalize weight for UI display: "1.0 gm" -> "1g", "3.5 oz" -> "3.5oz".
+ * Removes space between number and unit, strips trailing .0 for whole numbers, gm/gram/grams -> g.
+ */
+function normalizeWeightForDisplay(str) {
+  if (!str || typeof str !== 'string') return str;
+  const s = str.trim();
+  if (!s) return s;
+  const match = s.match(/^(\d+\.?\d*)\s*(g|gram|grams|gm|oz|ounce|ounces|mg|ml)\s*$/i);
+  if (!match) return s;
+  const num = parseFloat(match[1]);
+  let unit = (match[2] || 'g').toLowerCase();
+  if (unit === 'gm' || unit === 'gram' || unit === 'grams') unit = 'g';
+  if (unit === 'ounce' || unit === 'ounces') unit = 'oz';
+  const numStr = Number.isInteger(num) ? String(Math.round(num)) : String(parseFloat(match[1]));
+  return numStr + unit;
 }
 
 // Global function to restore body scroll after modal closes
@@ -900,8 +952,8 @@ function openLineageEditorForStrain(strainName, currentLineage) {
 
 const VALID_PRODUCT_TYPES = [
   "flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge",
-  "edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule", "paraphernalia",
-  "rso/co2 tankers"
+  "disposable", "edible (solid)", "edible (liquid)", "edible", "high cbd edible liquid",
+  "tincture", "topical", "capsule", "paraphernalia", "rso/co2 tankers", "sample"
 ];
 
 // Mac-like ultra-fast debounce function with performance adaptation
@@ -1029,6 +1081,7 @@ const AppLoadingSplash = {
         }
         
         if (mainContent) {
+            mainContent.classList.add('store-selected');
             setTimeout(() => {
                 mainContent.classList.add('loaded');
                 mainContent.style.opacity = '1';
@@ -1083,14 +1136,10 @@ const AppLoadingSplash = {
         }
         
         if (mainContent) {
+            mainContent.classList.add('store-selected');
+            mainContent.style.display = 'block';
+            mainContent.style.visibility = 'visible';
             mainContent.style.opacity = '1';
-            // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
-            if (mainContent) {
-                mainContent.style.display = 'block';
-                mainContent.style.visibility = 'visible';
-                mainContent.style.opacity = '1';
-                mainContent.classList.add('loaded');
-            }
             mainContent.classList.add('loaded');
         }
         
@@ -1174,8 +1223,8 @@ const TagManager = {
 
     getAvailableTagsCacheKey() {
         try {
-            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
-                window.currentStore || 'default';
+            const store = (window.sessionStorage && (null)) ||
+                'AGT_Bothell';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
             
@@ -1201,8 +1250,8 @@ const TagManager = {
     // This allows cache to persist even when filename timestamp changes
     getNormalizedCacheKey() {
         try {
-            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
-                window.currentStore || 'default';
+            const store = (window.sessionStorage && (null)) ||
+                'AGT_Bothell';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
             
@@ -1245,8 +1294,8 @@ const TagManager = {
                 return null;
             }
 
-            const store = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) ||
-                window.currentStore || 'default';
+            const store = (window.sessionStorage && (null)) ||
+                'AGT_Bothell';
             const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) ||
                 'nofile';
 
@@ -2576,7 +2625,7 @@ const TagManager = {
             sortedValues.forEach(value => {
                 const option = document.createElement('option');
                 option.value = value;
-                option.textContent = value;
+                option.textContent = filterType === 'weight' ? (typeof normalizeWeightForDisplay === 'function' ? normalizeWeightForDisplay(value) : value) : value;
                 
                 // Apply special font formatting for RSO/CO2 Tanker
                 if (value === 'rso/co2 tankers') {
@@ -2623,7 +2672,7 @@ const TagManager = {
                         verboseLog(`Preserving filter value "${currentValue}" for ${filterId} even though it's not in current options`);
                         const option = document.createElement('option');
                         option.value = currentValue;
-                        option.textContent = currentValue;
+                        option.textContent = filterType === 'weight' && typeof normalizeWeightForDisplay === 'function' ? normalizeWeightForDisplay(currentValue) : currentValue;
                         option.style.color = '#666'; // Gray out to indicate it's not currently available
                         filterElement.appendChild(option);
                         filterElement.value = currentValue;
@@ -2634,7 +2683,7 @@ const TagManager = {
                         verboseLog(`⚠️ Filter value "${currentValue}" not in sorted values, keeping it anyway`);
                         const option = document.createElement('option');
                         option.value = currentValue;
-                        option.textContent = currentValue;
+                        option.textContent = filterType === 'weight' && typeof normalizeWeightForDisplay === 'function' ? normalizeWeightForDisplay(currentValue) : currentValue;
                         option.style.color = '#666';
                         filterElement.appendChild(option);
                         filterElement.value = currentValue;
@@ -3057,6 +3106,24 @@ const TagManager = {
                 weight: filterOptionsArrays.weight.length
             });
 
+            // Show/hide filter groups based on whether the dataset has data for each filter.
+            // This makes the sidebar adapt to POSaBit (no manifest, no DOH) vs Excel (has both).
+            const filterGroupVisibility = {
+                'filterGroup_manifestRef': tags.some(t => t['Manifest Ref No'] || t['Manifest Ref'] || t.manifest_ref_no || t.manifest_ref),
+                'filterGroup_vendor':      filterOptionsArrays.vendor.length > 0,
+                'filterGroup_brand':       filterOptionsArrays.brand.length > 0,
+                'filterGroup_productType': filterOptionsArrays.productType.length > 0,
+                'filterGroup_lineage':     filterOptionsArrays.lineage.length > 0,
+                'filterGroup_weight':      filterOptionsArrays.weight.length > 0,
+                'filterGroup_price':       filterOptionsArrays.price.filter(p => p !== 'No Price').length > 0,
+                'filterGroup_doh':         filterOptionsArrays.doh.filter(d => d !== 'none').length > 0,
+                'filterGroup_highCbd':     filterOptionsArrays.highCbd.length > 0,
+            };
+            Object.entries(filterGroupVisibility).forEach(([id, visible]) => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = visible ? '' : 'none';
+            });
+
             // Update filters immediately
             console.log('⚡⚡⚡ Calling updateFilters with built options...');
             console.log('   Brand options:', filterOptionsArrays.brand.length, 'brands:', filterOptionsArrays.brand.slice(0, 10));
@@ -3377,7 +3444,8 @@ const TagManager = {
                 lineage: new Set(),
                 weight: new Set(),
                 doh: new Set(),
-                highCbd: new Set()
+                highCbd: new Set(),
+                strain: new Set()
             };
 
             // USER PREFERENCE: Always show ALL options for vendor, brand, productType, lineage, doh, highCbd
@@ -3436,6 +3504,10 @@ const TagManager = {
                 // Always add DOH options (show all)
                 const doh = (tag.DOH || tag.doh || '').toString().trim();
                 if (doh) availableOptions.doh.add(doh);
+
+                // Strain options (POSaBit-style strain dropdown)
+                const strain = (tag['Product Strain'] || tag.ProductStrain || tag.strain || '').toString().trim();
+                if (strain) availableOptions.strain.add(strain);
                 
                 // Always add high CBD options (show all)
                 if (typeLower.startsWith('high cbd')) {
@@ -3541,7 +3613,8 @@ const TagManager = {
             lineage: 'lineageFilter',
             weight: 'weightFilter',
             doh: 'dohFilter',
-            highCbd: 'highCbdFilter'
+            highCbd: 'highCbdFilter',
+            strain: 'strainFilter'
         };
 
         Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
@@ -3577,7 +3650,7 @@ const TagManager = {
                     const optionsHtml = `
                         <option value="">All</option>
                         ${sortedOptions.map(value => {
-                            const displayValue = filterType === 'productType' ? formatProductTypeLabel(value) : value;
+                            const displayValue = filterType === 'weight' ? (typeof normalizeWeightForDisplay === 'function' ? normalizeWeightForDisplay(value) : value) : (filterType === 'productType' ? formatProductTypeLabel(value) : value);
                             if (filterType === 'productType' && value === 'rso/co2 tankers') {
                                 return `<option value="${value}" style="font-weight: bold; font-style: italic; color: #a084e8;">${displayValue}</option>`;
                             }
@@ -3599,7 +3672,7 @@ const TagManager = {
                             // Add the current value back if it's not empty and user has selected it
                             const option = document.createElement('option');
                             option.value = currentValue;
-                            option.textContent = filterType === 'productType' ? formatProductTypeLabel(currentValue) : currentValue;
+                            option.textContent = filterType === 'weight' ? (typeof normalizeWeightForDisplay === 'function' ? normalizeWeightForDisplay(currentValue) : currentValue) : (filterType === 'productType' ? formatProductTypeLabel(currentValue) : currentValue);
                             option.style.color = '#666'; // Gray out to indicate it's not currently available
                             filterElement.appendChild(option);
                             filterElement.value = currentValue;
@@ -3620,6 +3693,8 @@ const TagManager = {
         
         // USER PREFERENCE: Scroll to top when filter is applied (don't preserve position)
         // Fast path: show all if no filters (Mac-like speed)
+        const productNameFilter = document.getElementById('productNameFilter')?.value || '';
+        const manifestRefFilter = document.getElementById('manifestRefFilter')?.value || '';
         const vendorFilter = document.getElementById('vendorFilter')?.value || '';
         // CRITICAL FIX: Ensure brand filter value is always read correctly, with fallback to state
         const brandFilterElement = document.getElementById('brandFilter');
@@ -3645,12 +3720,13 @@ const TagManager = {
         const priceFilter = document.getElementById('priceFilter')?.value || '';
         const dohFilter = document.getElementById('dohFilter')?.value || '';
         const highCbdFilter = document.getElementById('highCbdFilter')?.value || '';
+        const strainFilter = document.getElementById('strainFilter')?.value || '';
         
-        verboseLog('🔍 Current filter values:', { vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter });
+        verboseLog('🔍 Current filter values:', { productNameFilter, manifestRefFilter, vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter, strainFilter });
         
         // Check if all filters are "All" - show everything (fast path)
-        const allFiltersAll = [vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter]
-            .every(filter => !filter || filter.trim() === '' || filter.toLowerCase() === 'all');
+        const allFiltersAll = [productNameFilter, manifestRefFilter, vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter, strainFilter]
+            .every(filter => !filter || filter.toString().trim() === '' || filter.toString().toLowerCase() === 'all');
         
         verboseLog('🔍 All filters empty?', allFiltersAll);
         
@@ -3682,6 +3758,8 @@ const TagManager = {
         
         // Create a unique key for the current filter combination
         const filterKey = [
+            productNameFilter || '',
+            manifestRefFilter || '',
             vendorFilter || '',
             brandFilter || '',
             productTypeFilter || '',
@@ -3689,7 +3767,8 @@ const TagManager = {
             weightFilter || '',
             priceFilter || '',
             dohFilter || '',
-            highCbdFilter || ''
+            highCbdFilter || '',
+            strainFilter || ''
         ].join('|');
         
         // Check if we have cached results for this exact filter combination
@@ -3733,6 +3812,36 @@ const TagManager = {
         verboseLog('applyFilters - first tag sample:', tagsToFilter && tagsToFilter.length > 0 ? tagsToFilter[0] : null);
         
         const filteredTags = tagsToFilter.filter(tag => {
+            // Product name text filter (POSaBit-style)
+            if (productNameFilter && productNameFilter.trim() !== '') {
+                const term = productNameFilter.toLowerCase().trim();
+                const name = (tag['Product Name*'] || tag.ProductName || tag.Description || '').toString().toLowerCase();
+                if (!name.includes(term)) {
+                    return false;
+                }
+            }
+
+            // Manifest ref lookup (substring match)
+            if (manifestRefFilter && manifestRefFilter.trim() !== '') {
+                const term = manifestRefFilter.toLowerCase().trim();
+                const manifestRef = (
+                    tag['Manifest Ref No'] ||
+                    tag['Manifest Ref'] ||
+                    tag['ManifestRefNo'] ||
+                    tag.manifest_ref_no ||
+                    tag.manifestRefNo ||
+                    tag.manifest_ref ||
+                    tag.manifestRef ||
+                    tag.ManifestRefNo ||
+                    tag.manifest_number ||
+                    tag.manifestNumber ||
+                    ''
+                ).toString().toLowerCase().trim();
+                if (!manifestRef.includes(term)) {
+                    return false;
+                }
+            }
+
             // Check vendor filter - only apply if not empty and not "All"
             if (vendorFilter && vendorFilter.trim() !== '' && vendorFilter.toLowerCase() !== 'all') {
                 // Check multiple possible vendor field names
@@ -3929,6 +4038,14 @@ const TagManager = {
                     return false;
                 }
             }
+
+            // Strain filter (uses Product Strain where available)
+            if (strainFilter && strainFilter.trim() !== '' && strainFilter.toLowerCase() !== 'all') {
+                const tagStrain = (tag['Product Strain'] || tag.ProductStrain || tag.strain || '').toString().trim();
+                if (tagStrain.toLowerCase() !== strainFilter.toLowerCase()) {
+                    return false;
+                }
+            }
             
             return true;
         });
@@ -4022,8 +4139,8 @@ const TagManager = {
         // Always pass original tags to preserve persistent selections, with filtered tags for display
         // Use immediate update if requested (for filter changes), otherwise debounced (for search)
         if (immediate) {
-            // Immediate update for instant filter response
-            this._updateAvailableTags(this.state.originalTags, filteredTags);
+            // Immediate update for instant filter response - skip merging DOM into selection so filtered list doesn't become "all selected"
+            this._updateAvailableTags(this.state.originalTags, filteredTags, { skipMergeFromDom: true });
         } else {
             // Debounced update for search and other operations
             this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
@@ -4457,9 +4574,14 @@ const TagManager = {
             const isHighThcType = normalizedLower.startsWith('high thc');
             const isValidType = VALID_PRODUCT_TYPES.includes(normalizedLower) || isHighCbdType || isHighThcType;
             
+            // When type is invalid/Other, infer from product name so shots/beverages show as Edible (Liquid)
+            const productNameForType = (tag['Product Name*'] || tag.ProductName || tag.displayName || '').toString().toLowerCase();
+            const looksLikeLiquidEdible = /\bshot\b|lemonade|drink|beverage|soda|juice\b/.test(productNameForType);
+            const fallbackType = looksLikeLiquidEdible ? 'Edible (Liquid)' : 'Other';
+            
             const productType = isValidType
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
-              : 'Other';
+              : fallbackType;
             // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
             const lineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
@@ -4476,8 +4598,12 @@ const TagManager = {
                 weightWithUnits = `${weight}g`;
             }
             
-            // CRITICAL FIX: Normalize weight to remove .0 decimals (e.g., "1.0g" -> "1g", "1.0G" -> "1g")
-            // This ensures "1.0g" and "1g" are treated as the same weight group
+            // CRITICAL FIX: Normalize weight to remove .0 decimals (e.g., "1.0g" -> "1g", "1.0 gm" -> "1g")
+            // This ensures "1.0g", "1.0 gm", and "1g" are treated as the same weight group
+            if (weightWithUnits && typeof normalizeWeightForDisplay === 'function') {
+                const _normalized = normalizeWeightForDisplay(weightWithUnits);
+                if (_normalized && _normalized !== weightWithUnits) weightWithUnits = _normalized;
+            }
             if (weightWithUnits) {
                 const weightMatch = weightWithUnits.match(/^([\d.]+)([a-zA-Z]+.*)$/i);
                 if (weightMatch) {
@@ -4805,8 +4931,8 @@ const TagManager = {
         const tagsToShow = filteredTags || originalTags;
         // CRITICAL FIX: Only show loading if store is confirmed
         // Don't show loading splash before store selection modal
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        const selectedStore = (window.sessionStorage && (null)) || null;
+        const storeConfirmed = true; // store always confirmed
         
         // Show splash immediately when tags are being loaded, unless user is actively searching OR store not confirmed
         if (!this.state.isSearching && storeConfirmed) {
@@ -4824,11 +4950,8 @@ const TagManager = {
                     </div>
                 `;
             }
-        } else if (!storeConfirmed) {
-            // Store not confirmed - don't show loading, let store modal show
-            verboseLog('Store not confirmed - skipping loading splash (store modal should show)');
         }
-        
+
         // PERFORMANCE: Call immediately - no setTimeout delay for instant rendering
         this._updateAvailableTags(originalTags, filteredTags);
     }, 50), // Ultra-fast debounce (50ms) for near-instant response
@@ -5614,7 +5737,7 @@ const TagManager = {
                         });
                         
                         weightHeader.appendChild(weightCheckbox);
-                        weightHeader.appendChild(document.createTextNode(weight));
+                        weightHeader.appendChild(document.createTextNode(typeof normalizeWeightForDisplay === 'function' ? normalizeWeightForDisplay(weight) : weight));
                         const weightCollapseIcon = document.createElement('span');
                         weightCollapseIcon.className = 'collapse-icon ms-auto';
                         weightCollapseIcon.textContent = '▼';
@@ -5841,17 +5964,9 @@ const TagManager = {
     },
 
     // Internal function that actually updates the available tags
-    _updateAvailableTags(originalTags, filteredTags = null) {
+    _updateAvailableTags(originalTags, filteredTags = null, options = null) {
         // CRITICAL FIX: Don't update tags if store is not confirmed
         // This prevents loading states from appearing before store selection modal
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
-        if (!storeConfirmed) {
-            verboseLog('Store not confirmed - skipping _updateAvailableTags (store modal should show)');
-            return;
-        }
-        
         // CRITICAL FIX: Prevent unnecessary re-renders if tags haven't changed AND are already displayed
         // This prevents cycling/reloading when tags are the same, but only if DOM already shows them
         const tagsToProcess = filteredTags || originalTags;
@@ -5910,7 +6025,7 @@ const TagManager = {
         
         // CRITICAL FIX: Render immediately instead of using requestAnimationFrame to prevent delays
         // Tags need to appear immediately after upload, not on next frame
-        this._performUpdateAvailableTags(originalTags, filteredTags);
+        this._performUpdateAvailableTags(originalTags, filteredTags, options);
         
         // CRITICAL FIX: Refresh DOH badges after filters are applied
         // This ensures badges appear when filters trigger re-rendering
@@ -5928,7 +6043,7 @@ const TagManager = {
         });
     },
     
-    _performUpdateAvailableTags(originalTags, filteredTags = null) {
+    _performUpdateAvailableTags(originalTags, filteredTags = null, options = null) {
         verboseLog('_updateAvailableTags called with:', {
             originalTagsLength: originalTags ? originalTags.length : 0,
             filteredTagsLength: filteredTags ? filteredTags.length : 0,
@@ -5963,6 +6078,9 @@ const TagManager = {
         
         // CRITICAL FIX: Preserve checkbox selections from DOM before re-rendering
         // This prevents selections made during initial load from being lost
+        // When skipMergeFromDom is true (e.g. filter dropdown change), do NOT merge DOM into selection -
+        // otherwise every visible (filtered) item would be treated as selected and all get added.
+        const skipMergeFromDom = options && options.skipMergeFromDom === true;
         const currentlyCheckedCheckboxes = availableTagsContainer.querySelectorAll('.tag-checkbox:checked');
         const currentlySelectedTagNames = Array.from(currentlyCheckedCheckboxes).map(cb => cb.value).filter(Boolean);
         
@@ -5972,8 +6090,8 @@ const TagManager = {
             verboseLog(`🔒 Preserving ${this.state.persistentSelectedTags.length} persistent selected tags before re-render`);
         }
         
-        // Merge DOM selections with persistentSelectedTags to ensure nothing is lost
-        if (currentlySelectedTagNames.length > 0) {
+        // Merge DOM selections with persistentSelectedTags to ensure nothing is lost (skip when filter change to avoid "all filtered items selected")
+        if (!skipMergeFromDom && currentlySelectedTagNames.length > 0) {
             const currentSet = new Set(this.state.persistentSelectedTags || []);
             currentlySelectedTagNames.forEach(tagName => {
                 if (!currentSet.has(tagName)) {
@@ -6052,66 +6170,24 @@ const TagManager = {
             const noFileUploaded = !hasFile && !hasFileInUI && hasNoTags && !isFetchingTags;
             
             if (noFileUploaded) {
-                // Show prominent upload prompt when Excel is needed
+                // POSaBit-first empty state: no Excel prompt, keep filters visible.
                 availableTagsContainer.innerHTML = `
                     <div style="
                         display: flex;
                         flex-direction: column;
                         align-items: center;
                         justify-content: center;
-                        min-height: 400px;
-                        padding: 3rem 2rem;
-                        background: linear-gradient(135deg, rgba(45, 34, 58, 0.3), rgba(60, 45, 75, 0.3));
+                        min-height: 200px;
+                        padding: 2rem 1.5rem;
                         border-radius: 16px;
-                        margin: 2rem;
-                        border: 2px dashed rgba(160, 132, 232, 0.3);
+                        color: rgba(255,255,255,0.75);
                     ">
-                        <div style="font-size: 4rem; margin-bottom: 1.5rem; opacity: 0.6;">📤</div>
-                        <h2 style="
-                            color: #ffffff;
-                            margin-bottom: 1rem;
-                            font-size: 2rem;
-                            font-weight: 700;
-                        ">Upload Excel File to Begin</h2>
-                        <p style="
-                            font-size: 1.2rem;
-                            margin-bottom: 2rem;
-                            max-width: 600px;
-                            text-align: center;
-                            color: rgba(255, 255, 255, 0.8);
-                            line-height: 1.6;
-                        ">
-                            Upload your Excel inventory file to load products and start generating price tags.
-                        </p>
-                        <button onclick="document.getElementById('fileInput')?.click()" style="
-                            background: linear-gradient(135deg, #a084e8, #8b6fd8);
-                            border: none;
-                            color: white;
-                            padding: 1rem 2.5rem;
-                            font-size: 1.1rem;
-                            font-weight: 700;
-                            border-radius: 12px;
-                            cursor: pointer;
-                            box-shadow: 0 4px 16px rgba(160, 132, 232, 0.4);
-                            transition: all 0.3s ease;
-                        " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(160, 132, 232, 0.6)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 16px rgba(160, 132, 232, 0.4)';">
-                            📁 Choose Excel File
-                        </button>
-                        <p style="
-                            margin-top: 2rem;
-                            font-size: 0.95rem;
-                            color: rgba(255, 255, 255, 0.5);
-                        ">
-                            Supported formats: .xlsx, .xls
-                        </p>
+                        <div style="font-size: 1.4rem; margin-bottom: 0.75rem;">Loading products from POSaBit…</div>
+                        <div style="font-size: 0.95rem; opacity: 0.7; text-align: center; max-width: 520px;">
+                            If nothing appears, check your POSaBit API settings or switch to Excel / Upload using the button above.
+                        </div>
                     </div>
                 `;
-
-                // Hide filters when no file uploaded
-                const filterBar = document.querySelector('.filter-bar');
-                if (filterBar) {
-                    filterBar.style.display = 'none';
-                }
             } else {
                 // CRITICAL FIX: Check if tags are loading BEFORE showing "no match" message
                 // Re-check isFetchingTags here in case it changed since the earlier check
@@ -6600,6 +6676,27 @@ const TagManager = {
         
         // CRITICAL FIX: Render organized tags in chunks to prevent UI freeze
         this._renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags);
+
+        // FINAL SAFETY: If, for any reason, no tag rows were rendered but we have tags in memory,
+        // fall back to a simple flat list renderer so the user always sees products.
+        try {
+            const hasTagRows = availableTagsContainer.querySelectorAll('.tag-item').length > 0;
+            if (!hasTagRows && tags && tags.length > 0) {
+                console.warn('⚠️ No tag rows rendered after organized render; using simple flat list fallback');
+                const fallbackList = document.createElement('div');
+                fallbackList.className = 'tag-list';
+                const sortedSimple = [...tags].sort((a, b) => {
+                    const aName = (a && (a['Product Name*'] || a.ProductName || a.displayName) || '').toString();
+                    const bName = (b && (b['Product Name*'] || b.ProductName || b.displayName) || '').toString();
+                    return aName.localeCompare(bName);
+                });
+                this._renderTagsInBatches(sortedSimple, fallbackList);
+                availableTagsContainer.innerHTML = '';
+                availableTagsContainer.appendChild(fallbackList);
+            }
+        } catch (fallbackError) {
+            console.error('Simple flat list fallback render failed:', fallbackError);
+        }
     },
     
     _renderOrganizedTags(organizedTags, tagList, availableTagsContainer, savedScroll, savedPersistentTags) {
@@ -7095,7 +7192,7 @@ const TagManager = {
                         });
                         
                         weightHeader.appendChild(weightCheckbox);
-                        weightHeader.appendChild(document.createTextNode(weight));
+                        weightHeader.appendChild(document.createTextNode(typeof normalizeWeightForDisplay === 'function' ? normalizeWeightForDisplay(weight) : weight));
                         weightHeader.appendChild(document.createElement('span')).className = 'collapse-icon ms-auto';
                         
                         // Weight sections should always start expanded
@@ -7786,8 +7883,11 @@ const TagManager = {
         // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
         // This ensures UI displays correct lineage even if database/Excel has wrong value
         const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
-        const isClassicType = classicTypes.map(ct => ct.toLowerCase()).includes((productTypeCheck || '').toString().toLowerCase());
+        const productTypeLower = (productTypeCheck || '').toString().toLowerCase().trim();
+        // Use the shared getUniqueLineages() logic so "disposable" / "vape pen" are treated as classic.
+        const isClassicType = (typeof window.getUniqueLineages === 'function')
+            ? window.getUniqueLineages(productTypeLower).length === 6
+            : ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'].includes(productTypeLower);
         const isParaphernaliaType = (productTypeCheck || '').toString().toLowerCase() === 'paraphernalia';
         // Classic types: any lineage that isn't a standard value (SATIVA/INDICA/HYBRID/CBD variants)
         // gets normalized to HYBRID. This covers MIXED, THC, NON E, NON_E, and other Cultivera codes.
@@ -7896,8 +7996,13 @@ const TagManager = {
         // CRITICAL: Only apply fallback logic if database lineage is missing, invalid, or MIXED
         
         // Apply nonclassic product type logic ONLY if database lineage is missing or invalid
-        // Reuse classicTypes already declared above (line 4325)
-        const isNonclassic = !classicTypes.map(ct => ct.toLowerCase()).includes(lowerProductType);
+        // IMPORTANT: Ensure classicTypes exists in this scope (prevents runtime crash: "classicTypes is not defined").
+        const classicTypesForNonclassic = (Array.isArray(window.CLASSIC_TYPES) ? window.CLASSIC_TYPES : [
+            'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
+            'flower - outdoor', 'flower - indoor', 'flower - greenhouse',
+            'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'
+        ]);
+        const isNonclassic = !classicTypesForNonclassic.map(ct => String(ct).toLowerCase()).includes(lowerProductType);
         
         // CRITICAL FIX: Classic lineages (SATIVA, INDICA, HYBRID) should NEVER be used for capsules/nonclassic types
         // Capsules and other nonclassic types should ONLY use MIXED (blue) or CBD_BLEND (yellow)
@@ -10201,8 +10306,10 @@ const TagManager = {
         // CRITICAL FIX: Check if this is a nonclassic product type
         // For nonclassic types, don't propagate lineage changes to other products
         const productType = (source['Product Type*'] || source.ProductType || source.Type || '').toString().trim().toLowerCase();
-        const classicTypes = ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'];
-        const isNonclassic = !classicTypes.includes(productType);
+        const isClassicType = (typeof window.getUniqueLineages === 'function')
+            ? window.getUniqueLineages(productType).length === 6
+            : ['flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'].includes(productType);
+        const isNonclassic = !isClassicType;
         
         if (isNonclassic) {
             verboseLog(`🔄 Nonclassic product '${tagName}' (type: ${productType}) - skipping lineage propagation to other products`);
@@ -11970,6 +12077,13 @@ const TagManager = {
         this._fetchingAvailableTags = true;
         this._fetchingAvailableTagsStartTime = Date.now();
         this._fetchingAvailableTagsStartTime = Date.now();
+
+        // Lock UI during tag fetch+render so users can't click partially-built DOM.
+        // Skip the lock when we are doing an instant-cache display (user can already interact).
+        const useInstantCacheDisplay = hasCache && !hasExistingTags && !forceReload;
+        if (!useInstantCacheDisplay) {
+            this.showTagRenderModal('Loading tags...');
+        }
         
         // CRITICAL FIX: Set a safety timeout to reset flag if it gets stuck
         // This prevents infinite loading state on reload
@@ -12040,8 +12154,8 @@ const TagManager = {
         this._backgroundProcessingRetries = this._backgroundProcessingRetries || 0;
         
         // CRITICAL FIX: Only show loading if store is confirmed
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
+        const selectedStore = (window.sessionStorage && (null)) || null;
+        const storeConfirmed = true; // store always confirmed
         
         // CRITICAL FIX: Always show splash during tag loading/refreshing for better UX
         // Show splash immediately so user knows something is happening, but ONLY if store is confirmed
@@ -12060,10 +12174,7 @@ const TagManager = {
                 `;
             }
         } else if (!this._suppressActionSplash) {
-            if (!storeConfirmed) {
-                // Store not confirmed - don't show loading, let store modal show
-                verboseLog('Store not confirmed - skipping loading UI (store modal should show)');
-            } else if (storeConfirmed && hasExistingTags) {
+            if (hasExistingTags) {
                 // Reload/refresh - show splash to indicate loading is happening (only if store confirmed)
                 this.showActionSplash('Refreshing tags...');
                 // Also show loading indicator in container if it exists
@@ -12509,12 +12620,13 @@ const TagManager = {
                     const errorMsg = responseData.error || responseData.message;
                     console.warn('Backend returned empty tags with message:', errorMsg);
 
-                    // Auto-retry when backend is still loading the file in background
+                    // Auto-retry when backend is still loading (POSaBit cache warming or file processing)
                     const lowerMsg = (errorMsg || '').toLowerCase();
-                    const isBackgroundLoading = lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly');
+                    const isBackgroundLoading = lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly')
+                        || lowerMsg.includes('loading, please wait') || lowerMsg.includes('posabit') || responseData.source === 'posabit-loading';
                     if (isBackgroundLoading) {
                         this._backgroundProcessingRetries += 1;
-                        const maxBgRetries = 12; // ~24s if 2s delay
+                        const maxBgRetries = 30; // ~60s if 2s delay — enough for POSaBit cold start
                         if (this._backgroundProcessingRetries <= maxBgRetries) {
                             const delayMs = 2000;
                             verboseLog(`⏳ Background load in progress (retry ${this._backgroundProcessingRetries}/${maxBgRetries}) – retrying in ${delayMs}ms`);
@@ -12547,7 +12659,15 @@ const TagManager = {
                     console.log('📋 availableTagsContainer found:', !!availableTagsContainer);
                     if (availableTagsContainer && errorMsg) {
                         console.log('📋 Updating availableTagsContainer with message');
-                        availableTagsContainer.innerHTML = `
+                        const isPosabitLoading = (errorMsg || '').toLowerCase().includes('posabit') || (errorMsg || '').toLowerCase().includes('loading, please wait') || responseData.source === 'posabit-loading';
+                        availableTagsContainer.innerHTML = isPosabitLoading ? `
+                            <div class="text-center py-5">
+                                <div class="spinner-border text-info mb-3" role="status" style="width:2.5rem;height:2.5rem;">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="text-muted small mt-2">Loading inventory from POSaBit…</p>
+                            </div>
+                        ` : `
                             <div class="text-center py-4">
                                 <div class="alert alert-info mx-3">
                                     <p class="mb-2">${errorMsg}</p>
@@ -12581,7 +12701,7 @@ const TagManager = {
                                 <div class="text-center py-4">
                                     <div class="alert alert-info mx-3">
                                         <i class="fas fa-info-circle"></i>
-                                        <p class="mb-0 mt-2">No Excel file uploaded. Please upload an Excel file to see available tags.</p>
+                                        <p class="mb-0 mt-2">No inventory loaded yet. Use POSaBit / API or upload an Excel file to see available tags.</p>
                                     </div>
                                 </div>
                             `;
@@ -13350,6 +13470,9 @@ const TagManager = {
                 clearTimeout(this._fetchingTimeout);
                 this._fetchingTimeout = null;
             }
+
+            // Always remove the UI lock overlay when this fetch cycle ends.
+            this.hideTagRenderModal();
             
             // CRITICAL FIX: Always clear flag after a short delay to prevent stuck loading
             // This ensures the flag is reset even if _waitForTagsToAppear fails or doesn't exist
@@ -14258,8 +14381,9 @@ const TagManager = {
         }
         
         // Set each filter dropdown to saved value or 'All' (or '')
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['productNameFilter', 'manifestRefFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter', 'strainFilter'];
         const filterMap = {
+            'manifestRefFilter': 'manifestRef',
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
@@ -14367,7 +14491,7 @@ const TagManager = {
                     splash.style.display = 'none';
                     const mainContent = document.getElementById('mainContent');
                     if (mainContent) {
-                        // CRITICAL FIX: Prevent visual glitches by ensuring smooth transition
+                        mainContent.classList.add('store-selected');
                         mainContent.style.display = 'block';
                         mainContent.style.visibility = 'visible';
                         mainContent.style.opacity = '1';
@@ -14409,8 +14533,10 @@ const TagManager = {
         }
         
         // Set each filter dropdown to saved value or 'All' (or '')
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['productNameFilter', 'manifestRefFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter', 'strainFilter'];
         const filterMap = {
+            'productNameFilter': 'productName',
+            'manifestRefFilter': 'manifestRef',
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
@@ -14418,7 +14544,8 @@ const TagManager = {
             'weightFilter': 'weight',
             'priceFilter': 'price',
             'dohFilter': 'doh',
-            'highCbdFilter': 'highCbd'
+            'highCbdFilter': 'highCbd',
+            'strainFilter': 'strain'
         };
         filterIds.forEach(id => {
             const el = document.getElementById(id);
@@ -14428,6 +14555,8 @@ const TagManager = {
                 // CRITICAL FIX: Always set vendor filter to empty/All on page load
                 if (filterKey === 'vendor') {
                     el.value = '';
+                } else if (filterKey === 'productName') {
+                    el.value = savedValue || '';
                 } else if (savedValue && savedValue !== 'All') {
                     el.value = savedValue;
                 } else {
@@ -14583,20 +14712,27 @@ const TagManager = {
             return true; // Indicates loading state was shown
         }
         
-        // No fetch in progress, show upload prompt
-        container.innerHTML = `
-            <div class="text-center py-5">
-                <div class="upload-prompt">
-                    <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                    <h5 class="text-muted">No product data loaded</h5>
-                    <p class="text-muted">Upload an Excel file to get started</p>
-                    <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                        <i class="fas fa-upload me-2"></i>Upload Excel File
-                    </button>
+        // No fetch in progress — trigger a tag fetch instead of showing upload prompt.
+        // POSaBit may be the data source; don't demand an Excel upload.
+        if (this.fetchAndUpdateAvailableTags && !this._fetchingAvailableTags) {
+            this._fetchingAvailableTags = true;
+            this.fetchAndUpdateAvailableTags().catch(e => {
+                this._fetchingAvailableTags = false;
+                console.warn('Auto-fetch after empty state failed:', e);
+            });
+            // Show loading spinner while fetching
+            container.innerHTML = `
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;padding:3rem 2rem;">
+                    <div class="spinner-border text-primary" role="status" style="width:3rem;height:3rem;margin-bottom:1.5rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h5 style="color:#ffffff;margin-bottom:0.5rem;">Loading tags...</h5>
+                    <p style="color:rgba(255,255,255,0.7);font-size:0.95rem;">Please wait while we load your product data</p>
                 </div>
-            </div>
-        `;
-        return false; // Indicates upload prompt was shown
+            `;
+            return true;
+        }
+        return false; // Indicates nothing was shown
     },
 
     // Hide loading indicator
@@ -15834,9 +15970,11 @@ const TagManager = {
         }
         
         // Define classic types (matching backend CLASSIC_TYPES)
+        // Prefer shared logic so "disposable" and "vape pen" behave consistently.
         const classicTypes = [
             'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
-            'flower - outdoor', 'flower - indoor', 'flower - greenhouse'
+            'flower - outdoor', 'flower - indoor', 'flower - greenhouse',
+            'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'
         ];
         
         // Check if lineage is empty/invalid (matching backend empty_lineage_mask)
@@ -15846,7 +15984,9 @@ const TagManager = {
                              currentLineage === null || 
                              currentLineage === undefined;
         
-        const isClassicType = classicTypes.includes(productType);
+        const isClassicType = (typeof window.getUniqueLineages === 'function')
+            ? window.getUniqueLineages(productType).length === 6
+            : classicTypes.includes(productType);
         const isNonClassicType = !isClassicType;
         
         // BACKEND RULE 1: Set default lineage for classic types with empty lineage (HYBRID)
@@ -17001,37 +17141,6 @@ const TagManager = {
 
     // Action splash screen for clear/undo operations
     showActionSplash(message) {
-        // CRITICAL FIX: Don't show loading splash if store selection modal is visible or store not confirmed
-        const storeModal = document.getElementById('storeSelectionModal');
-        
-        // Check if store modal is visible using multiple methods
-        let isStoreModalVisible = false;
-        if (storeModal) {
-            // Check Bootstrap modal state
-            if (typeof bootstrap !== 'undefined') {
-                const modalInstance = bootstrap.Modal.getInstance(storeModal);
-                if (modalInstance && modalInstance._isShown) {
-                    isStoreModalVisible = true;
-                }
-            }
-            // Fallback: check DOM classes and styles
-            if (!isStoreModalVisible) {
-                isStoreModalVisible = storeModal.classList.contains('show') || 
-                                     (storeModal.style.display !== 'none' && storeModal.offsetParent !== null);
-            }
-        }
-        
-        // Also check if store is not confirmed
-        const selectedStore = (window.sessionStorage && (sessionStorage.getItem('selected_store') || sessionStorage.getItem('store'))) || null;
-        const storeConfirmed = window.storeConfirmed || (selectedStore && selectedStore !== '' && selectedStore !== 'none');
-        
-        // CRITICAL: Also check if we're in the middle of store selection process
-        const isCheckingStore = window.checkingStoreRequired === true;
-        
-        if (isStoreModalVisible || !storeConfirmed || isCheckingStore) {
-            verboseLog('Store modal visible or not confirmed - skipping action splash:', message);
-            return;
-        }
         // Create splash if it doesn't exist
         let splash = document.getElementById('actionSplash');
         if (!splash) {
@@ -17061,6 +17170,73 @@ const TagManager = {
         const splash = document.getElementById('actionSplash');
         if (splash) {
             splash.style.display = 'none';
+        }
+    },
+
+    // Full-screen UI lock during tag fetch + render.
+    // Prevents clicks on a partially-built UI for a brief window after tags load.
+    showTagRenderModal(message = 'Loading tags...') {
+        try {
+            let modal = document.getElementById('tagRenderModalOverlay');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'tagRenderModalOverlay';
+                modal.style.position = 'fixed';
+                modal.style.top = '0';
+                modal.style.left = '0';
+                modal.style.width = '100%';
+                modal.style.height = '100%';
+                modal.style.background = 'rgba(0, 0, 0, 0.55)';
+                modal.style.backdropFilter = 'blur(8px)';
+                modal.style.webkitBackdropFilter = 'blur(8px)';
+                modal.style.zIndex = '20000';
+                modal.style.display = 'flex';
+                modal.style.alignItems = 'center';
+                modal.style.justifyContent = 'center';
+                modal.style.pointerEvents = 'auto';
+                modal.innerHTML = `
+                    <div style="
+                        background: rgba(45, 34, 58, 0.95);
+                        border: 1px solid rgba(160, 132, 232, 0.35);
+                        border-radius: 16px;
+                        padding: 28px 34px;
+                        min-width: 360px;
+                        max-width: 520px;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+                        text-align: center;
+                        color: #fff;
+                    ">
+                        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem; margin: 0 auto 14px auto;">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">${message}</div>
+                        <div style="font-size: 13px; color: rgba(255,255,255,0.72);">
+                            Please wait while we finish rendering.
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } else {
+                const msgEl = modal.querySelector('div[style*="font-size: 16px"]');
+                if (msgEl) msgEl.textContent = message;
+            }
+            modal.style.display = 'flex';
+        } catch (e) {
+            console.warn('showTagRenderModal failed:', e);
+        }
+    },
+
+    hideTagRenderModal() {
+        try {
+            const modal = document.getElementById('tagRenderModalOverlay');
+            if (modal) modal.style.display = 'none';
+            const availableTagsContainer = document.getElementById('availableTags');
+            if (availableTagsContainer) {
+                availableTagsContainer.style.opacity = '1';
+                availableTagsContainer.style.pointerEvents = 'auto';
+            }
+        } catch (e) {
+            console.warn('hideTagRenderModal failed:', e);
         }
     },
 
@@ -17582,8 +17758,8 @@ const TagManager = {
 
             // CRITICAL: Check store selection before attempting upload
             try {
-                const storeCheckResponse = await fetch('/api/check-store-required');
-                const storeCheckData = await storeCheckResponse.json();
+                // store check removed
+                const storeCheckData = { required: false, has_store: true };
                 if (storeCheckData.required && !storeCheckData.has_store) {
                     const errorMsg = 'Please select a store before uploading files. Click on the store name in the header to select a store.';
                     console.error('Upload blocked:', errorMsg);
@@ -18506,6 +18682,7 @@ const TagManager = {
             
             // Update filter state immediately
             const filterTypeMap = {
+                'productName': 'productName',
                 'vendor': 'vendor',
                 'brand': 'brand',
                 'productType': 'productType',
@@ -18513,7 +18690,8 @@ const TagManager = {
                 'weight': 'weight',
                 'price': 'price',
                 'doh': 'doh',
-                'highCbd': 'highCbd'
+                'highCbd': 'highCbd',
+                'strain': 'strain'
             };
             
             const stateKey = filterTypeMap[filterType];
@@ -18650,8 +18828,13 @@ const TagManager = {
                     }
                 };
                 
-                // Only use change event for Mac-like behavior
-                filterElement.addEventListener('change', filterElement._filterChangeHandler);
+                // Text inputs need input events for instant filtering
+                if (filterId === 'productNameFilter') {
+                    filterElement.addEventListener('input', filterElement._filterChangeHandler);
+                } else {
+                    // Dropdowns use change
+                    filterElement.addEventListener('change', filterElement._filterChangeHandler);
+                }
                 
                 // CRITICAL FIX: Also add input event for brand filter to catch programmatic changes
                 if (filterId === 'brandFilter') {
@@ -18834,6 +19017,8 @@ const TagManager = {
 
     getFilterTypeFromId(filterId) {
         const idToType = {
+            'productNameFilter': 'productName',
+            'manifestRefFilter': 'manifestRef',
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
@@ -18841,7 +19026,8 @@ const TagManager = {
             'weightFilter': 'weight',
             'priceFilter': 'price',
             'dohFilter': 'doh',
-            'highCbdFilter': 'highCbd'
+            'highCbdFilter': 'highCbd',
+            'strainFilter': 'strain'
         };
         return idToType[filterId] || filterId;
     },
@@ -18849,14 +19035,17 @@ const TagManager = {
     // Add this function to render active filters above the Available list
     renderActiveFilters() {
         const filterIds = [
-            { id: 'vendorFilter', label: 'Vendor' },
+            { id: 'productNameFilter', label: 'Name' },
+            { id: 'manifestRefFilter', label: 'Manifest' },
+            { id: 'vendorFilter', label: 'Supplier' },
             { id: 'brandFilter', label: 'Brand' },
             { id: 'productTypeFilter', label: 'Type' },
             { id: 'lineageFilter', label: 'Lineage' },
             { id: 'weightFilter', label: 'Weight' },
             { id: 'priceFilter', label: 'Price' },
             { id: 'dohFilter', label: 'DOH' },
-            { id: 'highCbdFilter', label: 'High CBD' }
+            { id: 'highCbdFilter', label: 'High CBD' },
+            { id: 'strainFilter', label: 'Strain' }
         ];
         let container = document.getElementById('activeFiltersContainer');
         if (!container) {
@@ -18876,8 +19065,9 @@ const TagManager = {
         
         // Add "Clear All Filters" button if any filters are active
         const activeFilters = filterIds.filter(({ id }) => {
-            const select = document.getElementById(id);
-            return select && select.value && select.value !== '' && select.value.toLowerCase() !== 'all';
+            const el = document.getElementById(id);
+            const value = el?.value;
+            return el && value && value.toString().trim() !== '' && value.toString().toLowerCase() !== 'all';
         });
         
         if (activeFilters.length > 0) {
@@ -18898,8 +19088,9 @@ const TagManager = {
         }
         
         filterIds.forEach(({ id, label }) => {
-            const select = document.getElementById(id);
-            if (select && select.value && select.value !== '' && select.value.toLowerCase() !== 'all') {
+            const el = document.getElementById(id);
+            const value = el?.value;
+            if (el && value && value.toString().trim() !== '' && value.toString().toLowerCase() !== 'all') {
                 // DEBUG: Log active filter detection
                 verboseLog('🔍 Active Filter Detected:', {
                     id: id,
@@ -18918,7 +19109,7 @@ const TagManager = {
                 filterDiv.style.color = '#fff';
                 filterDiv.style.fontWeight = '500';
                 filterDiv.style.gap = '0.25em';
-                filterDiv.innerHTML = `${label}: ${select.value}`;
+                filterDiv.innerHTML = `${label}: ${value}`;
                 const closeBtn = document.createElement('span');
                 closeBtn.textContent = '×';
                 closeBtn.style.cursor = 'pointer';
@@ -18926,9 +19117,9 @@ const TagManager = {
                 closeBtn.style.fontSize = '1em';
                 closeBtn.setAttribute('aria-label', `Clear ${label} filter`);
                 closeBtn.addEventListener('click', () => {
-                    select.value = '';
+                    el.value = '';
                     // Trigger change event to update filters
-                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
                 });
                 filterDiv.appendChild(closeBtn);
                 container.appendChild(filterDiv);
@@ -18937,7 +19128,7 @@ const TagManager = {
                 verboseLog('🔍 Inactive Filter:', {
                     id: id,
                     label: label,
-                    value: select?.value || 'undefined',
+                    value: el?.value || 'undefined',
                     isActive: false
                 });
             }
@@ -22202,7 +22393,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // User templates modal: add, replace, view custom designs
 document.addEventListener('DOMContentLoaded', function() {
-    const TEMPLATE_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical', mini: 'Mini', double: 'Double', preroll: 'Preroll', inventory: 'Inventory' };
+    const TEMPLATE_LABELS = { horizontal: 'Horizontal', vertical: 'Vertical', mini: 'Mini', miniroll: 'Mini-roll', double: 'Double', new: 'New', preroll: 'Preroll', inventory: 'Inventory' };
     const manageBtn = document.getElementById('manageTemplatesBtn');
     const modalEl = document.getElementById('userTemplatesModal');
     const listEl = document.getElementById('userTemplatesList');
@@ -22212,7 +22403,9 @@ document.addEventListener('DOMContentLoaded', function() {
         horizontal: 'fa-grip-lines',
         vertical:   'fa-grip-lines-vertical',
         mini:       'fa-compress-alt',
+        miniroll:   'fa-compress-alt',
         double:     'fa-columns',
+        new:        'fa-file-alt',
         preroll:    'fa-scroll',
         inventory:  'fa-clipboard-list'
     };
@@ -22220,7 +22413,9 @@ document.addEventListener('DOMContentLoaded', function() {
         horizontal: '#6366f1',
         vertical:   '#8b5cf6',
         mini:       '#06b6d4',
+        miniroll:   '#06b6d4',
         double:     '#10b981',
+        new:        '#14b8a6',
         preroll:    '#f59e0b',
         inventory:  '#ef4444'
     };
@@ -22342,6 +22537,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <option value="mini">Mini</option>
                                 <option value="miniroll">Mini-roll</option>
                                 <option value="double">Double</option>
+                                <option value="new">New</option>
                                 <option value="inventory">Inventory</option>
                                 <option value="preroll">Preroll</option>
                             </select>

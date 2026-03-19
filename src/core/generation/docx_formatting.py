@@ -8,7 +8,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Define colors for lineage
+# Define colors for lineage (style-icon hex from user assets)
 COLORS = {
     'SATIVA': 'ED4123',
     'INDICA': '9900FF',
@@ -16,10 +16,44 @@ COLORS = {
     'HYBRID_INDICA': '9900FF',
     'HYBRID_SATIVA': 'ED4123',
     'CBD': 'F1C232',
-    'CBD_BLEND': 'F1C232',  # Same color as CBD
+    'CBD_BLEND': 'F1C232',
     'MIXED': '0021F5',
     'PARA': 'C83278'
 }
+
+# Style text icons for lineage placeholder (instead of word "lineage")
+# Maps lineage value to the icon text shown in the label.
+LINEAGE_ICON = {
+    'SATIVA': 'S',
+    'INDICA': 'I',
+    'HYBRID': 'H',
+    'HYBRID/SATIVA': 'S / H',
+    'HYBRID/INDICA': 'I / H',
+    'HYBRID_INDICA': 'I / H',
+    'HYBRID_SATIVA': 'S / H',
+}
+
+def lineage_to_icon_text(lineage_str):
+    """Return style icon text for classic lineage (S, I, H, S / H, I / H); otherwise return original."""
+    if not lineage_str or not isinstance(lineage_str, str):
+        return lineage_str or ''
+    raw = lineage_str.strip().upper()
+    key = raw.replace(' ', '_')
+    # Check exact keys (with slash or underscore)
+    for k, icon in LINEAGE_ICON.items():
+        if raw == k or key == k or raw == k.replace('_', '/') or key == k.replace('/', '_'):
+            return icon
+    if 'HYBRID/SATIVA' in raw or 'HYBRID_SATIVA' in key:
+        return 'S / H'
+    if 'HYBRID/INDICA' in raw or 'HYBRID_INDICA' in key:
+        return 'I / H'
+    if raw == 'SATIVA':
+        return 'S'
+    if raw == 'INDICA':
+        return 'I'
+    if raw == 'HYBRID':
+        return 'H'
+    return lineage_str
 
 def debug_lineage_data(records):
     """Debug function to log lineage data being processed."""
@@ -76,6 +110,9 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
         before_twips, after_twips = '40', '20'
     
     try:
+        if template_type == 'new':
+            logger.info("Skipping lineage color application for 'new' template (no background colors).")
+            return
         logger.info("Starting lineage color application...")
         cells_processed = 0
         colors_applied = 0
@@ -310,6 +347,22 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                         elif "PARAPHERNALIA" in text:
                             color_hex = COLORS['PARA']
                             lineage_matched = "PARAPHERNALIA"
+                        # Style text icon matching (S, I, H, S / H, I / H) – check before word matching
+                        elif text.strip() in ("S / H", "S/H") or (text.strip().startswith("S") and "H" in text and "/" in text):
+                            color_hex = COLORS['HYBRID_SATIVA']
+                            lineage_matched = "HYBRID/SATIVA (icon)"
+                        elif text.strip() in ("I / H", "I/H") or (text.strip().startswith("I") and "H" in text and "/" in text):
+                            color_hex = COLORS['HYBRID_INDICA']
+                            lineage_matched = "HYBRID/INDICA (icon)"
+                        elif text.strip() == "S":
+                            color_hex = COLORS['SATIVA']
+                            lineage_matched = "SATIVA (icon)"
+                        elif text.strip() == "I":
+                            color_hex = COLORS['INDICA']
+                            lineage_matched = "INDICA (icon)"
+                        elif text.strip() == "H":
+                            color_hex = COLORS['HYBRID']
+                            lineage_matched = "HYBRID (icon)"
                         elif "HYBRID/INDICA" in text or "HYBRID INDICA" in text:
                             color_hex = COLORS['HYBRID_INDICA']
                             lineage_matched = "HYBRID/INDICA"

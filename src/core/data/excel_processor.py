@@ -672,8 +672,8 @@ def get_default_upload_file(store_name: Optional[str] = None) -> Optional[str]:
     # Include cwd/uploads in case the process starts elsewhere
     candidate_locations.append(current_dir / "uploads")
     
-    # Downloads as a last resort (matches legacy behaviour)
-    candidate_locations.append(home_dir / "Downloads")
+    # Downloads intentionally excluded — auto-loading from Downloads is disabled
+    # candidate_locations.append(home_dir / "Downloads")
     
     # Remove duplicates while preserving order
     seen_locations = set()
@@ -1037,7 +1037,7 @@ class ExcelProcessor:
         self._last_loaded_file = None
         self._file_cache = {}
         self._max_cache_size = 3  # Reduced cache size for memory efficiency
-        self._product_db_enabled = True
+        self._product_db_enabled = False  # Only enabled for explicit user uploads, not auto-loads
         self._debug_count = 0
         self._store_name = store_name
         self._weight_mode_cache: Dict[str, Optional[Tuple[float, str, float]]] = {}

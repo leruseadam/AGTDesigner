@@ -55,6 +55,7 @@ from src.core.generation.docx_formatting import (
     clear_cell_background,
     clear_cell_margins,
     clear_table_cell_padding,
+    lineage_to_icon_text,
 )
 from src.core.generation._ui_lineage_port import compute_display_lineage_like_ui
 from src.core.generation.unified_font_sizing import (
@@ -66,7 +67,8 @@ from src.core.generation.unified_font_sizing import (
 )
 from src.core.generation.text_processing import (
     process_doh_image,
-    format_ratio_multiline
+    format_ratio_multiline,
+    format_price
 )
 from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_already_wrapped
 
@@ -90,6 +92,39 @@ _MG_THC_CBD_RELAXED = re.compile(
     r'\s*-\s*\d+\s*mg\s*(?:THC|CBD|THC/CBD)?\s*$',
     re.IGNORECASE
 )
+
+# Invalid XML/OOXML characters that cause Word "unreadable content" (keep tab, newline, carriage return)
+_INVALID_XML_CONTROL = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+_INVALID_XML_SURROGATES = re.compile(r'[\uD800-\uDFFF]')
+
+
+def _sanitize_text_for_ooxml(text):
+    """Remove control chars and surrogates that make Word report unreadable content."""
+    if text is None:
+        return ''
+    if not isinstance(text, str):
+        text = str(text)
+    text = _INVALID_XML_CONTROL.sub('', text)
+    text = _INVALID_XML_SURROGATES.sub('', text)
+    return text
+
+
+def _sanitize_document_for_word(doc):
+    """Sanitize all run text in the document so Word does not report unreadable content."""
+    try:
+        for table in getattr(doc, 'tables', []) or []:
+            for row in getattr(table, 'rows', []) or []:
+                for cell in getattr(row, 'cells', []) or []:
+                    for para in getattr(cell, 'paragraphs', []) or []:
+                        for run in getattr(para, 'runs', []) or []:
+                            if getattr(run, 'text', None) is not None:
+                                run.text = _sanitize_text_for_ooxml(run.text)
+        for para in getattr(doc, 'paragraphs', []) or []:
+            for run in getattr(para, 'runs', []) or []:
+                if getattr(run, 'text', None) is not None:
+                    run.text = _sanitize_text_for_ooxml(run.text)
+    except Exception:
+        pass
 
 
 # Module-level QR image bytes cache: keyed by (content_string, box_size, border).
@@ -116,6 +151,7 @@ def get_font_scheme(template_type, base_size=12):
         'mini': {"base_size": base_size - 2, "min_size": 6, "max_length": 15},
         'horizontal': {"base_size": base_size + 1, "min_size": 7, "max_length": 20},
         'double': {"base_size": base_size - 1, "min_size": 8, "max_length": 30},
+        'new': {"base_size": base_size - 1, "min_size": 8, "max_length": 30},
         'inventory': {"base_size": base_size, "min_size": 8, "max_length": 40},  # Inventory slips can handle longer text
         'preroll': {"base_size": base_size - 1, "min_size": 8, "max_length": 30}  # Preroll now uses double font scheme
     }
@@ -160,6 +196,7 @@ class TemplateProcessor:
             'mini': 'mini.docx',
             'miniroll': 'miniroll.docx',
             'double': 'double.docx',
+            'new': 'new.docx',
             'inventory': 'inventory.docx',
             'horizontal': 'horizontal.docx',
             'vertical': 'vertical.docx',
@@ -211,7 +248,7 @@ class TemplateProcessor:
         
         # CRITICAL FIX: Adjust scale factor for double template 12-label expansion
         # When the double template expands to 12 labels, cells become smaller, so we need to adjust the scale factor
-        if template_type == 'double':
+        if template_type in ('double', 'new'):
             self.scale_factor = scale_factor * 0.95  # Reduce font sizes by 5% for 12-label expansion (less aggressive)
             self.logger.info(f"🔧 DOUBLE TEMPLATE SCALE ADJUSTMENT: Adjusted scale factor from {scale_factor} to {self.scale_factor} for 12-label expansion")
         else:
@@ -262,6 +299,10 @@ class TemplateProcessor:
             self.chunk_size = min(12, CHUNK_SIZE_LIMIT)  # Fixed: 4x3 grid = 12 labels per page
             if not IS_PYTHONANYWHERE:
                 self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for double template")
+        elif self.template_type == 'new':
+            self.chunk_size = min(16, CHUNK_SIZE_LIMIT)  # Fixed: 4x4 grid = 16 labels per page
+            if not IS_PYTHONANYWHERE:
+                self.logger.info(f"DEBUG: Set chunk size to {self.chunk_size} for new template")
         elif self.template_type == 'inventory':
             self.chunk_size = min(4, CHUNK_SIZE_LIMIT)   # Fixed: 2x2 grid = 4 labels per page
             if not IS_PYTHONANYWHERE:
@@ -283,7 +324,7 @@ class TemplateProcessor:
         self._template_expansion_cache = {}
 
         # CRITICAL FIX: Disable chunking only for templates that support dynamic grids
-        if self.template_type in ['horizontal', 'vertical', 'double']:
+        if self.template_type in ['horizontal', 'vertical', 'double', 'new']:
             self.chunk_size = None  # Will be set dynamically in process_records for these templates
             self.logger.info(f"CRITICAL FIX: Chunking disabled for template '{self.template_type}' - chunk_size will match total records")
         else:
@@ -301,20 +342,22 @@ class TemplateProcessor:
             text = doc.element.body.xml
             matches = re.findall(r'Label(\d+)\.', text)
             
-            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 4 for 2x2)
+            # Check if we have all required labels (9 for 3x3, 20 for 4x5, 12 for 4x3, 16 for 4x4, 4 for 2x2)
             if self.template_type in ('mini', 'miniroll'):
                 required_labels = 20  # 4x5 grid
             elif self.template_type == 'double':
                 required_labels = 12  # 4x3 grid
+            elif self.template_type == 'new':
+                required_labels = 16  # 4x4 grid
             elif self.template_type == 'inventory':
                 required_labels = 4   # 2x2 grid
             elif self.template_type == 'preroll':
                 required_labels = 12  # 4x3 grid (same as double)
             else:
                 required_labels = 9   # 3x3 grid
-            
+
             unique_labels = set(matches)
-            
+
             if len(unique_labels) < required_labels or force_expand:
                 # CRITICAL FIX: Use standard expansion methods for now
                 # Dynamic templates will be created later in _process_chunk based on actual product count
@@ -324,6 +367,9 @@ class TemplateProcessor:
                 elif self.template_type == 'inventory':
                     self.logger.info("Calling 2x2 inventory expansion method")
                     return self._expand_template_to_2x2_inventory()
+                elif self.template_type == 'new':
+                    self.logger.info("Calling 4x3 expansion method for new template")
+                    return self._expand_template_to_4x3_fixed_new()
                 elif self.template_type == 'double':
                     self.logger.info("Calling 4x3 expansion method")
                     return self._expand_template_to_4x3_fixed_double()
@@ -873,12 +919,33 @@ class TemplateProcessor:
         from docx.oxml.ns import qn
         from io import BytesIO
         from copy import deepcopy
+        import re as _re
+
+        def _fix_split_runs(tc_elem):
+            """Merge split placeholder runs across all paragraphs in a tc element."""
+            for p in tc_elem.iter(qn('w:p')):
+                runs = p.findall('.//' + qn('w:r'))
+                if len(runs) < 2:
+                    continue
+                full_text = ''.join((t.text or '') for r in runs for t in r.findall(qn('w:t')))
+                if '{{' not in full_text:
+                    continue
+                for r in runs:
+                    for t in r.findall(qn('w:t')):
+                        r.remove(t)
+                new_t = OxmlElement('w:t')
+                # Normalise known placeholder variants
+                full_text = full_text.strip()
+                full_text = _re.sub(r'\{\{\s*Label\.Lineage\s*\}\}', '{{Label1.Lineage}}', full_text)
+                full_text = _re.sub(r'\{\{\s*Label1\.DOH\s*\}\}', '{{Label1.DOH}}', full_text)
+                full_text = full_text.replace('{{Label1.Description}}', '{{Label1.DescAndWeight}}')
+                full_text = full_text.replace('{{Label1.Type}}', '{{Label1.ProductType}}')
+                new_t.text = full_text
+                new_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+                if runs:
+                    runs[0].append(new_t)
 
         num_cols, num_rows = 4, 3  # 4 columns, 3 rows for 12 labels total
-        
-        # Equal width columns: 1.75 inches each for double template (original width)
-        col_width_twips = str(int(1.75 * 1440))  # 1.75 inches per column
-        row_height_pts = Pt(2.5 * 72)  # 2.5 inches per row for equal height
         cut_line_twips = int(0.001 * 1440)
 
         template_path = self._template_path
@@ -886,13 +953,34 @@ class TemplateProcessor:
         if not doc.tables:
             raise RuntimeError("Template must contain at least one table.")
         old = doc.tables[0]
-        src_tc = deepcopy(old.cell(0,0)._tc)
+
+        # Read dimensions BEFORE removing the table
+        seed_cell = old.cell(0, 0)
+        seed_row = old.rows[0]
+        seed_col_width = seed_cell.width  # EMUs
+        seed_row_height = seed_row.height  # EMUs (may be None)
+
+        if seed_col_width:
+            col_width_twips = str(int(seed_col_width / 635))  # EMU -> twips
+        else:
+            col_width_twips = str(int(1.75 * 1440))  # fallback 1.75"
+
+        if seed_row_height:
+            row_height_emu = seed_row_height
+        else:
+            row_height_emu = int(2.5 * 914400)  # fallback 2.5"
+
+        # Save tblPr before removing
+        old_tblPr = deepcopy(old._element.find(qn('w:tblPr')))
+
+        # Deepcopy seed cell and fix split placeholders
+        src_tc = deepcopy(seed_cell._tc)
+        _fix_split_runs(src_tc)
+
         old._element.getparent().remove(old._element)
 
-        # Only remove empty paragraphs, preserve content paragraphs
-        # This is important for templates that have content outside of tables
-        doc_paragraphs = list(doc.paragraphs)  # Create a copy to avoid modification during iteration
-        for paragraph in doc_paragraphs:
+        # Remove empty paragraphs outside tables
+        for paragraph in list(doc.paragraphs):
             if not paragraph.text.strip():
                 paragraph._element.getparent().remove(paragraph._element)
 
@@ -900,62 +988,60 @@ class TemplateProcessor:
         total_products = num_products if num_products is not None else max_cells_per_page
         pages = (total_products + max_cells_per_page - 1) // max_cells_per_page
         self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Creating {pages} table(s) for {total_products} products.")
-        
+
         product_idx = 0
         for page in range(pages):
-            # Insert a real page break between tables so each 4x3 sheet starts on a new page.
             if page > 0:
                 doc.add_page_break()
 
             tbl = doc.add_table(rows=num_rows, cols=num_cols)
             tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-            
-            # Copy the original table properties and styling from the source template
-            if hasattr(old, '_element') and old._element is not None:
-                old_tblPr = old._element.find(qn('w:tblPr'))
-                if old_tblPr is not None:
-                    tbl._element.insert(0, deepcopy(old_tblPr))
-                else:
-                    tblPr = OxmlElement('w:tblPr')
-                    layout = OxmlElement('w:tblLayout')
-                    layout.set(qn('w:type'), 'fixed')
-                    tblPr.append(layout)
-                    tbl._element.insert(0, tblPr)
+
+            # Apply saved tblPr (fixed layout)
+            existing_tblPr = tbl._element.find(qn('w:tblPr'))
+            if existing_tblPr is not None:
+                tbl._element.remove(existing_tblPr)
+            if old_tblPr is not None:
+                tbl._element.insert(0, deepcopy(old_tblPr))
             else:
                 tblPr = OxmlElement('w:tblPr')
                 layout = OxmlElement('w:tblLayout')
                 layout.set(qn('w:type'), 'fixed')
                 tblPr.append(layout)
                 tbl._element.insert(0, tblPr)
-            
+
             # Set up the grid with proper column widths
+            existing_grid = tbl._element.find(qn('w:tblGrid'))
+            if existing_grid is not None:
+                tbl._element.remove(existing_grid)
             grid = OxmlElement('w:tblGrid')
             for _ in range(num_cols):
                 gc = OxmlElement('w:gridCol')
                 gc.set(qn('w:w'), col_width_twips)
                 grid.append(gc)
             tbl._element.insert(0, grid)
-            
+
             # Set row heights
             for row in tbl.rows:
-                row.height = row_height_pts
+                row.height = row_height_emu
                 row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
-            
+
             for r in range(num_rows):
                 for c in range(num_cols):
                     cell = tbl.cell(r, c)
                     cell._tc.clear_content()
-                    
+
                     if product_idx < total_products:
                         cnt = product_idx + 1
                         tc = deepcopy(src_tc)
-                        
-                        # Update placeholders
+
+                        # Update Label1 -> LabelN in all text nodes
                         for t in tc.iter(qn('w:t')):
                             if t.text and 'Label1' in t.text:
                                 t.text = t.text.replace('Label1', f'Label{cnt}')
-                        
-                        for el in tc.xpath('./*'):
+
+                        # Append children (not the tc itself to avoid duplicate tcPr)
+                        for el in list(tc):
                             cell._tc.append(deepcopy(el))
                         product_idx += 1
                     else:
@@ -987,6 +1073,173 @@ class TemplateProcessor:
             if page > 0:
                 self.logger.info(f"🔍 DOUBLE TEMPLATE EXPANSION: Added page break before table {page + 1} of {pages}")
         
+        buf = BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        return buf
+
+    def _expand_template_to_4x3_fixed_new(self, num_products=None):
+        """Expand new.docx to 4x3 grid (4 cols x 3 rows = 12 labels per page, 1.75x2.25 Avery 5390)."""
+        from docx import Document
+        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from io import BytesIO
+        from copy import deepcopy
+        import re as _re
+
+        def _fix_split_runs(tc_elem):
+            """Merge Word-split placeholder runs in all paragraphs of a cell element."""
+            for p in tc_elem.iter(qn('w:p')):
+                runs = p.findall('.//' + qn('w:r'))
+                if len(runs) < 2:
+                    continue
+                full_text = ''.join((t.text or '') for r in runs for t in r.findall(qn('w:t')))
+                if '{{' not in full_text:
+                    continue
+                # Clear all w:t from all runs
+                for r in runs:
+                    for t in r.findall(qn('w:t')):
+                        r.remove(t)
+                # Normalise known placeholder variants
+                full_text = full_text.strip()
+                full_text = _re.sub(r'\{\{\s*Label1?\.Lineage\s*\}\}', '{{Label1.Lineage}}', full_text)
+                full_text = _re.sub(r'\{\{\s*Label1\.DOH\s*\}\}', '{{Label1.DOH}}', full_text)
+                full_text = full_text.replace('{{Label1.Description}}', '{{Label1.DescAndWeight}}')
+                full_text = full_text.replace('{{Label1.Type}}', '{{Label1.ProductType}}')
+                new_t = OxmlElement('w:t')
+                new_t.text = full_text
+                new_t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+                if runs:
+                    runs[0].append(new_t)
+
+        num_cols, num_rows = 4, 3  # 4 columns x 3 rows = 12 labels per page
+        cut_line_twips = int(0.001 * 1440)
+
+        template_path = self._template_path
+        doc = Document(template_path)
+        if not doc.tables:
+            raise RuntimeError("new.docx must contain at least one table.")
+        old = doc.tables[0]
+
+        # Read dimensions BEFORE removing the table
+        seed_cell = old.cell(0, 0)
+        seed_row = old.rows[0]
+        seed_col_width = seed_cell.width   # EMUs
+        seed_row_height = seed_row.height  # EMUs
+
+        col_width_twips = str(int(seed_col_width / 635)) if seed_col_width else str(int(1.75 * 1440))
+        row_height_emu = seed_row_height if seed_row_height else int(2.25 * 914400)
+
+        # Save tblPr before removing the old table
+        old_tblPr = deepcopy(old._element.find(qn('w:tblPr')))
+
+        # Build seed cell copy with all split placeholders merged
+        src_tc = deepcopy(seed_cell._tc)
+        _fix_split_runs(src_tc)
+
+        # Strip tblpPr (floating/absolute positioning) from all nested tables in the seed cell.
+        # Floating nested tables conflict with being inside a grid cell and cause Word corruption.
+        for nested_tbl in src_tc.iter(qn('w:tbl')):
+            nested_tblPr = nested_tbl.find(qn('w:tblPr'))
+            if nested_tblPr is not None:
+                tblpPr_el = nested_tblPr.find(qn('w:tblpPr'))
+                if tblpPr_el is not None:
+                    nested_tblPr.remove(tblpPr_el)
+                tblOverlap_el = nested_tblPr.find(qn('w:tblOverlap'))
+                if tblOverlap_el is not None:
+                    nested_tblPr.remove(tblOverlap_el)
+
+        old._element.getparent().remove(old._element)
+
+        # Remove empty paragraphs outside tables
+        for para in list(doc.paragraphs):
+            if not para.text.strip():
+                para._element.getparent().remove(para._element)
+
+        max_cells_per_page = num_rows * num_cols
+        total_products = num_products if num_products is not None else max_cells_per_page
+        pages = (total_products + max_cells_per_page - 1) // max_cells_per_page
+        self.logger.info(f"🔍 NEW TEMPLATE EXPANSION: {pages} page(s) for {total_products} products (4x3 grid).")
+
+        product_idx = 0
+        for page in range(pages):
+            if page > 0:
+                doc.add_page_break()
+
+            tbl = doc.add_table(rows=num_rows, cols=num_cols)
+            tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+            # Build a clean tblPr for the outer grid — never copy floating (tblpPr) or
+            # single-label-width (tblW) properties from the seed template.
+            existing_tblPr = tbl._element.find(qn('w:tblPr'))
+            if existing_tblPr is not None:
+                tbl._element.remove(existing_tblPr)
+            tblPr = OxmlElement('w:tblPr')
+            tblLayout = OxmlElement('w:tblLayout')
+            tblLayout.set(qn('w:type'), 'fixed')
+            tblPr.append(tblLayout)
+            jc = OxmlElement('w:jc')
+            jc.set(qn('w:val'), 'center')
+            tblPr.append(jc)
+            tbl._element.insert(0, tblPr)
+
+            # Replace auto-generated tblGrid with correct column widths
+            existing_grid = tbl._element.find(qn('w:tblGrid'))
+            if existing_grid is not None:
+                tbl._element.remove(existing_grid)
+            grid = OxmlElement('w:tblGrid')
+            for _ in range(num_cols):
+                gc = OxmlElement('w:gridCol')
+                gc.set(qn('w:w'), col_width_twips)
+                grid.append(gc)
+            tbl._element.insert(0, grid)
+
+            # Set exact row heights
+            for row in tbl.rows:
+                row.height = row_height_emu
+                row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+
+            for r in range(num_rows):
+                for c in range(num_cols):
+                    cell = tbl.cell(r, c)
+                    cell._tc.clear_content()
+
+                    if product_idx < total_products:
+                        cnt = product_idx + 1
+                        tc = deepcopy(src_tc)
+                        # Renumber Label1 -> LabelN
+                        for t in tc.iter(qn('w:t')):
+                            if t.text and 'Label1' in t.text:
+                                t.text = t.text.replace('Label1', f'Label{cnt}')
+                        # Append children (skips duplicate tcPr from src_tc root)
+                        for el in list(tc):
+                            cell._tc.append(deepcopy(el))
+                        product_idx += 1
+                    else:
+                        # Blank unused cells
+                        tc = cell._tc
+                        tcPr = tc.find(qn('w:tcPr'))
+                        if tcPr is None:
+                            tcPr = OxmlElement('w:tcPr')
+                            tc.insert(0, tcPr)
+                        shd = tcPr.find(qn('w:shd'))
+                        if shd is not None:
+                            tcPr.remove(shd)
+                        shd = OxmlElement('w:shd')
+                        shd.set(qn('w:val'), 'clear')
+                        shd.set(qn('w:color'), 'auto')
+                        shd.set(qn('w:fill'), 'FFFFFF')
+                        tcPr.append(shd)
+                        cell.add_paragraph()
+
+            tblPr2 = tbl._element.find(qn('w:tblPr'))
+            if tblPr2 is not None:
+                spacing = OxmlElement('w:tblCellSpacing')
+                spacing.set(qn('w:w'), str(cut_line_twips))
+                spacing.set(qn('w:type'), 'dxa')
+                tblPr2.append(spacing)
+
         buf = BytesIO()
         doc.save(buf)
         buf.seek(0)
@@ -1211,7 +1464,7 @@ class TemplateProcessor:
                         self._vendor_fallback = most_common_vendor[0]
                         # Only log if we actually use it (reduces logging overhead)
             
-            if self.template_type in ['horizontal', 'vertical', 'double']:
+            if self.template_type in ['horizontal', 'vertical', 'double', 'new']:
                 self.chunk_size = len(records)
                 self.logger.info(f"🔍 LABEL RENDER: For template '{self.template_type}', forced chunk_size to {self.chunk_size} to render all labels.")
                 self.logger.info(f"🔍 LABEL RENDER: Chunking is fully disabled. All {len(records)} records will be processed in one pass.")
@@ -1405,7 +1658,9 @@ class TemplateProcessor:
             final_doc = Document(final_doc_buffer)
             from src.core.generation.docx_formatting import remove_all_headers_and_footers
             final_doc = remove_all_headers_and_footers(final_doc)
-            
+            # Sanitize so Word does not report "unreadable content"
+            _sanitize_document_for_word(final_doc)
+
             total_time = time.time() - self.start_time
             self.logger.info(f"Template processing completed in {total_time:.2f}s for {len(records)} records")
             
@@ -1443,6 +1698,8 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_3x3_fixed(num_products)
                 elif self.template_type == 'double':
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
+                elif self.template_type == 'new':
+                    self._expanded_template_buffer = self._expand_template_to_4x3_fixed_new(num_products)
                 elif self.template_type in ('mini', 'miniroll'):
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
                 elif self.template_type == 'preroll':
@@ -1596,7 +1853,9 @@ class TemplateProcessor:
             elif self.template_type in ('mini', 'miniroll'):
                 required_labels = 20  # Fixed grid: 4x5 = 20 labels
             elif self.template_type == 'double':
-                required_labels = 12  # Fixed grid: 3x4 = 12 labels
+                required_labels = 12  # Fixed grid: 4x3 = 12 labels
+            elif self.template_type == 'new':
+                required_labels = 16  # Fixed grid: 4x4 = 16 labels
             elif self.template_type == 'inventory':
                 required_labels = 4   # Fixed grid: 2x2 = 4 labels
             else:
@@ -1622,7 +1881,7 @@ class TemplateProcessor:
             
             # For fixed-grid templates (mini, double, inventory), pad with empty labels
             # For preroll, template expands to fit all records, so no padding needed
-            if self.template_type in ['mini', 'double', 'inventory']:
+            if self.template_type in ['mini', 'double', 'new', 'inventory']:
                 empty_label_context = self._get_empty_label_context()
                 for i in range(len(chunk) + 1, required_labels + 1):
                     context[f'Label{i}'] = empty_label_context
@@ -1758,6 +2017,16 @@ class TemplateProcessor:
                 except Exception:
                     # Keep render path resilient; only best-effort logging
                     self.logger.debug("FINAL CONTEXT: failed to dump label contexts before render")
+
+            # Sanitize context strings so merged placeholders do not insert invalid XML (Word "unreadable content")
+            try:
+                for k, v in context.items():
+                    if isinstance(v, dict) and (k.startswith('Label') or k == 'AcceptedDate'):
+                        for key, val in list(v.items()):
+                            if isinstance(val, str):
+                                v[key] = _sanitize_text_for_ooxml(val)
+            except Exception:
+                pass
 
             try:
                 doc.render(context)
@@ -1920,6 +2189,12 @@ class TemplateProcessor:
             except Exception as e:
                 self.logger.warning(f"Trailing blank removal failed (non-fatal): {e}")
 
+            # Sanitize all run text so Word does not report "unreadable content" (invalid XML control chars/surrogates)
+            try:
+                _sanitize_document_for_word(rendered_doc)
+            except Exception as e:
+                self.logger.warning(f"Docx sanitization failed (non-fatal): {e}")
+
             return rendered_doc
             
         except Exception as e:
@@ -1958,6 +2233,7 @@ class TemplateProcessor:
         """Create an empty label context dictionary with all required fields set to empty strings."""
         return {
             'Description': '',
+            'Type': '',
             'WeightUnits': '',
             'ProductBrand': '',
             'Price': '',
@@ -1974,6 +2250,12 @@ class TemplateProcessor:
             'DescAndWeight': '',
             'JointRatio': '',
             'ProductType': '',
+            'Product Type*': '',
+            'type': '',
+            'productype': '',
+            'Product Type*': '',
+            'type': '',
+            'productype': '',
             # Marker fields for template processing
             'ProductStrain_START': 'PRODUCTSTRAIN_START',
             'ProductStrain_END': 'PRODUCTSTRAIN_END',
@@ -2045,6 +2327,58 @@ class TemplateProcessor:
                     label_context['Product Name*'] = _pname_clean
                     self.logger.debug(f"🔧 PRODUCT NAME CLEAN: '{_raw_pname}' -> '{_pname_clean}' (stripped brand/vendor suffix)")
 
+        # Split cleaned product name into Description (strain) and Type (trailing type label),
+        # but avoid guessing based on raw word counts.
+        # Priority:
+        # 1. If a ProductStrain field exists, use that as Description.
+        # 2. Use explicit suffix patterns (e.g. "Infused Pre-Roll", "Pre-Roll") to derive Type.
+        # 3. Otherwise, leave Type empty and keep Description as the full display name.
+        display_name = (label_context.get('ProductName') or label_context.get('Product Name*') or '').strip()
+        if display_name:
+            # Prefer an explicit ProductStrain field for Description when available
+            strain_from_field = (
+                label_context.get('ProductStrain')
+                or label_context.get('Product Strain')
+                or record.get('ProductStrain')
+                or record.get('Product Strain')
+                or ''
+            )
+            strain_from_field = str(strain_from_field).strip() if strain_from_field is not None else ''
+
+            # Explicit suffix patterns for pre-roll style names
+            pre_roll_match = re.search(
+                r'\s+(Infused\s+Pre[-‑ ]?Roll|Pre[-‑ ]?Roll)\s*$',
+                display_name,
+                flags=re.IGNORECASE
+            )
+
+            strain = ''
+            type_text = ''
+
+            if strain_from_field:
+                # Description is the strain from data
+                strain = strain_from_field
+                # If display_name starts with the strain, treat the remainder as candidate type text
+                dn_lower = display_name.lower()
+                sf_lower = strain_from_field.lower()
+                if dn_lower.startswith(sf_lower):
+                    remainder = display_name[len(strain_from_field):].strip(" -")
+                    type_text = remainder
+                elif pre_roll_match:
+                    # Fallback: just use the explicit suffix as Type
+                    type_text = pre_roll_match.group(1).strip()
+            else:
+                # No explicit strain field; use display_name for Description
+                if pre_roll_match:
+                    type_text = pre_roll_match.group(1).strip()
+                    strain = display_name[:pre_roll_match.start()].strip()
+                else:
+                    strain = display_name
+                    type_text = ''
+
+            label_context['Description'] = strain
+            label_context['Type'] = type_text
+
         # CRITICAL: Never render placeholder "Unknown" on labels - treat as missing
         for key in ('ProductStrain', 'Product Strain', 'ProductBrand', 'Product Brand', 'Vendor', 'Vendor/Supplier*', 'ProductVendor'):
             val = label_context.get(key)
@@ -2059,13 +2393,13 @@ class TemplateProcessor:
         if price_val is not None and not (hasattr(pd, 'isna') and pd.isna(price_val)):
             price_str = str(price_val).strip()
             if price_str and price_str.lower() not in ('nan', 'none', 'null', ''):
-                if not price_str.startswith('$'):
-                    try:
-                        float(price_str.replace(',', '').replace('$', ''))
+                try:
+                    # Use format_price so whole numbers show as $35 not $35.0, and decimals strip trailing zeros
+                    label_context['Price'] = format_price(price_str)
+                except (ValueError, TypeError):
+                    if not price_str.startswith('$'):
                         price_str = '$' + price_str.lstrip('$')
-                    except ValueError:
-                        pass
-                label_context['Price'] = price_str
+                    label_context['Price'] = price_str
         # Ensure Price is never NaN in context (web/request rows can have NaN from DataFrame)
         if not label_context.get('Price') or (hasattr(pd, 'isna') and pd.isna(label_context.get('Price'))):
             label_context['Price'] = ''
@@ -2350,7 +2684,12 @@ class TemplateProcessor:
                         if excel_lineage and str(excel_lineage).strip().upper() != db_lineage_upper:
                             # Database lineage differs from Excel - use database
                             self.logger.debug(f"✅ LINEAGE DB OVERRIDE (DOCX): '{product_name}' - Excel: '{excel_lineage}' -> DB: '{db_lineage_upper}' (using DB)")
-                        label_context['Lineage'] = db_lineage_upper
+                        # For classic templates, keep full lineage text (SATIVA, HYBRID, etc.).
+                        # Only the 'new' template uses icon text (S, I, H).
+                        if self.template_type == 'new':
+                            label_context['Lineage'] = lineage_to_icon_text(db_lineage_upper)
+                        else:
+                            label_context['Lineage'] = db_lineage_upper
                     else:
                         # No DB lineage - use defaults based on product type (never Excel)
                         product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
@@ -2363,7 +2702,10 @@ class TemplateProcessor:
                             default_lineage = 'MIXED'
                         
                         self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX): '{product_name}' - No DB lineage, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
-                        label_context['Lineage'] = default_lineage
+                        if self.template_type == 'new':
+                            label_context['Lineage'] = lineage_to_icon_text(default_lineage)
+                        else:
+                            label_context['Lineage'] = default_lineage
         except Exception as e:
             self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
             # On error, use defaults based on product type (never Excel)
@@ -2377,7 +2719,10 @@ class TemplateProcessor:
                 default_lineage = 'MIXED'
             
             self.logger.debug(f"⚠️ LINEAGE DEFAULT (DOCX ERROR): '{product_name}' - Error checking DB, using default '{default_lineage}' for {'classic' if is_classic else 'non-classic'} type (never Excel)")
-            label_context['Lineage'] = default_lineage
+            if self.template_type == 'new':
+                label_context['Lineage'] = lineage_to_icon_text(default_lineage)
+            else:
+                label_context['Lineage'] = default_lineage
         
         # CRITICAL FIX: Force DOH to be read from the actual data source, not defaults
         # If DOH is 'YES' but we updated it to 'No', use 'No' instead
@@ -2441,8 +2786,17 @@ class TemplateProcessor:
         self.logger.debug(f"🔍 ALL PRODUCTS DEBUG: Product '{record.get('ProductName', 'N/A')}', Raw Type: '{raw_product_type}', Processed: '{product_type}'")
         
         # CRITICAL FIX: Store the processed product type in the context
+        product_type_display = product_type.title()  # e.g. "Flower", "Pre-Roll", "Infused Pre-Roll"
         label_context['ProductType'] = product_type
-        label_context['Product Type*'] = product_type.title()  # Store as title case for consistency
+        label_context['Product Type*'] = product_type_display  # Store as title case for consistency
+        # DOCX templates may reference {{ Label.productype }} (legacy typo) – keep it populated
+        # For backwards compatibility, keep this as the display-ready product category
+        label_context['productype'] = product_type_display
+        # NEW BEHAVIOR: {{ Label.type }} should show ONLY the "Type" portion split from ProductName,
+        # e.g. "Super Lemon Haze Infused Pre-Roll" -> Description="Super Lemon Haze", Type="Infused Pre-Roll".
+        # Do NOT fall back to ProductType/category; when there's no trailing type text, keep it blank.
+        type_from_name = label_context.get('Type') or ''
+        label_context['type'] = type_from_name if isinstance(type_from_name, str) and type_from_name.strip() else ''
         
         # CRITICAL FIX: Process JointRatio FIRST for pre-rolls, before any other weight processing
         # This ensures WeightUnits is set to JointRatio before DescAndWeight construction
@@ -2582,6 +2936,19 @@ class TemplateProcessor:
                     self.logger.warning(f"⚠️ WEIGHT FALLBACK: No Excel processor available, using simple concatenation: '{weight_units}'")
             
             label_context['WeightUnits'] = weight_units
+            # Normalize: units + remove space between number and unit (e.g. "1 gm" -> "1g", "3.5 oz" -> "3.5oz")
+            if label_context.get('WeightUnits'):
+                wu = str(label_context['WeightUnits'])
+                # Canonicalize gram spellings
+                wu = re.sub(r'\b(grams?|gms?)\b', 'g', wu, flags=re.IGNORECASE)
+                wu = re.sub(r'\bgm\b', 'g', wu, flags=re.IGNORECASE)
+                # Remove space between number and unit (include common gram spellings just in case)
+                label_context['WeightUnits'] = re.sub(
+                    r'(\d+\.?\d*)\s+(oz|g|gm|mg|kg|lb|lbs)\b',
+                    r'\1\2',
+                    wu,
+                    flags=re.IGNORECASE
+                ).replace('gm', 'g').replace('GM', 'g')
             
             # CRITICAL FIX: Remove any weight markers that might interfere with display
             if label_context['WeightUnits'] and 'WEIGHTUNITS_START' in str(label_context['WeightUnits']):
@@ -2915,6 +3282,8 @@ class TemplateProcessor:
                         if weight_units and weight_units.strip():
                             # WeightUnits already contains the complete weight (e.g., "3.4oz", "1616.0g")
                             clean_weight = weight_units.strip()
+                            # Remove space between number and unit (e.g. "3.5 oz" -> "3.5oz")
+                            clean_weight = re.sub(r'(\d+\.?\d*)\s+(oz|g|mg|kg|lb|lbs)\b', r'\1\2', clean_weight, flags=re.IGNORECASE)
                             
                             # CRITICAL FIX: Clean weight duplication patterns directly in template processor
                             # Pattern 1: Decimal duplication like "0.50.5oz" -> "0.5oz"
@@ -3324,11 +3693,15 @@ class TemplateProcessor:
                     # For double, horizontal, and vertical templates, preserve the full lineage value without cleaning
                     self.logger.debug(f"DEBUG: Preserving full lineage for {self.template_type} template: '{cleaned_lineage_val}'")
                 
-                # For vertical and double templates, don't wrap with markers since they use simple placeholders
-                if self.template_type in ['vertical', 'double']:
-                    label_context['Lineage'] = cleaned_lineage_val
+                # 'new' template uses abbreviated icons (S, I, H); all others use full lineage words
+                if self.template_type == 'new':
+                    lineage_for_context = lineage_to_icon_text(cleaned_lineage_val)
                 else:
-                    label_context['Lineage'] = f"LINEAGE_START{cleaned_lineage_val}LINEAGE_END"
+                    lineage_for_context = cleaned_lineage_val
+                if self.template_type in ['vertical', 'double', 'new']:
+                    label_context['Lineage'] = lineage_for_context
+                else:
+                    label_context['Lineage'] = f"LINEAGE_START{lineage_for_context}LINEAGE_END"
             else:
                 label_context['Lineage'] = ""
                 self.logger.debug(f"No lineage available for classic type '{product_type}', Lineage set to empty")
@@ -3659,6 +4032,13 @@ class TemplateProcessor:
                     label_context['ProductBrand'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND')
                     label_context['ProductBrand_Center'] = wrap_with_marker(plain_brand, 'PRODUCTBRAND_CENTER')
                     self.logger.debug(f"🎯 PREROLL TEMPLATE BRAND FIX: Set Lineage, ProductBrand, and ProductBrand_Center to '{brand_center_text}' for preroll template")
+                elif self.template_type == 'new':
+                    # For new template: plain brand text in Lineage, no hint token.
+                    # apply_lineage_colors handles the small lineage box color directly.
+                    label_context['Lineage'] = str(brand_center_text).strip().upper()
+                    label_context['ProductBrand'] = ""
+                    label_context['ProductBrand_Center'] = ""
+                    self.logger.debug(f"🎯 NEW TEMPLATE BRAND FIX: Set Lineage='{brand_center_text}' (no hint token)")
                 elif self.template_type == 'double':
                     # For double template, use brand text as-is with markers for downstream formatting
                     final_brand_text = str(brand_center_text).strip().upper()
@@ -3956,7 +4336,15 @@ class TemplateProcessor:
             label_context['DescAndWeight'] = wrap_with_marker(unwrap_marker(label_context['DescAndWeight'], 'DESC'), 'DESC')
         
         if 'ProductType' not in label_context:
-            label_context['ProductType'] = record.get('ProductType', '')
+            pt = record.get('ProductType', '') or record.get('Product Type*', '')
+            product_type_val = pt.lower() if isinstance(pt, str) else ''
+            product_type_display = pt.title() if isinstance(pt, str) and pt else ''
+            label_context['ProductType'] = product_type_val
+            # Keep legacy aliases aligned with main ProductType display
+            label_context['Product Type*'] = product_type_display
+            label_context['productype'] = product_type_display
+            # {{ Label.type }} remains strictly the split Type from ProductName (set earlier if available);
+            # do NOT override it here with ProductType/category.
         
         
         # Fast strain handling - always show the actual strain value from Excel
@@ -3995,8 +4383,8 @@ class TemplateProcessor:
         else:
             self.logger.debug(f"STRAIN OVERRIDE DEBUG: Skipping strain override - ProductStrain already set to '{label_context.get('ProductStrain', 'NOT_SET')}'")
 
-        # Double template should never display ProductStrain text (prevent 12pt strain labels)
-        if self.template_type == 'double':
+        # Double/new template should never display ProductStrain text (prevent 12pt strain labels)
+        if self.template_type in ('double', 'new'):
             if not has_cbd_blend_strain:
                 label_context['ProductStrain'] = ''
 
@@ -4110,6 +4498,18 @@ class TemplateProcessor:
             label_context['DescAndWeight'] = make_nonbreaking_hyphens(label_context['DescAndWeight'])
             self.logger.debug(f"🔧 NON-BREAKING FORMATTING: DescAndWeight '{original_desc_weight}' -> '{label_context['DescAndWeight']}'")
 
+        # Excel processing rule: {{Labelx.Description}} shows Product Strain only (e.g. "Blue Dream"), not the full description.
+        # Skip for preroll groups where Description was set to group_display_name and ONLY override when we actually have a strain.
+        if not (self.template_type == 'preroll' and record.get('_group_id')):
+            strain_for_placeholder = (
+                label_context.get('ProductStrain') or record.get('Product Strain') or record.get('ProductStrain') or ''
+            )
+            if isinstance(strain_for_placeholder, str):
+                strain_for_placeholder = strain_for_placeholder.strip()
+            else:
+                strain_for_placeholder = str(strain_for_placeholder).strip() if strain_for_placeholder else ''
+            if strain_for_placeholder:
+                label_context['Description'] = strain_for_placeholder
 
         # Fast line break processing
         product_type = (label_context.get('ProductType', '').lower() or 
@@ -5797,7 +6197,7 @@ class TemplateProcessor:
             self.logger.warning(f"Failed to force exact row heights: {e}")
 
     def _determine_field_type_for_template(self, text, paragraph, cell):
-        if self.template_type == 'double':
+        if self.template_type in ('double', 'new'):
             return self._determine_field_type_for_double_template(text, paragraph, cell)
         if self.template_type == 'horizontal':
             return self._determine_field_type_for_horizontal_template(text, paragraph, cell)
@@ -6093,7 +6493,7 @@ class TemplateProcessor:
                             pPr.append(spacing)
                         spacing.set(qn('w:before'), str(int(before_pt * 20)))
                         spacing.set(qn('w:after'), str(int(after_pt * 20)))
-                elif ttype == "double":
+                elif ttype in ("double", "new"):
                     before_pt, after_pt = 2, 2
                     paragraph.paragraph_format.space_before = Pt(before_pt)
                     paragraph.paragraph_format.space_after = Pt(after_pt)
@@ -6390,9 +6790,12 @@ class TemplateProcessor:
                     # Remove any marker remnants
                     clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
                     clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
-                    # Check if the cleaned content is a classic lineage value
-                    is_classic_lineage_value = clean_content in VALID_CLASSIC_LINEAGES or any(
-                        clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
+                    # Check if the cleaned content is a classic lineage value (word or style icon)
+                    CLASSIC_LINEAGE_ICONS = {'S', 'I', 'H', 'S / H', 'I / H', 'S/H', 'I/H'}
+                    is_classic_lineage_value = (
+                        clean_content in VALID_CLASSIC_LINEAGES
+                        or clean_content.strip() in CLASSIC_LINEAGE_ICONS
+                        or any(clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES)
                     )
                     
                     if (not is_classic_product) and ('PRODUCTBRAND_CENTER' in content):
@@ -6881,8 +7284,11 @@ class TemplateProcessor:
                                 clean_lineage = _trim_invisible_edges(actual_lineage).upper()
                                 clean_lineage = re.sub(r'LINEAGE_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
                                 clean_lineage = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_lineage, flags=re.IGNORECASE).strip()
-                                is_classic_lineage_value = clean_lineage in VALID_CLASSIC_LINEAGES or any(
-                                    clean_lineage.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
+                                _icon_set = {'S', 'I', 'H', 'S / H', 'I / H', 'S/H', 'I/H'}
+                                is_classic_lineage_value = (
+                                    clean_lineage in VALID_CLASSIC_LINEAGES
+                                    or clean_lineage.strip() in _icon_set
+                                    or any(clean_lineage.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES)
                                 )
                                 
                                 # For nonclassic types, Lineage field contains ProductBrand content which should always be centered
@@ -6920,16 +7326,18 @@ class TemplateProcessor:
                         # Fallback: check if this is a classic product type by using the context
                         # Import constants to check against CLASSIC_TYPES
                         from src.core.constants import CLASSIC_TYPES, VALID_CLASSIC_LINEAGES
-                        
+                        CLASSIC_LINEAGE_ICONS = {'S', 'I', 'H', 'S / H', 'I / H', 'S/H', 'I/H'}
                         # CRITICAL FIX: Check if lineage content itself is a classic lineage value
                         # Clean the content to check for classic lineage values
                         clean_content = _trim_invisible_edges(content).upper()
                         # Remove any marker remnants
                         clean_content = re.sub(r'PRODUCTBRAND_CENTER_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
                         clean_content = re.sub(r'LINEAGE_(START|END)', '', clean_content, flags=re.IGNORECASE).strip()
-                        # Check if the cleaned content is a classic lineage value
-                        is_classic_lineage_value = clean_content in VALID_CLASSIC_LINEAGES or any(
-                            clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES
+                        # Check if the cleaned content is a classic lineage value (word or style icon)
+                        is_classic_lineage_value = (
+                            clean_content in VALID_CLASSIC_LINEAGES
+                            or clean_content.strip() in CLASSIC_LINEAGE_ICONS
+                            or any(clean_content.startswith(classic_lineage) for classic_lineage in VALID_CLASSIC_LINEAGES)
                         )
                         
                         # Get product type from context, not from content
@@ -7455,6 +7863,9 @@ class TemplateProcessor:
                 elif self.template_type == 'double':
                     # 4x3 grid = 12 cells max
                     max_cells = 12
+                elif self.template_type == 'new':
+                    # 4x4 grid = 16 cells max
+                    max_cells = 16
                 elif self.template_type in ('mini', 'miniroll'):
                     # 4x5 grid = 20 cells max
                     max_cells = 20
@@ -7851,7 +8262,7 @@ class TemplateProcessor:
             # Determine expected structure based on template type
             if template_type == 'vertical':
                 expected_rows, expected_cols = 3, 3
-            elif template_type == 'double':
+            elif template_type in ('double', 'new'):
                 expected_rows, expected_cols = 4, 3
             elif template_type in ('mini', 'miniroll'):
                 expected_rows, expected_cols = 4, 5
@@ -8003,7 +8414,7 @@ class TemplateProcessor:
                 tblW.set(qn('w:type'), 'dxa')
                 
                 # For double templates, ensure proper table grid structure without accessing table.columns
-                if self.template_type == 'double':
+                if self.template_type in ('double', 'new'):
                     # Use safe table iteration to get column count
                     if self._safe_table_iteration(table, "double template grid setup"):
                         # Get column count from XML structure instead of table.columns

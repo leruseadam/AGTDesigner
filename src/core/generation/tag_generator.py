@@ -143,8 +143,8 @@ PLACEHOLDER_MARKERS = {
     "ProductType": ("PRODUCTTYPE_START", "PRODUCTTYPE_END")
 }
 
-# Import colors from docx_formatting to avoid duplication
-from .docx_formatting import COLORS as LINEAGE_COLORS
+# Import colors and lineage icon helper from docx_formatting
+from .docx_formatting import COLORS as LINEAGE_COLORS, lineage_to_icon_text
 
 def get_template_path(template_type):
     """Return the absolute path for a given template type."""
@@ -155,6 +155,7 @@ def get_template_path(template_type):
         'mini': 'mini.docx',
         'miniroll': 'miniroll.docx',
         'double': 'double.docx',
+        'new': 'new.docx',
         'inventory': 'inventory.docx',
         'preroll': 'preroll.docx'
     }
@@ -886,10 +887,10 @@ def process_chunk(args):
         local_template_buffer = base_template
         num_labels = 12  # Use standard 4x3 grid (same as double)
         logger.debug(f"🔧 PREROLL TEMPLATE EXPANSION: Using standard 4x3 expansion (same as double)")
-    elif orientation == "double":
+    elif orientation in ("double", "new"):
         local_template_buffer = base_template
         num_labels = 12  # Use standard 4x3 grid
-        logger.debug(f"🔧 DOUBLE TEMPLATE EXPANSION: Using standard template expansion")
+        logger.debug(f"🔧 DOUBLE/NEW TEMPLATE EXPANSION: Using standard template expansion")
     else:
         # CRITICAL FIX: Use dynamic label count based on chunk size
         # Allow templates to expand to accommodate all products in the chunk
@@ -1140,9 +1141,9 @@ def process_chunk(args):
                 
                 # CRITICAL FIX: Set Lineage field with proper markers for double template compatibility
                 # The double template uses Lineage field with PRODUCTBRAND_CENTER markers
-                if orientation == 'double':
+                if orientation in ('double', 'new'):
                     label_data["Lineage"] = f"PRODUCTBRAND_CENTER_START{brand_content}PRODUCTBRAND_CENTER_END"
-                    logger.info(f"🔧 DOUBLE TEMPLATE BRAND DATA: Label{i+1} - Set Lineage to '{brand_content}' with markers")
+                    logger.info(f"🔧 DOUBLE/NEW TEMPLATE BRAND DATA: Label{i+1} - Set Lineage to '{brand_content}' with markers")
                 else:
                     label_data["Lineage"] = brand_content
             
@@ -1309,40 +1310,31 @@ def process_chunk(args):
                 print(f"DEBUG NON-CLASSIC: product_type='{product_type}', product_brand='{product_brand}', lineage_val='{lineage_val}', orientation='{orientation}'")
                 
             # Final hardening: normalize lineage text so LabelX.Lineage never carries extra/hidden spaces.
+            # IMPORTANT: Do NOT overwrite custom database lineages – only fill in when missing.
             lineage_val = _clean_lineage_text(lineage_val).upper()
-            # If classic type: enforce canonical classic lineages; anything unrecognized or empty => HYBRID
             if is_classic_type:
-                allowed_classic = {"SATIVA", "HYBRID/SATIVA", "HYBRID", "HYBRID/INDICA", "INDICA"}
-                if not lineage_val or lineage_val not in allowed_classic:
+                # Classic: if DB/Excel lineage is completely missing, fall back to HYBRID.
+                if not lineage_val:
                     lineage_val = "HYBRID"
             else:
+                # Nonclassic: if missing, fall back to MIXED.
                 if not lineage_val:
                     lineage_val = "MIXED"
 
             label_data["Lineage"] = lineage_val  # Don't wrap with markers for template rendering
-            
+
             # For classic types, set ProductBrand and ProductBrand_Center to lineage
             if is_classic_type:
                 if lineage_val:
-                    # Use the lineage value from database (never Excel)
-                    label_data["ProductBrand"] = lineage_val  # Don't wrap with markers for template rendering
-                    label_data["ProductBrand_Center"] = lineage_val  # Don't wrap with markers for template rendering
+                    label_data["ProductBrand"] = lineage_val
+                    label_data["ProductBrand_Center"] = lineage_val
                 else:
-                    # No lineage available - use default HYBRID for classic types (never fall back to Excel)
                     label_data["ProductBrand"] = "HYBRID"
                     label_data["ProductBrand_Center"] = "HYBRID"
             else:
-                # CRITICAL FIX: For vertical template, ensure brand goes to Lineage field only
-                # and ProductStrain field is cleared to prevent 1pt font issue
                 if orientation == 'vertical':
-                    # For vertical template, clear ProductStrain to prevent brand from appearing in 1pt font
-                    # The brand should only appear in Lineage field with proper font size
                     label_data["ProductStrain"] = ""
                     print(f"DEBUG VERTICAL FIX: Cleared ProductStrain for vertical template to prevent 1pt font issue")
-                else:
-                    # Non-classic types already have brand data set in the first processing section above
-                    # No need to override it here - this was causing brand data to be lost
-                    pass
             label_data["Ratio_or_THC_CBD"] = str(row.get("Ratio", ""))  # Don't wrap with markers for template rendering
             # ProductStrain is now handled by the template processor to ensure proper conversion
             # of non-classic types to "Mixed" or "CBD Blend"
@@ -1374,7 +1366,7 @@ def process_chunk(args):
             
             # For edibles in double template, use Product Brand instead of Description
             edible_types = {"edible (solid)", "edible (liquid)", "high cbd edible liquid", "tincture", "topical", "capsule"}
-            if product_type in edible_types and orientation == "double":
+            if product_type in edible_types and orientation in ("double", "new"):
                 # Use Product Brand instead of Description for edibles in double template
                 desc = product_brand if product_brand else desc
             

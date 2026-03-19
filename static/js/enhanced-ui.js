@@ -1208,6 +1208,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     isScaling = true;
 
+    // Hide main content during reset/measure/apply so user never sees the unscaled flash
+    const prevVisibility = main.style.visibility;
+    main.style.visibility = 'hidden';
+
     // Temporarily reset transform to measure full, natural page size
     const prevTransformMain = main.style.transform;
     const prevTransformBody = page.style.transform;
@@ -1256,6 +1260,7 @@ document.addEventListener('DOMContentLoaded', function() {
       page.style.transform = prevTransformBody;
       page.style.width = prevWidthBody;
       page.style.height = prevHeightBody;
+      main.style.visibility = prevVisibility || '';
       isScaling = false;
       return;
     }
@@ -1298,11 +1303,13 @@ document.addEventListener('DOMContentLoaded', function() {
       page.style.transform = prevTransformBody;
       page.style.width = prevWidthBody;
       page.style.height = prevHeightBody;
+      main.style.visibility = prevVisibility || '';
       isScaling = false;
       return;
     }
 
     lastAppliedScale = appliedScale;
+    main.style.visibility = prevVisibility || '';
 
     // Hide scrollbars for a cleaner fit
     document.documentElement.style.overflow = 'hidden';
@@ -1384,6 +1391,57 @@ document.addEventListener('DOMContentLoaded', function() {
       scaleAppToFit();
     }, 300); // Longer delay for orientation change
   });
+})();
+
+// Align header card to center column
+(function() {
+  function alignHeaderToCenterColumn() {
+    const headerCard = document.getElementById('appHeaderCard');
+    if (!headerCard) return;
+
+    // On smaller screens we stack columns, keep header centered normally
+    if (window.matchMedia && window.matchMedia('(max-width: 992px)').matches) {
+      headerCard.style.setProperty('--header-align-shift-x', '0px');
+      return;
+    }
+
+    const centerCol = document.querySelector('[data-container-type="center"]');
+    if (!centerCol) {
+      headerCard.style.setProperty('--header-align-shift-x', '0px');
+      return;
+    }
+
+    const centerRect = centerCol.getBoundingClientRect();
+    const centerX = centerRect.left + (centerRect.width / 2);
+
+    // Compute current header card center (accounts for any transforms/scale)
+    const headerRect = headerCard.getBoundingClientRect();
+    const headerCenterX = headerRect.left + (headerRect.width / 2);
+
+    let shift = centerX - headerCenterX;
+    if (!isFinite(shift)) shift = 0;
+
+    // Prevent extreme offsets if layout changes
+    const maxShift = Math.min(360, window.innerWidth * 0.25);
+    shift = Math.max(-maxShift, Math.min(maxShift, shift));
+
+    headerCard.style.setProperty('--header-align-shift-x', `${shift.toFixed(2)}px`);
+  }
+
+  const scheduleAlign = (() => {
+    let t = null;
+    return () => {
+      if (t) cancelAnimationFrame(t);
+      t = requestAnimationFrame(() => {
+        alignHeaderToCenterColumn();
+      });
+    };
+  })();
+
+  window.addEventListener('DOMContentLoaded', scheduleAlign);
+  window.addEventListener('load', scheduleAlign);
+  window.addEventListener('resize', scheduleAlign);
+  window.addEventListener('orientationchange', () => setTimeout(scheduleAlign, 200));
 })();
 
 // Expose manual control in console

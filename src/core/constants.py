@@ -1,13 +1,13 @@
 from typing import Dict
 import copy
 
-# Lineage color mapping - SYNCHRONIZED WITH FRONTEND CSS
+# Lineage color mapping - style icon hex from user assets (S, I, H, S/H, I/H icons)
 LINEAGE_COLOR_MAP: Dict[str, str] = {
-    "SATIVA": "#ED4123",
-    "INDICA": "#9900FF",
-    "HYBRID": "#009900",
-    "HYBRID/SATIVA": "#ED4123",
-    "HYBRID/INDICA": "#9900FF",
+    "SATIVA": "#C43326",
+    "INDICA": "#861F9C",
+    "HYBRID": "#55803B",
+    "HYBRID/SATIVA": "#C43326",
+    "HYBRID/INDICA": "#662D91",
     "CBD": "#F1C232",
     "MIXED": "#0021F5",
     "PARAPHERNALIA": "#FFC0CB",
@@ -92,6 +92,7 @@ CELL_DIMENSIONS: Dict[str, Dict[str, float]] = {
     'mini': {'width': 1.5, 'height': 1.5},        # Each cell is 1.5" wide, 1.5" tall
     'single': {'width': 3.0, 'height': 2.0},      # Single label template
     'double': {'width': 1.75, 'height': 2.5},     # Each cell is 1.75" wide, 2.5" tall (with 0.10" horizontal and 0.05" vertical gutters)
+    'new': {'width': 1.75, 'height': 2.25},      # 4x3 grid, Avery 5390 style (exact template sizes)
     'inventory': {'width': 4.0, 'height': 2.0},   # Each cell is 4.0" wide, 2.0" tall
     'preroll': {'width': 1.75, 'height': 2.5}     # Preroll now uses double-template dimensions
 }
@@ -103,6 +104,7 @@ GRID_LAYOUTS: Dict[str, Dict[str, int]] = {
     'mini': {'rows': 5, 'cols': 4},  # 4 columns across, 5 rows down
     'single': {'rows': 1, 'cols': 1},  # Single label template
     'double': {'rows': 3, 'cols': 4},  # 3 rows, 4 columns for 12 labels total
+    'new': {'rows': 3, 'cols': 4},    # 3 rows, 4 columns for 12 labels total (exact template sizes)
     'inventory': {'rows': 2, 'cols': 2},
     'preroll': {'rows': 3, 'cols': 4}  # 3 rows, 4 columns for 12 labels total (same as double)
 }

@@ -177,6 +177,61 @@ class FastGenerationEngine:
         # Return the document
         buffer.seek(0)
         return Document(buffer)
+
+    def generate_bytes_with_cache(
+        self,
+        records: List[Dict],
+        template_type: str,
+        scale_factor: float = 1.0
+    ) -> bytes:
+        """
+        Generate labels and return raw DOCX bytes.
+
+        This avoids an extra save()/reload cycle when the caller only needs the
+        downloadable bytes (common in the API route).
+        """
+        # Check cache first
+        cache_key = self._get_cache_key(records, template_type, scale_factor)
+
+        # Handle manual TTL for simple dict cache
+        if not HAS_CACHETOOLS and cache_key in _generation_cache:
+            cache_age = time.time() - _cache_timestamps.get(cache_key, 0)
+            if cache_age > 300:  # 5 minute TTL
+                logger.info(f"⚡ CACHE EXPIRED: Removing stale entry (age: {cache_age:.1f}s)")
+                del _generation_cache[cache_key]
+                del _cache_timestamps[cache_key]
+
+        if cache_key in _generation_cache:
+            self.cache_hits += 1
+            logger.debug(f"⚡ CACHE HIT(bytes): Returning cached generation for {len(records)} records")
+            return _generation_cache[cache_key]
+
+        self.cache_misses += 1
+        logger.debug(f"⚡ CACHE MISS(bytes): Generating labels for {len(records)} records")
+
+        try:
+            final_doc = self.template_processor.process_records(records)
+        except Exception as e:
+            logger.error(f"Exception in template_processor.process_records: {e}")
+            logger.error(traceback.format_exc())
+            raise RuntimeError(f"Failed to generate document: template processing failed: {e}")
+
+        if final_doc is None:
+            logger.error("❌ FastGenerationEngine(bytes): process_records returned None (no document generated)")
+            raise RuntimeError("Failed to generate document: no valid records or template error. See logs for details.")
+
+        buffer = BytesIO()
+        final_doc.save(buffer)
+        buffer.seek(0)
+        doc_bytes = buffer.getvalue()
+        _generation_cache[cache_key] = doc_bytes
+
+        if not HAS_CACHETOOLS:
+            _cache_timestamps[cache_key] = time.time()
+            if len(_generation_cache) > 100:
+                self._cleanup_cache()
+
+        return doc_bytes
     
     def _cleanup_cache(self):
         """Clean up old cache entries when using simple dict"""
