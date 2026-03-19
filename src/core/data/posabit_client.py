@@ -19,7 +19,7 @@ import json as _json
 import pathlib as _pathlib
 
 _DISK_CACHE_DIR = _pathlib.Path(__file__).parent.parent.parent.parent / "uploads" / "cache"
-_DISK_CACHE_TTL = int(os.environ.get("POSABIT_DISK_CACHE_TTL", "3600"))  # 1 hour default
+_DISK_CACHE_TTL = int(os.environ.get("POSABIT_DISK_CACHE_TTL", "86400"))  # 24 hour default
 
 
 def _store_slug(store_name: Optional[str]) -> str:

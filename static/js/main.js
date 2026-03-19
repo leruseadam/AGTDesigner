@@ -3735,10 +3735,11 @@ const TagManager = {
             this.state.filterCache = null;
             this.state.activeFilteredTags = null;
             // Use immediate update if requested, otherwise debounced
+            const updateOptions = { skipMergeFromDom: true };
             if (immediate) {
-                this._updateAvailableTags(this.state.originalTags, null);
+                this._updateAvailableTags(this.state.originalTags, null, updateOptions);
             } else {
-                this.debouncedUpdateAvailableTags(this.state.originalTags, null);
+                this.debouncedUpdateAvailableTags(this.state.originalTags, null, updateOptions);
             }
             this.renderActiveFilters();
             // USER PREFERENCE: Scroll to top after clearing filters
@@ -3776,10 +3777,11 @@ const TagManager = {
             // Always pass original tags to preserve persistent selections
             // Use immediate update if requested, otherwise debounced
             this.state.activeFilteredTags = this.state.filterCache.result || null;
+            const updateOptions = { skipMergeFromDom: true };
             if (immediate) {
-                this._updateAvailableTags(this.state.originalTags, this.state.filterCache.result);
+                this._updateAvailableTags(this.state.originalTags, this.state.filterCache.result, updateOptions);
             } else {
-                this.debouncedUpdateAvailableTags(this.state.originalTags, this.state.filterCache.result);
+                this.debouncedUpdateAvailableTags(this.state.originalTags, this.state.filterCache.result, updateOptions);
             }
             this.renderActiveFilters();
             // USER PREFERENCE: Scroll to top after applying cached filter
@@ -4143,7 +4145,7 @@ const TagManager = {
             this._updateAvailableTags(this.state.originalTags, filteredTags, { skipMergeFromDom: true });
         } else {
             // Debounced update for search and other operations
-            this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags);
+            this.debouncedUpdateAvailableTags(this.state.originalTags, filteredTags, { skipMergeFromDom: true });
         }
         
         // Update selected tags to also respect the current filters
@@ -4953,7 +4955,8 @@ const TagManager = {
         }
 
         // PERFORMANCE: Call immediately - no setTimeout delay for instant rendering
-        this._updateAvailableTags(originalTags, filteredTags);
+        // CRITICAL: Always skip DOM merge in debounced path to prevent filtered items from being auto-selected
+        this._updateAvailableTags(originalTags, filteredTags, { skipMergeFromDom: true });
     }, 50), // Ultra-fast debounce (50ms) for near-instant response
 
     // Helpers to preserve scroll position of the available list across re-renders
@@ -6914,11 +6917,8 @@ const TagManager = {
             }
             vendorSection.appendChild(vendorContent);
 
-            // Create brand sections
-            const sortedBrands = Array.from(brandGroups.entries())
-                .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-            sortedBrands.forEach(([brand, productTypeGroups]) => {
+            // Create brand sections (preserve insertion order)
+            Array.from(brandGroups.entries()).forEach(([brand, productTypeGroups]) => {
                 const brandSection = document.createElement('div');
                 brandSection.className = 'brand-section ms-3 mb-2';
                 
@@ -7008,11 +7008,8 @@ const TagManager = {
                 }
                 brandSection.appendChild(brandContent);
 
-                // Create product type sections
-                const sortedProductTypes = Array.from(productTypeGroups.entries())
-                    .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-                sortedProductTypes.forEach(([productType, weightGroupsOrSubcategories]) => {
+                // Create product type sections (preserve insertion order)
+                Array.from(productTypeGroups.entries()).forEach(([productType, weightGroupsOrSubcategories]) => {
                     const productTypeSection = document.createElement('div');
                     productTypeSection.className = 'product-type-section ms-3 mb-2';
                     
@@ -10722,31 +10719,25 @@ const TagManager = {
                     <div class="d-flex align-items-center justify-content-center" style="min-height: 100%;">
                         <div class="text-center p-4" style="max-width: 500px;">
                             <h5 class="text-secondary fw-bold mb-4">Quick Start Guide</h5>
-                            
+
                             <div class="text-start">
                                 <div class="mb-4">
-                                    <h6 class="text-secondary mb-3">1. Upload Product Data</h6>
-                                    <div style="color: #b8b8b8;">
-                                        <p class="mb-2 fw-bold fst-italic">📥 Download LOTs Data:</p>
-                                        <ol class="ms-3 fst-italic">
-                                            <li class="mb-2">Log in to app.posabit.com</li>
-                                            <li class="mb-2">Navigate to Inventory → LOTs</li>
-                                            <li class="mb-2">Set "Select State" to Active</li>
-                                            <li class="mb-2">Click the green Search button</li>
-                                            <li class="mb-2">Click the blue Download CSV button</li>
-                                            <li class="mb-2">Upload the downloaded file here using the "Upload Data" button</li>
-                                        </ol>
-                                    </div>
+                                    <h6 class="text-secondary mb-3">1. Load Inventory</h6>
+                                    <ol class="ms-3 fst-italic" style="color: #b8b8b8;">
+                                        <li class="mb-2">Select your <strong>Store</strong> at the top of the page</li>
+                                        <li class="mb-2">Inventory loads automatically from POSaBit</li>
+                                        <li class="mb-2">If tags don't appear, click <strong>Reset Cache</strong> and refresh</li>
+                                    </ol>
                                 </div>
 
                                 <div>
                                     <h6 class="text-secondary mb-3">2. Create Labels</h6>
                                     <ol class="fst-italic ms-3" style="color: #b8b8b8;">
-                                        <li class="mb-2">Browse products in the left panel</li>
-                                        <li class="mb-2">Check boxes next to products to label</li>
-                                        <li class="mb-2">Use filters above to find specific items</li>
+                                        <li class="mb-2">Use the left sidebar to filter by supplier, brand, type, lineage, etc.</li>
+                                        <li class="mb-2">Check boxes next to products to add them here</li>
                                         <li class="mb-2">Drag and drop to reorder if needed</li>
-                                        <li>Click "Generate Labels" when ready</li>
+                                        <li class="mb-2">Pick a <strong>Template</strong> in the center column</li>
+                                        <li>Click <strong>Generate Tags</strong> when ready</li>
                                     </ol>
                                 </div>
                             </div>
@@ -11000,16 +10991,28 @@ const TagManager = {
 
         // Organize tags into hierarchical groups (SAME HIERARCHY AS AVAILABLE TAGS)
         // This ensures JSON matched tags and all tags use: Vendor > Brand > Product Type > Weight
-        const groupedTags = this.organizeBrandCategories(fullTags);
+        //
+        // IMPORTANT: The Selected Tags list should preserve the order tags were added
+        // (and any drag-reordering via persistentSelectedTags), NOT alphabetical sorting.
+        const selectionOrder = Array.isArray(this.state.persistentSelectedTags)
+            ? this.state.persistentSelectedTags
+            : [];
+        const selectionIndex = new Map(selectionOrder.map((name, idx) => [String(name), idx]));
+        const bySelectionOrder = (a, b) => {
+            const aName = String((a && (a['Product Name*'] || a.ProductName || a.displayName)) || '');
+            const bName = String((b && (b['Product Name*'] || b.ProductName || b.displayName)) || '');
+            const ai = selectionIndex.has(aName) ? selectionIndex.get(aName) : Number.MAX_SAFE_INTEGER;
+            const bi = selectionIndex.has(bName) ? selectionIndex.get(bName) : Number.MAX_SAFE_INTEGER;
+            return ai - bi;
+        };
+        const orderedFullTags = [...fullTags].sort(bySelectionOrder);
+
+        const groupedTags = this.organizeBrandCategories(orderedFullTags);
         verboseLog('✅ SELECTED TAGS: Using same hierarchical organization as Current Inventory');
         verboseLog('Grouped selected tags:', groupedTags);
 
-        // Sort vendors alphabetically
-        const sortedVendors = Array.from(groupedTags.entries())
-            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
         // Create vendor sections
-        sortedVendors.forEach(([vendor, brandGroups]) => {
+        Array.from(groupedTags.entries()).forEach(([vendor, brandGroups]) => {
             verboseLog('Processing vendor:', vendor, 'with brand groups:', brandGroups);
             
             const vendorSection = document.createElement('div');
@@ -11306,11 +11309,8 @@ const TagManager = {
                     productTypeSection.appendChild(productTypeContent);
 
                     if (hasSubcategories) {
-                        // Render subcategories (510, Disposable, etc.)
-                        const sortedSubcategories = Array.from(weightGroupsOrSubcategories.entries())
-                            .sort(([a], [b]) => (a || '').localeCompare(b || ''));
-
-                        sortedSubcategories.forEach(([subcategory, weightGroups]) => {
+                        // Render subcategories (preserve insertion order)
+                        Array.from(weightGroupsOrSubcategories.entries()).forEach(([subcategory, weightGroups]) => {
                             const subcategorySection = document.createElement('div');
                             subcategorySection.className = 'subcategory-section ms-3 mb-2';
                             
@@ -11356,11 +11356,8 @@ const TagManager = {
                             subcategoryHeader.appendChild(subcategoryNameSpan);
                             subcategorySection.appendChild(subcategoryHeader);
 
-                            // Create weight sections
-                            const sortedWeights = Array.from(weightGroups.entries())
-                                .sort(([a], [b]) => (a || '').toString().localeCompare((b || '').toString()));
-
-                    sortedWeights.forEach(([weight, tags]) => {
+                            // Create weight sections (preserve insertion order)
+                            Array.from(weightGroups.entries()).forEach(([weight, tags]) => {
                         const weightSection = document.createElement('div');
                         weightSection.className = 'weight-section ms-3 mb-1';
                         
@@ -11456,18 +11453,9 @@ const TagManager = {
                         
                         // Flatten price groups Map into a single array (selected list doesn't show price headers)
                         const flatTags = (tags instanceof Map) ? Array.from(tags.values()).flat() : (tags || []);
-                        // Render tags in the order they were added (persistentSelectedTags), not alphabetically
+                        // Always render tags as leaf nodes - preserve selection order (not alphabetical)
                         if (flatTags.length > 0) {
-                            const orderedTags = [...flatTags].sort((a, b) => {
-                                const nameA = a['Product Name*'] || '';
-                                const nameB = b['Product Name*'] || '';
-                                const idxA = this.state.persistentSelectedTags.indexOf(nameA);
-                                const idxB = this.state.persistentSelectedTags.indexOf(nameB);
-                                if (idxA === -1 && idxB === -1) return 0;
-                                if (idxA === -1) return 1;
-                                if (idxB === -1) return -1;
-                                return idxA - idxB;
-                            });
+                            const orderedTags = [...flatTags].sort(bySelectionOrder);
 
                             orderedTags.forEach(tag => {
                                 // CRITICAL: Before creating tag element, ensure tag has database lineage
@@ -11537,11 +11525,8 @@ const TagManager = {
                             productTypeContent.appendChild(subcategorySection);
                         });
                     } else {
-                        // No subcategories - render weights directly
-                        const sortedWeights = Array.from(weightGroupsOrSubcategories.entries())
-                            .sort(([a], [b]) => (a || '').toString().localeCompare((b || '').toString()));
-
-                        sortedWeights.forEach(([weight, tags]) => {
+                        // No subcategories - render weights directly (preserve insertion order)
+                        Array.from(weightGroupsOrSubcategories.entries()).forEach(([weight, tags]) => {
                             const weightSection = document.createElement('div');
                             weightSection.className = 'weight-section ms-3 mb-1';
                             
@@ -11638,14 +11623,9 @@ const TagManager = {
                             
                             // Flatten price groups Map into a single array (selected list doesn't show price headers)
                             const flatTags = (tags instanceof Map) ? Array.from(tags.values()).flat() : (tags || []);
-                            // Always render tags as leaf nodes - sort alphabetically by product name
+                            // Always render tags as leaf nodes - preserve selection order (not alphabetical)
                             if (flatTags.length > 0) {
-                                // Sort tags alphabetically by product name
-                                const orderedTags = [...flatTags].sort((a, b) => {
-                                    const nameA = (a['Product Name*'] || '').toLowerCase();
-                                    const nameB = (b['Product Name*'] || '').toLowerCase();
-                                    return nameA.localeCompare(nameB);
-                                });
+                                const orderedTags = [...flatTags].sort(bySelectionOrder);
 
                                 orderedTags.forEach(tag => {
                                     const tagElement = this.createTagElement(tag, true); // true = isForSelectedTags
@@ -12131,7 +12111,7 @@ const TagManager = {
                     }
                 }
             }
-        }, 60000); // 60 second safety timeout
+        }, 120000); // 120 second safety timeout to match POSaBit cold-start window
         
         // CRITICAL FIX: Immediately show loading state if container is empty
         // This prevents upload prompt from flashing while tags are being fetched
@@ -12399,13 +12379,15 @@ const TagManager = {
                     
                     // CRITICAL FIX: For web clients, if lineage was recently updated, force nocache to bypass stale cache
                     // Web endpoint will still get database lineage when needed (it checks lineage_update_timestamp)
-                    // PERFORMANCE: Web clients skip prefer_db for speed, but still get fresh data when lineage updates
-                    const forceDbLineage = isWebClient ? false : (this._forceDatabaseLineage || isDatabaseMode || hasRecentLineageUpdate);
+                    // IMPORTANT: For desktop/dev clients we no longer force prefer_db, because any backend error on that
+                    // path returns an empty payload and permanently blocks tag loading. Let the backend handle DB/Excel
+                    // fallbacks instead of hard-failing the entire request.
+                    const forceDbLineage = false;
                     // CRITICAL: Force nocache if lineage was recently updated (even for web clients) to get fresh lineage
-                    const useCache = retryCount === 0 && !forceDbLineage && !forceReload && !hasRecentLineageUpdate;
+                    const useCache = retryCount === 0 && !forceReload && !hasRecentLineageUpdate;
                     const cacheParam = useCache ? '' : '&nocache=1';
-                    // Skip prefer_db for web clients (fast_load includes lineage), use for desktop if needed
-                    const preferDbParam = isWebClient ? '' : (forceDbLineage ? '&prefer_db=1' : '');
+                    // Skip prefer_db entirely to avoid empty-error payloads; rely on backend fallbacks instead
+                    const preferDbParam = '';
                     
                     // Use web endpoint for web clients, regular endpoint for localhost/desktop
                     const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
@@ -12630,10 +12612,9 @@ const TagManager = {
 
                     // Auto-retry when backend is still loading (POSaBit cache warming or file processing)
                     const lowerMsg = (errorMsg || '').toLowerCase();
-                    const _noRetrySource = ['posabit-error', 'db-fallback', 'no-inventory', 'no-excel-or-posabit'].includes(responseData.source);
-                    const isBackgroundLoading = !_noRetrySource && (
+                    const isBackgroundLoading = responseData.source !== 'posabit-error' && (
                         lowerMsg.includes('loading in background') || lowerMsg.includes('processing') || lowerMsg.includes('will appear shortly')
-                        || lowerMsg.includes('loading, please wait') || responseData.source === 'posabit-loading');
+                        || lowerMsg.includes('loading, please wait') || lowerMsg.includes('posabit') || responseData.source === 'posabit-loading');
                     if (isBackgroundLoading) {
                         this._backgroundProcessingRetries += 1;
                         const maxBgRetries = 30; // ~60s if 2s delay — enough for POSaBit cold start
@@ -19747,7 +19728,7 @@ const TagManager = {
                         lineageFilter.appendChild(allOpt);
 
                         // Add lineage options in proper order
-                        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED'];
+                        const lineageOrder = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA', 'PARAPHERNALIA'];
                         const sortedLineages = lineages.sort((a, b) => {
                             const aIndex = lineageOrder.indexOf(a);
                             const bIndex = lineageOrder.indexOf(b);
@@ -19760,7 +19741,16 @@ const TagManager = {
                         sortedLineages.forEach(lineage => {
                             const opt = document.createElement('option');
                             opt.value = lineage;
-                            opt.textContent = lineage;
+                            // User-facing labels for special nonclassic lineages
+                            if (lineage === 'CBD_BLEND') {
+                                opt.textContent = 'CBD (Edible)';
+                            } else if (lineage === 'MIXED') {
+                                opt.textContent = 'THC (Edible)';
+                            } else if (lineage === 'PARA' || lineage === 'PARAPHERNALIA') {
+                                opt.textContent = 'Paraphernalia';
+                            } else {
+                                opt.textContent = lineage;
+                            }
                             lineageFilter.appendChild(opt);
                         });
 

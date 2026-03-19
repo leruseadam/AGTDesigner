@@ -1441,3 +1441,5 @@ function showToast(type, message) {
     }, 3000);
 }
 
+// Align the header card over the center column rather than dead‑center on the page
+

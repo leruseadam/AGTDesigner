@@ -1788,9 +1788,19 @@ def create_app():
         'https://www.agtpricetags.com',  # Your actual domain
         'https://agtpricetags.com',
         'http://localhost:5000',  # For local development
-        'http://localhost:5001',  # For local development
+        'http://localhost:5001',
         'http://127.0.0.1:5000',
         'http://127.0.0.1:5001',
+        'http://localhost:8001',
+        'http://localhost:8002',
+        'http://localhost:8003',
+        'http://localhost:8004',
+        'http://localhost:8005',
+        'http://127.0.0.1:8001',
+        'http://127.0.0.1:8002',
+        'http://127.0.0.1:8003',
+        'http://127.0.0.1:8004',
+        'http://127.0.0.1:8005',
         'https://adamcordova.pythonanywhere.com'  # PythonAnywhere domain
     ]
     # Add caching headers for static resources to improve performance
@@ -12400,6 +12410,20 @@ def process_database_product_for_api(db_product):
         processed_product['currentLineage'] = lineage_value
 
     return processed_product
+
+# Fields the frontend actually uses — strip everything else to reduce payload size
+_TAG_KEEP_FIELDS = frozenset([
+    'Product Name*', 'ProductName', 'Product Brand', 'ProductBrand', 'ProductVendor',
+    'Product Type*', 'Product Strain', 'Weight*', 'Price*',
+    'Lineage', 'Lineage*', 'sovereign_lineage', 'canonical_lineage', 'currentLineage',
+    'DOH', 'Vendor', 'Vendor/Supplier*', 'Vendor*',
+    'CBD test result', 'THC test result', 'Description',
+])
+
+def _slim_tags(tags):
+    """Strip redundant/duplicate fields from each tag to reduce JSON payload size."""
+    return [{k: v for k, v in tag.items() if k in _TAG_KEEP_FIELDS} for tag in tags]
+
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     store_name = None
@@ -12449,7 +12473,7 @@ def get_available_tags():
                     logging.warning(f"Could not align tags in memory fallback: {align_err}")
                 # CRITICAL FIX: Enforce non-classic lineage rules on cached tags
                 cached_tags = _enforce_nonclassic_lineage_rules(cached_tags)
-                safe_cached_tags = make_json_safe(cached_tags)
+                safe_cached_tags = make_json_safe(_slim_tags(cached_tags))
                 return jsonify({
                     'tags': safe_cached_tags,
                     'total_count': len(safe_cached_tags),
@@ -12497,7 +12521,7 @@ def get_available_tags():
                         logging.warning(f"Could not align tags in rate-limit fallback: {align_err}")
                     # CRITICAL FIX: Enforce non-classic lineage rules on cached tags
                     cached_tags = _enforce_nonclassic_lineage_rules(cached_tags)
-                    safe_cached_tags = make_json_safe(cached_tags)
+                    safe_cached_tags = make_json_safe(_slim_tags(cached_tags))
                     return jsonify({
                         'tags': safe_cached_tags,
                         'total_count': len(safe_cached_tags),
@@ -12733,7 +12757,7 @@ def get_available_tags():
                     cached_rows = get_cached_product_rows(store_name=store_for_posabit)
                     if cached_rows:
                         logging.info(f"📦 Serving {len(cached_rows)} POSaBit products from cache")
-                        safe_posabit_tags = make_json_safe(cached_rows)
+                        safe_posabit_tags = make_json_safe(_slim_tags(cached_rows))
                         # Ensure POSaBit tags use DB lineage overrides (sovereign_lineage wins).
                         try:
                             store_name_align = get_current_store_name(allow_fallback=True)
@@ -12764,7 +12788,7 @@ def get_available_tags():
                     except Exception as _cf_err:
                         logging.warning(f"Cold POSaBit fetch failed: {_cf_err}")
                     if posabit_rows:
-                        safe_posabit_tags = make_json_safe(posabit_rows)
+                        safe_posabit_tags = make_json_safe(_slim_tags(posabit_rows))
                         try:
                             store_name_align = get_current_store_name(allow_fallback=True)
                             safe_posabit_tags = _align_tags_with_db_lineage(
@@ -12797,7 +12821,7 @@ def get_available_tags():
                     if _fb_df is not None and not _fb_df.empty:
                         _fb_records = _fb_df.to_dict('records')
                         _fb_tags = [process_database_product_for_api(p) for p in _fb_records]
-                        _fb_tags = make_json_safe(_fb_tags)
+                        _fb_tags = make_json_safe(_slim_tags(_fb_tags))
                         logging.info(f"✅ DB fallback: serving {len(_fb_tags)} products from {_fb_store}")
                         return jsonify({
                             'tags': _fb_tags,
@@ -13143,7 +13167,7 @@ def get_available_tags():
                 if 'productBrand' not in tag:
                     tag['productBrand'] = ''
             
-            safe_cached_tags = make_json_safe(cached_tags)
+            safe_cached_tags = make_json_safe(_slim_tags(cached_tags))
             elapsed = (time.time() - start_time) * 1000
             return jsonify({
                 'tags': safe_cached_tags,
@@ -13348,7 +13372,7 @@ def get_available_tags():
                 if 'productBrand' not in tag:
                     tag['productBrand'] = ''
             
-            safe_cached_tags = make_json_safe(cached_tags)
+            safe_cached_tags = make_json_safe(_slim_tags(cached_tags))
             elapsed = (time.time() - start_time) * 1000
             return jsonify({
                 'tags': safe_cached_tags,
@@ -13832,7 +13856,7 @@ def get_available_tags():
             # This ensures non-classic types can ONLY have MIXED or CBD lineage, never SATIVA/INDICA/etc.
             simple_tags = _enforce_nonclassic_lineage_rules(simple_tags)
             
-            safe_simple_tags = make_json_safe(simple_tags)
+            safe_simple_tags = make_json_safe(_slim_tags(simple_tags))
             elapsed = (time.time() - start_time) * 1000
             logging.info(f"✅ SIMPLE PATH complete ({elapsed:.1f}ms) - returning {len(safe_simple_tags)} tags (with database lineage)")
 
@@ -27253,7 +27277,7 @@ def import_strains():
         product_db = get_product_database(store_name)
         conn = product_db._get_connection()
         cursor = conn.cursor()
-        
+    
         imported_count = 0
         for strain in strains:
             try:
@@ -29030,99 +29054,31 @@ if __name__ == '__main__':
     
     # Get cross-platform temp directory
     temp_dir = tempfile.gettempdir()
-    lock_file = os.path.join(temp_dir, 'labelmaker_app.lock')
-    
     # Set up signal handlers for clean shutdown
     def signal_handler(signum, frame):
         print(f"\n🛑 Received signal {signum} - shutting down gracefully...")
-        # Clean up lock file if it exists
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-        except Exception:
-            pass
         sys.exit(0)
-    
-    # Register signal handlers for clean shutdown (Windows-compatible)
+
     try:
-        signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C (works on Windows)
-        signal.signal(signal.SIGTERM, signal_handler)  # kill command (Unix)
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
         if not is_windows:
-            signal.signal(signal.SIGHUP, signal_handler)   # hangup (Unix only)
+            signal.signal(signal.SIGHUP, signal_handler)
     except (ValueError, AttributeError) as e:
         logging.warning(f"Some signal handlers unavailable on this platform: {e}")
-    
-    # CRITICAL FIX: Cross-platform lock file check (lock_file already defined above)
-    if os.path.exists(lock_file):
-        try:
-            with open(lock_file, 'r') as f:
-                pid = int(f.read().strip())
-            # Check if the process is still running (Windows-compatible)
-            try:
-                if is_windows:
-                    # Windows: use tasklist to check if process exists
-                    import subprocess
-                    result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'], 
-                                          capture_output=True, text=True, timeout=2)
-                    if str(pid) in result.stdout:
-                        print(f"⚠️  App already running with PID {pid}")
-                        print(f"💡 To force start, delete lock file: {lock_file}")
-                        sys.exit(0)
-                    else:
-                        # Process doesn't exist, remove stale lock file
-                        os.remove(lock_file)
-                else:
-                    # Unix: use os.kill
-                    os.kill(pid, 0)  # This will raise an exception if process doesn't exist
-                    print(f"⚠️  App already running with PID {pid}")
-                    print(f"💡 To force start, run: rm -f {lock_file} && python app.py")
-                    sys.exit(0)
-            except (OSError, ProcessLookupError, subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-                # Process doesn't exist or tasklist failed, remove stale lock file
-                try:
-                    os.remove(lock_file)
-                except FileNotFoundError:
-                    pass
-        except (ValueError, FileNotFoundError):
-            # Invalid lock file, remove it
-            try:
-                os.remove(lock_file)
-            except FileNotFoundError:
-                pass
-    
-    # Create lock file with current PID
-    try:
-        with open(lock_file, 'w') as f:
-            f.write(str(os.getpid()))
-    except Exception:
-        pass  # Continue even if we can't create lock file
-    
+
     # Use the LabelMakerApp class for proper startup
     print("Starting Label Maker application...")
     print(f"🆔 Process ID: {os.getpid()}")
-    # CRITICAL FIX: os.getppid() not available on Windows
-    try:
-        if not is_windows:
-            print(f"🆔 Parent Process ID: {os.getppid()}")
-    except (AttributeError, OSError):
-        pass  # Not available on this platform
     print("🛑 Press Ctrl+C to stop the app")
-    
+
     try:
-        # Create and run the application
         label_maker_app = LabelMakerApp()
         label_maker_app.run()
     except KeyboardInterrupt:
         print("\n🛑 Shutdown requested by user")
     except Exception as e:
         print(f"\n❌ Error: {e}")
-    finally:
-        # Clean up lock file on exit
-        try:
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
-        except Exception:
-            pass 
 @app.route('/test-json-match')
 def test_json_match_page():
     """Test page for JSON matching functionality."""

@@ -40,18 +40,23 @@
   }
 }
 
-/* Ensure Template selects show a bright turquoise border in all contexts, but keep them compact */
+/* Ensure Template selects show a bright turquoise border in all contexts, and stay within the center column width */
 .center-column-wrapper #templateSelect,
 .center-column-wrapper #templateGroupSelect,
 #templateSelect,
 #templateGroupSelect {
   border: 2px solid #00d4aa !important;
-  box-shadow: 0 0 16px rgba(0,212,170,0.45) !important;
+  box-shadow: 0 0 10px rgba(0,212,170,0.35) !important;
   background-color: rgba(44,34,58,0.9) !important;
   color: #ffffff !important;
-  font-size: 0.9rem !important;
-  padding-top: 0.4rem !important;
-  padding-bottom: 0.4rem !important;
+  font-size: 0.8rem !important;
+  padding-top: 0.25rem !important;
+  padding-bottom: 0.25rem !important;
+  min-height: 34px !important;
+  width: calc(100% - 8px) !important;
+  max-width: calc(100% - 8px) !important;
+  margin: 0 4px !important; /* inset the glowing border so it doesn’t spill past the card */
+  box-sizing: border-box !important;
 }
 
 .center-column-wrapper #templateSelect:focus,
@@ -77,7 +82,9 @@
   background-repeat: no-repeat !important;
   background-position: right 12px center !important;
   background-size: 14px 14px !important;
-  padding-right: 2.2rem !important; /* leave space for custom arrow */
+  padding-right: 1.5rem !important; /* leave space for custom arrow but keep overall width/height smaller */
+  padding-top: 0.2rem !important;
+  padding-bottom: 0.2rem !important;
   z-index: 5 !important;
 }
 
@@ -719,8 +726,8 @@ canvas#lava-lamp-canvas {
 
 /* Dynamic viewport height support so layout adapts when DevTools/keyboard open */
 :root {
-  --tag-list-vertical-offset: clamp(3.25rem, 4.5vh, 5rem);
-  --tag-list-min-height: 28rem;  /* Increased min so tag lists are taller by default */
+  --tag-list-vertical-offset: clamp(1rem, 2vh, 2rem);
+  --tag-list-min-height: 80vh;
 }
 @supports (height: 100svh) {
   :root {
@@ -1117,19 +1124,19 @@ body.modal-open #mainContent.store-selection-disabled,
     }
   }
   
-  /* Clean Title Styling - Professional & BIGGER */
+/* Clean Title Styling - larger, hero-style */
   .vibrant-title {
     color: #ffffff !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 800 !important;
-    font-size: 2rem !important;
+  font-size: 2.1rem !important;
     letter-spacing: -0.02em;
-    margin: 0 0 0.2rem 0 !important;
+    margin: 0 0 0.1rem 0 !important;
     text-align: center !important;
     line-height: 1.0;
     text-shadow:
-      0 4px 12px rgba(0,0,0,0.4),
-      0 8px 24px rgba(160, 132, 232, 0.3);
+      0 3px 8px rgba(0,0,0,0.35),
+      0 4px 14px rgba(160, 132, 232, 0.25);
     position: relative;
     animation: titleGlow 3s ease-in-out infinite alternate;
   }
@@ -1137,26 +1144,26 @@ body.modal-open #mainContent.store-selection-disabled,
   /* Responsive Title Scaling */
   @media (max-width: 768px) {
     .vibrant-title {
-      font-size: 3rem !important; /* Increased for bigger title section */
-      margin: 0 0 0.5rem 0 !important;
+      font-size: 2.4rem !important;
+      margin: 0 0 0.25rem 0 !important;
     }
     
     .vibrant-subtitle {
-      font-size: 1rem !important; /* Increased for bigger title section */
-      margin: 0 0 0.7rem 0 !important;
+      font-size: 0.8rem !important;
+      margin: 0 0 0.3rem 0 !important;
     }
   }
   
   @media (max-width: 480px) {
     .vibrant-title {
-      font-size: 2.5rem !important; /* Increased for bigger title section */
-      margin: 0 0 0.4rem 0 !important;
+      font-size: 2.1rem !important;
+      margin: 0 0 0.25rem 0 !important;
       padding: 0 1rem;
     }
     
     .vibrant-subtitle {
-      font-size: 0.95rem !important; /* Increased for bigger title section */
-      margin: 0 0 0.6rem 0 !important;
+      font-size: 0.75rem !important;
+      margin: 0 0 0.25rem 0 !important;
       padding: 0 1rem;
     }
   }
@@ -3401,82 +3408,7 @@ body.modal-open #mainContent.store-selection-disabled,
     left: 100%;
   }
   
-  /* Manage templates button - same visual style and shape as Generate button */
-  .btn-manage-templates,
-  #manageTemplatesBtn.btn-manage-templates {
-    background: linear-gradient(135deg, rgba(51, 153, 102)) !important;
-    border-color: rgba(251, 146, 60, 0.8) !important;
-    color: #ffffff !important;
-    max-width: 70%; 
-    box-shadow: 
-      0 2px 8px rgba(0, 0, 0, 0.15),
-      0 0 12px rgba(251, 146, 60, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-    padding: 0.5rem 0.4rem !important; /* Ensure consistent padding */
-    min-height: 42px !important; /* Ensure consistent height */
-    }
-
-  .btn-manage-templates:hover,
-  #manageTemplatesBtn.btn-manage-templates:hover {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.65), rgba(22, 163, 74, 0.75)) !important;
-    border-color: rgba(34, 197, 94, 1) !important;
-    color: #ffffff !important;
-    box-shadow: 0 4px 20px rgba(34, 197, 94, 0.6), 0 0 20px rgba(34, 197, 94, 0.5) !important;
-    transform: translateY(-2px) scale(1.02) !important;
-  }
-  .btn-manage-templates:active,
-  #manageTemplatesBtn.btn-manage-templates:active {
-    transform: translateY(0) scale(1) !important;
-    transition: transform 0.1s ease !important;
-  }
-  .btn-manage-templates:focus,
-  #manageTemplatesBtn.btn-manage-templates:focus {
-    box-shadow:
-      0 0 0 4px rgba(34, 197, 94, 0.3),
-      0 2px 8px rgba(0, 0, 0, 0.15),
-      0 0 12px rgba(34, 197, 94, 0.4) !important;
-    outline: none !important;
-  }
-  .btn-manage-templates::before,
-  #manageTemplatesBtn.btn-manage-templates::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-    transition: left 0.5s ease;
-  }
-  .btn-manage-templates:hover::before,
-  #manageTemplatesBtn.btn-manage-templates:hover::before {
-    left: 100%;
-  }
-  
-  /* Direct styling for Manage Templates button (fallback if class not present) */
-  #manageTemplatesBtn {
-    background: linear-gradient(135deg, #56CCF2 0%, #2F80ED 100%) !important;
-    border: 1px solid rgba(47,128,237,0.9) !important;
-    color: #ffffff !important;
-    max-width: 80% !important;
-    box-shadow:
-      0 4px 10px rgba(47,128,237,0.22),
-      inset 0 1px 0 rgba(255,255,255,0.06) !important;
-    padding: 0.55rem 0.8rem !important;
-    min-height: 44px !important;
-    border-radius: 10px !important;
-    transition: transform 120ms ease, filter 120ms ease !important;
-  }
-
-  #manageTemplatesBtn svg {
-    stroke: rgba(255,255,255,0.95) !important;
-    fill: none !important;
-  }
-
-  #manageTemplatesBtn:hover {
-    filter: brightness(1.05) !important;
-    transform: translateY(-2px) !important;
-  }
+  /* (Manage templates button now uses shared .btn-tool-modern + variant classes; no special overrides) */
   
   /* JSON Tools section spacing */
   .control-panel .mb-3 {
@@ -7164,9 +7096,9 @@ body.modal-open #mainContent.store-selection-disabled,
   }
 
   /* Custom dropdown arrow for glassy background - exclude templateSelect */
-  select:not(#templateSelect):not(#templateSelectModal), 
-  .form-select:not(#templateSelect):not(#templateSelectModal), 
-  .form-select-modern:not(#templateSelect):not(#templateSelectModal) {
+  select:not(#templateSelect):not(#templateSelectModal):not(#productNameFilter):not(#manifestRefFilter),
+  .form-select:not(#templateSelect):not(#templateSelectModal):not(#productNameFilter):not(#manifestRefFilter),
+  .form-select-modern:not(#templateSelect):not(#templateSelectModal):not(#productNameFilter):not(#manifestRefFilter) {
     background-image: url('data:image/svg+xml;utf8,<svg fill="%23a084e8" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
     background-repeat: no-repeat;
     background-position: right 14px center;
@@ -8013,7 +7945,7 @@ body.modal-open #mainContent.store-selection-disabled,
   align-items: start !important;
   display: grid !important;
   /* Left vertical filter sidebar + 2 side lists + center controls */
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(170px, 210px) minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) minmax(170px, 210px) minmax(0, 1fr);
   gap: 1rem !important;
   padding-top: 0 !important;
   margin-top: 0 !important;
@@ -8023,27 +7955,6 @@ body.modal-open #mainContent.store-selection-disabled,
 .main-content-row > [data-container-type] {
   width: 100% !important;
   max-width: 100% !important;
-}
-
-/* Header row aligned to CURRENT INVENTORY column without affecting list widths */
-.header-grid-row {
-  display: grid !important;
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(170px, 210px) minmax(0, 1fr);
-  gap: 1rem !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  padding: 0 0.5rem !important; /* match main-content horizontal breathing room */
-  box-sizing: border-box !important;
-  align-items: start !important;
-}
-
-.header-grid-row .header-grid-cell {
-  grid-column: 2 !important;
-  min-width: 0 !important;
-}
-
-.header-grid-row .header-grid-spacer {
-  min-width: 0 !important;
 }
 
 /* Top tools bar (where filter bar used to be) */
@@ -8056,8 +7967,8 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .top-tools-bar {
-  width: 100% !important;
-  max-width: none !important;
+  width: auto !important;
+  max-width: 720px !important;
   margin: 0 auto !important;
   background: rgba(45, 34, 58, 0.85);
   border-radius: 14px !important;
@@ -8090,30 +8001,33 @@ body.modal-open #mainContent.store-selection-disabled,
 
 .top-tools-buttons {
   order: 1;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.4rem;
   align-items: stretch;
-  justify-content: flex-start;
+  justify-items: stretch;
 }
 
 .top-tools-buttons .btn-tool-modern,
 .top-tools-buttons .btn-help-modern {
-  flex: 1 1 auto !important;
-  min-width: 100px !important;
-  max-width: 160px !important;
-  padding: 0.45rem 0.6rem !important;
-  border-radius: 10px !important;
-  font-size: 0.82rem !important;
-  min-height: 40px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  padding: 0.35rem 0.55rem !important;
+  border-radius: 8px !important;
+  font-size: 0.78rem !important;
+  min-height: 34px !important;
   height: auto !important;
-  width: auto !important;
   box-shadow: 0 4px 12px rgba(0,0,0,0.16) !important;
   display: inline-flex !important;
-  flex-direction: column !important;
+  flex-direction: row !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 4px !important;
+}
+
+.top-tools-buttons .btn-tool-modern span {
+  white-space: nowrap !important;
 }
 
 .top-tools-buttons .btn-tool-modern svg,
@@ -8152,28 +8066,20 @@ body.modal-open #mainContent.store-selection-disabled,
   align-self: stretch !important;
   display: flex !important;
   flex-direction: column !important;
-  width: 175px !important;
-  min-width: 175px !important;
-  max-width: 175px !important;
-  flex-shrink: 0 !important;
   max-height: var(--tag-list-height) !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
-  box-sizing: border-box !important;
 }
 
 .main-content-row > [data-container-type="filter"] .enhanced-filter-bar {
   flex-direction: column !important;
   align-items: stretch !important;
   flex: 1 1 auto !important;
-  width: 100% !important;
-  min-width: 0 !important;
   min-height: 0 !important;
   max-height: none !important;
   overflow-y: visible !important;
   overflow-x: hidden !important;
   margin-top: 0 !important;
-  box-sizing: border-box !important;
 }
 
 .main-content-row > [data-container-type="filter"] .enhanced-filter-bar .filter-row {
@@ -8195,6 +8101,7 @@ body.modal-open #mainContent.store-selection-disabled,
 .main-content-row > [data-container-type="filter"] .enhanced-filter-bar .left-section {
   width: 100% !important;
   flex-wrap: wrap !important;
+  margin-bottom: 0.75rem !important; /* add breathing room below Clear Filters */
 }
 
 /* Override global fixed-width `.filter-group` rules inside the left sidebar */
@@ -8227,6 +8134,17 @@ body.modal-open #mainContent.store-selection-disabled,
   flex: 1 1 0 !important;
   min-width: 0 !important;
   max-width: 100% !important;
+}
+
+/* Sidebar filter controls: remove dropdown arrows from product + manifest + basic dropdowns */
+#vendorFilter,
+#brandFilter,
+#productTypeFilter,
+#lineageFilter,
+#weightFilter,
+#priceFilter,
+#dohFilter {
+  background-image: none !important;
 }
 
 /* Ensure top filter bar never overflows horizontally on main page */
