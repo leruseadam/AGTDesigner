@@ -6020,14 +6020,16 @@
             </div>
 
             <!-- Store Selection Modal -->
-            {# If no store is selected, render the modal visible immediately (before JS). #}
+            <!-- Force visible immediately; we hide it synchronously below if server says a store is already selected. -->
             <div
-              class="modal fade {% if not (user_has_store and current_store) %}show{% endif %}"
+              class="modal fade show"
               id="storeSelectionModal"
               tabindex="-1"
               aria-labelledby="storeSelectionModalLabel"
-              aria-hidden="{% if not (user_has_store and current_store) %}false{% else %}true{% endif %}"
-              {% if not (user_has_store and current_store) %}aria-modal="true" role="dialog" style="display: block;"{% endif %}
+              aria-hidden="false"
+              aria-modal="true"
+              role="dialog"
+              style="display: block; z-index: 2000;"
               data-bs-backdrop="static"
               data-bs-keyboard="false"
             >
@@ -6057,12 +6059,30 @@
                 </div>
               </div>
             </div>
-            {% if not (user_has_store and current_store) %}
-              <div class="modal-backdrop fade show" id="storeSelectionBackdrop"></div>
-              <style>
-                body.modal-open { overflow: hidden; }
-              </style>
-            {% endif %}
+            <div class="modal-backdrop fade show" id="storeSelectionBackdrop" style="z-index: 1990;"></div>
+            <style>
+              body.modal-open { overflow: hidden; }
+            </style>
+
+            <script>
+              // Hide the store modal immediately if server already has a store selected.
+              (function () {
+                const hasCurrentStore = {{ 'true' if user_has_store and current_store else 'false' }};
+                if (hasCurrentStore) {
+                  const modalEl = document.getElementById('storeSelectionModal');
+                  if (modalEl) {
+                    modalEl.classList.remove('show');
+                    modalEl.style.display = 'none';
+                    modalEl.setAttribute('aria-hidden', 'true');
+                  }
+                  const backdrop = document.getElementById('storeSelectionBackdrop');
+                  if (backdrop) backdrop.remove();
+                  document.body.classList.remove('modal-open');
+                } else {
+                  document.body.classList.add('modal-open');
+                }
+              })();
+            </script>
 
             <script>
               // Store selection: called by store option buttons in the modal
