@@ -17458,9 +17458,93 @@ def get_web_available_tags():
                 except Exception as load_err:
                     logging.warning(f"WEB: Error loading default file: {load_err}")
         
-        # CRITICAL: Check if Excel file exists BEFORE serving cache
+        # CRITICAL: Check if Excel file exists BEFORE serving cache — but try POSaBit first
         if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
-            logging.info("WEB: No Excel data available - user must upload file")
+            # No Excel data — attempt POSaBit (same logic as /api/available-tags)
+            try:
+                from src.core.data.posabit_client import (
+                    is_posabit_configured, is_posabit_products_enabled,
+                    get_cached_product_rows, get_menu_feed_as_product_rows
+                )
+                if is_posabit_configured() or is_posabit_products_enabled():
+                    store_for_posabit = get_current_store_name(allow_fallback=True)
+                    _web_pb_cache_key = cache_key
+
+                    # Serve aligned POSaBit tags from Flask cache (instant)
+                    _web_pb_cached = cache.get(_web_pb_cache_key) if not nocache else None
+                    if _web_pb_cached:
+                        logging.info(f"⚡ WEB: Serving {len(_web_pb_cached)} POSaBit tags from Flask cache")
+                        resp = make_response(jsonify({
+                            'tags': _web_pb_cached,
+                            'total_count': len(_web_pb_cached),
+                            'source': 'posabit'
+                        }))
+                        return compress_response(resp)
+
+                    cached_rows = get_cached_product_rows(store_name=store_for_posabit)
+                    if cached_rows:
+                        logging.info(f"WEB: Serving {len(cached_rows)} POSaBit products from cache")
+                        safe_posabit_tags = make_json_safe(cached_rows)
+                        try:
+                            safe_posabit_tags = _align_tags_with_db_lineage(
+                                safe_posabit_tags, store_for_posabit,
+                                skip_if_aligned=False, force_overwrite=True
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=300)
+                        except Exception:
+                            pass
+                        resp = make_response(jsonify({
+                            'tags': safe_posabit_tags,
+                            'total_count': len(safe_posabit_tags),
+                            'source': 'posabit'
+                        }))
+                        return compress_response(resp)
+
+                    # Cache cold — blocking fetch (PA-safe)
+                    import threading as _web_pb_threading
+                    _web_cold = {'rows': None}
+                    def _web_cold_fetch():
+                        try:
+                            _web_cold['rows'] = get_menu_feed_as_product_rows(store_name=store_for_posabit)
+                        except Exception as _e:
+                            logging.warning(f"WEB cold POSaBit fetch failed: {_e}")
+                    _wt = _web_pb_threading.Thread(target=_web_cold_fetch, daemon=True)
+                    _wt.start()
+                    _wt.join(timeout=20.0)
+                    if _web_cold['rows']:
+                        safe_posabit_tags = make_json_safe(_web_cold['rows'])
+                        try:
+                            safe_posabit_tags = _align_tags_with_db_lineage(
+                                safe_posabit_tags, store_for_posabit,
+                                skip_if_aligned=False, force_overwrite=True
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=300)
+                        except Exception:
+                            pass
+                        resp = make_response(jsonify({
+                            'tags': safe_posabit_tags,
+                            'total_count': len(safe_posabit_tags),
+                            'source': 'posabit'
+                        }))
+                        return compress_response(resp)
+
+                    # Still loading — tell client to retry
+                    return jsonify({
+                        'tags': [], 'total_count': 0,
+                        'source': 'posabit-loading',
+                        'message': 'POSaBit inventory is loading, please wait...',
+                        'retry_after': 5
+                    }), 200
+            except Exception as _pb_err:
+                logging.warning(f"WEB POSaBit fallback failed: {_pb_err}")
+
+            logging.info("WEB: No Excel data and no POSaBit data available")
             return jsonify({
                 'tags': [],
                 'total_count': 0,

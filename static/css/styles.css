@@ -1122,12 +1122,12 @@ body.modal-open #mainContent.store-selection-disabled,
     color: #ffffff !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 800 !important;
-    font-size: 3.5rem !important; /* Increased for bigger title section */
+    font-size: 2rem !important;
     letter-spacing: -0.02em;
-    margin: 0 0 0.6rem 0 !important; /* Increased spacing */
+    margin: 0 0 0.2rem 0 !important;
     text-align: center !important;
     line-height: 1.0;
-    text-shadow: 
+    text-shadow:
       0 4px 12px rgba(0,0,0,0.4),
       0 8px 24px rgba(160, 132, 232, 0.3);
     position: relative;
@@ -1257,22 +1257,22 @@ body.modal-open #mainContent.store-selection-disabled,
   .vibrant-subtitle {
     color: rgba(255, 255, 255, 0.9) !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
-    font-size: 1.15rem !important; /* Increased for bigger title section */
+    font-size: 0.7rem !important;
     font-weight: 600 !important;
     letter-spacing: 0.06em;
     text-align: center !important;
-    margin: 0 0 0.8rem 0 !important; /* Increased spacing */
+    margin: 0 0 0.15rem 0 !important;
     line-height: 1.2;
     text-transform: uppercase;
     text-shadow: 0 2px 6px rgba(0,0,0,0.4);
     opacity: 0.95;
     position: relative;
   }
-  
+
  .copyright-text {
-    font-size: 0.95rem !important; /* Increased for bigger title section */
+    font-size: 0.65rem !important;
     color: #ffffff !important;
-    margin: 0.3rem 0 0 0 !important; /* Increased spacing */
+    margin: 0.1rem 0 0 0 !important;
     font-family: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-weight: 400;
     letter-spacing: 0.02em;
@@ -2823,9 +2823,9 @@ body.modal-open #mainContent.store-selection-disabled,
 
   /* Size adjustments specific to center column generate button */
   .center-column-wrapper #generateBtn {
-    font-size: 0.95rem !important;
-    padding: 0.6rem 0.9rem !important;
-    min-height: 44px !important; /* more compact */
+    font-size: 0.9rem !important;
+    padding: 0.35rem 0.6rem !important;
+    min-height: 36px !important; /* more compact */
     border-radius: 10px !important;
   }
 
@@ -2870,15 +2870,17 @@ body.modal-open #mainContent.store-selection-disabled,
   .center-column-wrapper .control-group-modern > button,
   .center-column-wrapper .control-group-modern button.btn-primary-modern,
   .center-column-wrapper .control-group-modern button#generateBtn {
-    width: 100% !important;
-    max-width: 210px !important;
+    width: auto !important;
+    max-width: 190px !important;
     height: auto !important;
-    max-height: 44px !important; /* smaller cap height */
-    padding: 0.45rem 0.65rem !important;
-    font-size: 0.95rem !important;
+    max-height: 40px !important; /* smaller cap height */
+    padding: 0.35rem 0.6rem !important;
+    font-size: 0.9rem !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
   }
 
   /* If a button contains a pseudo-element that grows, cap it */
@@ -8069,48 +8071,41 @@ body.modal-open #mainContent.store-selection-disabled,
   order: 1;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: stretch;
   justify-content: flex-start;
 }
 
 .top-tools-buttons .btn-tool-modern,
-.top-tools-buttons .filter-action-button,
 .top-tools-buttons .btn-help-modern {
-  flex: 1 1 auto;
-  min-width: 110px;
-  max-width: 180px;
-}
-
-.top-tools-buttons .btn-tool-modern,
-.top-tools-buttons .filter-action-button {
-  padding: 0.55rem 0.7rem !important;
-  border-radius: 12px !important;
-  font-size: 0.95rem !important;
-  min-height: 44px !important;
-  box-shadow: 0 6px 16px rgba(0,0,0,0.16) !important;
+  flex: 1 1 auto !important;
+  min-width: 100px !important;
+  max-width: 160px !important;
+  padding: 0.45rem 0.6rem !important;
+  border-radius: 10px !important;
+  font-size: 0.82rem !important;
+  min-height: 40px !important;
+  height: auto !important;
+  width: auto !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.16) !important;
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
 }
 
 .top-tools-buttons .btn-tool-modern svg,
-.top-tools-buttons .filter-action-button svg {
-  width: 16px !important;
-  height: 16px !important;
-}
-
-.top-tools-buttons .btn-help-modern {
-  width: 100% !important;
-  height: auto !important;
-  border-radius: 12px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 10px !important;
-  padding: 0.55rem 0.7rem !important;
+.top-tools-buttons .btn-help-modern .help-icon {
+  width: 15px !important;
+  height: 15px !important;
+  font-size: 0.9rem !important;
 }
 
 .top-tools-buttons .btn-help-modern .help-text {
   display: inline-block !important;
-  font-weight: 700 !important;
+  font-weight: 600 !important;
+  font-size: 0.82rem !important;
 }
 
 @media (max-width: 768px) {

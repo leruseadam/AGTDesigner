@@ -5742,56 +5742,10 @@
       }
     }
 
-    /* Top "DATABASE TOOLS" bar width fix */
-    .top-tools-row {
-      display: flex;
-      justify-content: center;
-      padding-left: 0.5rem;
-      padding-right: 0.5rem;
-    }
-
-    /* Header alignment: shift title card so it's centered on the center column */
-    #appHeaderCard {
-      transform: translateX(var(--header-align-shift-x, 0px));
-      will-change: transform;
-    }
-
-    @media (max-width: 992px) {
-      #appHeaderCard {
-        transform: none;
-      }
-    }
-
-    .top-tools-bar {
-      width: 100%;
-      max-width: 750px; /* match title card width */
-      margin: 0 auto;
-    }
-
-    /* Keep Database Tools buttons on ONE line (scroll instead of wrap) */
-    .top-tools-buttons {
-      display: flex;
-      flex-wrap: nowrap;
-      align-items: center;
-      justify-content: flex-start;
-      gap: 0.5rem;
-      overflow-x: auto;
-      overflow-y: hidden;
-      -webkit-overflow-scrolling: touch;
-      padding-bottom: 6px; /* room for scrollbar overlay */
-      scrollbar-width: thin; /* Firefox */
-    }
-
-    .top-tools-buttons > button,
-    .top-tools-buttons > a {
-      flex: 0 0 auto;
-      white-space: nowrap;
-    }
-
 
   </style>
 </head>
-<body>
+<body class="{% if not (user_has_store and current_store) %}modal-open{% endif %}">
   <!-- Application Loading Splash Screen -->
   <div id="appLoadingSplash" class="app-loading-splash">
     <div class="app-loading-container">
@@ -5831,7 +5785,7 @@
   <script src="{{ url_for('static', filename='js/lava-lamp.js') }}?v={{ cache_bust }}" async></script>
 
   <!-- Main Content (hidden until store is selected) - backend adds store-selected when user_has_store -->
-  <div class="main-content{% if user_has_store %} store-selected{% endif %}" id="mainContent">
+  <div class="main-content{% if user_has_store %} store-selected{% endif %}" id="mainContent" style="padding-top: 0.5rem;">
     <!-- Psychedelic Background Effects -->
     <div class="psychedelic-orbs">
       <div class="orb"></div>
@@ -5888,8 +5842,8 @@
       <!-- Title and Subtitle centered above tag panels -->
 
       <div class="centerframe" style="width:100%; margin:0 auto; text-align:center; position:relative;">
-        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.75rem;">
-          <div id="appHeaderCard" style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 2rem 3rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 750px; position: relative; overflow: hidden;">
+        <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 0.25rem;">
+          <div id="appHeaderCard" style="text-align: center; background: linear-gradient(135deg, rgba(45, 34, 58, 0.95) 0%, rgba(60, 45, 75, 0.9) 50%, rgba(45, 34, 58, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.4); border-radius: 16px; padding: 0.6rem 2rem 0.7rem 2rem; box-shadow: 0 8px 32px rgba(80, 40, 160, 0.25), 0 0 0 1px rgba(160, 132, 232, 0.1); max-width: 750px; position: relative; overflow: hidden;">
             <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle at 30% 20%, rgba(160, 132, 232, 0.1) 0%, transparent 50%), radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 50%); pointer-events: none;"></div>
             <div style="position: relative; z-index: 2;">
               <h1 class="vibrant-title">
@@ -5904,7 +5858,7 @@
             </div>
 
             <!-- Store Selection -->
-            <div class="store-selection-container" style="margin-top: 0.5rem;">
+            <div class="store-selection-container" style="margin-top: 0.1rem;">
               <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap">
                 <div class="d-flex align-items-center gap-2">
                   <span class="store-label">Store:</span>
@@ -5927,12 +5881,11 @@
               </div>
             </div>
 
-            <!-- Database Tools (moved into title card; no full-width toolbar) -->
-            <div class="top-tools-row fade-in" style="animation-delay: 0.4s; margin-top: 1rem;">
+            <!-- Database Tools (stacked directly under title; compact spacing) -->
+            <div class="top-tools-row fade-in" style="animation-delay: 0.4s; margin-top: 0.25rem;">
               <div class="top-tools-bar">
-                <div class="top-tools-title">DATABASE TOOLS</div>
                 <div class="top-tools-buttons">
-                  <button type="button" class="btn filter-action-button" data-bs-toggle="modal" data-bs-target="#excelUploadModal" title="Upload Excel or Match JSON" aria-label="Excel upload and match">
+                  <button type="button" class="btn-tool-modern btn-export" data-bs-toggle="modal" data-bs-target="#excelUploadModal" title="Upload Excel or Match JSON" aria-label="Excel upload and match">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
@@ -5995,8 +5948,18 @@
               </div>
             </div>
 
-            <!-- Store Selection Modal (missing in current build) -->
-            <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-labelledby="storeSelectionModalLabel" aria-hidden="true">
+            <!-- Store Selection Modal -->
+            {# If no store is selected, render the modal visible immediately (before JS). #}
+            <div
+              class="modal fade {% if not (user_has_store and current_store) %}show{% endif %}"
+              id="storeSelectionModal"
+              tabindex="-1"
+              aria-labelledby="storeSelectionModalLabel"
+              aria-hidden="{% if not (user_has_store and current_store) %}false{% else %}true{% endif %}"
+              {% if not (user_has_store and current_store) %}aria-modal="true" role="dialog" style="display: block;"{% endif %}
+              data-bs-backdrop="static"
+              data-bs-keyboard="false"
+            >
               <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
                   <div class="modal-header border-0">
@@ -6023,6 +5986,12 @@
                 </div>
               </div>
             </div>
+            {% if not (user_has_store and current_store) %}
+              <div class="modal-backdrop fade show" id="storeSelectionBackdrop"></div>
+              <style>
+                body.modal-open { overflow: hidden; }
+              </style>
+            {% endif %}
 
             <script>
               // Store selection: called by store option buttons in the modal
@@ -6049,29 +6018,54 @@
                 }
               };
 
-              // Show the modal immediately on first load if no store is selected.
-              document.addEventListener('DOMContentLoaded', async () => {
-                const modalEl = document.getElementById('storeSelectionModal');
-                if (!modalEl || typeof bootstrap === 'undefined' || !bootstrap.Modal) return;
-
-                // If the template already knows store is set, skip the fetch.
+              // Ensure the modal is shown ASAP if no store is selected.
+              // The template renders it visible immediately; this block "upgrades" it once Bootstrap is ready.
+              (function ensureStoreModalShown() {
                 const hasCurrentStore = {{ 'true' if user_has_store and current_store else 'false' }};
                 if (hasCurrentStore) return;
 
-                // Immediate show (no API wait) for first-load UX
-                const modal = new bootstrap.Modal(modalEl, { backdrop: 'static', keyboard: false });
-                modal.show();
+                const modalEl = document.getElementById('storeSelectionModal');
+                if (!modalEl) return;
 
-                try {
-                  const res = await fetch('/api/check-store-required', { method: 'GET' });
-                  const payload = await res.json();
-                  // If backend says store isn't required (unexpected), hide it.
-                  if (payload && payload.requires_store === false) modal.hide();
-                } catch (e) {
-                  // Fallback: if the check fails, still show the modal so the user can proceed.
-                  // (already shown)
-                }
-              });
+                const alreadyVisible = modalEl.classList.contains('show') || modalEl.style.display === 'block';
+
+                // When bootstrap is available, show via Bootstrap to ensure focus trapping etc.
+                const tryBootstrapShow = () => {
+                  if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return false;
+
+                  // Remove our manual backdrop to prevent double-backdrop when bootstrap shows
+                  const manualBackdrop = document.getElementById('storeSelectionBackdrop');
+                  if (manualBackdrop) manualBackdrop.remove();
+
+                  const modal = bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false });
+                  if (!alreadyVisible) modal.show();
+                  return true;
+                };
+
+                // Try now, then retry for a short time until bootstrap loads.
+                if (tryBootstrapShow()) return;
+                let tries = 0;
+                const tick = () => {
+                  tries += 1;
+                  if (tryBootstrapShow() || tries > 60) return; // ~1s at 60fps
+                  requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+
+                // Optional safety check: if backend says store isn't required (unexpected), hide.
+                fetch('/api/check-store-required', { method: 'GET' })
+                  .then(r => r.json())
+                  .then(payload => {
+                    if (payload && payload.requires_store === false) {
+                      modalEl.classList.remove('show');
+                      modalEl.style.display = 'none';
+                      document.body.classList.remove('modal-open');
+                      const manualBackdrop = document.getElementById('storeSelectionBackdrop');
+                      if (manualBackdrop) manualBackdrop.remove();
+                    }
+                  })
+                  .catch(() => {});
+              })();
             </script>
 
             <!-- IMMEDIATE STORE SETTING SCRIPT -->
