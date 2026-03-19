@@ -12353,7 +12353,7 @@ const TagManager = {
             // Desktop/localhost should respond quickly with fast_load=1
             const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for web (was 1, but timeouts need retries)
             const maxProcessingRetries = isWebClient ? 2 : 2; // Allow 2 processing retries for web
-            const fetchTimeout = isWebClient ? 60000 : 45000; // 60s timeout for web clients (large datasets), 45s for desktop
+            const fetchTimeout = isWebClient ? 120000 : 45000; // 120s timeout for web clients (POSaBit cold fetch can take 30-60s), 45s for desktop
             
             let retryCount = 0;
             let processingRetryCount = 0;
