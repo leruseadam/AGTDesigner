@@ -8263,6 +8263,29 @@ class ExcelProcessor:
                 elif pd.isna(value):
                     return default
                 return str(value).strip()
+
+            def get_manual_lineage_from_row() -> Tuple[Optional[str], Optional[str]]:
+                """
+                Prefer explicit manual lineage edit columns when present.
+                Falls back to standard Lineage only if no explicit manual column is set.
+                """
+                lineage_candidate_columns = [
+                    'Lineage Manual Edit',
+                    'Manual Lineage',
+                    'Lineage Override',
+                    'CurrentLineage',
+                    'Sovereign Lineage',
+                    'sovereign_lineage',
+                    'Lineage',
+                ]
+                for col in lineage_candidate_columns:
+                    raw = get_val(col)
+                    if not raw:
+                        continue
+                    normalized = normalize_lineage(raw)
+                    if normalized and str(normalized).strip().upper() in VALID_LINEAGES:
+                        return normalized, col
+                return None, None
             
             # Use the dynamically detected product name column
             product_name_col = 'Product Name*'
@@ -8426,18 +8449,24 @@ class ExcelProcessor:
                 'weightWithUnits': weight_with_units,
                 'displayName': product_name
             }
+            manual_lineage, manual_lineage_source = get_manual_lineage_from_row()
+
             # --- Filtering logic ---
             product_brand = str(tag['productBrand']).strip().lower()
             product_type = str(tag['productType']).strip().lower().replace('  ', ' ')
             weight = str(tag['weight']).strip().lower()
 
-            # CRITICAL: Excel lineage inference REMOVED - lineage ONLY comes from database
-            # Excel lineage column and name-based inference are completely ignored
-            # Lineage will be populated by _align_tags_with_db_lineage() or background fetch
-            lineage = 'MIXED'  # Placeholder - will be replaced by database lineage
+            # Respect manual lineage edit column values when provided.
+            # If no manual lineage value is present, lineage can still be aligned from database later.
+            lineage = manual_lineage or 'MIXED'
 
             tag['Lineage'] = lineage
             tag['lineage'] = lineage
+            if manual_lineage:
+                tag['manual_lineage'] = manual_lineage
+                tag['manual_lineage_source'] = manual_lineage_source or 'Lineage'
+                # Mark as sovereign-style lineage so DB alignment can preserve it.
+                tag['sovereign_lineage'] = manual_lineage
 
             # Filter out samples and invalid products
             product_name_lower = product_name.lower()

@@ -9141,6 +9141,21 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
             name = tag.get('Product Name*') or tag.get('ProductName')
             if not name:
                 continue
+            manual_lineage = (tag.get('manual_lineage') or '').strip().upper() if isinstance(tag.get('manual_lineage'), str) else ''
+            manual_source = tag.get('manual_lineage_source')
+            if manual_lineage:
+                # Preserve explicit user-edited lineage columns from Excel/UI.
+                # Do not overwrite with DB alignment when a manual lineage source is present.
+                tag['Lineage'] = manual_lineage
+                tag['Lineage*'] = manual_lineage
+                tag['lineage'] = manual_lineage.lower()
+                tag['currentLineage'] = manual_lineage
+                tag['canonical_lineage'] = manual_lineage
+                tag['sovereign_lineage'] = manual_lineage
+                if manual_source:
+                    tag['lineage_source'] = f"manual:{manual_source}"
+                aligned_count += 1
+                continue
             # Try exact match first (like docx generation), then normalized, then lowercase
             lineage_info = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
 

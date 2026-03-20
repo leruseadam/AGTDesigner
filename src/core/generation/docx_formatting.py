@@ -248,8 +248,8 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                                             # Also set at XML level
                                             pPr = paragraph._element.get_or_add_pPr()
                                             pPr.set(qn('w:jc'), 'center')
-                                        logger.info(f"✅ CENTERED hint-only cell (non-classic type)")
-                                    logger.info(f"LINEAGE COLOR (hint-only cell): Applied {hint_upper} color #{color_candidate}")
+                                        logger.debug(f"✅ CENTERED hint-only cell (non-classic type)")
+                                    logger.debug(f"LINEAGE COLOR (hint-only cell): Applied {hint_upper} color #{color_candidate}")
                                     colors_applied += 1
                                     continue
     
@@ -330,7 +330,7 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                             if color_candidate:
                                 color_hex = color_candidate
                                 lineage_matched = f"{hint_upper} (from hint token)"
-                                logger.info(f"✅ LINEAGE COLOR FROM HINT: '{hint_upper}' -> #{color_hex} (hint_key='{hint_key}')")
+                                logger.debug(f"✅ LINEAGE COLOR FROM HINT: '{hint_upper}' -> #{color_hex} (hint_key='{hint_key}')")
                             else:
                                 logger.warning(f"⚠️ HINT TOKEN FOUND BUT NO COLOR MATCH: '{hint_upper}' (tried: '{hint_upper}', '{hint_key}')")
     
@@ -345,7 +345,7 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                             else:
                                 color_hex = COLORS['MIXED']
                                 lineage_matched = "MIXED (non-classic)"
-                            logger.info(f"Non-classic type color: {lineage_matched}")
+                            logger.debug(f"Non-classic type color: {lineage_matched}")
                         elif "PARAPHERNALIA" in text:
                             color_hex = COLORS['PARA']
                             lineage_matched = "PARAPHERNALIA"
@@ -387,7 +387,7 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
     
                         # Log lineage color application
                         if color_hex:
-                            logger.info(f"LINEAGE COLOR: '{text[:50]}...' -> {lineage_matched} -> #{color_hex}")
+                            logger.debug(f"LINEAGE COLOR: '{text[:50]}...' -> {lineage_matched} -> #{color_hex}")
                             colors_applied += 1
                         else:
                             logger.debug(f"NO LINEAGE MATCH: '{text[:50]}' (classic: {is_classic_type}, strain_cbd: {is_product_strain_cbd})")
@@ -453,7 +453,7 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                                             sp.set(qn('w:before'), before_twips)
                                             sp.set(qn('w:after'), after_twips)
                                             sp.set(qn('w:lineRule'), 'auto')
-                                        logger.info(f"✅ CENTERED+SPACING non-classic brand cell (color applied): '{original_text[:50]}'")
+                                        logger.debug(f"✅ CENTERED+SPACING non-classic brand cell (color applied): '{original_text[:50]}'")
                                     except Exception as e:
                                         logger.warning(f"⚠️ Failed to set alignment/spacing: {e}")
 
@@ -464,7 +464,7 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                         if has_productbrand_center_marker:
                             # Get original cell text for debugging (before any processing)
                             cell_text_debug = cell.text[:100] if cell.text else ""
-                            logger.info(f"🔍 CENTERING CHECK: has_productbrand_center_marker=True, is_classic_type={is_classic_type}, cell_text='{cell_text_debug}'")
+                            logger.debug(f"🔍 CENTERING CHECK: has_productbrand_center_marker=True, is_classic_type={is_classic_type}, cell_text='{cell_text_debug}'")
                             for paragraph in cell.paragraphs:
                                 if not is_classic_type:
                                     # Non-classic types: center brand text and match lineage paragraph spacing
@@ -488,10 +488,9 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                                             spacing.set(qn('w:before'), before_twips)
                                             spacing.set(qn('w:after'), after_twips)
                                             spacing.set(qn('w:lineRule'), 'auto')
-                                        logger.info(f"✅ CENTERED non-classic brand text (has_productbrand_center_marker=True, is_classic_type=False, text='{cell_text_debug[:50]}')")
+                                        logger.debug(f"✅ CENTERED non-classic brand text (has_productbrand_center_marker=True, is_classic_type=False, text='{cell_text_debug[:50]}')")
                                     except Exception as e:
                                         logger.warning(f"⚠️ Failed to set XML alignment: {e}, using Python alignment only")
-                                        logger.info(f"✅ CENTERED non-classic brand text (Python level only, text='{cell_text_debug[:50]}')")
                                 else:
                                     # Classic types: keep left-aligned (explicitly set to None/left)
                                     paragraph.alignment = None  # or WD_ALIGN_PARAGRAPH.LEFT
@@ -693,7 +692,7 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                                 sp.set(qn('w:before'), before_twips)
                                 sp.set(qn('w:after'), after_twips)
                                 sp.set(qn('w:lineRule'), 'auto')
-                                logger.info(f"✅ FINAL CENTERING PASS: Centered brand cell '{cell_text[:50]}' (has_color={has_color}, looks_like_brand={looks_like_brand})")
+                                logger.debug(f"✅ FINAL CENTERING PASS: Centered brand cell '{cell_text[:50]}' (has_color={has_color}, looks_like_brand={looks_like_brand})")
                             except Exception as e:
                                 logger.warning(f"⚠️ Failed to set XML alignment in final pass: {e}")
         

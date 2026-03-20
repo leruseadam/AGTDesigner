@@ -1479,8 +1479,10 @@ class TemplateProcessor:
                 self.logger.info(f"🔍 LABEL RENDER: Chunking is fully disabled. All {len(records)} records will be processed in one pass.")
                 self.start_time = time.time()
                 self.chunk_count = 1
-                overall_order = [record.get('ProductName', 'Unknown') for record in records]
-                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
+                self.logger.info(f"Processing {len(records)} records")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    overall_order = [record.get('ProductName', 'Unknown') for record in records]
+                    self.logger.debug(f"Processing records in order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
                 
                 # DEDUPLICATION: Skip entirely for preroll - generate_preroll_tags already produces
@@ -1516,8 +1518,10 @@ class TemplateProcessor:
                     self.logger.debug(f"Processing {len(records)} records for template '{self.template_type}' (chunk_size={self.chunk_size})")
                 self.start_time = time.time()
                 self.chunk_count = 0
-                overall_order = [record.get('ProductName', 'Unknown') for record in records]
-                self.logger.info(f"Processing {len(records)} records in overall order: {overall_order}")
+                self.logger.info(f"Processing {len(records)} records")
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    overall_order = [record.get('ProductName', 'Unknown') for record in records]
+                    self.logger.debug(f"Processing records in order: {overall_order}")
                 has_json_products = any(record.get('Source', '').startswith('JSON') or record.get('Source', '').startswith('Database Priority') for record in records)
 
                 # DEDUPLICATION: Skip entirely for preroll - generate_preroll_tags already produces
