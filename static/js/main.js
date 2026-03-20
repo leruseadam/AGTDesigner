@@ -11962,8 +11962,12 @@ const TagManager = {
 
             verboseLog('Prefetching lite available tags for instant first render...');
             const controller = new AbortController();
-            // Keep this timeout short – we only want it if it is truly fast
-            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            // Web: allow slightly longer — lite can still return quickly from POS disk/memory cache
+            const isWebPrefetch = window.location.hostname.includes('pythonanywhere.com') ||
+                window.location.hostname.includes('agtpricetags.com') ||
+                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            const litePrefetchMs = isWebPrefetch ? 8000 : 3000;
+            const timeoutId = setTimeout(() => controller.abort(), litePrefetchMs);
 
             const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`, {
                 signal: controller.signal

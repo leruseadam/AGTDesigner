@@ -187,6 +187,14 @@ def _is_preserved_disk_cache_filename(filename):
     return False
 
 
+# Web /api/web/available-tags: use fast batched lineage (_quick_align_tags_lineage) instead of
+# full DB enrichment (_align_tags_with_db_lineage) for Excel-backed lists. Set WEB_TAGS_FAST_LINEAGE=0
+# to restore slower full enrichment on tag load. POS paths always use quick align for speed.
+WEB_TAGS_FAST_LINEAGE = os.environ.get('WEB_TAGS_FAST_LINEAGE', '1').strip().lower() in (
+    '1', 'true', 'yes', 'on',
+)
+
+
 # Memory monitoring and optimization
 def get_memory_usage():
     """Get current memory usage in MB."""
@@ -8767,8 +8775,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         # Collect product names for lookup (always include; alignment now force-overwrites)
         product_names = []
         for t in aligned_tags:
-            if isinstance(t, dict) and t.get('Product Name*'):
-                product_names.append(t.get('Product Name*'))
+            if not isinstance(t, dict):
+                continue
+            _pn = t.get('Product Name*') or t.get('ProductName')
+            if _pn:
+                product_names.append(_pn)
         
         if not product_names:
             logging.debug("⚡ No products need lineage alignment")
@@ -17578,10 +17589,11 @@ def get_web_available_tags():
                         logging.info(f"WEB: Serving {len(cached_rows)} POSaBit products from cache")
                         safe_posabit_tags = make_json_safe(cached_rows)
                         try:
-                            safe_posabit_tags = _align_tags_with_db_lineage(
-                                safe_posabit_tags, store_for_posabit,
-                                skip_if_aligned=False, force_overwrite=True
-                            )
+                            # Fast batched lineage only — full _align_tags_with_db_lineage is too slow for 2k–5k SKUs on web
+                            if store_for_posabit:
+                                safe_posabit_tags = _quick_align_tags_lineage(
+                                    safe_posabit_tags, store_for_posabit
+                                )
                         except Exception:
                             pass
                         try:
@@ -17614,10 +17626,10 @@ def get_web_available_tags():
                     if _web_cold_rows:
                         safe_posabit_tags = make_json_safe(_web_cold_rows)
                         try:
-                            safe_posabit_tags = _align_tags_with_db_lineage(
-                                safe_posabit_tags, store_for_posabit,
-                                skip_if_aligned=False, force_overwrite=True
-                            )
+                            if store_for_posabit:
+                                safe_posabit_tags = _quick_align_tags_lineage(
+                                    safe_posabit_tags, store_for_posabit
+                                )
                         except Exception:
                             pass
                         try:
@@ -17686,10 +17698,22 @@ def get_web_available_tags():
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and excel_tags:
                 try:
-                    logging.info(f"🔄 WEB: Aligning {len(excel_tags)} tags with database lineage (web fast-path)...")
-                    excel_tags = _align_tags_with_db_lineage(excel_tags, store_name, skip_if_aligned=False, force_overwrite=True)
-                    matched_count = len([t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')])
-                    logging.info(f"✅ WEB: Aligned {matched_count} tags with database lineage")
+                    if WEB_TAGS_FAST_LINEAGE:
+                        logging.info(
+                            f"🔄 WEB: Quick-aligning {len(excel_tags)} tags (WEB_TAGS_FAST_LINEAGE=1)..."
+                        )
+                        excel_tags = _quick_align_tags_lineage(excel_tags, store_name)
+                    else:
+                        logging.info(
+                            f"🔄 WEB: Full DB aligning {len(excel_tags)} tags (WEB_TAGS_FAST_LINEAGE=0)..."
+                        )
+                        excel_tags = _align_tags_with_db_lineage(
+                            excel_tags, store_name, skip_if_aligned=False, force_overwrite=True
+                        )
+                    matched_count = len(
+                        [t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')]
+                    )
+                    logging.info(f"✅ WEB: Lineage fields set on {matched_count} tags")
                 except Exception as align_err:
                     logging.warning(f"WEB: Lineage alignment failed, returning Excel tags: {align_err}")
                     import traceback
@@ -23509,8 +23533,10 @@ def get_available_tags_lite():
         start_time = time.time()
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
         
-        # Only try Excel processor - no database queries
-        excel_processor = get_excel_processor()
+        # Prefer session-scoped processor (uploaded file) then global
+        excel_processor = get_session_excel_processor()
+        if excel_processor is None:
+            excel_processor = get_excel_processor()
         if excel_processor is not None and excel_processor.df is not None and not excel_processor.df.empty:
             try:
                 # CRITICAL: Skip enrichment for maximum speed in lite mode
@@ -23566,8 +23592,41 @@ def get_available_tags_lite():
             except Exception as e:
                 logging.error(f"Excel processor error in lite mode: {e}")
         
+        # POSaBit: serve from memory/disk cache only (no network) for instant first paint on web
+        try:
+            from src.core.data.posabit_client import (
+                is_posabit_configured,
+                is_posabit_products_enabled,
+                get_cached_product_rows,
+            )
+
+            if is_posabit_configured() or is_posabit_products_enabled():
+                store_pb = get_current_store_name(allow_fallback=True)
+                cached_rows = get_cached_product_rows(store_name=store_pb)
+                if cached_rows:
+                    lite_tags = [dict(t) if isinstance(t, dict) else t for t in cached_rows]
+                    store_align = get_current_store_name(allow_fallback=False)
+                    if store_align:
+                        try:
+                            lite_tags = _quick_align_tags_lineage(lite_tags, store_align)
+                        except Exception as _lite_al:
+                            logging.debug(f"Lite POS lineage align skipped: {_lite_al}")
+                    safe_lite = make_json_safe(lite_tags)
+                    elapsed = (time.time() - start_time) * 1000
+                    logging.info(
+                        f"✅ Lite tags (POS cache) returned {len(safe_lite)} tags ({elapsed:.1f}ms)"
+                    )
+                    return jsonify({
+                        'tags': safe_lite,
+                        'total_count': len(safe_lite),
+                        'source': 'posabit-lite-cache',
+                        'limited': False,
+                    })
+        except Exception as _lite_pb:
+            logging.debug(f"Lite POS path skipped: {_lite_pb}")
+
         # No Excel file - return empty with message to upload
-        logging.info("Lite: No Excel data available - user must upload file")
+        logging.info("Lite: No Excel data and no warm POS cache")
         return jsonify({
             'tags': [],
             'total_count': 0,
