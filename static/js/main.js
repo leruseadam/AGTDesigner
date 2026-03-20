@@ -1568,7 +1568,7 @@ const TagManager = {
         if (!Array.isArray(tags) || tags.length === 0) return false;
         const withLineage = tags.filter(t => {
             if (!t || typeof t !== 'object') return false;
-            const L = (t.sovereign_lineage || t.canonical_lineage || t.currentLineage || t.Lineage || '').toString().trim();
+            const L = (t.manual_lineage || t.sovereign_lineage || t.canonical_lineage || t.currentLineage || t.Lineage || '').toString().trim();
             return L !== '';
         });
         const ratio = withLineage.length / tags.length;
@@ -1801,13 +1801,14 @@ const TagManager = {
                 : false);
             
             if (isClassicType) {
-                // Get the effective lineage (prioritize sovereign_lineage > canonical_lineage > currentLineage > Lineage)
-                let effectiveLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || '';
+                // Get the effective lineage (manual edits must win over cached DB fields)
+                let effectiveLineage = tag.manual_lineage || tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || '';
                 const normalizedLineage = String(effectiveLineage).trim().toUpperCase();
+                const hasManualLineage = Boolean(tag.manual_lineage || tag.manual_lineage_source);
                 
                 // CRITICAL: Fix MIXED/THC in ANY lineage field (including canonical_lineage from database)
                 // This ensures database lineage is corrected IMMEDIATELY, before any rendering
-                if (normalizedLineage === 'MIXED' || normalizedLineage === 'THC') {
+                if (!hasManualLineage && (normalizedLineage === 'MIXED' || normalizedLineage === 'THC')) {
                     const fixedLineage = 'HYBRID';
                     
                     // Update ALL lineage fields with the fixed value (including canonical_lineage)
@@ -18783,7 +18784,7 @@ const TagManager = {
     },
 
     setupFilterEventListeners() {
-        const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['productNameFilter', 'manifestRefFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
         
         verboseLog('Setting up Mac-like fast filter event listeners...');
         
@@ -18814,6 +18815,7 @@ const TagManager = {
             // Update filter state immediately
             const filterTypeMap = {
                 'productName': 'productName',
+                'manifestRef': 'manifestRef',
                 'vendor': 'vendor',
                 'brand': 'brand',
                 'productType': 'productType',
@@ -18959,11 +18961,10 @@ const TagManager = {
                     }
                 };
                 
-                // Text inputs need input events for instant filtering
-                if (filterId === 'productNameFilter') {
+                // Text inputs need input events for instant filtering; dropdowns use change
+                if (filterId === 'productNameFilter' || filterId === 'manifestRefFilter') {
                     filterElement.addEventListener('input', filterElement._filterChangeHandler);
                 } else {
-                    // Dropdowns use change
                     filterElement.addEventListener('change', filterElement._filterChangeHandler);
                 }
                 
@@ -19449,6 +19450,8 @@ const TagManager = {
             
             // Reset filter state to defaults
             this.state.filters = {
+                productName: '',
+                manifestRef: '',
                 vendor: 'All',
                 brand: 'All',
                 productType: 'All',

@@ -5950,7 +5950,24 @@
                     <div class="d-flex align-items-center gap-2">
                       <span class="store-label">Store:</span>
                       <span class="current-store-display" id="currentStoreDisplay" style="{% if user_has_store %}color: #4ade80;{% else %}color: #f87171;{% endif %}">{% if user_has_store and current_store %}{{ current_store|replace("_", " ") }}{% else %}No store selected{% endif %}</span>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="openStoreSelection()" title="Change store">Change</button>
                     </div>
+                    {% if stores and stores|length > 1 %}
+                    <div class="d-flex align-items-center gap-2">
+                      <label for="storeSwitcher" class="store-label mb-0">Switch:</label>
+                      <select
+                        id="storeSwitcher"
+                        class="form-select form-select-sm"
+                        style="min-width: 190px; background: rgba(255,255,255,0.12); border-color: rgba(160,132,232,0.45); color: #fff;"
+                        onchange="if (this.value) selectStore(this.value)"
+                      >
+                        <option value="" {% if not current_store %}selected{% endif %}>Select store...</option>
+                        {% for store in stores %}
+                          <option value="{{ store }}" {% if current_store == store %}selected{% endif %}>{{ store|replace("_", " ") }}</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    {% endif %}
                     <div class="d-flex align-items-center gap-2" id="dataSourceIndicatorWrap">
                       <span class="store-label">Data source:</span>
                       <span id="dataSourceIndicator" class="current-store-display" style="color: #a084e8;">Excel</span>
@@ -14131,6 +14148,21 @@
   </script>
 
   <script>
+    window.openStoreSelection = function() {
+      const modalEl = document.getElementById('storeSelectionModal');
+      const fallback = document.getElementById('storeSelectionFallback');
+      const shield = document.getElementById('storeSelectionShield');
+      if (modalEl) {
+        modalEl.style.display = 'block';
+        modalEl.classList.add('show');
+        modalEl.setAttribute('aria-hidden', 'false');
+      }
+      if (shield) shield.style.display = 'block';
+      if (fallback) fallback.style.display = 'block';
+      document.body.classList.add('modal-open');
+      document.body.style.overflow = 'hidden';
+    };
+
     window.selectStore = async function(storeValue) {
       try {
         const r = await fetch('/api/set-store', {
