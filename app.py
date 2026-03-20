@@ -184,6 +184,9 @@ def _is_preserved_disk_cache_filename(filename):
         return True
     if lower.startswith('posabit_products_') and lower.endswith('.json'):
         return True
+    # Label generation DOCX bytes cache (fast_generation.py) — same idea as POS disk cache
+    if lower.startswith('gdoc_') and lower.endswith('.bin'):
+        return True
     return False
 
 

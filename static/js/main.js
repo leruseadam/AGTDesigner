@@ -6542,9 +6542,9 @@ const TagManager = {
                 verboseLog('Select All Available checkbox changed:', e.target.checked);
                 const isChecked = e.target.checked;
 
-                // Operate on ALL tags in state (not just rendered DOM checkboxes)
-                const allAvailableTags = this.state.tags || [];
-                verboseLog('Select All: operating on', allAvailableTags.length, 'tags from state');
+                // Operate on FILTERED tags if a filter is active, otherwise all tags
+                const allAvailableTags = this.state.activeFilteredTags || this.state.tags || [];
+                verboseLog('Select All: operating on', allAvailableTags.length, 'tags from state (filtered:', !!this.state.activeFilteredTags, ')');
 
                 allAvailableTags.forEach(tag => {
                     const name = tag['Product Name*'];
@@ -17742,9 +17742,9 @@ const TagManager = {
                 verboseLog('Select All Available checkbox changed:', e.target.checked);
                 const isChecked = e.target.checked;
 
-                // Operate on ALL tags in state (not just rendered DOM checkboxes)
-                const allAvailableTags = this.state.tags || [];
-                verboseLog('Select All: operating on', allAvailableTags.length, 'tags from state');
+                // Operate on FILTERED tags if a filter is active, otherwise all tags
+                const allAvailableTags = this.state.activeFilteredTags || this.state.tags || [];
+                verboseLog('Select All: operating on', allAvailableTags.length, 'tags from state (filtered:', !!this.state.activeFilteredTags, ')');
 
                 allAvailableTags.forEach(tag => {
                     const name = tag['Product Name*'];

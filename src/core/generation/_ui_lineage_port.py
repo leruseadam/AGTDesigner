@@ -5,6 +5,24 @@ from typing import Any, Dict
 from src.core.constants import CLASSIC_TYPES
 
 
+def canonical_product_type_for_classic_check(lower_pt: str) -> str:
+    """
+    Map authoritative Product Type* strings to a key that exists in CLASSIC_TYPES.
+    Uses **only** the type field (never product name) so we don't misclassify
+    dessert/fruit strain names as something else.
+    """
+    t = (lower_pt or "").strip().lower()
+    if t in ("unknown", "not_found", "nan", "none"):
+        return ""
+    if "disposable vape" in t or ("disposable" in t and "vape" in t):
+        return "disposable"
+    if "disposable cart" in t:
+        return "vape cartridge"
+    if "vaporizer" in t or "vapouriser" in t or "vapourizer" in t:
+        return "disposable"
+    return t
+
+
 @lru_cache(maxsize=512)
 def _lookup_product_type_from_db(json_token: str) -> str:
     """Cached DB lookup for product type by JSON token. Opens connection once per unique token."""
@@ -96,19 +114,17 @@ def compute_display_lineage_like_ui(record: Dict[str, Any]) -> str:
             if result:
                 lower_product_type = result
 
-    # Classic vs nonclassic
-    is_classic_type = lower_product_type in CLASSIC_TYPES
+    # Classic vs nonclassic: **Product Type* only** (+ canonical aliases for that field).
+    canonical_pt = canonical_product_type_for_classic_check(lower_product_type)
+    is_classic_type = canonical_pt in CLASSIC_TYPES
     is_paraphernalia_type = lower_product_type == "paraphernalia"
 
-    # Frontend rule: classic types never use MIXED/THC, convert to HYBRID
-    if is_classic_type and lineage in {"MIXED", "THC"}:
-        lineage = "HYBRID"
+    # Do not rewrite explicit lineage from product-name heuristics — trust lineage fields from data.
 
     # Default lineage when completely missing
     if not lineage:
         lineage = "HYBRID" if is_classic_type else "MIXED"
 
-    # Prepare strings used by CBD/CBG indicator logic (check all common product name keys)
     name_str = str(
         record.get("Product Name*")
         or record.get("ProductName")
@@ -184,7 +200,7 @@ def compute_display_lineage_like_ui(record: Dict[str, Any]) -> str:
     is_classic_lineage = lineage in classic_lineages
     is_nonclassic = not is_classic_type
 
-    # Paraphernalia override
+    # Paraphernalia override (driven by Product Type*, not name parsing)
     if is_paraphernalia_type:
         return "PARAPHERNALIA"
 

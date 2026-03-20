@@ -1,24 +1,60 @@
 """
 Fast Tag Generation Module
 Optimizes label generation for speed using caching, batching, and parallel processing
+
+Disk cache (uploads/cache/gdoc_<md5>.bin): survives PythonAnywhere worker reloads, like POS disk cache.
+Env:
+  GENERATION_DISK_CACHE=1|0          (default 1)
+  GENERATION_DISK_CACHE_TTL=86400    seconds (default 24h)
+  GENERATION_MEMORY_CACHE_TTL=900    seconds for dict fallback / reference for ops (default 15m)
+  GENERATION_MEMORY_CACHE_MAX=250    max in-memory entries when not using cachetools (default 250)
+  With cachetools: TTL and maxsize follow GENERATION_MEMORY_CACHE_TTL / GENERATION_MEMORY_CACHE_MAX
 """
 
 import logging
+import os
 import time
 import hashlib
 import json
 from io import BytesIO
 import traceback
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
 from docx import Document
 
 logger = logging.getLogger(__name__)
 
+# --- Tunable cache (env) ---
+GENERATION_DISK_CACHE = os.environ.get("GENERATION_DISK_CACHE", "1").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+try:
+    GENERATION_DISK_CACHE_TTL = int(os.environ.get("GENERATION_DISK_CACHE_TTL", "86400"))
+except ValueError:
+    GENERATION_DISK_CACHE_TTL = 86400
+try:
+    GENERATION_MEMORY_CACHE_TTL = int(os.environ.get("GENERATION_MEMORY_CACHE_TTL", "900"))
+except ValueError:
+    GENERATION_MEMORY_CACHE_TTL = 900
+try:
+    GENERATION_MEMORY_CACHE_MAX = int(os.environ.get("GENERATION_MEMORY_CACHE_MAX", "250"))
+except ValueError:
+    GENERATION_MEMORY_CACHE_MAX = 250
+
+# Disk directory: project_root/uploads/cache (same tree as POS / tag JSON caches)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_GENERATION_DISK_DIR = _PROJECT_ROOT / "uploads" / "cache"
+_MAX_DISK_DOC_BYTES = 80 * 1024 * 1024  # skip disk if DOCX larger than this
+
 # Try to import cachetools, fall back to simple dict if not available
 try:
     from cachetools import TTLCache
-    _generation_cache = TTLCache(maxsize=100, ttl=300)  # 5-minute cache
+
+    _generation_cache = TTLCache(
+        maxsize=max(50, GENERATION_MEMORY_CACHE_MAX),
+        ttl=max(60, GENERATION_MEMORY_CACHE_TTL),
+    )
     HAS_CACHETOOLS = True
 except ImportError:
     logger.warning("cachetools not available, using simple dict cache (install with: pip install cachetools)")
@@ -27,6 +63,50 @@ except ImportError:
 
 _template_buffer_cache = {}  # Persistent cache for template buffers
 _cache_timestamps = {}  # Track cache entry times for manual TTL
+
+
+def _generation_disk_path(cache_key: str) -> Path:
+    safe = "".join(c for c in cache_key if c in "0123456789abcdef")
+    if len(safe) != 32:
+        safe = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
+    return _GENERATION_DISK_DIR / f"gdoc_{safe}.bin"
+
+
+def _read_generation_disk(cache_key: str) -> Optional[bytes]:
+    if not GENERATION_DISK_CACHE:
+        return None
+    try:
+        path = _generation_disk_path(cache_key)
+        if not path.is_file():
+            return None
+        age = time.time() - path.stat().st_mtime
+        if age > GENERATION_DISK_CACHE_TTL:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return None
+        data = path.read_bytes()
+        if not data or len(data) > _MAX_DISK_DOC_BYTES:
+            return None
+        return data
+    except OSError as e:
+        logger.debug("Generation disk read skipped: %s", e)
+        return None
+
+
+def _write_generation_disk(cache_key: str, doc_bytes: bytes) -> None:
+    if not GENERATION_DISK_CACHE or not doc_bytes:
+        return
+    if len(doc_bytes) > _MAX_DISK_DOC_BYTES:
+        return
+    try:
+        _GENERATION_DISK_DIR.mkdir(parents=True, exist_ok=True)
+        path = _generation_disk_path(cache_key)
+        path.write_bytes(doc_bytes)
+        logger.debug("Generation disk cache write: %s (%s bytes)", path.name, len(doc_bytes))
+    except OSError as e:
+        logger.debug("Generation disk write skipped: %s", e)
 
 
 # Helper: normalize lineage when used in cache keys to avoid invisible character
@@ -79,7 +159,7 @@ class FastGenerationEngine:
         parts = []
         for r in records:
             name = str(r.get('Product Name*', r.get('ProductName', '')) or '')
-            ptype = str(r.get('ProductType', '') or '')
+            ptype = str(r.get('ProductType', r.get('Product Type*', '')) or '')
             # Normalize lineage for cache key stability
             lineage = _clean_lineage_for_cache(r.get('Lineage', '') or '')
             # Normalize lineage to remove soft-hyphen and non-breaking space
@@ -89,12 +169,25 @@ class FastGenerationEngine:
                 lineage = ' '.join(lineage.split()).strip()
             # CRITICAL: Include _group_key for preroll templates to ensure unique cache per product
             group_key = str(r.get('_group_key', '') or '') if template_type == 'preroll' else ''
-            parts.append(f"{name}||{ptype}||{lineage}||{group_key}")
+            # Price + weight affect label output — must bust cache when menu/Excel changes
+            price = _clean_lineage_for_cache(
+                str(r.get('Price*', r.get('Price', '')) or "")
+            )[:48]
+            wt = _clean_lineage_for_cache(
+                str(
+                    r.get('Weight*')
+                    or r.get('CombinedWeight')
+                    or r.get('WeightUnits')
+                    or r.get('DescAndWeight')
+                    or ""
+                )
+            )[:80]
+            parts.append(f"{name}||{ptype}||{lineage}||{group_key}||{price}||{wt}")
         parts.append(f"TEMPLATE||{template_type}")
         parts.append(f"SCALE||{scale_factor}")
         # IMPORTANT: Bump cache version whenever lineage/coloring logic changes
         # so stale DOCX generations (old CBD coloring rules) are not reused.
-        parts.append("CACHE_VERSION||CBD_FIX_V8_LINEAGE_COLOR_ALWAYS")
+        parts.append("CACHE_VERSION||V9_DISK_KEY_PRICE_WEIGHT")
         cache_str = '\n'.join(parts)
         return hashlib.md5(cache_str.encode('utf-8')).hexdigest()
     
@@ -119,11 +212,27 @@ class FastGenerationEngine:
         
         # Check cache first
         cache_key = self._get_cache_key(records, template_type, scale_factor)
+
+        disk_bytes = _read_generation_disk(cache_key)
+        if disk_bytes:
+            self.cache_hits += 1
+            logger.info(
+                "⚡ GENERATION DISK CACHE HIT: %s labels (key …%s)",
+                len(records),
+                cache_key[-8:],
+            )
+            try:
+                _generation_cache[cache_key] = disk_bytes
+            except Exception:
+                pass
+            if not HAS_CACHETOOLS:
+                _cache_timestamps[cache_key] = time.time()
+            return Document(BytesIO(disk_bytes))
         
         # Handle manual TTL for simple dict cache
         if not HAS_CACHETOOLS and cache_key in _generation_cache:
             cache_age = time.time() - _cache_timestamps.get(cache_key, 0)
-            if cache_age > 300:  # 5 minute TTL
+            if cache_age > GENERATION_MEMORY_CACHE_TTL:
                 logger.info(f"⚡ CACHE EXPIRED: Removing stale entry (age: {cache_age:.1f}s)")
                 del _generation_cache[cache_key]
                 del _cache_timestamps[cache_key]
@@ -162,13 +271,14 @@ class FastGenerationEngine:
         buffer = BytesIO()
         final_doc.save(buffer)
         buffer.seek(0)
-        _generation_cache[cache_key] = buffer.getvalue()
+        raw = buffer.getvalue()
+        _generation_cache[cache_key] = raw
+        _write_generation_disk(cache_key, raw)
 
         # Track timestamp for manual TTL
         if not HAS_CACHETOOLS:
             _cache_timestamps[cache_key] = time.time()
-            # Clean up old entries if cache is too large
-            if len(_generation_cache) > 100:
+            if len(_generation_cache) > GENERATION_MEMORY_CACHE_MAX:
                 self._cleanup_cache()
 
         generation_time = time.time() - start_time
@@ -193,10 +303,26 @@ class FastGenerationEngine:
         # Check cache first
         cache_key = self._get_cache_key(records, template_type, scale_factor)
 
+        disk_bytes = _read_generation_disk(cache_key)
+        if disk_bytes:
+            self.cache_hits += 1
+            logger.info(
+                "⚡ GENERATION DISK CACHE HIT (bytes): %s labels (key …%s)",
+                len(records),
+                cache_key[-8:],
+            )
+            try:
+                _generation_cache[cache_key] = disk_bytes
+            except Exception:
+                pass
+            if not HAS_CACHETOOLS:
+                _cache_timestamps[cache_key] = time.time()
+            return disk_bytes
+
         # Handle manual TTL for simple dict cache
         if not HAS_CACHETOOLS and cache_key in _generation_cache:
             cache_age = time.time() - _cache_timestamps.get(cache_key, 0)
-            if cache_age > 300:  # 5 minute TTL
+            if cache_age > GENERATION_MEMORY_CACHE_TTL:
                 logger.info(f"⚡ CACHE EXPIRED: Removing stale entry (age: {cache_age:.1f}s)")
                 del _generation_cache[cache_key]
                 del _cache_timestamps[cache_key]
@@ -225,10 +351,11 @@ class FastGenerationEngine:
         buffer.seek(0)
         doc_bytes = buffer.getvalue()
         _generation_cache[cache_key] = doc_bytes
+        _write_generation_disk(cache_key, doc_bytes)
 
         if not HAS_CACHETOOLS:
             _cache_timestamps[cache_key] = time.time()
-            if len(_generation_cache) > 100:
+            if len(_generation_cache) > GENERATION_MEMORY_CACHE_MAX:
                 self._cleanup_cache()
 
         return doc_bytes
@@ -241,7 +368,7 @@ class FastGenerationEngine:
         current_time = time.time()
         expired_keys = [
             key for key, timestamp in _cache_timestamps.items()
-            if current_time - timestamp > 300
+            if current_time - timestamp > GENERATION_MEMORY_CACHE_TTL
         ]
         
         for key in expired_keys:
@@ -458,7 +585,23 @@ def update_generation_stats(num_labels: int, generation_time: float, cache_hit: 
 
 
 def clear_all_caches():
-    """Clear all generation caches"""
-    _generation_cache.clear()
+    """Clear all generation caches (memory + on-disk gdoc_*.bin)."""
+    try:
+        _generation_cache.clear()
+    except Exception:
+        pass
     _template_buffer_cache.clear()
-    logger.info("⚡ All generation caches cleared")
+    _cache_timestamps.clear()
+    removed = 0
+    if GENERATION_DISK_CACHE:
+        try:
+            _GENERATION_DISK_DIR.mkdir(parents=True, exist_ok=True)
+            for p in _GENERATION_DISK_DIR.glob("gdoc_*.bin"):
+                try:
+                    p.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+        except OSError as e:
+            logger.debug("Generation disk clear skipped: %s", e)
+    logger.info("⚡ All generation caches cleared (disk files removed: %s)", removed)

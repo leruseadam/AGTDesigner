@@ -387,8 +387,6 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
             return _log_and_return("Vape Cartridge", 'medically_rosin_like')
         elif any(keyword in product_name_lower for keyword in ["flower", "bud", "pre-roll", "pre roll"]):
             return _log_and_return("Flower" if "flower" in product_name_lower else "Pre-Roll", 'medically_flower_or_preroll')
-        elif any(keyword in product_name_lower for keyword in ["edible", "gummy", "chocolate", "cookie"]):
-            return _log_and_return("Edible", 'medically_edible')
         elif any(keyword in product_name_lower for keyword in ["melt stix", "flavour stix", "rosin rolls", "infused blunt"]):
             return _log_and_return("Pre-Roll", 'medically_meltstix_like')
 
@@ -405,12 +403,7 @@ def map_inventory_type_to_product_type(inventory_type, inventory_category=None, 
             return _log_and_return("Vape Cartridge", 'name_cartridge_keywords')
         if any(keyword in product_name_lower for keyword in ["rosin", "resin", "wax", "shatter", "crumble", "sauce", "badder", "diamonds", "hash", "solventless", "distillate"]):
             return _log_and_return("Concentrate", 'name_concentrate_keywords')
-        if any(keyword in product_name_lower for keyword in ["gummy", "chew", "cookie", "brownie", "chocolate", "edible", "candy", "lozenge"]):
-            return _log_and_return("Edible", 'name_edible_keywords')
-        if any(keyword in product_name_lower for keyword in ["tincture", "drops", "sublingual", "dropper"]):
-            return _log_and_return("Tincture", 'name_tincture_keywords')
-        if any(keyword in product_name_lower for keyword in ["topical", "lotion", "salve", "balm", "cream", "ointment"]):
-            return _log_and_return("Topical", 'name_topical_keywords')
+        # Do NOT infer Edible / Tincture / Topical from product name (dessert/strain words caused false positives).
 
     # Check for specific keywords in the inventory type
     if any(keyword in inventory_type_lower for keyword in ["cartridge", "pen", "vape"]):
@@ -766,40 +759,35 @@ MEDICALLY_COMPLIANT_PREFIXES = [
 
 def infer_product_type_from_name(product_name: str) -> str:
     """
-    Infer product type from product name using pattern matching and TYPE_OVERRIDES.
+    Best-effort hints from name for obvious non-edible formats only.
+
+    Does **not** infer Edible / Tincture / Topical from dessert/fruit/strain wording.
+    Real product type must come from POS/API/DB when this returns Unknown Type.
     """
+    import re
+
     if not isinstance(product_name, str):
         return "Unknown Type"
-    
+
     name_lower = product_name.lower()
-    
-    # Check TYPE_OVERRIDES first
+
     for key, value in TYPE_OVERRIDES.items():
         if key in name_lower:
             return value
-    
-    # Pattern-based inference - prioritize vape keywords over concentrate keywords
-    if any(x in name_lower for x in ["flower", "bud", "nug", "herb", "marijuana", "cannabis"]):
-        return "Flower"
-    elif any(x in name_lower for x in ["aio", "all-in-one", "disposable"]):
-        return "Disposable"
-    elif any(x in name_lower for x in ["vape", "cart", "cartridge", "510", "pod", "battery", "jefe", "twisted", "fire", "pen"]):
+
+    if any(x in name_lower for x in ["vape", "cart", "cartridge", "disposable", "aio", "all-in-one", "510", "pod", "battery", "jefe", "twisted", "fire", "pen"]):
         return "Vape Cartridge"
-    elif any(x in name_lower for x in ["concentrate", "rosin", "shatter", "wax", "live resin", "diamonds", "sauce", "extract", "oil", "distillate"]):
+    if any(x in name_lower for x in ["concentrate", "rosin", "shatter", "wax", "live resin", "diamonds", "sauce", "extract", "distillate"]) or re.search(
+        r"\b(hash|co2|cbd|thc)\s+oil\b|\bcrude\s+oil\b|\boil\s+(cartridge|tank)\b",
+        name_lower,
+    ):
         return "Concentrate"
-    elif any(x in name_lower for x in ["edible", "gummy", "chocolate", "cookie", "brownie", "candy"]):
-        return "Edible (Solid)"
-    elif any(x in name_lower for x in ["tincture", "oil", "drops", "liquid"]):
-        return "Edible (Liquid)"
-    elif any(x in name_lower for x in ["pre-roll", "joint", "cigar", "blunt"]):
+    if any(x in name_lower for x in ["pre-roll", "joint", "cigar", "blunt"]) or "preroll" in name_lower.replace("-", ""):
         return "Pre-roll"
-    elif any(x in name_lower for x in ["topical", "cream", "lotion", "salve", "balm"]):
-        return "Topical"
-    elif any(x in name_lower for x in ["tincture", "sublingual"]):
-        return "Tincture"
-    else:
-        # Default to Vape Cartridge for any remaining unknown types since most products are concentrates
-        return "Vape Cartridge"
+    if re.search(r"\b(flower|nug|marijuana|cannabis)\b", name_lower):
+        return "Flower"
+
+    return "Unknown Type"
 
 def strip_medically_compliant_prefix(name):
     # Safety check: ensure name is a string
@@ -10882,48 +10870,8 @@ class JSONMatcher:
             return False
 
     def _infer_product_type_from_name(self, product_name: str) -> str:
-        """
-        Infer product type from product name by analyzing keywords.
-        Uses the same logic as the global infer_product_type_from_name function.
-        
-        Args:
-            product_name: The product name to analyze
-            
-        Returns:
-            Inferred product type or "Unknown Type" if no match
-        """
-        if not isinstance(product_name, str):
-            return "Unknown Type"
-        
-        name_lower = product_name.lower()
-        
-        # Check TYPE_OVERRIDES first
-        for key, value in TYPE_OVERRIDES.items():
-            if key in name_lower:
-                return value
-        
-        # Pattern-based inference - prioritize vape keywords over concentrate keywords
-        if any(x in name_lower for x in ["flower", "bud", "nug", "herb", "marijuana", "cannabis"]):
-            return "Flower"
-        elif any(x in name_lower for x in ["aio", "all-in-one", "disposable"]):
-            return "Disposable"
-        elif any(x in name_lower for x in ["vape", "cart", "cartridge", "510", "pod", "battery", "jefe", "twisted", "fire", "pen"]):
-            return "Vape Cartridge"
-        elif any(x in name_lower for x in ["concentrate", "rosin", "shatter", "wax", "live resin", "diamonds", "sauce", "extract", "oil", "distillate"]):
-            return "Concentrate"
-        elif any(x in name_lower for x in ["edible", "gummy", "chocolate", "cookie", "brownie", "candy"]):
-            return "Edible (Solid)"
-        elif any(x in name_lower for x in ["tincture", "oil", "drops", "liquid"]):
-            return "Edible (Liquid)"
-        elif any(x in name_lower for x in ["pre-roll", "joint", "cigar", "blunt"]):
-            return "Pre-roll"
-        elif any(x in name_lower for x in ["topical", "cream", "lotion", "salve", "balm"]):
-            return "Topical"
-        elif any(x in name_lower for x in ["tincture", "sublingual"]):
-            return "Tincture"
-        else:
-            # Default to Vape Cartridge for any remaining unknown types since most products are concentrates
-            return "Vape Cartridge"
+        """Delegates to module-level infer_product_type_from_name (no duplicate edible guessing)."""
+        return infer_product_type_from_name(product_name)
 
     def _infer_brand_from_name(self, product_name: str) -> str:
         """

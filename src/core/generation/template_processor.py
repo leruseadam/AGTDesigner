@@ -57,7 +57,10 @@ from src.core.generation.docx_formatting import (
     clear_table_cell_padding,
     lineage_to_icon_text,
 )
-from src.core.generation._ui_lineage_port import compute_display_lineage_like_ui
+from src.core.generation._ui_lineage_port import (
+    compute_display_lineage_like_ui,
+    canonical_product_type_for_classic_check,
+)
 from src.core.generation.unified_font_sizing import (
     get_font_size,
     get_font_size_by_marker,
@@ -71,6 +74,7 @@ from src.core.generation.text_processing import (
     format_price
 )
 from src.core.formatting.markers import wrap_with_marker, unwrap_marker, is_already_wrapped
+from src.core.constants import CLASSIC_TYPES as CONST_CLASSIC_TYPES
 
 # Performance settings - check if running on PythonAnywhere
 import os
@@ -2693,8 +2697,8 @@ class TemplateProcessor:
                     else:
                         # No DB lineage - use defaults based on product type (never Excel)
                         product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
-                        CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-                        is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+                        canon_pt = canonical_product_type_for_classic_check(product_type)
+                        is_classic = canon_pt in CONST_CLASSIC_TYPES
                         
                         if is_classic:
                             default_lineage = 'HYBRID'
@@ -2710,8 +2714,8 @@ class TemplateProcessor:
             self.logger.warning(f"Could not check database lineage for DOCX output: {e}")
             # On error, use defaults based on product type (never Excel)
             product_type = record.get('Product Type*', record.get('ProductType', '')).lower()
-            CLASSIC_TYPES = {'flower', 'pre-roll', 'concentrate', 'infused pre-roll', 'solventless concentrate', 'vape cartridge', 'rso/co2 tankers'}
-            is_classic = product_type in CLASSIC_TYPES or any(ct in product_type for ct in CLASSIC_TYPES)
+            canon_pt = canonical_product_type_for_classic_check(product_type)
+            is_classic = canon_pt in CONST_CLASSIC_TYPES
             
             if is_classic:
                 default_lineage = 'HYBRID'
@@ -3627,7 +3631,8 @@ class TemplateProcessor:
         # CRITICAL: Ensure case-insensitive comparison
         product_type_lower = product_type.lower() if product_type else ''
         classic_types_lower = {t.lower() for t in classic_types}
-        is_classic_type = product_type_lower in classic_types_lower
+        canon_pt = canonical_product_type_for_classic_check(product_type_lower)
+        is_classic_type = canon_pt in classic_types_lower
         # Debug logging for blunts and pre-rolls to diagnose vendor issues
         if product_name and ('blunt' in product_name.lower() or 'pre-roll' in product_name.lower()):
             self.logger.debug(f"🔍 CLASSIC TYPE CHECK: '{product_name}' - product_type: '{product_type}', product_type_lower: '{product_type_lower}', is_classic: {is_classic_type}, classic_types includes blunt: {'blunt' in classic_types_lower}")

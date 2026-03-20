@@ -7328,13 +7328,10 @@ class ProductDatabase:
         words = re.findall(r'\b[a-zA-Z]+\b', name_lower)
         key_terms = {word for word in words if len(word) > 2 and word not in common_words}
         
-        # Add broader matching terms for better similarity
-        # For example, "Glazed Apricots" should match "Wedding Cake" (both are dessert-like)
-        dessert_terms = {'glazed', 'apricots', 'wedding', 'cake', 'cherry', 'lemon', 'blueberry', 'strawberry'}
-        if any(term in key_terms for term in dessert_terms):
-            # Add dessert-related terms to improve matching
-            key_terms.update({'cake', 'dessert', 'fruit', 'sweet'})
-        
+        # Do NOT inject generic dessert/fruit terms into key_terms: that steers "educated guess"
+        # similarity toward edibles and wrong MIXED lineages for vapes named after strains
+        # (e.g. Wedding Cake, Fruit Loop, Gelato, Cherry strains).
+
         # Add strain-related terms for better matching
         strain_terms = {'kush', 'haze', 'diesel', 'og', 'cookies', 'runtz', 'gelato'}
         if any(term in key_terms for term in strain_terms):
@@ -7365,38 +7362,41 @@ class ProductDatabase:
         return final_score
     
     def _infer_product_type_from_name(self, product_name: str) -> Optional[str]:
-        """Infer product type from product name using consistent logic."""
+        """
+        Best-effort hints from product name for **non-edible** formats only.
+
+        We deliberately do **not** infer Edible / Tincture / Topical from name text:
+        dessert/fruit/strain names (Wedding Cake, Cookies, Gelato, etc.) caused false edibles.
+
+        When nothing matches, returns None so callers use Unknown / real POS or DB Product Type*.
+        """
+        import re
+
         if not isinstance(product_name, str):
-            return "Unknown Type"
-        
+            return None
+
         name_lower = product_name.lower()
-        
-        # Check TYPE_OVERRIDES first
+
+        # Explicit curated substring overrides only (constants.py)
         from src.core.constants import TYPE_OVERRIDES
         for key, value in TYPE_OVERRIDES.items():
             if key in name_lower:
                 return value
-        
-        # Pattern-based inference - prioritize vape keywords over concentrate keywords
-        if any(x in name_lower for x in ["flower", "bud", "nug", "herb", "marijuana", "cannabis"]):
-            return "Flower"
-        elif any(x in name_lower for x in ["vape", "cart", "cartridge", "disposable", "pod", "battery", "jefe", "twisted", "fire", "pen"]):
+
+        # Obvious inhalable / concentrate form factors only (order matters: pre-roll before generic flower)
+        if any(x in name_lower for x in ["vape", "cart", "cartridge", "disposable", "pod", "battery", "jefe", "twisted", "fire", "pen"]):
             return "Vape Cartridge"
-        elif any(x in name_lower for x in ["concentrate", "rosin", "shatter", "wax", "live resin", "diamonds", "sauce", "extract", "oil", "distillate"]):
+        if any(x in name_lower for x in ["concentrate", "rosin", "shatter", "wax", "live resin", "diamonds", "sauce", "extract", "distillate"]) or re.search(
+            r"\b(hash|co2|cbd|thc)\s+oil\b|\bcrude\s+oil\b|\boil\s+(cartridge|tank)\b",
+            name_lower,
+        ):
             return "Concentrate"
-        elif any(x in name_lower for x in ["edible", "gummy", "chocolate", "cookie", "brownie", "candy"]):
-            return "Edible (Solid)"
-        elif any(x in name_lower for x in ["tincture", "oil", "drops", "liquid"]):
-            return "Edible (Liquid)"
-        elif any(x in name_lower for x in ["pre-roll", "joint", "cigar", "blunt"]):
+        if any(x in name_lower for x in ["pre-roll", "joint", "cigar", "blunt"]) or "preroll" in name_lower.replace("-", ""):
             return "Pre-roll"
-        elif any(x in name_lower for x in ["topical", "cream", "lotion", "salve", "balm"]):
-            return "Topical"
-        elif any(x in name_lower for x in ["tincture", "sublingual"]):
-            return "Tincture"
-        else:
-            # Default to Vape Cartridge for any remaining unknown types since most products are concentrates
-            return "Vape Cartridge"
+        if re.search(r"\b(flower|nug|marijuana|cannabis)\b", name_lower):
+            return "Flower"
+
+        return None
     
     def _extract_strain_from_name(self, product_name: str) -> Optional[str]:
         """Extract strain name from product name."""
