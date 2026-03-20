@@ -12573,11 +12573,27 @@ def process_database_product_for_api(db_product):
 
 # Fields the frontend actually uses — strip everything else to reduce payload size
 _TAG_KEEP_FIELDS = frozenset([
-    'Product Name*', 'ProductName', 'Product Brand', 'ProductBrand', 'ProductVendor',
-    'Product Type*', 'Product Strain', 'Weight*', 'Price*',
+    # Identity
+    'Product Name*', 'ProductName',
+    # Brand / vendor
+    'Product Brand', 'ProductBrand', 'ProductVendor', 'Vendor', 'Vendor/Supplier*', 'Vendor*', 'Vendor/Supplier',
+    # Type / strain
+    'Product Type*', 'ProductType', 'Product Strain', 'ProductStrain',
+    # Weight / price
+    'Weight*', 'Weight', 'weight', 'WeightUnits', 'CombinedWeight', 'NetWeight',
+    'Price*', 'Price', 'price',
+    # Lineage — include manual override fields so UI colors are correct
     'Lineage', 'Lineage*', 'sovereign_lineage', 'canonical_lineage', 'currentLineage',
-    'DOH', 'Vendor', 'Vendor/Supplier*', 'Vendor*',
-    'CBD test result', 'THC test result', 'Description',
+    'manual_lineage', 'manual_lineage_source',
+    # Compliance
+    'DOH', 'doh', 'DOH Compliant', 'DOH Compliant (Yes/No)',
+    # CBD / THC
+    'CBD test result', 'THC test result', 'Ratio', 'JointRatio', 'Ratio_or_THC_CBD',
+    # Manifest ref — needed for manifest ref filter
+    'Manifest Ref No', 'Manifest Ref', 'ManifestRefNo', 'manifest_ref_no', 'manifest_ref',
+    'manifestRefNo', 'manifestRef', 'ManifestRef', 'manifest_number',
+    # Misc display
+    'Description', 'Source',
 ])
 
 def _slim_tags(tags):
