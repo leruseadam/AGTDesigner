@@ -8556,6 +8556,7 @@ def _enforce_nonclassic_lineage_rules(tags):
                 tag['Lineage'] = 'HYBRID'
                 tag['currentLineage'] = 'HYBRID'
                 tag['canonical_lineage'] = 'HYBRID'
+                tag['sovereign_lineage'] = 'HYBRID'
                 fixed_count += 1
             continue
         
@@ -8609,7 +8610,9 @@ def _enforce_nonclassic_lineage_rules(tags):
                 tag['currentLineage'] = correct_lineage
                 tag['canonical_lineage'] = correct_lineage
                 tag['lineage'] = correct_lineage.lower()
-                
+                # CRITICAL: also clear sovereign_lineage — JS reads it first and it would override everything
+                tag['sovereign_lineage'] = correct_lineage
+
                 product_name = tag.get('Product Name*', 'unknown')
                 logging.info(f"🔧 NON-CLASSIC LINEAGE ENFORCEMENT: Fixed '{product_name}' ({product_type}) from '{current_lineage_upper}' to '{correct_lineage}' based on Product Strain '{product_strain}' (DB missing)")
                 fixed_count += 1
@@ -8619,6 +8622,7 @@ def _enforce_nonclassic_lineage_rules(tags):
             tag['Lineage*'] = 'MIXED'
             tag['currentLineage'] = 'MIXED'
             tag['canonical_lineage'] = 'MIXED'
+            tag['sovereign_lineage'] = 'MIXED'
             tag['lineage'] = 'mixed'
             fixed_count += 1
         elif current_lineage_upper == 'CBD_BLEND':
@@ -8627,6 +8631,7 @@ def _enforce_nonclassic_lineage_rules(tags):
             tag['Lineage*'] = 'CBD'
             tag['currentLineage'] = 'CBD'
             tag['canonical_lineage'] = 'CBD'
+            tag['sovereign_lineage'] = 'CBD'
             tag['lineage'] = 'cbd'
             fixed_count += 1
     
