@@ -187,14 +187,6 @@ def _is_preserved_disk_cache_filename(filename):
     return False
 
 
-# Web /api/web/available-tags: use fast batched lineage (_quick_align_tags_lineage) instead of
-# full DB enrichment (_align_tags_with_db_lineage) for Excel-backed lists. Set WEB_TAGS_FAST_LINEAGE=0
-# to restore slower full enrichment on tag load. POS paths always use quick align for speed.
-WEB_TAGS_FAST_LINEAGE = os.environ.get('WEB_TAGS_FAST_LINEAGE', '1').strip().lower() in (
-    '1', 'true', 'yes', 'on',
-)
-
-
 # Memory monitoring and optimization
 def get_memory_usage():
     """Get current memory usage in MB."""
@@ -8642,7 +8634,10 @@ def _enforce_nonclassic_lineage_rules(tags):
 
 
 def _quick_align_tags_lineage(tags, store_name):
-    """Fast DB-first lineage alignment for cache-hit paths."""
+    """Fast DB-first alignment for cache-hit / lite paths: lineage + brand + DOH + vendor (batched SQL).
+
+    Does not run strain batch or full classic/non-classic rules — use _align_tags_with_db_lineage for that.
+    """
     try:
         if not tags or not store_name:
             return tags
@@ -8650,6 +8645,34 @@ def _quick_align_tags_lineage(tags, store_name):
         product_db = get_product_database(store_name)
         if not product_db:
             return tags
+
+        def _qlin(val):
+            if val is None:
+                return None
+            txt = str(val).strip().upper()
+            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                return None
+            return txt
+
+        def _qbrand(val):
+            if val is None:
+                return None
+            txt = str(val).strip()
+            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                return None
+            return txt
+
+        def _qdoh(val):
+            if val is None:
+                return None
+            txt = str(val).strip().upper()
+            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                return None
+            if txt in ['YES', 'Y', 'DOH', 'COMPLIANT']:
+                return 'DOH'
+            if txt in ['NO', 'N']:
+                return 'NO'
+            return txt
 
         aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
         product_names = []
@@ -8694,8 +8717,27 @@ def _quick_align_tags_lineage(tags, store_name):
         if strain_name_ref:
             coalesce_parts.append('s3.canonical_lineage')
 
-        lineage_map = {}
-        chunk_size = 400
+        extra_cols = ''
+        if 'Product Brand' in product_columns:
+            extra_cols += ', p."Product Brand" AS _pb'
+        else:
+            extra_cols += ', NULL AS _pb'
+        if 'DOH' in product_columns:
+            extra_cols += ', p."DOH" AS _doh'
+        else:
+            extra_cols += ', NULL AS _doh'
+        if 'DOH Compliant (Yes/No)' in product_columns:
+            extra_cols += ', p."DOH Compliant (Yes/No)" AS _dohc'
+        else:
+            extra_cols += ', NULL AS _dohc'
+        if 'Vendor/Supplier*' in product_columns:
+            extra_cols += ', p."Vendor/Supplier*" AS _vend'
+        else:
+            extra_cols += ', NULL AS _vend'
+
+        # name -> {lineage, brand, doh, vendor} (last SQL row wins; rare duplicates)
+        row_map = {}
+        chunk_size = 500
         for start in range(0, len(product_names), chunk_size):
             chunk = product_names[start:start + chunk_size]
             chunk_lower = [str(n).strip().lower() for n in chunk]
@@ -8707,26 +8749,43 @@ def _quick_align_tags_lineage(tags, store_name):
                     chunk_norm.append(str(n).strip().lower())
 
             placeholders = ','.join(['?'] * len(chunk_lower))
+            or_pn = ''
+            q_params = list(chunk_lower) + list(chunk_norm)
+            if 'ProductName' in product_columns:
+                or_pn = f' OR LOWER(TRIM(p."ProductName")) IN ({placeholders})'
+                q_params = list(chunk_lower) + list(chunk_lower) + list(chunk_norm)
             query = f'''
                 SELECT p."Product Name*", p.normalized_name, COALESCE({", ".join(coalesce_parts)}) AS lineage
+                {extra_cols}
                 FROM products p
                 {" ".join(join_parts)}
                 WHERE LOWER(TRIM(p."Product Name*")) IN ({placeholders})
-                   OR LOWER(TRIM(p."ProductName")) IN ({placeholders})
+                   {or_pn}
                    OR p.normalized_name IN ({placeholders})
             '''
-            cursor.execute(query, chunk_lower + chunk_lower + chunk_norm)
-            for db_name, db_norm, db_lineage in cursor.fetchall():
-                if not db_lineage:
+            cursor.execute(query, q_params)
+            for row in cursor.fetchall():
+                db_name = row[0]
+                db_norm = row[1]
+                db_lineage_raw = row[2]
+                pb_raw = row[3] if len(row) > 3 else None
+                doh_raw = row[4] if len(row) > 4 else None
+                dohc_raw = row[5] if len(row) > 5 else None
+                vend_raw = row[6] if len(row) > 6 else None
+
+                lin = _qlin(db_lineage_raw)
+                brand = _qbrand(pb_raw)
+                doh_v = _qdoh(doh_raw) or _qdoh(dohc_raw)
+                vend = _qbrand(vend_raw)
+                if not (lin or brand or doh_v or vend):
                     continue
-                clean = str(db_lineage).strip().upper()
-                if not clean:
-                    continue
+                info = {'lineage': lin, 'brand': brand, 'doh': doh_v, 'vendor': vend}
                 if db_name:
-                    lineage_map[str(db_name).strip()] = clean
-                    lineage_map[str(db_name).strip().lower()] = clean
+                    k = str(db_name).strip()
+                    row_map[k] = info
+                    row_map[k.lower()] = info
                 if db_norm:
-                    lineage_map[str(db_norm).strip()] = clean
+                    row_map[str(db_norm).strip()] = info
 
         for tag in aligned_tags:
             if not isinstance(tag, dict):
@@ -8735,18 +8794,39 @@ def _quick_align_tags_lineage(tags, store_name):
             if not name:
                 continue
             lookup_name = str(name).strip()
-            db_lineage = lineage_map.get(lookup_name) or lineage_map.get(lookup_name.lower())
-            if not db_lineage:
+            info = row_map.get(lookup_name) or row_map.get(lookup_name.lower())
+            if not info:
                 try:
-                    db_lineage = lineage_map.get(product_db._normalize_product_name(lookup_name))
+                    info = row_map.get(product_db._normalize_product_name(lookup_name))
                 except Exception:
-                    db_lineage = None
-            if db_lineage:
-                tag['currentLineage'] = db_lineage
-                tag['canonical_lineage'] = db_lineage
-                tag['Lineage'] = db_lineage
-                tag['Lineage*'] = db_lineage
-                tag['lineage'] = db_lineage.lower()
+                    info = None
+            if not info:
+                continue
+            lin = info.get('lineage')
+            if lin:
+                tag['currentLineage'] = lin
+                tag['canonical_lineage'] = lin
+                tag['Lineage'] = lin
+                tag['Lineage*'] = lin
+                tag['lineage'] = lin.lower()
+            brand = info.get('brand')
+            if brand:
+                cur = str(tag.get('Product Brand') or tag.get('ProductBrand') or '').strip().lower()
+                if not cur or cur in ('none', 'null', 'nan', 'unknown', 'unknown brand'):
+                    tag['Product Brand'] = brand
+                    tag['ProductBrand'] = brand
+                    tag['productBrand'] = brand
+            doh_v = info.get('doh')
+            if doh_v:
+                tag['DOH'] = doh_v
+                tag['DOH Compliant (Yes/No)'] = doh_v
+                tag['doh'] = doh_v.lower() if isinstance(doh_v, str) else doh_v
+            vend = info.get('vendor')
+            if vend:
+                cv = str(tag.get('Vendor/Supplier*') or tag.get('Vendor') or '').strip().lower()
+                if not cv or cv in ('none', 'null', 'nan', 'unknown', 'unknown vendor'):
+                    tag['Vendor/Supplier*'] = vend
+                    tag['Vendor'] = vend
 
         return aligned_tags
     except Exception as e:
@@ -8834,10 +8914,38 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         lineage_map = {}
         conn = product_db._get_connection()
         cursor = conn.cursor()
-        
-        # CRITICAL FIX: Use EXACT same query as docx generation for consistency
-        # PERFORMANCE: One row per product name (latest by id) to avoid redundant DB rows slowing tag load
-        chunk_size = 400
+
+        def _clean_lineage(val):
+            if val is None:
+                return None
+            txt = str(val).strip().upper()
+            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                return None
+            return txt
+
+        def _clean_brand(val):
+            if val is None:
+                return None
+            txt = str(val).strip()
+            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                return None
+            return txt
+
+        def _clean_doh(val):
+            if val is None:
+                return None
+            txt = str(val).strip().upper()
+            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
+                return None
+            if txt in ['YES', 'Y', 'DOH', 'COMPLIANT']:
+                return 'DOH'
+            elif txt in ['NO', 'N']:
+                return 'NO'
+            return txt
+
+        # CRITICAL FIX: Same data as before, faster plan — join to pre-aggregated latest row ids
+        # (avoids redundant double IN + per-row subquery evaluation on large SKU lists).
+        chunk_size = 500
         for start in range(0, len(product_names), chunk_size):
             chunk = product_names[start:start + chunk_size]
             placeholders = ','.join(['?' for _ in chunk])
@@ -8852,52 +8960,24 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                        p."DOH Compliant (Yes/No)" as doh_compliant,
                        p."Vendor/Supplier*" as vendor
                 FROM products p
+                INNER JOIN (
+                    SELECT MAX(id) AS mid
+                    FROM products
+                    WHERE "Product Name*" IN ({placeholders})
+                    GROUP BY "Product Name*"
+                ) latest ON p.id = latest.mid
                 LEFT JOIN strains s ON p.strain_id = s.id
-                WHERE p."Product Name*" IN ({placeholders})
-                  AND p.id IN (SELECT MAX(id) FROM products WHERE "Product Name*" IN ({placeholders}) GROUP BY "Product Name*")
-                ORDER BY p.id DESC
-            ''', chunk + chunk)
+            ''', chunk)
             for row in cursor.fetchall():
                 db_name = row[0]
                 db_lineage_raw = row[1]
                 product_sovereign_raw = row[2]
                 strain_sovereign_raw = row[3]
                 strain_canonical_raw = row[4]
-                product_brand_raw = row[5] if len(row) > 5 else None  # CRITICAL FIX: Get Product Brand from database
-                doh_raw = row[6] if len(row) > 6 else None  # CRITICAL FIX: Get DOH from database
-                doh_compliant_raw = row[7] if len(row) > 7 else None  # CRITICAL FIX: Get DOH Compliant from database
-                vendor_raw = row[8] if len(row) > 8 else None  # Get Vendor from database
-
-                def _clean_lineage(val):
-                    if val is None:
-                        return None
-                    txt = str(val).strip().upper()
-                    if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
-                        return None
-                    return txt
-                
-                def _clean_brand(val):
-                    """Clean brand value - preserve original case, just strip whitespace."""
-                    if val is None:
-                        return None
-                    txt = str(val).strip()
-                    if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
-                        return None
-                    return txt
-                
-                def _clean_doh(val):
-                    """Clean DOH value - normalize to YES/NO/DOH format."""
-                    if val is None:
-                        return None
-                    txt = str(val).strip().upper()
-                    if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
-                        return None
-                    # Normalize common variations
-                    if txt in ['YES', 'Y', 'DOH', 'COMPLIANT']:
-                        return 'DOH'
-                    elif txt in ['NO', 'N']:
-                        return 'NO'
-                    return txt
+                product_brand_raw = row[5] if len(row) > 5 else None
+                doh_raw = row[6] if len(row) > 6 else None
+                doh_compliant_raw = row[7] if len(row) > 7 else None
+                vendor_raw = row[8] if len(row) > 8 else None
 
                 db_lineage = _clean_lineage(db_lineage_raw)
                 product_sovereign = _clean_lineage(product_sovereign_raw)
@@ -8969,7 +9049,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
-            name = tag.get('Product Name*')
+            name = tag.get('Product Name*') or tag.get('ProductName')
             if not name:
                 continue
             # Check if this tag needs strain lookup (missing or incomplete lineage_info)
@@ -8980,7 +9060,12 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 if not hasattr(_align_tags_with_db_lineage, '_debug_lookup_count'):
                     _align_tags_with_db_lineage._debug_lookup_count = 0
                 if _align_tags_with_db_lineage._debug_lookup_count < 12:
-                    logging.debug("ALIGN-LOOKUP: name=%s is_classic=%s lineage_info=%s excel_preview=%s", name, is_classic, lineage_info, tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage'))
+                    logging.debug(
+                        "ALIGN-LOOKUP: name=%s lineage_info=%s excel_preview=%s",
+                        name,
+                        lineage_info,
+                        tag.get('Lineage') or tag.get('lineage') or tag.get('canonical_lineage'),
+                    )
                     _align_tags_with_db_lineage._debug_lookup_count += 1
             except Exception:
                 pass
@@ -9038,7 +9123,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
         for tag in aligned_tags:
             if not isinstance(tag, dict):
                 continue
-            name = tag.get('Product Name*')
+            name = tag.get('Product Name*') or tag.get('ProductName')
             if not name:
                 continue
             # Try exact match first (like docx generation), then normalized, then lowercase
@@ -17589,10 +17674,12 @@ def get_web_available_tags():
                         logging.info(f"WEB: Serving {len(cached_rows)} POSaBit products from cache")
                         safe_posabit_tags = make_json_safe(cached_rows)
                         try:
-                            # Fast batched lineage only — full _align_tags_with_db_lineage is too slow for 2k–5k SKUs on web
                             if store_for_posabit:
-                                safe_posabit_tags = _quick_align_tags_lineage(
-                                    safe_posabit_tags, store_for_posabit
+                                safe_posabit_tags = _align_tags_with_db_lineage(
+                                    safe_posabit_tags,
+                                    store_for_posabit,
+                                    skip_if_aligned=False,
+                                    force_overwrite=True,
                                 )
                         except Exception:
                             pass
@@ -17627,8 +17714,11 @@ def get_web_available_tags():
                         safe_posabit_tags = make_json_safe(_web_cold_rows)
                         try:
                             if store_for_posabit:
-                                safe_posabit_tags = _quick_align_tags_lineage(
-                                    safe_posabit_tags, store_for_posabit
+                                safe_posabit_tags = _align_tags_with_db_lineage(
+                                    safe_posabit_tags,
+                                    store_for_posabit,
+                                    skip_if_aligned=False,
+                                    force_overwrite=True,
                                 )
                         except Exception:
                             pass
@@ -17698,18 +17788,12 @@ def get_web_available_tags():
             store_name = get_current_store_name(allow_fallback=False)
             if store_name and excel_tags:
                 try:
-                    if WEB_TAGS_FAST_LINEAGE:
-                        logging.info(
-                            f"🔄 WEB: Quick-aligning {len(excel_tags)} tags (WEB_TAGS_FAST_LINEAGE=1)..."
-                        )
-                        excel_tags = _quick_align_tags_lineage(excel_tags, store_name)
-                    else:
-                        logging.info(
-                            f"🔄 WEB: Full DB aligning {len(excel_tags)} tags (WEB_TAGS_FAST_LINEAGE=0)..."
-                        )
-                        excel_tags = _align_tags_with_db_lineage(
-                            excel_tags, store_name, skip_if_aligned=False, force_overwrite=True
-                        )
+                    logging.info(
+                        f"🔄 WEB: Aligning {len(excel_tags)} tags with database (optimized batch query)..."
+                    )
+                    excel_tags = _align_tags_with_db_lineage(
+                        excel_tags, store_name, skip_if_aligned=False, force_overwrite=True
+                    )
                     matched_count = len(
                         [t for t in excel_tags if t.get('canonical_lineage') or t.get('sovereign_lineage')]
                     )
