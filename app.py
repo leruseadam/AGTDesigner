@@ -12939,17 +12939,13 @@ def get_available_tags():
                     if cached_rows:
                         logging.info(f"📦 Serving {len(cached_rows)} POSaBit products from cache")
                         safe_posabit_tags = make_json_safe(_slim_tags(cached_rows))
-                        # Ensure POSaBit tags use DB lineage overrides (sovereign_lineage wins).
+                        # Use fast alignment on cache hit (avoids full strain batch)
                         try:
                             store_name_align = get_current_store_name(allow_fallback=True)
-                            safe_posabit_tags = _align_tags_with_db_lineage(
-                                safe_posabit_tags,
-                                store_name_align,
-                                skip_if_aligned=False,
-                                force_overwrite=True
-                            )
+                            safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
                         except Exception as align_err:
                             logging.warning(f"POSaBit tag lineage alignment skipped: {align_err}")
+                        safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
                         return jsonify({
                             'tags': safe_posabit_tags,
                             'total_count': len(safe_posabit_tags),
@@ -12978,6 +12974,7 @@ def get_available_tags():
                             )
                         except Exception:
                             pass
+                        safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
                         try:
                             cache.set(_posabit_flask_cache_key, safe_posabit_tags, timeout=300)
                         except Exception:
@@ -13003,6 +13000,11 @@ def get_available_tags():
                         _fb_records = _fb_df.to_dict('records')
                         _fb_tags = [process_database_product_for_api(p) for p in _fb_records]
                         _fb_tags = make_json_safe(_slim_tags(_fb_tags))
+                        try:
+                            _fb_tags = _quick_align_tags_lineage(_fb_tags, _fb_store)
+                        except Exception:
+                            pass
+                        _fb_tags = _enforce_nonclassic_lineage_rules(_fb_tags)
                         logging.info(f"✅ DB fallback: serving {len(_fb_tags)} products from {_fb_store}")
                         return jsonify({
                             'tags': _fb_tags,
@@ -13124,12 +13126,12 @@ def get_available_tags():
                 except Exception:
                     needs_realignment = False
             
-            # ALWAYS re-align cached tags with the database to avoid serving stale lineage
+            # Use fast alignment on cache hits to avoid full strain-batch re-query every reload
             try:
                 store_name_align = get_current_store_name(allow_fallback=False) or store_name
                 if store_name_align:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    logging.info("✅ Re-aligned cached tags with database lineage (forced alignment)")
+                    cached_tags = _quick_align_tags_lineage(cached_tags, store_name_align)
+                    logging.info("✅ Re-aligned cached tags with database lineage (quick alignment)")
             except Exception as align_err:
                 logging.warning(f"Could not align cached tags after lineage update or cache hit: {align_err}")
             
@@ -13377,15 +13379,14 @@ def get_available_tags():
                 except Exception:
                     pass
             
-            # ALWAYS re-align cached tags with the database on cache hit (slow mode)
+            # Use fast alignment on cache hits (slow mode path) to avoid full strain-batch re-query every reload
             try:
                 store_name_align = get_current_store_name(allow_fallback=False) or store_name
                 if store_name_align:
-                    cached_tags = _align_tags_with_db_lineage(cached_tags, store_name_align, skip_if_aligned=False, force_overwrite=True)
-                    # Mark that we've aligned tags in this session
+                    cached_tags = _quick_align_tags_lineage(cached_tags, store_name_align)
                     session['tags_aligned_this_session'] = True
                     session.modified = True
-                    logging.info("✅ Re-aligned cached tags with database lineage (forced alignment - slow mode)")
+                    logging.info("✅ Re-aligned cached tags with database lineage (quick alignment - slow mode)")
             except Exception as align_err:
                 logging.warning(f"Could not align cached tags on slow-mode cache hit: {align_err}")
             
