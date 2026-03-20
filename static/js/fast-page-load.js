@@ -11,10 +11,9 @@
 
     function hasValidCurrentFileContext() {
         try {
-            const file = (window.sessionStorage && (sessionStorage.getItem('uploaded_filename') || sessionStorage.getItem('file_path'))) || null;
-            if (!file) return false;
-            const normalized = String(file).trim().toLowerCase();
-            return normalized !== '' && normalized !== 'nofile' && normalized !== 'database';
+            // Allow database/POSaBit mode (nofile) so the early cache check works for store-only setups
+            const store = (window.sessionStorage && sessionStorage.getItem('current_store')) || 'default';
+            return !!store;
         } catch (_) {
             return false;
         }

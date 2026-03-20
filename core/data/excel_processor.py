@@ -5707,7 +5707,7 @@ class ExcelProcessor:
                     if not inferred_type:
                         inferred_type = self._infer_product_type(product_name)  # Fallback to pattern matching
                     logger.debug(f"Inferred product type: {inferred_type}")
-                    repaired_product['Product Type*'] = inferred_type
+                    repaired_product['Product Type*'] = inferred_type or "Unknown"
                 else:
                     logger.debug(f"Product Type* already set: {repaired_product.get('Product Type*')}")
                 
@@ -5839,48 +5839,25 @@ class ExcelProcessor:
         logger.info(f"Data repair completed. {len(repaired_products)} products processed")
         return repaired_products
     
+    def _infer_product_type_from_name(self, product_name: Optional[str]) -> Optional[str]:
+        """
+        Best-effort type hints only (shared rules with json_matcher).
+
+        Does not infer edible / tincture / topical from dessert, food, or strain names.
+        Returns None when unknown so callers can show \"Unknown\" or use POS/DB data.
+        """
+        from src.core.data.json_matcher import infer_product_type_from_name
+
+        if not product_name or not isinstance(product_name, str):
+            return None
+        t = infer_product_type_from_name(product_name)
+        if not t or t == "Unknown Type":
+            return None
+        return t
+
     def _infer_product_type(self, product_name):
-        """Infer product type from product name using intelligent pattern matching."""
-        name_lower = product_name.lower()
-        
-        # Flower types
-        if any(word in name_lower for word in ['flower', 'bud', 'nug', 'herb', 'cannabis']):
-            return 'Flower'
-        
-        # Pre-roll types
-        if any(word in name_lower for word in ['pre-roll', 'preroll', 'joint', 'roll', 'cigarette']):
-            return 'Pre-roll'
-        
-        # Concentrate types
-        if any(word in name_lower for word in ['concentrate', 'wax', 'shatter', 'live resin', 'rosin', 'budder', 'crumble']):
-            return 'Concentrate'
-        
-        # Vape types
-        if any(word in name_lower for word in ['vape', 'cartridge', 'cart', 'pen', 'disposable']):
-            return 'Vape Cartridge'
-        
-        # Edible types
-        if any(word in name_lower for word in ['edible', 'gummy', 'chocolate', 'cookie', 'brownie', 'candy', 'food']):
-            return 'Edible (Solid)'
-        
-        # Liquid edible types
-        if any(word in name_lower for word in ['tincture', 'oil', 'drops', 'liquid', 'drink', 'beverage']):
-            return 'Edible (Liquid)'
-        
-        # Topical types
-        if any(word in name_lower for word in ['topical', 'cream', 'lotion', 'salve', 'balm', 'ointment']):
-            return 'Topical'
-        
-        # Capsule types
-        if any(word in name_lower for word in ['capsule', 'pill', 'tablet', 'supplement']):
-            return 'Capsule'
-        
-        # RSO/CO2 types
-        if any(word in name_lower for word in ['rso', 'co2', 'tanker', 'syringe']):
-            return 'rso/co2 tankers'
-        
-        # Default to flower if no clear indication
-        return 'Flower'
+        """Same policy as json_matcher.infer_product_type_from_name — no edible guessing from names."""
+        return self._infer_product_type_from_name(product_name)
     
     def _extract_brand_from_name(self, product_name):
         """Extract brand information from product name using pattern matching."""
@@ -6010,51 +5987,6 @@ class ExcelProcessor:
         }
         
         return price_ranges.get(product_type, '$25.00')
-    
-    def _infer_weight_from_name(self, product_name, product_type):
-        """Infer weight and units from product name and type."""
-        name_lower = product_name.lower()
-        
-        # Extract weight from name patterns
-        weight_patterns = [
-            r'(\d+(?:\.\d+)?)\s*(g|gram|grams|oz|ounce|ounces)',
-            r'(\d+(?:\.\d+)?)\s*(pack|packs|pk)',
-            r'(\d+(?:\.\d+)?)\s*(piece|pieces)',
-            r'(\d+(?:\.\d+)?)\s*(roll|rolls)'
-        ]
-        
-        for pattern in weight_patterns:
-            match = re.search(pattern, name_lower)
-            if match:
-                weight = match.group(1)
-                unit = match.group(2)
-                
-                # Standardize units
-                if unit in ['g', 'gram', 'grams']:
-                    return {'weight': weight, 'units': 'g'}
-                elif unit in ['oz', 'ounce', 'ounces']:
-                    return {'weight': weight, 'units': 'oz'}
-                elif unit in ['pack', 'packs', 'pk']:
-                    return {'weight': weight, 'units': 'pack'}
-                elif unit in ['piece', 'pieces']:
-                    return {'weight': weight, 'units': 'piece'}
-                elif unit in ['roll', 'rolls']:
-                    return {'weight': weight, 'units': 'roll'}
-        
-        # Default weights by product type
-        default_weights = {
-            'Flower': {'weight': '3.5', 'units': 'g'},
-            'Pre-roll': {'weight': '1', 'units': 'pack'},
-            'Concentrate': {'weight': '1', 'units': 'g'},
-            'Vape Cartridge': {'weight': '1', 'units': 'piece'},
-            'Edible (Solid)': {'weight': '1', 'units': 'piece'},
-            'Edible (Liquid)': {'weight': '30', 'units': 'ml'},
-            'Topical': {'weight': '1', 'units': 'oz'},
-            'Capsule': {'weight': '30', 'units': 'piece'},
-            'rso/co2 tankers': {'weight': '1', 'units': 'g'}
-        }
-        
-        return default_weights.get(product_type, {'weight': '1', 'units': 'piece'})
     
     def _infer_thc_from_type(self, product_type):
         """Infer THC content based on product type."""
@@ -6696,37 +6628,40 @@ class ExcelProcessor:
                     'Ingredients': '',
                 }
             else:
-                # Use basic inference from existing data
+                # Use basic inference from existing data (type hints only; unknown stays Unknown)
+                ptype_hint = self._infer_product_type_from_name(product_name)
+                ptype_display = ptype_hint or "Unknown"
+                wt = self._infer_weight_from_name(product_name, ptype_display)
                 product_data = {
                     'Product Name*': product_name,
                     'ProductName': product_name,
                     'Description': product_name,
-                    'Product Type*': self._infer_product_type_from_name(product_name) or "Unknown",
-                    'Product Type': self._infer_product_type_from_name(product_name) or "Unknown",
+                    'Product Type*': ptype_display,
+                    'Product Type': ptype_display,
                     'Vendor': vendor or "Unknown",
                     'Vendor/Supplier*': vendor or "Unknown",
                     'Product Brand': brand or "Unknown",
                     'ProductBrand': brand or "Unknown",
                     'Product Strain': self._infer_strain_from_name(product_name) or "Unknown",
                     'Strain Name': self._infer_strain_from_name(product_name) or "Unknown",
-                    'Lineage': self._infer_lineage_from_name(product_name, self._infer_product_type_from_name(product_name)) or "HYBRID",
-                    'Weight*': self._infer_weight_from_name(product_name)['weight'],
-                    'Weight': self._infer_weight_from_name(product_name)['weight'],
+                    'Lineage': self._infer_lineage_from_name(product_name, ptype_hint) or "HYBRID",
+                    'Weight*': wt['weight'],
+                    'Weight': wt['weight'],
                     'Quantity*': '1',
                     'Quantity': '1',
-                    'Units': self._infer_weight_from_name(product_name)['units'],
+                    'Units': wt['units'],
                     'Price': self._infer_price_from_type_and_weight(
-                        self._infer_product_type_from_name(product_name) or "Unknown",
-                        float(self._infer_weight_from_name(product_name)['weight'])
+                        ptype_display,
+                        float(wt['weight'])
                     ),
                     'Price* (Tier Name for Bulk)': self._infer_price_from_type_and_weight(
-                        self._infer_product_type_from_name(product_name) or "Unknown",
-                        float(self._infer_weight_from_name(product_name)['weight'])
+                        ptype_display,
+                        float(wt['weight'])
                     ),
                     'Source': 'Manual Entry with Inference',
                     'Quantity Received*': '1',
-                    'Weight Unit* (grams/gm or ounces/oz)': self._infer_weight_from_name(product_name)['units'],
-                    'CombinedWeight': self._infer_weight_from_name(product_name)['weight'],
+                    'Weight Unit* (grams/gm or ounces/oz)': wt['units'],
+                    'CombinedWeight': wt['weight'],
                     'DescAndWeight': self._process_description_from_product_name(product_name),  # Use Excel processor formula
                     'Description_Complexity': '1',
                     'Ratio_or_THC_CBD': '',

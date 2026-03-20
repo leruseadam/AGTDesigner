@@ -279,21 +279,16 @@ class AIProductMatcher:
         return price_info
     
     def _infer_product_type(self, product_name: str) -> str:
-        """Infer product type from product name"""
-        name_lower = product_name.lower()
-        
-        if any(word in name_lower for word in ['flower', 'bud', 'nug']):
-            return 'Flower'
-        elif any(word in name_lower for word in ['pre-roll', 'preroll', 'joint']):
-            return 'Pre-Roll'
-        elif any(word in name_lower for word in ['cartridge', 'vape', 'pen']):
-            return 'Vape Cartridge'
-        elif any(word in name_lower for word in ['edible', 'gummy', 'chocolate', 'cookie']):
-            return 'Edible'
-        elif any(word in name_lower for word in ['concentrate', 'wax', 'shatter', 'rosin']):
-            return 'Concentrate'
-        else:
-            return 'Unknown'
+        """Coarse hints only — same rules as json_matcher (no dessert/strain → edible)."""
+        from src.core.data.json_matcher import infer_product_type_from_name
+
+        t = infer_product_type_from_name(product_name or "")
+        if not t or t == "Unknown Type":
+            return "Unknown"
+        # Historical alias in this module
+        if t == "Pre-roll":
+            return "Pre-Roll"
+        return t
     
     def find_best_matches(self, product_features: Dict, max_matches: int = 5) -> List[MatchScore]:
         """

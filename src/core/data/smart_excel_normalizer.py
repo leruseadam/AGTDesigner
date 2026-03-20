@@ -263,46 +263,20 @@ class SmartExcelNormalizer:
             return product_data
     
     def _infer_product_type(self, product_name: str) -> Optional[str]:
-        """Infer product type from product name."""
+        """Coarse name hints only — shared json_matcher rules (no dessert words → edible)."""
+        from src.core.data.json_matcher import infer_product_type_from_name
+
         if not product_name:
             return None
-        
-        name_lower = product_name.lower()
-        
-        # Type inference patterns
-        type_patterns = {
-            'moonshot': 'Edible (Solid)',
-            'gummy': 'Edible (Solid)',
-            'chocolate': 'Edible (Solid)',
-            'cookie': 'Edible (Solid)',
-            'brownie': 'Edible (Solid)',
-            'candy': 'Edible (Solid)',
-            'beverage': 'Edible (Liquid)',
-            'drink': 'Edible (Liquid)',
-            'juice': 'Edible (Liquid)',
-            'soda': 'Edible (Liquid)',
-            'tincture': 'Tincture',
-            'drops': 'Tincture',
-            'topical': 'Topical',
-            'cream': 'Topical',
-            'lotion': 'Topical',
-            'balm': 'Topical',
-            'capsule': 'Capsule',
-            'concentrate': 'Concentrate',
-            'wax': 'Concentrate',
-            'shatter': 'Concentrate',
-            'rosin': 'Solventless Concentrate',
-            'hash': 'Solventless Concentrate',
-            'flower': 'Flower',
-            'pre-roll': 'Pre-Roll',
-            'vape': 'Vape Cartridge'
-        }
-        
-        for pattern, product_type in type_patterns.items():
-            if pattern in name_lower:
-                return product_type
-        
-        return None
+        t = infer_product_type_from_name(product_name)
+        if not t or t == "Unknown Type":
+            return None
+        if t == "Pre-roll":
+            return "Pre-Roll"
+        nl = product_name.lower()
+        if t == "Concentrate" and ("rosin" in nl or "solventless" in nl):
+            return "Solventless Concentrate"
+        return t
     
     def _standardize_product_type(self, product_type: str) -> str:
         """Standardize product type formatting."""

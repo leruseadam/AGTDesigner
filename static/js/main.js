@@ -995,18 +995,33 @@ const AppLoadingSplash = {
     currentStep: 0,
     isVisible: true,
     autoAdvanceInterval: null,
+    _hidePending: false,
+
+    _whenDocumentFullyLoaded(run) {
+        if (document.readyState === 'complete') {
+            run();
+        } else {
+            window.addEventListener('load', run, { once: true });
+        }
+    },
 
     show() {
         this.isVisible = true;
         this.currentStep = 0;
-        // Emergency kill-switch: never let the splash sit indefinitely
+        this._hidePending = false;
         if (this._emergencyTimer) {
             clearTimeout(this._emergencyTimer);
+            this._emergencyTimer = null;
         }
-        this._emergencyTimer = setTimeout(() => {
-            console.log('⚡ Emergency hide splash - 5 second timeout');
+        if (this._maxWaitTimer) {
+            clearTimeout(this._maxWaitTimer);
+        }
+        // Last resort if a hung network resource blocks `load` forever
+        this._maxWaitTimer = setTimeout(() => {
+            console.warn('⚡ Splash max wait (120s) — forcing unlock');
+            this._maxWaitTimer = null;
             this.emergencyHide();
-        }, 5000); // Reduced from 7000 to 5000 for faster recovery
+        }, 120000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -1019,6 +1034,7 @@ const AppLoadingSplash = {
         if (mainContent) {
             mainContent.classList.remove('loaded');
             mainContent.style.opacity = '0';
+            mainContent.style.pointerEvents = 'none';
         }
         
         this.updateProgress(0, 'Initializing application...');
@@ -1074,45 +1090,59 @@ const AppLoadingSplash = {
     },
 
     hide() {
-        this.isVisible = false;
+        if (this._hidePending) {
+            return;
+        }
+        this._hidePending = true;
         this.stopAutoAdvance();
         if (this._emergencyTimer) {
             clearTimeout(this._emergencyTimer);
             this._emergencyTimer = null;
         }
-        
-        const splash = document.getElementById('appLoadingSplash');
-        const mainContent = document.getElementById('mainContent');
-        
-        if (splash) {
-            splash.classList.add('fade-out');
-            setTimeout(() => {
-                splash.style.display = 'none';
-            }, 500);
-        }
-        
-        if (mainContent) {
-            mainContent.classList.add('store-selected');
-            setTimeout(() => {
-                mainContent.classList.add('loaded');
-                mainContent.style.opacity = '1';
-                // CRITICAL FIX: Delay scaleAppToFit after splash hide to prevent glitchiness
-                // Use double RAF to ensure DOM is stable before applying transforms
-                if (window.scaleAppToFit) {
-                    requestAnimationFrame(() => {
+
+        const runHide = () => {
+            this._hidePending = false;
+            this.isVisible = false;
+            if (this._maxWaitTimer) {
+                clearTimeout(this._maxWaitTimer);
+                this._maxWaitTimer = null;
+            }
+
+            const splash = document.getElementById('appLoadingSplash');
+            const mainContent = document.getElementById('mainContent');
+
+            if (splash) {
+                splash.classList.add('fade-out');
+                setTimeout(() => {
+                    splash.style.display = 'none';
+                    splash.classList.remove('fade-out');
+                }, 500);
+            }
+
+            if (mainContent) {
+                mainContent.classList.add('store-selected');
+                setTimeout(() => {
+                    mainContent.classList.add('loaded');
+                    mainContent.style.opacity = '1';
+                    mainContent.style.pointerEvents = '';
+                    if (window.scaleAppToFit) {
                         requestAnimationFrame(() => {
-                            try {
-                                window.scaleAppToFit();
-                            } catch (e) {
-                                console.warn('scaleAppToFit error', e);
-                            }
+                            requestAnimationFrame(() => {
+                                try {
+                                    window.scaleAppToFit();
+                                } catch (e) {
+                                    console.warn('scaleAppToFit error', e);
+                                }
+                            });
                         });
-                    });
-                }
-            }, 200); // Increased delay to allow DOM to stabilize
-        }
-        
-        verboseLog('Splash screen hidden');
+                    }
+                }, 200);
+            }
+
+            verboseLog('Splash screen hidden');
+        };
+
+        this._whenDocumentFullyLoaded(runHide);
     },
 
     // Auto-advance steps for visual feedback
@@ -1135,22 +1165,32 @@ const AppLoadingSplash = {
     // Emergency hide function for debugging
     emergencyHide() {
         verboseLog('Emergency hiding splash screen');
+        this._hidePending = false;
         this.isVisible = false;
         this.stopAutoAdvance();
-        
+        if (this._emergencyTimer) {
+            clearTimeout(this._emergencyTimer);
+            this._emergencyTimer = null;
+        }
+        if (this._maxWaitTimer) {
+            clearTimeout(this._maxWaitTimer);
+            this._maxWaitTimer = null;
+        }
+
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
-        
+
         if (splash) {
             splash.style.display = 'none';
-            splash.classList.add('fade-out');
+            splash.classList.remove('fade-out');
         }
-        
+
         if (mainContent) {
             mainContent.classList.add('store-selected');
             mainContent.style.display = 'block';
             mainContent.style.visibility = 'visible';
             mainContent.style.opacity = '1';
+            mainContent.style.pointerEvents = '';
             mainContent.classList.add('loaded');
         }
         
@@ -1226,10 +1266,25 @@ const TagManager = {
     },
 
     hasValidCurrentFileContext() {
+        // Returns true when there's a usable cache context.
+        // Allows database/POSaBit (nofile) mode so tags cache and load instantly on refresh.
+        // Only returns false when there is genuinely nothing to identify this session
+        // (e.g. no store AND no file on first visit ever).
+        const store = (window.sessionStorage && sessionStorage.getItem('current_store')) ||
+                      (window.localStorage && localStorage.getItem('current_store')) || null;
+        if (store && String(store).trim()) return true;
         const file = this.getCurrentFileName();
-        if (!file) return false;
+        if (file && String(file).trim()) return true;
+        // getAvailableTagsCacheKey() always defaults to AGT_Bothell/nofile, so allow cache
+        // in production where a store is always configured.
+        return true;
+    },
+
+    isDatabaseOnlyMode() {
+        const file = this.getCurrentFileName();
+        if (!file) return true;
         const normalized = String(file).trim().toLowerCase();
-        return normalized !== '' && normalized !== 'nofile' && normalized !== 'database';
+        return normalized === '' || normalized === 'nofile' || normalized === 'database';
     },
 
     getAvailableTagsCacheKey() {
@@ -1394,8 +1449,8 @@ const TagManager = {
         try {
             verboseLog('💾 Attempting to load tags from cache...');
 
-            // Deterministic startup: only hydrate tag cache when a real file context exists.
-            // This prevents stale/no-file caches from changing first-load behavior across machines.
+            // Skip load only when there is truly no context (empty/null).
+            // Database/POSaBit mode (nofile) is allowed for instant refresh.
             if (!this.hasValidCurrentFileContext()) {
                 verboseLog('⏭️ Skipping available-tags cache load: no valid current file context');
                 return null;
@@ -1473,7 +1528,9 @@ const TagManager = {
             }
             
             const age = Date.now() - payload.timestamp;
-            if (payload.timestamp && age > this.CACHE_TTL_MS) {
+            // Database/POSaBit mode: use 15-minute TTL so inventory stays reasonably fresh
+            const effectiveTtl = this.isDatabaseOnlyMode() ? 15 * 60 * 1000 : this.CACHE_TTL_MS;
+            if (payload.timestamp && age > effectiveTtl) {
                 return null;
             }
 
@@ -1524,7 +1581,8 @@ const TagManager = {
                 return;
             }
 
-            // Deterministic startup: do not persist no-file caches.
+            // Skip save only when there is truly no context (empty string/null).
+            // Database/POSaBit mode (nofile) is allowed so tags load instantly on refresh.
             if (!this.hasValidCurrentFileContext()) {
                 verboseLog('⏭️ Skipping available-tags cache save: no valid current file context');
                 return;
@@ -5074,6 +5132,9 @@ const TagManager = {
             
             // Recreate the change handler (same logic as in createTagElement)
             const handleCheckboxChange = (e) => {
+                // Ignore non-user/programmatic checkbox state updates.
+                // Prevents filter re-renders from accidentally mutating persistentSelectedTags.
+                if (e && e.isTrusted === false) return;
                 console.log(`🎯 Checkbox handler called for: ${tagName}, skipUndoTracking: ${this.state.skipUndoTracking}`);
 
                 // CRITICAL FIX: Ensure tag lookup map is built before processing
@@ -5479,6 +5540,8 @@ const TagManager = {
             vendorCheckbox.type = 'checkbox';
             vendorCheckbox.className = 'select-all-checkbox me-2';
             vendorCheckbox.addEventListener('change', (e) => {
+                // Ignore non-user/programmatic checkbox updates.
+                if (e && e.isTrusted === false) return;
                 // PERFORMANCE: Skip during bulk clear operations
                 if (this.state.isClearing) {
                     return;
@@ -5555,6 +5618,8 @@ const TagManager = {
                 brandCheckbox.type = 'checkbox';
                 brandCheckbox.className = 'select-all-checkbox me-2';
                 brandCheckbox.addEventListener('change', (e) => {
+                    // Ignore non-user/programmatic checkbox updates.
+                    if (e && e.isTrusted === false) return;
                     // PERFORMANCE: Skip during bulk clear operations
                     if (this.state.isClearing) {
                         return;
@@ -5630,6 +5695,8 @@ const TagManager = {
                     productTypeCheckbox.type = 'checkbox';
                     productTypeCheckbox.className = 'select-all-checkbox me-2';
                     productTypeCheckbox.addEventListener('change', (e) => {
+                        // Ignore non-user/programmatic checkbox updates.
+                        if (e && e.isTrusted === false) return;
                         // PERFORMANCE: Skip during bulk clear operations
                         if (this.state.isClearing) {
                             return;
@@ -5719,6 +5786,8 @@ const TagManager = {
                         weightCheckbox.type = 'checkbox';
                         weightCheckbox.className = 'select-all-checkbox me-2';
                         weightCheckbox.addEventListener('change', (e) => {
+                            // Ignore non-user/programmatic checkbox updates.
+                            if (e && e.isTrusted === false) return;
                             const savedScroll = this._saveAvailableScrollPosition();
                             const isChecked = e.target.checked;
                             const checkboxes = weightSection.querySelectorAll('input[type="checkbox"]');
@@ -5816,6 +5885,8 @@ const TagManager = {
                                 priceCheckbox.type = 'checkbox';
                                 priceCheckbox.className = 'select-all-checkbox me-2';
                                 priceCheckbox.addEventListener('change', (e) => {
+                                    // Ignore non-user/programmatic checkbox updates.
+                                    if (e && e.isTrusted === false) return;
                                     try {
                                         const savedScroll = (typeof this._saveAvailableScrollPosition === 'function') ? this._saveAvailableScrollPosition() : null;
                                         const isChecked = !!e.target.checked;
@@ -6882,6 +6953,8 @@ const TagManager = {
             vendorCheckbox.type = 'checkbox';
             vendorCheckbox.className = 'select-all-checkbox me-2';
             vendorCheckbox.addEventListener('change', (e) => {
+                // Ignore non-user/programmatic checkbox updates.
+                if (e && e.isTrusted === false) return;
                 const savedScroll = this._saveAvailableScrollPosition();
                 const isChecked = e.target.checked;
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
@@ -6987,6 +7060,8 @@ const TagManager = {
                 brandCheckbox.type = 'checkbox';
                 brandCheckbox.className = 'select-all-checkbox me-2';
             brandCheckbox.addEventListener('change', (e) => {
+                // Ignore non-user/programmatic checkbox updates.
+                if (e && e.isTrusted === false) return;
                 const savedScroll = this._saveAvailableScrollPosition();
                 const isChecked = e.target.checked;
                 // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
@@ -7084,6 +7159,8 @@ const TagManager = {
                     productTypeCheckbox.type = 'checkbox';
                     productTypeCheckbox.className = 'select-all-checkbox me-2';
                     productTypeCheckbox.addEventListener('change', (e) => {
+                        // Ignore non-user/programmatic checkbox updates.
+                        if (e && e.isTrusted === false) return;
                         const savedScroll = this._saveAvailableScrollPosition();
                         const isChecked = e.target.checked;
                         // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
@@ -7191,6 +7268,8 @@ const TagManager = {
                         weightCheckbox.type = 'checkbox';
                         weightCheckbox.className = 'select-all-checkbox me-2';
                         weightCheckbox.addEventListener('change', (e) => {
+                            // Ignore non-user/programmatic checkbox updates.
+                            if (e && e.isTrusted === false) return;
                             const savedScroll = this._saveAvailableScrollPosition();
                             const isChecked = e.target.checked;
                             // Select ALL checkboxes (both select-all checkboxes and tag checkboxes) within this section
@@ -7304,6 +7383,8 @@ const TagManager = {
                                 priceCheckbox.type = 'checkbox';
                                 priceCheckbox.className = 'select-all-checkbox me-2';
                                 priceCheckbox.addEventListener('change', (e) => {
+                                    // Ignore non-user/programmatic checkbox updates.
+                                    if (e && e.isTrusted === false) return;
                                     const savedScroll = this._saveAvailableScrollPosition();
                                     const isChecked = e.target.checked;
                                     const checkboxes = priceSection.querySelectorAll('input[type="checkbox"]');
@@ -7670,6 +7751,9 @@ const TagManager = {
         
         // Add event listener with proper error handling and improved logic
         const handleCheckboxChange = (e) => {
+            // Ignore non-user/programmatic checkbox state updates.
+            // Prevents filter re-renders from accidentally mutating persistentSelectedTags.
+            if (e && e.isTrusted === false) return;
             console.log(`🎯🎯🎯 CHECKBOX HANDLER CALLED FOR: ${displayName}, skipUndoTracking: ${this.state.skipUndoTracking}`);
             console.log('Checkbox details:', {
                 value: e.target.value,
@@ -10773,8 +10857,8 @@ const TagManager = {
                     verboseLog('No persistent tags found, showing empty selected tags list');
                     container.innerHTML = `
                     <div class="d-flex align-items-center justify-content-center" style="min-height: 100%;">
-                        <div class="text-center p-4" style="max-width: 500px;">
-                            <h5 class="text-secondary fw-bold mb-4">Quick Start Guide</h5>
+                        <div class="text-center p-4 mx-auto" style="max-width: 360px;">
+                            <h6 class="text-secondary fw-bold mb-3 text-uppercase" style="letter-spacing: 0.04em;">Quick Start</h6>
 
                             <div class="text-start">
                                 <div class="mb-4">
@@ -10807,33 +10891,27 @@ const TagManager = {
                 verboseLog('No backend tags and no persistent tags, showing empty selected tags list');
                 container.innerHTML = `
                     <div class="d-flex align-items-center justify-content-center" style="min-height: 100%;">
-                        <div class="text-center p-4" style="max-width: 500px;">
-                            <h5 class="text-secondary fw-bold mb-3">Quick Start Guide</h5>
+                        <div class="text-center p-4 mx-auto" style="max-width: 360px;">
+                            <h6 class="text-secondary fw-bold mb-3 text-uppercase" style="letter-spacing: 0.04em;">Quick Start</h6>
                             
                             <div class="text-start">
                                 <div class="mb-4">
-                                    <h6 class="text-secondary mb-3">1. Upload Product Data</h6>
-                                    <div style="color: #b8b8b8;">
-                                        <p class="mb-2 fw-bold fst-italic">📥 Download LOTs Data:</p>
-                                        <ol class="ms-3 fst-italic">
-                                            <li class="mb-2">Log in to app.posabit.com</li>
-                                            <li class="mb-2">Navigate to Inventory → LOTs</li>
-                                            <li class="mb-2">Set "Select State" to Active</li>
-                                            <li class="mb-2">Click the green Search button</li>
-                                            <li class="mb-2">Click the blue Download CSV button</li>
-                                            <li class="mb-2">Upload the downloaded file here using the "Upload Data" button</li>
-                                        </ol>
-                                    </div>
+                                    <h6 class="text-secondary mb-3">1. Load Inventory</h6>
+                                    <ol class="ms-3 fst-italic" style="color: #b8b8b8;">
+                                        <li class="mb-2">Select your <strong>Store</strong> at the top of the page</li>
+                                        <li class="mb-2">Inventory loads automatically from POSaBit</li>
+                                        <li class="mb-2">If nothing appears, click <strong>Reset Cache</strong> then refresh</li>
+                                    </ol>
                                 </div>
 
                                 <div>
                                     <h6 class="text-secondary mb-3">2. Create Labels</h6>
                                     <ol class="fst-italic ms-3" style="color: #b8b8b8;">
-                                        <li class="mb-2">Browse products in the left panel</li>
-                                        <li class="mb-2">Check boxes next to products to label</li>
-                                        <li class="mb-2">Use filters above to find specific items</li>
-                                        <li class="mb-2">Drag and drop to reorder if needed</li>
-                                        <li>Click "Generate Labels" when ready</li>
+                                        <li class="mb-2">Use the left sidebar filters to find products quickly</li>
+                                        <li class="mb-2">Check products to add them to Selected Tags</li>
+                                        <li class="mb-2">Drag and drop in Selected Tags to set print order</li>
+                                        <li class="mb-2">Choose a <strong>Template</strong> in the center column</li>
+                                        <li>Click <strong>Generate Tags</strong></li>
                                     </ol>
                                 </div>
                             </div>
@@ -11083,6 +11161,8 @@ const TagManager = {
             vendorCheckbox.type = 'checkbox';
             vendorCheckbox.className = 'select-all-checkbox me-2';
             vendorCheckbox.addEventListener('change', (e) => {
+                // Ignore non-user/programmatic checkbox updates.
+                if (e && e.isTrusted === false) return;
                 const isChecked = e.target.checked;
                 
                 // Select all descendant checkboxes (including subcategories and tags)
@@ -11182,6 +11262,8 @@ const TagManager = {
                 brandCheckbox.type = 'checkbox';
                 brandCheckbox.className = 'select-all-checkbox me-2';
                 brandCheckbox.addEventListener('change', (e) => {
+                    // Ignore non-user/programmatic checkbox updates.
+                    if (e && e.isTrusted === false) return;
                     const isChecked = e.target.checked;
                     
                     // Select all descendant checkboxes (including subcategories and tags)
@@ -11285,6 +11367,8 @@ const TagManager = {
                     productTypeCheckbox.type = 'checkbox';
                     productTypeCheckbox.className = 'select-all-checkbox me-2';
                     productTypeCheckbox.addEventListener('change', (e) => {
+                        // Ignore non-user/programmatic checkbox updates.
+                        if (e && e.isTrusted === false) return;
                         const isChecked = e.target.checked;
                         
                         // Select all descendant checkboxes (including subcategories and tags)
@@ -11426,6 +11510,8 @@ const TagManager = {
                         weightCheckbox.type = 'checkbox';
                         weightCheckbox.className = 'select-all-checkbox me-2';
                         weightCheckbox.addEventListener('change', (e) => {
+                            // Ignore non-user/programmatic checkbox updates.
+                            if (e && e.isTrusted === false) return;
                             const savedScroll = this._saveAvailableScrollPosition();
                             const isChecked = e.target.checked;
                             // Only iterate tag checkboxes for performance
@@ -11595,6 +11681,8 @@ const TagManager = {
                             weightCheckbox.type = 'checkbox';
                             weightCheckbox.className = 'select-all-checkbox me-2';
                             weightCheckbox.addEventListener('change', (e) => {
+                                // Ignore non-user/programmatic checkbox updates.
+                                if (e && e.isTrusted === false) return;
                                 const savedScroll = this._saveAvailableScrollPosition();
                                 const isChecked = e.target.checked;
                                 // Only iterate tag checkboxes for performance
@@ -14535,33 +14623,15 @@ const TagManager = {
             }
         }, 8000); // Reduced from 15000 to 8000
         
-        // Additional emergency fix for stuck initialization
+        // Additional emergency fix for stuck initialization (after load + grace period)
         window.addEventListener('load', () => {
             setTimeout(() => {
                 const splash = document.getElementById('appLoadingSplash');
-                if (splash && splash.style.display !== 'none') {
+                if (splash && splash.style.display !== 'none' && typeof AppLoadingSplash !== 'undefined') {
                     verboseLog('Emergency fix: hiding stuck splash screen');
-                    splash.style.display = 'none';
-                    const mainContent = document.getElementById('mainContent');
-                    if (mainContent) {
-                        mainContent.classList.add('store-selected');
-                        mainContent.style.display = 'block';
-                        mainContent.style.visibility = 'visible';
-                        mainContent.style.opacity = '1';
-                        mainContent.classList.add('loaded');
-                    }
-                    
-                    // Force initialize TagManager if still not initialized
-                    if (window.TagManager && typeof window.TagManager.init === 'function' && !window.TagManager.state.initialized) {
-                        verboseLog('Emergency: Force initializing TagManager after load');
-                        try {
-                            window.TagManager.init();
-                        } catch (e) {
-                            console.error('Emergency TagManager.init() after load failed:', e);
-                        }
-                    }
+                    AppLoadingSplash.emergencyHide();
                 }
-            }, 10000); // Reduced from 20000 to 10000
+            }, 10000);
         });
     },
 
@@ -17739,6 +17809,8 @@ const TagManager = {
         verboseLog('Initializing Select All Available checkbox');
             selectAllAvailable.setAttribute('data-listener-added', 'true');
             selectAllAvailable.addEventListener('change', (e) => {
+                // Ignore non-user/programmatic updates triggered by UI sync.
+                if (e && e.isTrusted === false) return;
                 verboseLog('Select All Available checkbox changed:', e.target.checked);
                 const isChecked = e.target.checked;
 
@@ -19766,6 +19838,23 @@ const TagManager = {
             // Mark as initialized
             this.state.initialized = true;
 
+            // Ensure clear buttons are visible/interactive.
+            // Some UI refresh paths can leave them hidden/disabled.
+            const clearCenterBtn = document.getElementById('clear-filters-btn');
+            if (clearCenterBtn) {
+                clearCenterBtn.style.display = '';
+                clearCenterBtn.disabled = false;
+                clearCenterBtn.style.opacity = '1';
+                clearCenterBtn.style.cursor = 'pointer';
+            }
+            const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+            if (clearFiltersBtn) {
+                clearFiltersBtn.style.display = '';
+                clearFiltersBtn.disabled = false;
+                clearFiltersBtn.style.opacity = '1';
+                clearFiltersBtn.style.cursor = 'pointer';
+            }
+
             // CRITICAL FIX: Setup filter event listeners IMMEDIATELY
             // This ensures filters work on initial load regardless of cache state
             console.log('🔧 Setting up filter event listeners in init()...');
@@ -20008,6 +20097,8 @@ try {
         const delegatedChange = function(e) {
             const el = e.target;
             if (!el || !el.classList || !el.classList.contains('tag-checkbox')) return;
+            // Ignore synthetic/programmatic change events from UI re-renders.
+            if (e && e.isTrusted === false) return;
 
             // If the checkbox already has its own change handler, do nothing
             if (el._changeHandler || el.onchange) return;
@@ -20121,6 +20212,8 @@ function attachSelectedTagsCheckboxListeners() {
         }
 
         parentCheckbox.addEventListener('change', function(e) {
+            // Ignore synthetic/programmatic checkbox updates.
+            if (e && e.isTrusted === false) return;
             verboseLog('Parent checkbox clicked in selected tags', this);
             const isChecked = e.target.checked;
             // Find the closest section (vendor, brand, product type, or weight)
@@ -20157,7 +20250,9 @@ function attachSelectedTagsCheckboxListeners() {
             checkbox.removeAttribute('onclick');
         }
 
-        checkbox.addEventListener('change', function() {
+        checkbox.addEventListener('change', function(e) {
+            // Ignore synthetic/programmatic checkbox updates.
+            if (e && e.isTrusted === false) return;
             if (this.checked) {
                 TagManager.state.selectedTags.add(this.value);
             } else {

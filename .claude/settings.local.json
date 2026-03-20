@@ -61,7 +61,8 @@
       "Bash(/dev/null pkill:*)",
       "Bash(/dev/null echo:*)",
       "Bash(head -10 grep -rn \"serviceWorker\\\\|sw\\\\.js\" \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/templates/index.html\")",
-      "Bash(/dev/null sleep:*)"
+      "Bash(/dev/null sleep:*)",
+      "Read(//<style>/,/<\\\\/**)"
     ],
     "deny": [],
     "ask": [],

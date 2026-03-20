@@ -8691,17 +8691,29 @@ def _quick_align_tags_lineage(tags, store_name):
         conn = product_db._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("PRAGMA table_info(products)")
-        product_columns = {row[1] for row in cursor.fetchall()}
-        cursor.execute("PRAGMA table_info(strains)")
-        strain_columns = {row[1] for row in cursor.fetchall()}
-
-        has_normalized_product_strain = 'normalized_product_strain' in product_columns and 'normalized_name' in strain_columns
-        strain_name_ref = None
-        if 'strain_name' in strain_columns:
-            strain_name_ref = 'strain_name'
-        elif 'Strain Name' in strain_columns:
-            strain_name_ref = '"Strain Name"'
+        # Cache PRAGMA results per store to avoid repeated schema introspection on every cache hit
+        _schema_key = f'_quick_align_schema_{store_name}'
+        _schema = getattr(_quick_align_tags_lineage, '_schema_cache', {}).get(_schema_key)
+        if _schema is None:
+            cursor.execute("PRAGMA table_info(products)")
+            product_columns = {row[1] for row in cursor.fetchall()}
+            cursor.execute("PRAGMA table_info(strains)")
+            strain_columns = {row[1] for row in cursor.fetchall()}
+            has_normalized_product_strain = 'normalized_product_strain' in product_columns and 'normalized_name' in strain_columns
+            strain_name_ref = None
+            if 'strain_name' in strain_columns:
+                strain_name_ref = 'strain_name'
+            elif 'Strain Name' in strain_columns:
+                strain_name_ref = '"Strain Name"'
+            _schema = {
+                'has_normalized_product_strain': has_normalized_product_strain,
+                'strain_name_ref': strain_name_ref,
+            }
+            if not hasattr(_quick_align_tags_lineage, '_schema_cache'):
+                _quick_align_tags_lineage._schema_cache = {}
+            _quick_align_tags_lineage._schema_cache[_schema_key] = _schema
+        has_normalized_product_strain = _schema['has_normalized_product_strain']
+        strain_name_ref = _schema['strain_name_ref']
 
         join_parts = ['LEFT JOIN strains s1 ON p.strain_id = s1.id']
         coalesce_parts = ['p.sovereign_lineage', 's1.sovereign_lineage']

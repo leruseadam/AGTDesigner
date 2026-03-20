@@ -85,6 +85,11 @@ MAX_PROCESSING_TIME_PER_CHUNK = 30  # 30 seconds max per chunk
 MAX_TOTAL_PROCESSING_TIME = 600     # 10 minutes max total (increased for large batches)
 CHUNK_SIZE_LIMIT = 100              # PERFORMANCE: Increased from 50 to 100 for faster generation of large batches
 
+# Module-level template expansion cache — persists across requests so the first
+# request after a worker restart pays the expansion cost only once per template type.
+# Key: (template_type, num_products, template_path)  Value: BytesIO bytes (getvalue())
+_MODULE_TEMPLATE_EXPANSION_CACHE: dict = {}
+
 # Pattern for "100mg THC", "50mg CBD", " - 100mg THC" etc. (non-classic: replace with weight)
 # Match at end of string
 _MG_THC_CBD_PATTERN = re.compile(
@@ -1690,9 +1695,14 @@ class TemplateProcessor:
             # OPTIMIZATION: Cache template expansions to avoid re-expanding for same size
             num_products = len(chunk)
             cache_key = f"{self.template_type}_{num_products}"
-            
-            if cache_key in self._template_expansion_cache:
-                # Use cached template expansion
+            # Include template path in module-level key so user templates don't collide with built-ins
+            module_cache_key = f"{self._template_path}_{self.template_type}_{num_products}"
+
+            if module_cache_key in _MODULE_TEMPLATE_EXPANSION_CACHE:
+                # Fast path: reuse expansion from a previous request (survives across requests)
+                self._expanded_template_buffer = BytesIO(_MODULE_TEMPLATE_EXPANSION_CACHE[module_cache_key])
+            elif cache_key in self._template_expansion_cache:
+                # Use cached template expansion from this request
                 self._expanded_template_buffer = self._template_expansion_cache[cache_key]
                 if hasattr(self._expanded_template_buffer, 'seek'):
                     self._expanded_template_buffer.seek(0)
@@ -1708,11 +1718,13 @@ class TemplateProcessor:
                     self._expanded_template_buffer = self._expand_template_to_4x5_fixed_scaled(num_products)
                 elif self.template_type == 'preroll':
                     self._expanded_template_buffer = self._expand_template_to_4x3_fixed_double(num_products)
-                
-                # Cache the expansion (create a copy since BytesIO is consumed)
+
+                # Cache the expansion at both instance and module level
                 if hasattr(self._expanded_template_buffer, 'getvalue'):
-                    cached_buffer = BytesIO(self._expanded_template_buffer.getvalue())
+                    raw = self._expanded_template_buffer.getvalue()
+                    cached_buffer = BytesIO(raw)
                     self._template_expansion_cache[cache_key] = cached_buffer
+                    _MODULE_TEMPLATE_EXPANSION_CACHE[module_cache_key] = raw
                     self._expanded_template_buffer.seek(0)
                 elif hasattr(self._expanded_template_buffer, 'seek'):
                     self._expanded_template_buffer.seek(0)
@@ -1749,50 +1761,21 @@ class TemplateProcessor:
                             conn = product_db._get_connection()
                             cursor = conn.cursor()
                             placeholders = ','.join(['?'] * len(product_names))
-                            
-                            # Load brand data
-                            batch_brand_query = f'''
-                                SELECT "Product Name*", "Product Brand"
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND "Product Brand" IS NOT NULL
-                                AND "Product Brand" != ""
-                            '''
-                            cursor.execute(batch_brand_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, brand = row_result
-                                if brand and str(brand).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_brand_cache[pname] = str(brand).strip()
-                            
-                            # Load vendor data - try Vendor/Supplier* first, then Vendor, then ProductVendor
-                            batch_vendor_query = f'''
-                                SELECT "Product Name*", 
-                                       CASE 
-                                           WHEN "Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '' THEN "Vendor/Supplier*"
-                                           WHEN "Vendor" IS NOT NULL AND "Vendor" != '' THEN "Vendor"
-                                           WHEN "ProductVendor" IS NOT NULL AND "ProductVendor" != '' THEN "ProductVendor"
-                                           ELSE NULL
-                                       END as vendor
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND (
-                                    ("Vendor/Supplier*" IS NOT NULL AND "Vendor/Supplier*" != '')
-                                    OR ("Vendor" IS NOT NULL AND "Vendor" != '')
-                                    OR ("ProductVendor" IS NOT NULL AND "ProductVendor" != '')
-                                )
-                            '''
-                            cursor.execute(batch_vendor_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, vendor = row_result
-                                if vendor and str(vendor).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    product_vendor_cache[pname] = str(vendor).strip()
-                            
-                            # Load lineage data: sovereign_lineage > strain lineage > products.Lineage
-                            # CRITICAL: Use same COALESCE as app _align_tags_with_db_lineage and force-step
-                            batch_lineage_query = f'''
+
+                            # PERF: single query loads brand + vendor + lineage + JointRatio in one round-trip
+                            # (previously 4 separate queries against the same IN(...) set)
+                            batch_combined_query = f'''
                                 SELECT p."Product Name*",
+                                       p."Product Brand",
+                                       CASE
+                                           WHEN p."Vendor/Supplier*" IS NOT NULL AND p."Vendor/Supplier*" != '' THEN p."Vendor/Supplier*"
+                                           WHEN p."Vendor" IS NOT NULL AND p."Vendor" != '' THEN p."Vendor"
+                                           WHEN p."ProductVendor" IS NOT NULL AND p."ProductVendor" != '' THEN p."ProductVendor"
+                                           ELSE NULL
+                                       END as vendor,
                                        COALESCE(p.sovereign_lineage, s1.sovereign_lineage, s2.sovereign_lineage, s3.sovereign_lineage,
-                                                s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage
+                                                s1.canonical_lineage, s2.canonical_lineage, s3.canonical_lineage, p."Lineage") AS lineage,
+                                       p.JointRatio
                                 FROM products p
                                 LEFT JOIN strains s1 ON p.strain_id = s1.id
                                 LEFT JOIN strains s2 ON p.normalized_product_strain = s2.normalized_name
@@ -1800,32 +1783,26 @@ class TemplateProcessor:
                                 WHERE p."Product Name*" IN ({placeholders})
                                 ORDER BY p.id DESC
                             '''
-                            cursor.execute(batch_lineage_query, product_names)
-                            seen = set()
+                            cursor.execute(batch_combined_query, product_names)
+                            seen_lineage = set()
+                            _skip = {'', 'None', 'NULL', 'null', 'nan'}
                             for row_result in cursor.fetchall():
-                                pname, lineage = row_result
-                                if not pname or pname in seen:
+                                pname, brand, vendor, lineage, joint_ratio = row_result
+                                if not pname:
                                     continue
-                                normalized_lineage = _trim_invisible_edges(lineage)
-                                if normalized_lineage and normalized_lineage not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
-                                    product_lineage_cache[pname] = normalized_lineage.upper()
-                                    seen.add(pname)
-                            
-                            # Load JointRatio data
-                            batch_joint_ratio_query = f'''
-                                SELECT "Product Name*", JointRatio
-                                FROM products
-                                WHERE "Product Name*" IN ({placeholders})
-                                AND JointRatio IS NOT NULL
-                                AND JointRatio != ""
-                            '''
-                            cursor.execute(batch_joint_ratio_query, product_names)
-                            for row_result in cursor.fetchall():
-                                pname, joint_ratio = row_result
-                                if joint_ratio and str(joint_ratio).strip() not in ['', 'None', 'NULL', 'null', 'nan']:
-                                    joint_ratio_cache[pname] = str(joint_ratio).strip()
-                            
-                            # Batch load strain info (sovereign_lineage > canonical_lineage)
+                                if brand and str(brand).strip() not in _skip:
+                                    product_brand_cache.setdefault(pname, str(brand).strip())
+                                if vendor and str(vendor).strip() not in _skip:
+                                    product_vendor_cache.setdefault(pname, str(vendor).strip())
+                                if pname not in seen_lineage:
+                                    normalized_lineage = _trim_invisible_edges(lineage)
+                                    if normalized_lineage and normalized_lineage not in _skip and normalized_lineage != 'SOVEREIGN':
+                                        product_lineage_cache[pname] = normalized_lineage.upper()
+                                        seen_lineage.add(pname)
+                                if joint_ratio and str(joint_ratio).strip() not in _skip:
+                                    joint_ratio_cache.setdefault(pname, str(joint_ratio).strip())
+
+                            # Batch load strain info (sovereign_lineage > canonical_lineage) — separate table
                             if strain_names:
                                 strain_placeholders = ','.join(['?'] * len(strain_names))
                                 batch_strain_query = f'''
@@ -1838,7 +1815,7 @@ class TemplateProcessor:
                                     strain_name, sov_lineage, canon_lineage = row_result
                                     strain_info = {}
                                     for val, key in [(sov_lineage, 'sovereign_lineage'), (canon_lineage, 'canonical_lineage')]:
-                                        if val and str(val).strip() not in ['', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN']:
+                                        if val and str(val).strip() not in {'', 'None', 'NULL', 'null', 'nan', 'SOVEREIGN'}:
                                             strain_info[key] = str(val).strip()
                                     if strain_info:
                                         strain_info_cache[strain_name] = strain_info
@@ -6059,7 +6036,39 @@ class TemplateProcessor:
         if self.template_type in ['vertical', 'double']:
             self._apply_unified_font_sizing_to_all_text(doc)
 
+        # Horizontal tags: fixed row heights + default Word "Normal" spacing stacks and clips text
+        # (description / lineage pushed under the brand bar or out of the cell).
+        if self.template_type == 'horizontal':
+            self._compact_horizontal_table_paragraph_spacing(doc)
 
+    def _compact_horizontal_table_paragraph_spacing(self, doc):
+        """Force 0pt before/after on all table paragraphs for horizontal tags (recursive nested tables)."""
+        try:
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+
+            def process_table(table):
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
+                            pPr = paragraph._element.get_or_add_pPr()
+                            sp = pPr.find(qn('w:spacing'))
+                            if sp is None:
+                                sp = OxmlElement('w:spacing')
+                                pPr.append(sp)
+                            sp.set(qn('w:before'), '0')
+                            sp.set(qn('w:after'), '0')
+                            sp.set(qn('w:lineRule'), 'auto')
+                        for inner in getattr(cell, 'tables', []):
+                            process_table(inner)
+
+            for table in getattr(doc, 'tables', []):
+                process_table(table)
+            self.logger.debug("Compacted horizontal table paragraph spacing (0 before/after)")
+        except Exception as e:
+            self.logger.warning(f"Horizontal paragraph spacing compact failed: {e}")
 
     def _apply_unified_font_sizing_to_all_text(self, doc):
         """
@@ -6683,10 +6692,27 @@ class TemplateProcessor:
             
             # Clear paragraph and rebuild with all processed content
             paragraph.clear()
-            
-            # Ensure consistent spacing above all marker sections for equal margins
-            paragraph.paragraph_format.space_before = Pt(2)
-            paragraph.paragraph_format.space_after = Pt(1)
+
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+
+            pPr = paragraph._element.get_or_add_pPr()
+            sp0 = pPr.find(qn('w:spacing'))
+            if sp0 is None:
+                sp0 = OxmlElement('w:spacing')
+                pPr.append(sp0)
+            if self.template_type == 'horizontal':
+                # Horizontal labels use exact row heights; extra paragraph spacing stacks
+                # and hides description/lineage behind fixed rows or the brand bar.
+                paragraph.paragraph_format.space_before = Pt(0)
+                paragraph.paragraph_format.space_after = Pt(0)
+                sp0.set(qn('w:before'), '0')
+                sp0.set(qn('w:after'), '0')
+            else:
+                # Equal margins for vertical / other templates
+                paragraph.paragraph_format.space_before = Pt(2)
+                paragraph.paragraph_format.space_after = Pt(1)
+            sp0.set(qn('w:lineRule'), 'auto')
             
             # Sort markers by position in text
             sorted_markers = sorted(processed_content.items(), key=lambda x: x[1]['start_pos'])
@@ -6764,15 +6790,21 @@ class TemplateProcessor:
                 # Always center ProductBrand markers for ALL templates; match lineage paragraph spacing
                 if ('PRODUCTBRAND' in marker_name):
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
                     pPr = paragraph._element.get_or_add_pPr()
                     sp = pPr.find(qn('w:spacing'))
                     if sp is None:
                         sp = OxmlElement('w:spacing')
                         pPr.append(sp)
-                    sp.set(qn('w:before'), '40')
-                    sp.set(qn('w:after'), '20')
+                    if self.template_type == 'horizontal':
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
+                        sp.set(qn('w:before'), '0')
+                        sp.set(qn('w:after'), '0')
+                    else:
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
+                        sp.set(qn('w:before'), '40')
+                        sp.set(qn('w:after'), '20')
                     sp.set(qn('w:lineRule'), 'auto')
                     self._set_paragraph_cell_vertical_alignment(paragraph, WD_CELL_VERTICAL_ALIGNMENT.CENTER)
                     for idx, run in enumerate(paragraph.runs):
@@ -6874,6 +6906,17 @@ class TemplateProcessor:
                         if self.template_type == 'vertical':
                             paragraph.paragraph_format.space_before = Pt(6)
                             paragraph.paragraph_format.space_after = Pt(6)
+                        elif self.template_type == 'horizontal':
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
+                            pPr_sp = paragraph._element.get_or_add_pPr()
+                            sp_le = pPr_sp.find(qn('w:spacing'))
+                            if sp_le is None:
+                                sp_le = OxmlElement('w:spacing')
+                                pPr_sp.append(sp_le)
+                            sp_le.set(qn('w:before'), '0')
+                            sp_le.set(qn('w:after'), '0')
+                            sp_le.set(qn('w:lineRule'), 'auto')
                         else:
                             paragraph.paragraph_format.space_before = Pt(2)
                             paragraph.paragraph_format.space_after = Pt(1)
@@ -6887,6 +6930,17 @@ class TemplateProcessor:
                         if self.template_type == 'vertical':
                             paragraph.paragraph_format.space_before = Pt(6)
                             paragraph.paragraph_format.space_after = Pt(6)
+                        elif self.template_type == 'horizontal':
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
+                            pPr_sp = paragraph._element.get_or_add_pPr()
+                            sp_le = pPr_sp.find(qn('w:spacing'))
+                            if sp_le is None:
+                                sp_le = OxmlElement('w:spacing')
+                                pPr_sp.append(sp_le)
+                            sp_le.set(qn('w:before'), '0')
+                            sp_le.set(qn('w:after'), '0')
+                            sp_le.set(qn('w:lineRule'), 'auto')
                         else:
                             paragraph.paragraph_format.space_before = Pt(2)
                             paragraph.paragraph_format.space_after = Pt(1)
@@ -6897,6 +6951,17 @@ class TemplateProcessor:
                         if self.template_type == 'vertical':
                             paragraph.paragraph_format.space_before = Pt(6)
                             paragraph.paragraph_format.space_after = Pt(6)
+                        elif self.template_type == 'horizontal':
+                            paragraph.paragraph_format.space_before = Pt(0)
+                            paragraph.paragraph_format.space_after = Pt(0)
+                            pPr_sp = paragraph._element.get_or_add_pPr()
+                            sp_le = pPr_sp.find(qn('w:spacing'))
+                            if sp_le is None:
+                                sp_le = OxmlElement('w:spacing')
+                                pPr_sp.append(sp_le)
+                            sp_le.set(qn('w:before'), '0')
+                            sp_le.set(qn('w:after'), '0')
+                            sp_le.set(qn('w:lineRule'), 'auto')
                         else:
                             paragraph.paragraph_format.space_before = Pt(2)
                             paragraph.paragraph_format.space_after = Pt(1)
@@ -6911,10 +6976,21 @@ class TemplateProcessor:
                 # Always center ProductBrand and ProductBrand_Center markers
                 if marker_name in ('PRODUCTBRAND', 'PRODUCTBRAND_CENTER') or 'PRODUCTBRAND' in marker_name:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    # Vertical template: 6pt before/after; others: 2pt/1pt
+                    # Vertical: 6pt; horizontal: 0 (fixed row heights); others: 2pt/1pt
                     if self.template_type == 'vertical':
                         paragraph.paragraph_format.space_before = Pt(6)
                         paragraph.paragraph_format.space_after = Pt(6)
+                    elif self.template_type == 'horizontal':
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
+                        pPr_sp = paragraph._element.get_or_add_pPr()
+                        sp_le = pPr_sp.find(qn('w:spacing'))
+                        if sp_le is None:
+                            sp_le = OxmlElement('w:spacing')
+                            pPr_sp.append(sp_le)
+                        sp_le.set(qn('w:before'), '0')
+                        sp_le.set(qn('w:after'), '0')
+                        sp_le.set(qn('w:lineRule'), 'auto')
                     else:
                         paragraph.paragraph_format.space_before = Pt(2)
                         paragraph.paragraph_format.space_after = Pt(1)
@@ -6930,9 +7006,21 @@ class TemplateProcessor:
                 # Right-align PRODUCTVENDOR markers
                 if marker_name == 'PRODUCTVENDOR':
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                    # Ensure consistent spacing above vendor section for equal margins
-                    paragraph.paragraph_format.space_before = Pt(2)
-                    paragraph.paragraph_format.space_after = Pt(1)
+                    # Horizontal: no extra margins (exact row heights)
+                    if self.template_type == 'horizontal':
+                        paragraph.paragraph_format.space_before = Pt(0)
+                        paragraph.paragraph_format.space_after = Pt(0)
+                        pPr_sp = paragraph._element.get_or_add_pPr()
+                        sp_le = pPr_sp.find(qn('w:spacing'))
+                        if sp_le is None:
+                            sp_le = OxmlElement('w:spacing')
+                            pPr_sp.append(sp_le)
+                        sp_le.set(qn('w:before'), '0')
+                        sp_le.set(qn('w:after'), '0')
+                        sp_le.set(qn('w:lineRule'), 'auto')
+                    else:
+                        paragraph.paragraph_format.space_before = Pt(2)
+                        paragraph.paragraph_format.space_after = Pt(1)
                     # Use unified font sizing for vendor text
                     for run in paragraph.runs:
                         # Apply unified font sizing using 'vendor' field type

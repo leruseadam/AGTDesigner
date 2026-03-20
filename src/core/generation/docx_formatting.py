@@ -8,6 +8,9 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Compiled once at module level — was previously re.compile'd inside the per-cell loop
+_LINEAGE_HINT_PATTERN = re.compile(r"__LINEAGE_HINT_([A-Z\/\s_]+)__")
+
 # Define colors for lineage (style-icon hex from user assets)
 COLORS = {
     'SATIVA': 'ED4123',
@@ -99,8 +102,10 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     if template_type == 'horizontal':
-        space_before_pt, space_after_pt = 1.5, 1.5  # Equal margins above and below for lineage
-        before_twips, after_twips = '30', '30'
+        # Fixed-height horizontal tags: any before/after here stacks with description/lineage
+        # paragraphs and pushes the yellow brand bar or clips text — keep banner tight.
+        space_before_pt, space_after_pt = 0, 0
+        before_twips, after_twips = '0', '0'
     elif template_type == 'double':
         # Double: non-classic (brand) cells use Auto before/after; classic uses 2/1
         space_before_pt, space_after_pt = 2, 1
@@ -135,15 +140,12 @@ def apply_lineage_colors(doc, template_type=None, placeholder_settings=None):
                         )
                         lineage_hint_value = None
                         lineage_hint_token = None
-                        hint_pattern = re.compile(r"__LINEAGE_HINT_([A-Z\/\s_]+)__")
-                        hint_match = hint_pattern.search(original_text)
+                        hint_match = _LINEAGE_HINT_PATTERN.search(original_text)
                         if hint_match:
                             lineage_hint_value = hint_match.group(1).strip()
                             lineage_hint_token = hint_match.group(0)
-                            logger.info(f"🔍 FOUND LINEAGE HINT TOKEN: '{lineage_hint_token}' -> value: '{lineage_hint_value}' in cell text: '{original_text[:100]}'")
+                            logger.debug(f"🔍 FOUND LINEAGE HINT TOKEN: '{lineage_hint_token}' -> value: '{lineage_hint_value}'")
                             original_text = original_text.replace(lineage_hint_token, "")
-                        else:
-                            logger.debug(f"🔍 NO LINEAGE HINT TOKEN found in cell text: '{original_text[:100]}'")
                         
                         # Detect placeholder field markers (so we can apply per-field controls)
                         marker_to_field = {
