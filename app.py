@@ -17746,7 +17746,9 @@ def get_web_available_tags():
         if session_file_path:
             cache_key = get_session_cache_key(f'available_tags_{session_file_path}_{effective_timestamp}_b{cache_bust}')
         else:
-            cache_key = get_session_cache_key('available_tags')
+            # Include TAGS_CACHE_VERSION so any code change that bumps the version
+            # auto-invalidates stale Flask-cached POSaBit data (e.g. missing DOH fields)
+            cache_key = get_session_cache_key(f'available_tags_{TAGS_CACHE_VERSION}')
 
         # FAST-PATH: Check for background-generated file tag cache created during upload processing
         # Background thread stores tags under a sha256(file_path) key with a version prefix

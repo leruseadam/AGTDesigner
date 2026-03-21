@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Shared cache version token for tag/lineage payload invalidation.
 # Keep this aligned with app.py cache version usage so stale lineage payloads
 # are consistently bypassed across UI load and generation flows.
-TAGS_CACHE_VERSION = "v4_db_strains_lineage_hotfix"
+TAGS_CACHE_VERSION = "v5_doh_fields_fix"
 
 # Cache resolved default file paths to avoid repeated filesystem scans
 # Limited to 50 entries with TTL of 1 hour to prevent unbounded growth
