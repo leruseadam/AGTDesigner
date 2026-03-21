@@ -727,14 +727,14 @@
                           </div>
                           <div class="mb-3">
                             <label class="form-label">Filter by Vendor</label>
-                            <select class="form-select" id="vendorFilter">
+                            <select class="form-select" id="lineageEditorVendorFilter">
                               <option value="">All Vendors</option>
                               ${vendors.map(v => `<option value="${v.vendor}">${v.vendor} (${v.total_products} products)</option>`).join('')}
                             </select>
                           </div>
                           <div class="mb-3">
                             <label class="form-label">Filter by Lineage</label>
-                            <select class="form-select" id="lineageFilter">
+                            <select class="form-select" id="lineageEditorLineageFilter">
                               <option value="">All Lineages</option>
                               <option value="SATIVA">SATIVA</option>
                               <option value="INDICA">INDICA</option>
@@ -928,14 +928,14 @@
               }
 
               // Trigger search when changing vendor/lineage filters
-              const vendorSelect = document.getElementById('vendorFilter');
+              const vendorSelect = document.getElementById('lineageEditorVendorFilter');
               if (vendorSelect) {
                 vendorSelect.addEventListener('change', function() {
                   if (window.searchStrains) window.searchStrains();
                 });
               }
 
-              const lineageSelect = document.getElementById('lineageFilter');
+              const lineageSelect = document.getElementById('lineageEditorLineageFilter');
               if (lineageSelect) {
                 lineageSelect.addEventListener('change', function() {
                   if (window.searchStrains) window.searchStrains();
@@ -946,8 +946,8 @@
             // Enhanced Lineage Editor Interactive Functions
             window.searchStrains = async function() {
               const searchTerm = document.getElementById('strainSearchInput').value;
-              const vendorFilter = document.getElementById('vendorFilter').value;
-              const lineageFilter = document.getElementById('lineageFilter').value;
+              const vendorFilter = document.getElementById('lineageEditorVendorFilter').value;
+              const lineageFilter = document.getElementById('lineageEditorLineageFilter').value;
               
               try {
                 const response = await fetch('/api/strain-search', {
@@ -976,8 +976,8 @@
             
             window.clearSearchFilters = function() {
               document.getElementById('strainSearchInput').value = '';
-              document.getElementById('vendorFilter').value = '';
-              document.getElementById('lineageFilter').value = '';
+              document.getElementById('lineageEditorVendorFilter').value = '';
+              document.getElementById('lineageEditorLineageFilter').value = '';
               
               // Reload original data
               window.openLineageEditor();

@@ -3381,9 +3381,30 @@ class TemplateProcessor:
         # Fast DOH image processing - only if needed
         # IMPORTANT: Only use the canonical DOH field for image decisions
         # Ignore legacy "DOH Compliant (Yes/No)" and any other variants
-        doh_value = label_context.get('DOH', '') or record.get('DOH', '')
+        # Read DOH from label_context first, then record, then "DOH Compliant (Yes/No)" as fallback
+        doh_value = (label_context.get('DOH', '') or record.get('DOH', '')
+                     or label_context.get('DOH Compliant (Yes/No)', '') or record.get('DOH Compliant (Yes/No)', ''))
         product_name = label_context.get('ProductName', 'Unknown')
-        
+
+        # Normalize raw POSaBit values (e.g. "General Use", "TRUE", "1", "true") to
+        # the canonical tokens the rest of the block expects: YES / DOH / THC / CBD / NO
+        if doh_value:
+            _dv = str(doh_value).strip()
+            _du = _dv.upper()
+            if _du in ('YES', 'Y', 'DOH', 'THC', 'CBD', 'NO', 'N', 'NONE', 'FALSE', 'F'):
+                pass  # already canonical
+            elif _du in ('TRUE', '1'):
+                doh_value = 'YES'
+            elif ('NON' in _du and 'DOH' in _du) or ('NOT' in _du and 'DOH' in _du) or ('NON' in _du and 'COMPLIANT' in _du):
+                doh_value = 'NO'
+            elif _dv in ('No', 'no'):
+                doh_value = 'NO'
+            elif _du in ('NO', 'N', 'FALSE', 'F'):
+                doh_value = 'NO'
+            elif _dv not in ('', 'None', 'nan', 'null', 'undefined'):
+                # Any other truthy raw value (e.g. "General Use", "Compliant", "General") → compliant
+                doh_value = 'YES'
+
         # CRITICAL FIX: If DOH is missing from record, query database directly
         if not doh_value or str(doh_value).strip() in ['', 'None', 'nan']:
             try:

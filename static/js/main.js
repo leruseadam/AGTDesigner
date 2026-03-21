@@ -21,23 +21,23 @@ function abbreviateLineage(lineage) {
 /**
  * Single source of truth for which lineage field wins before UI heuristics.
  * MUST match backend `compute_display_lineage_like_ui` in
- * `src/core/generation/_ui_lineage_port.py` (and SQL COALESCE used when hydrating tags).
+ * `src/core/generation/_ui_lineage_port.py`.
  *
- * Priority: sovereign_lineage (user override) > canonical_lineage (strain DB) >
- * currentLineage (session/excel) > Lineage > lineage
+ * Priority: sovereign_lineage (manual) > products Lineage / lineage / Lineage* >
+ * canonical_lineage (strain) > currentLineage (POS/session — often stale HYBRID).
  *
- * Without this, a stale `currentLineage` (e.g. HYBRID) can hide the correct
- * `canonical_lineage` (e.g. SATIVA), so badges disagree with generated DOCX.
+ * Never put currentLineage before Lineage: alignment can set HYBRID in currentLineage
+ * while products."Lineage" is still SATIVA (e.g. Frosted Gummy).
  */
 function resolveRawLineageFromTag(tag) {
     if (!tag || typeof tag !== 'object') return '';
     const candidates = [
         tag.sovereign_lineage,
-        tag.canonical_lineage,
-        tag.currentLineage,
         tag.Lineage,
         tag.lineage,
         tag['Lineage*'],
+        tag.canonical_lineage,
+        tag.currentLineage,
     ];
     for (const cand of candidates) {
         if (cand === null || cand === undefined) continue;
@@ -56,7 +56,9 @@ if (typeof window !== 'undefined') {
 /** Raw DOH / compliant fields from a tag (aligned with app.py normalize_doh_value). */
 function getRawDohFromTag(tag) {
     if (!tag) return '';
-    const v = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || tag['DOH*'] || '';
+    // Prefer compliance column over technical DOH (same as API / DOCX intent)
+    const v = tag['DOH Compliant (Yes/No)'] ?? tag['DOH Compliant'] ?? tag.DOH ?? tag.doh ?? tag['DOH*'] ?? '';
+    if (v === undefined || v === null) return '';
     return v.toString().trim();
 }
 
@@ -73,6 +75,41 @@ function normalizeDohTagValue(raw) {
     if (u.includes('DOH') || u === 'COMPLIANT') return 'DOH';
     if (u === 'THC' || u === 'CBD') return u;
     return u;
+}
+
+/**
+ * Which DOH badge to show (NONE | DOH | THC | CBD). Aligns with app.py:
+ * - Prefer DOH Compliant (Yes/No) for yes/no.
+ * - Use technical tag.DOH for THC/CBD/DOH flavor when present.
+ * - Uses normalizeDohTagValue so 1 / TRUE / General Use match backend.
+ */
+function resolveDohBadgeStatusFromTag(tag) {
+    if (!tag) return 'NONE';
+    const techRaw = tag.DOH ?? tag['DOH'] ?? tag['DOH*'];
+    const compRaw = tag['DOH Compliant (Yes/No)'] ?? tag['DOH Compliant'] ?? tag['DOH Compliant (Yes/No)*'];
+    const tech = techRaw !== undefined && techRaw !== null ? String(techRaw).trim() : '';
+    const comp = compRaw !== undefined && compRaw !== null ? String(compRaw).trim() : '';
+    const techNorm = tech ? normalizeDohTagValue(tech) : '';
+    const compNorm = comp ? normalizeDohTagValue(comp) : '';
+    // Technical THC/CBD wins for badge artwork when set
+    if (techNorm === 'THC' || techNorm === 'CBD') return techNorm;
+    if (techNorm === 'DOH') return 'DOH';
+    if (compNorm === 'DOH') return 'DOH';
+    if (compNorm === 'NONE') {
+        if (techNorm && techNorm !== 'NONE') return techNorm;
+        return 'NONE';
+    }
+    if (techNorm && techNorm !== 'NONE') return techNorm;
+    const legacy = tag.doh !== undefined && tag.doh !== null ? String(tag.doh).trim() : '';
+    if (legacy) {
+        const ln = normalizeDohTagValue(legacy);
+        if (ln && ln !== 'NONE') return ln;
+    }
+    return 'NONE';
+}
+
+if (typeof window !== 'undefined') {
+    window.resolveDohBadgeStatusFromTag = resolveDohBadgeStatusFromTag;
 }
 
 /** Dropdown uses lowercase "none" for empty / non-DOH bucket (matches existing UI). */
@@ -114,6 +151,97 @@ function tagMatchesDohFilter(tag, dohFilter) {
         normalizedTagDoh === filterDoh ||
         tagU === normalizedFilterDoh;
 }
+
+/** Supplier/vendor on tag — same fields everywhere (dropdown options + applyFilters). */
+function getVendorFromTagForFilter(tag) {
+    if (!tag) return '';
+    const candidates = [
+        tag['Vendor/Supplier*'],
+        tag['Vendor/Supplier'],
+        tag['Vendor*'],
+        tag.Vendor,
+        tag.vendor,
+        tag['Product Vendor'],
+        tag['ProductVendor'],
+        tag['Vendor Name'],
+        tag['vendor_name'],
+        tag['VendorName'],
+        tag['Supplier'],
+        tag.supplier,
+        tag['supplier'],
+        tag.vendor_supplier,
+        tag['vendor_supplier']
+    ];
+    const unknown = (s) => {
+        const t = String(s ?? '').trim().toLowerCase();
+        return !t || t === 'unknown' || t === 'unknown vendor' || t === 'nan' || t === 'none' || t === 'null';
+    };
+    for (const v of candidates) {
+        if (v == null || v === '') continue;
+        const t = String(v).trim();
+        if (t && !unknown(t)) return t;
+    }
+    for (const v of candidates) {
+        if (v == null || v === '') continue;
+        const t = String(v).trim();
+        if (t) return t;
+    }
+    // Fallback: any tag key that looks like vendor/supplier (matches brand-field fallback pattern)
+    try {
+        const keys = Object.keys(tag);
+        for (const k of keys) {
+            const kl = k.toLowerCase();
+            if (!/(vendor|supplier)/.test(kl) || /doh|product name|product type|brand/i.test(k)) continue;
+            const v = tag[k];
+            if (v == null || v === '') continue;
+            const t = String(v).trim();
+            if (t && !unknown(t)) return t;
+        }
+    } catch (e) { /* ignore */ }
+    return '';
+}
+
+function normalizeVendorForFilterCompare(s) {
+    let t = String(s || '')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\u00A0/g, ' ');
+    if (typeof t.normalize === 'function') {
+        try { t = t.normalize('NFKC'); } catch (e) { /* ignore */ }
+    }
+    return t.toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function tagMatchesVendorFilter(tag, vendorFilterRaw) {
+    const want = normalizeVendorForFilterCompare(vendorFilterRaw);
+    if (!want || want === 'all') return true;
+    const got = normalizeVendorForFilterCompare(getVendorFromTagForFilter(tag));
+    if (got === want) return true;
+    // Case / accent insensitive (dropdown vs tag may differ only by case)
+    try {
+        if (got && want && got.localeCompare(want, undefined, { sensitivity: 'base' }) === 0) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+}
+
+/** Main filter bar only — avoids duplicate id with lineage editor modal. */
+function getMainPageVendorFilterEl() {
+    const scoped =
+        document.querySelector('[data-container-type="filter"] #vendorFilter') ||
+        document.querySelector('#mainContent [data-container-type="filter"] #vendorFilter');
+    if (scoped) return scoped;
+    return document.getElementById('vendorFilter');
+}
+
+function getMainPageLineageFilterEl() {
+    const scoped =
+        document.querySelector('[data-container-type="filter"] #lineageFilter') ||
+        document.querySelector('#mainContent [data-container-type="filter"] #lineageFilter');
+    if (scoped) return scoped;
+    return document.getElementById('lineageFilter');
+}
+
 // Detect Windows platform for optimizations
 // navigator.platform is deprecated; use userAgentData when available, fallback to userAgent
 const isWindows = (() => {
@@ -512,6 +640,25 @@ function normalizeProductType(productType) {
   if (!productType) return productType;
   const normalized = PRODUCT_TYPE_OVERRIDES[productType.toLowerCase()];
   return normalized || productType;
+}
+
+/**
+ * POSaBit / inventory imports sometimes set Product Type* to "Concentrate" for infused pre-rolls.
+ * Tree grouping (Vendor → Brand → Product Type → …) uses this field, so mislabeled rows land under
+ * "Concentrate" even when the product name clearly says Infused Pre-Roll.
+ */
+function reconcileProductTypeWithProductName(rawType, productName) {
+    if (!productName) return rawType || '';
+    const t = (rawType || '').trim().toLowerCase();
+    if (t !== 'concentrate' && t !== 'solventless concentrate') return rawType || '';
+    const name = String(productName);
+    const infusedPreRoll =
+        /\binfused\s+pre[\s-]*roll\b/i.test(name) ||
+        (/\binfused\b/i.test(name) && /\bpre[\s-]*roll\b/i.test(name));
+    if (infusedPreRoll) {
+        return 'Infused Pre-Roll';
+    }
+    return rawType || '';
 }
 
 function formatProductTypeLabel(value) {
@@ -2559,9 +2706,8 @@ const TagManager = {
         ];
 
         tags.forEach(tag => {
-            // CRITICAL FIX: Check all possible vendor field names consistently
-            const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '';
-            if (vendor && vendor.trim()) vendors.add(vendor.trim());
+            const vendor = getVendorFromTagForFilter(tag);
+            if (vendor) vendors.add(vendor);
             // CRITICAL FIX: Check all possible brand field names consistently
             const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
             if (brand && brand.trim()) brands.add(brand.trim());
@@ -2640,12 +2786,23 @@ const TagManager = {
             const hasFilterSelections = Array.from(document.querySelectorAll('select[id*="Filter"]')).some(select => select.value && select.value.trim() !== '');
             if (hasFilterSelections) {
                 verboseLog('⏭️ Skipping filter update - all filters empty but user has selections to preserve');
+                // Restore flag — otherwise immediateFilterUpdate() stays blocked and supplier filter (and others) never apply.
+                this._isUpdatingFilters = wasUpdatingFilters;
                 return;
             }
         }
         
-        // Store original filter options to preserve order
-        if (!this.state.originalFilterOptions.vendor) {
+        // Store full filter option snapshot. Old logic used `if (!originalFilterOptions.vendor)` which
+        // stays false for [] (truthy) — first empty snapshot blocked later updates when tags loaded.
+        const prevV = this.state.originalFilterOptions.vendor;
+        const nextV = filters.vendor;
+        const prevLen = Array.isArray(prevV) ? prevV.length : 0;
+        const nextLen = Array.isArray(nextV) ? nextV.length : 0;
+        const prevJoin = Array.isArray(prevV) ? prevV.slice().sort().join('\u0001') : '';
+        const nextJoin = Array.isArray(nextV) ? nextV.slice().sort().join('\u0001') : '';
+        const shouldSnap = !Array.isArray(prevV) || nextLen > prevLen || (prevLen === 0 && nextLen > 0) ||
+            (nextLen > 0 && prevJoin !== nextJoin);
+        if (shouldSnap) {
             this.state.originalFilterOptions = { ...filters };
         }
         
@@ -2664,7 +2821,9 @@ const TagManager = {
         
         // Update each filter dropdown
         Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
-            const filterElement = document.getElementById(filterId);
+            const filterElement = filterType === 'vendor' && typeof getMainPageVendorFilterEl === 'function'
+                ? (getMainPageVendorFilterEl() || document.getElementById(filterId))
+                : document.getElementById(filterId);
             
             if (!filterElement) {
                 console.warn(`Filter element not found: ${filterId}`);
@@ -2878,10 +3037,10 @@ const TagManager = {
     saveFiltersToStorage() {
         try {
             const filters = {
-                vendor: document.getElementById('vendorFilter')?.value || '',
+                vendor: getMainPageVendorFilterEl()?.value || '',
                 brand: document.getElementById('brandFilter')?.value || '',
                 productType: document.getElementById('productTypeFilter')?.value || '',
-                lineage: document.getElementById('lineageFilter')?.value || '',
+                lineage: getMainPageLineageFilterEl()?.value || '',
                 weight: document.getElementById('weightFilter')?.value || '',
                 price: document.getElementById('priceFilter')?.value || '',
                 doh: document.getElementById('dohFilter')?.value || '',
@@ -3002,14 +3161,10 @@ const TagManager = {
             const excludedTypesLower = excludedTypes.map(t => t.toLowerCase());
             
             tags.forEach(tag => {
-                // Vendor - check ALL possible vendor field names
-                const vendor = tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || 
-                              tag['Vendor/Supplier'] || tag['Vendor*'] || tag['Product Vendor'] || 
-                              tag['ProductVendor'] || '';
+                const vendor = getVendorFromTagForFilter(tag);
                 if (vendor && vendor.trim()) {
                     const vendorTrimmed = vendor.trim();
-                    // Skip "Unknown" vendors
-                    if (vendorTrimmed.toLowerCase() !== 'unknown' && 
+                    if (vendorTrimmed.toLowerCase() !== 'unknown' &&
                         vendorTrimmed.toLowerCase() !== 'unknown vendor') {
                         filterOptions.vendor.add(vendorTrimmed);
                     }
@@ -3392,7 +3547,6 @@ const TagManager = {
     async updateFilterOptions() {
         try {
             verboseLog('🔍 updateFilterOptions() called');
-            console.trace('Call stack for updateFilterOptions');
             
             // CRITICAL FIX: Don't update filter options during tag deselection to prevent clearing user's filters
             if (this.state.isProcessingDeselection) {
@@ -3400,17 +3554,20 @@ const TagManager = {
                 return;
             }
             
-            // Fast path: skip if no original options (Mac-like speed)
-            if (!this.state.originalFilterOptions.vendor) {
+            // Need tags to compute cascading options — do not skip when vendor array was empty on first paint
+            const tagsForCascade = (this.state.originalTags && this.state.originalTags.length)
+                ? this.state.originalTags
+                : (this.state.tags || []);
+            if (!tagsForCascade.length) {
                 return;
             }
             
             // Get current filter values (minimal)
             const currentFilters = {
-                vendor: document.getElementById('vendorFilter')?.value || '',
+                vendor: getMainPageVendorFilterEl()?.value || '',
                 brand: document.getElementById('brandFilter')?.value || '',
                 productType: document.getElementById('productTypeFilter')?.value || '',
-                lineage: document.getElementById('lineageFilter')?.value || '',
+                lineage: getMainPageLineageFilterEl()?.value || '',
                 weight: document.getElementById('weightFilter')?.value || '',
                 price: document.getElementById('priceFilter')?.value || '',
                 doh: document.getElementById('dohFilter')?.value || '',
@@ -3433,9 +3590,7 @@ const TagManager = {
             const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
                 // Check vendor filter - only apply if not empty and not "All"
                 if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
-                    // CRITICAL FIX: Check all possible vendor field names
-                    const tagVendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
-                    if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) {
+                    if (!tagMatchesVendorFilter(tag, currentFilters.vendor)) {
                         return false;
                     }
                 }
@@ -3587,9 +3742,7 @@ const TagManager = {
             for (let i = 0; i < tagsForOptions.length; i++) {
                 const tag = tagsForOptions[i];
                 
-                // Always add vendor options (show all vendors)
-                // CRITICAL FIX: Check all possible vendor field names to ensure all vendors are shown
-                const vendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
+                const vendor = getVendorFromTagForFilter(tag);
                 if (vendor) availableOptions.vendor.add(vendor);
                 
                 // Always add brand options (show all brands)
@@ -3675,10 +3828,10 @@ const TagManager = {
     _applyCachedFilterOptions() {
         // Get current filter values
         const currentFilters = {
-            vendor: document.getElementById('vendorFilter')?.value || '',
+            vendor: getMainPageVendorFilterEl()?.value || '',
             brand: document.getElementById('brandFilter')?.value || '',
             productType: document.getElementById('productTypeFilter')?.value || '',
-            lineage: document.getElementById('lineageFilter')?.value || '',
+            lineage: getMainPageLineageFilterEl()?.value || '',
             weight: document.getElementById('weightFilter')?.value || '',
             doh: document.getElementById('dohFilter')?.value || '',
             highCbd: document.getElementById('highCbdFilter')?.value || ''
@@ -3695,9 +3848,7 @@ const TagManager = {
         // Apply filters to get weight options
         const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
             if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
-                // CRITICAL FIX: Check all possible vendor field names consistently
-                const tagVendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag.vendor || tag['Vendor/Supplier'] || '').toString().trim();
-                if (tagVendor.toLowerCase() !== currentFilters.vendor.toLowerCase()) return false;
+                if (!tagMatchesVendorFilter(tag, currentFilters.vendor)) return false;
             }
             if (currentFilters.brand && currentFilters.brand.trim() !== '' && currentFilters.brand.toLowerCase() !== 'all') {
                 // CRITICAL FIX: Check all possible brand field names consistently
@@ -3746,7 +3897,12 @@ const TagManager = {
         };
 
         Object.entries(filterFieldMap).forEach(([filterType, filterId]) => {
-                const filterElement = document.getElementById(filterId);
+                const filterElement =
+                    filterType === 'vendor' && typeof getMainPageVendorFilterEl === 'function'
+                        ? (getMainPageVendorFilterEl() || document.getElementById(filterId))
+                        : filterType === 'lineage' && typeof getMainPageLineageFilterEl === 'function'
+                            ? (getMainPageLineageFilterEl() || document.getElementById(filterId))
+                            : document.getElementById(filterId);
                 if (!filterElement) {
                     return;
                 }
@@ -3823,7 +3979,7 @@ const TagManager = {
         // Fast path: show all if no filters (Mac-like speed)
         const productNameFilter = document.getElementById('productNameFilter')?.value || '';
         const manifestRefFilter = document.getElementById('manifestRefFilter')?.value || '';
-        const vendorFilter = document.getElementById('vendorFilter')?.value || '';
+        const vendorFilter = getMainPageVendorFilterEl()?.value || '';
         // CRITICAL FIX: Ensure brand filter value is always read correctly, with fallback to state
         const brandFilterElement = document.getElementById('brandFilter');
         let brandFilter = brandFilterElement?.value || '';
@@ -3843,7 +3999,7 @@ const TagManager = {
             }
         }
         const productTypeFilter = document.getElementById('productTypeFilter')?.value || '';
-        const lineageFilter = document.getElementById('lineageFilter')?.value || '';
+        const lineageFilter = getMainPageLineageFilterEl()?.value || '';
         const weightFilter = document.getElementById('weightFilter')?.value || '';
         const priceFilter = document.getElementById('priceFilter')?.value || '';
         const dohFilter = document.getElementById('dohFilter')?.value || '';
@@ -3974,9 +4130,7 @@ const TagManager = {
 
             // Check vendor filter - only apply if not empty and not "All"
             if (vendorFilter && vendorFilter.trim() !== '' && vendorFilter.toLowerCase() !== 'all') {
-                // Check multiple possible vendor field names
-                const tagVendor = (tag['Vendor/Supplier*'] || tag['Vendor/Supplier'] || tag.Vendor || tag.vendor || '').toString().trim();
-                if (tagVendor.toLowerCase() !== vendorFilter.toLowerCase()) {
+                if (!tagMatchesVendorFilter(tag, vendorFilter)) {
                     return false;
                 }
             }
@@ -4366,7 +4520,7 @@ const TagManager = {
             const filteredTags = tags.filter(tag => {
                 const tagName = (tag['Product Name*'] || '').toLowerCase();
                 const brand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toLowerCase();
-                const vendor = (tag['Vendor/Supplier*'] || tag.Vendor || tag['Vendor/Supplier'] || '').toLowerCase();
+                const vendor = getVendorFromTagForFilter(tag).toLowerCase();
                 const productType = (tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '').toLowerCase();
                 const strain = (tag['Product Strain'] || tag.ProductStrain || tag.strain || '').toLowerCase();
                 
@@ -4652,7 +4806,9 @@ const TagManager = {
             }
             // CRITICAL FIX: Check all possible brand field names consistently
             let brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || tag['ProductBrand'] || this.extractBrand(tag) || '';
-            const rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
+            const productNameForReconcile = tag['Product Name*'] || tag.ProductName || tag.displayName || '';
+            let rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
+            rawProductType = reconcileProductTypeWithProductName(rawProductType.trim(), productNameForReconcile);
             const normalizedProductType = normalizeProductType(rawProductType.trim());
             const normalizedLower = normalizedProductType.toLowerCase();
             
@@ -8013,6 +8169,19 @@ const TagManager = {
         
         // Normalize lineage to uppercase for consistent matching - respect database value
         lineage = (lineage || '').toString().trim().toUpperCase();
+
+        // When strain DB or user override is present, do NOT remap Cultivera codes → HYBRID or
+        // override with product-name CBD heuristics (those caused wrong badges vs POSaBit / DOCX).
+        const trustStrainDbLineage = (() => {
+            const ok = (v) => {
+                if (v == null || v === undefined) return false;
+                const s = String(v).trim();
+                if (!s) return false;
+                return s.toUpperCase() !== 'SOVEREIGN';
+            };
+            // products."Lineage" / POS column — skip name/CBD heuristics when explicitly set (aligns with resolveRawLineageFromTag).
+            return ok(tag.sovereign_lineage) || ok(tag.Lineage) || ok(tag.lineage) || ok(tag['Lineage*']) || ok(tag.canonical_lineage);
+        })();
         
         // CRITICAL FIX: Classic types should NEVER have MIXED/THC lineage - convert to HYBRID
         // This ensures UI displays correct lineage even if database/Excel has wrong value
@@ -8026,7 +8195,7 @@ const TagManager = {
         // Classic types: any lineage that isn't a standard value (SATIVA/INDICA/HYBRID/CBD variants)
         // gets normalized to HYBRID. This covers MIXED, THC, NON E, NON_E, and other Cultivera codes.
         const _classicValidLineages = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','CBD_BLEND'];
-        if (isClassicType && !_classicValidLineages.includes(lineage)) {
+        if (!trustStrainDbLineage && isClassicType && !_classicValidLineages.includes(lineage)) {
             lineage = 'HYBRID';
         }
         
@@ -8099,9 +8268,18 @@ const TagManager = {
         const validDatabaseLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA', 'PARAPHERNALIA'];
         const hasValidDatabaseLineage = validDatabaseLineages.includes(lineage);
         
-        // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
-        // Check if product type is "paraphernalia" - this overrides everything else
-        if (lowerProductType === 'paraphernalia') {
+        if (trustStrainDbLineage) {
+            displayLineage = lineage;
+            if (lowerProductType === 'paraphernalia') {
+                displayLineage = 'PARAPHERNALIA';
+                verboseLog(`🎯 Trusted lineage + paraphernalia type: "${displayName}" → PARAPHERNALIA`);
+            } else if (lowerProductType.startsWith('high cbd')) {
+                displayLineage = 'CBD_BLEND';
+                verboseLog(`🎯 Trusted lineage + high CBD type: "${displayName}" → CBD_BLEND`);
+            } else {
+                verboseLog(`🎯 Trusted strain/sovereign lineage (no name heuristics): "${displayName}" → ${displayLineage}`);
+            }
+        } else if (lowerProductType === 'paraphernalia') {
             displayLineage = 'PARAPHERNALIA';
             verboseLog(`🎯 Paraphernalia product detected: "${displayName}" (${lowerProductType}) → PARAPHERNALIA (pink)`);
             // Set the lineage data attributes
@@ -8204,7 +8382,7 @@ const TagManager = {
             }
             verboseLog(`🎨 Classic type using database lineage: "${displayName}" → ${displayLineage}`);
         }
-        } // End of else block for High CBD check
+        } // End of else block for High CBD check (heuristic path when no canonical/sovereign lineage)
         
         // Backend now handles lineage assignment correctly:
         // CBD Blend products = yellow (CBD lineage)
@@ -8281,58 +8459,8 @@ const TagManager = {
         
         // Price display removed from individual tag items - kept in dropdown header only
         
-        // Add DOH and High CBD/THC images if applicable
-        // CRITICAL FIX: Check ALL possible DOH field variations for all tags
-        let dohValue = '';
-        // Check all possible DOH field names (same as backend and other parts of code)
-        // CRITICAL: Check in order of priority - DOH Compliant (Yes/No) first, then DOH, then doh, etc.
-        // Also check for any field that might contain DOH info
-        // IMPORTANT: Check both direct property access and bracket notation for maximum compatibility
-        const rawDoh = tag['DOH Compliant (Yes/No)'] || 
-                       tag['DOH Compliant (Yes/No)*'] ||
-                       tag.DOH || 
-                       tag['DOH'] ||
-                       tag['DOH*'] ||
-                       tag.doh || 
-                       tag['doh'] ||
-                       tag['DOH Compliant'] || 
-                       tag['DOH Compliant*'] ||
-                       '';
-        
-        // CRITICAL DEBUG: Log ALL tag keys to see what fields are actually present
-        if (!window._dohDebugCount) window._dohDebugCount = 0;
-        if (window._dohDebugCount < 5) {
-            const allTagKeys = Object.keys(tag);
-            const dohRelatedKeys = allTagKeys.filter(k => k.toLowerCase().includes('doh'));
-            console.log(`🔍 DOH DEBUG [${window._dohDebugCount}]: "${cleanedName}"`, {
-                rawDoh: rawDoh,
-                allDohKeys: dohRelatedKeys,
-                dohKeyValues: dohRelatedKeys.reduce((acc, k) => { acc[k] = tag[k]; return acc; }, {}),
-                allTagKeys: allTagKeys.slice(0, 30) // First 30 keys
-            });
-            window._dohDebugCount++;
-        }
-        
-        // Normalize DOH value - handle None, null, undefined, empty strings
-        // CRITICAL: Ensure we always have a string value, even if empty
-        if (rawDoh !== null && rawDoh !== undefined && rawDoh !== '') {
-            const dohStr = String(rawDoh).trim();
-            // Only uppercase if we have a non-empty string
-            if (dohStr.length > 0 && 
-                dohStr.toLowerCase() !== 'none' && 
-                dohStr.toLowerCase() !== 'null' && 
-                dohStr.toLowerCase() !== 'undefined' && 
-                dohStr.toLowerCase() !== 'nan' &&
-                dohStr.toLowerCase() !== 'no' &&
-                dohStr.toLowerCase() !== 'n') {
-                dohValue = dohStr.toUpperCase();
-            }
-        }
-        
-        // DEBUG: Log all DOH-related fields to diagnose missing data
+        // Add DOH and High CBD/THC images if applicable (uses normalizeDohTagValue + resolveDohBadgeStatusFromTag)
         const productTypeForImages = (tag['Product Type*'] || '').toString().toLowerCase();
-        
-        // CRITICAL DEBUG: Always log DOH fields for first few tags to diagnose badge issues
         const allDohFields = {
             'DOH': tag.DOH,
             'DOH Compliant (Yes/No)': tag['DOH Compliant (Yes/No)'],
@@ -8340,14 +8468,26 @@ const TagManager = {
             'DOH Compliant': tag['DOH Compliant'],
             'DOH*': tag['DOH*']
         };
-        
-        // Only log DOH field checks if verbose logging is enabled (to reduce console spam)
+        const rawDoh = getRawDohFromTag(tag);
+        if (!window._dohDebugCount) window._dohDebugCount = 0;
+        if (window._dohDebugCount < 5) {
+            const allTagKeys = Object.keys(tag);
+            const dohRelatedKeys = allTagKeys.filter(k => k.toLowerCase().includes('doh'));
+            console.log(`🔍 DOH DEBUG [${window._dohDebugCount}]: "${cleanedName}"`, {
+                rawDoh: rawDoh,
+                resolved: resolveDohBadgeStatusFromTag(tag),
+                allDohKeys: dohRelatedKeys,
+                dohKeyValues: dohRelatedKeys.reduce((acc, k) => { acc[k] = tag[k]; return acc; }, {}),
+                allTagKeys: allTagKeys.slice(0, 30)
+            });
+            window._dohDebugCount++;
+        }
         if (typeof verboseLog === 'function') {
             const hasAnyDoh = Object.values(allDohFields).some(v => v && String(v).trim() && String(v).trim().toLowerCase() !== 'none' && String(v).trim().toLowerCase() !== 'null');
-            if (!hasAnyDoh || !dohValue || dohValue === '') {
+            if (!hasAnyDoh || !rawDoh) {
                 verboseLog(`⚠️ No DOH fields found for "${cleanedName}" - all DOH fields:`, allDohFields);
             }
-            verboseLog(`🏷️ DOH Badge Check for "${cleanedName}": rawDoh="${rawDoh}", dohValue="${dohValue}"`);
+            verboseLog(`🏷️ DOH Badge Check for "${cleanedName}": rawDoh="${rawDoh}", resolved="${resolveDohBadgeStatusFromTag(tag)}"`);
         }
         
         // Create image container for dynamic updates
@@ -8439,7 +8579,6 @@ const TagManager = {
         };
         
         // Check if product type indicates High CBD (more robust check)
-        // Check both the original product type and normalized version
         const productTypeOriginal = (tag['Product Type*'] || tag.productType || tag.Type || '').toString().toLowerCase().trim();
         const isHighCbdProduct = productTypeForImages.startsWith('high cbd') || 
                                  productTypeForImages.includes('doh high cbd') ||
@@ -8448,14 +8587,9 @@ const TagManager = {
                                  productTypeForImages.includes('high cbd edible') ||
                                  productTypeOriginal.includes('high cbd edible');
         
-        // Set initial image based on current DOH status
-        let initialDohStatus = 'NONE'; // Default to NONE
+        let initialDohStatus = 'NONE';
         
-        // For High CBD products, only show High CBD badge (not DOH badge)
-        // CRITICAL: This check must happen BEFORE any DOH status checks
         if (isHighCbdProduct) {
-            // High CBD products should only show High CBD badge, not DOH badge
-            // Clear any existing images first
             while (imageContainer.firstChild) {
                 imageContainer.removeChild(imageContainer.firstChild);
             }
@@ -8466,205 +8600,63 @@ const TagManager = {
             highCbdImg.loading = 'lazy';
             highCbdImg.style.cssText = 'height:24px;width:auto;margin-left:6px;vertical-align:middle;display:inline-block;';
             imageContainer.appendChild(highCbdImg);
+            initialDohStatus = 'CBD';
             console.log(`✅ Added High CBD badge for High CBD product "${cleanedName}"`);
-            // Don't call updateDohImage for High CBD products - skip DOH logic entirely
         } else {
-            // For non-High CBD products, use normal DOH logic
-            // CRITICAL FIX: Normalize DOH value first, then check
-            // dohValue is already uppercase from line 7680, but ensure it's a string
-            const dohValueUpper = dohValue && dohValue.length > 0 ? String(dohValue).trim().toUpperCase() : '';
-            let normalizedDohValue = dohValueUpper;
-            
-            // CRITICAL DEBUG: Log DOH normalization for first few tags
-            if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
-                console.log(`🔍 DOH Normalization [${window._dohDebugCount}]: "${cleanedName}"`, {
-                    rawDoh: rawDoh,
-                    dohValue: dohValue,
-                    dohValueUpper: dohValueUpper,
-                    allDohFields: allDohFields
-                });
+            let resolved = resolveDohBadgeStatusFromTag(tag);
+            // TagsTable: DOH bucket + "high thc" in name → High THC image
+            const nameLower = (tag['Product Name*'] || tag.ProductName || cleanedName || '').toString().toLowerCase();
+            if (resolved === 'DOH' && nameLower.includes('high thc')) {
+                resolved = 'THC';
             }
-            
-            // CRITICAL: Check for DOH/YES/Y/COMPLIANT variations FIRST (before checking empty)
-            if (dohValueUpper && dohValueUpper.length > 0) {
-                // More comprehensive matching - check for DOH in any form
-                if (dohValueUpper === 'YES' || dohValueUpper === 'Y' || 
-                    dohValueUpper.includes('DOH') || dohValueUpper === 'COMPLIANT' ||
-                    dohValueUpper.startsWith('DOH') || dohValueUpper.endsWith('DOH')) {
-                    normalizedDohValue = 'DOH';
-                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
-                        console.log(`✅ DOH Normalized to DOH for "${cleanedName}": "${dohValueUpper}" -> "DOH"`);
-                    }
-                } else if (dohValueUpper === 'THC') {
-                    normalizedDohValue = 'THC';
-                } else if (dohValueUpper === 'CBD') {
-                    normalizedDohValue = 'CBD';
-                } else if (dohValueUpper === 'NO' || dohValueUpper === 'N' || dohValueUpper === 'NONE') {
-                    normalizedDohValue = 'NONE';
-                } else {
-                    // Unknown value - log it for debugging
-                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
-                        console.log(`⚠️ Unknown DOH value for "${cleanedName}": "${dohValueUpper}" - defaulting to NONE`);
-                    }
-                    normalizedDohValue = 'NONE';
-                }
-            } else {
-                // Empty or undefined - check product type for High THC indicators as fallback
-                if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
-                    normalizedDohValue = 'THC';
-                } else {
-                    normalizedDohValue = 'NONE';
-                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
-                        console.log(`⚠️ Empty DOH value for "${cleanedName}" - defaulting to NONE`);
-                    }
-                }
+            if (resolved === 'NONE' && (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc'))) {
+                resolved = 'THC';
             }
+            initialDohStatus = resolved;
             
-            // CRITICAL FIX: Set initialDohStatus based on normalized value
-            if (normalizedDohValue === 'DOH') {
-                initialDohStatus = 'DOH';
-            } else if (normalizedDohValue === 'THC') {
-                initialDohStatus = 'THC';
-            } else if (normalizedDohValue === 'CBD') {
-                initialDohStatus = 'CBD';
-            } else {
-                initialDohStatus = 'NONE';
-            }
-            
-            // CRITICAL DEBUG: Log initial DOH status for first few tags
             if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
                 console.log(`🔍 Initial DOH Status [${window._dohDebugCount}]: "${cleanedName}"`, {
-                    normalizedDohValue: normalizedDohValue,
+                    rawDoh: rawDoh,
+                    resolved: resolved,
                     initialDohStatus: initialDohStatus,
                     willShowBadge: initialDohStatus !== 'NONE'
                 });
             }
             
-            // CRITICAL FIX: Store updateDohImage function on tag element so refreshAllDohBadges can use it
             tagElement._updateDohImage = updateDohImage;
-            
-            // CRITICAL FIX: Always call updateDohImage immediately for initial render
-            // This ensures badges appear right away if DOH values are available
             updateDohImage(initialDohStatus);
             
-            // CRITICAL FIX: Also use setTimeout to re-check DOH values in case they're enriched asynchronously
-            // Use multiple timeouts to catch badges that might be added later
             setTimeout(() => {
-                // Re-read DOH value in case it was enriched after tag creation
-                // CRITICAL: Use same comprehensive field checking as initial read
-                const currentRawDoh = tag['DOH Compliant (Yes/No)'] || 
-                                     tag['DOH Compliant (Yes/No)*'] ||
-                                     tag.DOH || 
-                                     tag['DOH'] ||
-                                     tag['DOH*'] ||
-                                     tag.doh || 
-                                     tag['doh'] ||
-                                     tag['DOH Compliant'] || 
-                                     tag['DOH Compliant*'] ||
-                                     '';
-                let currentDohValue = '';
-                if (currentRawDoh !== null && currentRawDoh !== undefined && currentRawDoh !== '') {
-                    const dohStr = String(currentRawDoh).trim();
-                    if (dohStr.length > 0 && 
-                        dohStr.toLowerCase() !== 'none' && 
-                        dohStr.toLowerCase() !== 'null' && 
-                        dohStr.toLowerCase() !== 'undefined' && 
-                        dohStr.toLowerCase() !== 'nan' &&
-                        dohStr.toLowerCase() !== 'no' &&
-                        dohStr.toLowerCase() !== 'n') {
-                        currentDohValue = dohStr.toUpperCase();
+                let late = resolveDohBadgeStatusFromTag(tag);
+                const nl = (tag['Product Name*'] || tag.ProductName || cleanedName || '').toString().toLowerCase();
+                if (late === 'DOH' && nl.includes('high thc')) late = 'THC';
+                if (late !== initialDohStatus && late !== 'NONE') {
+                    updateDohImage(late);
+                    if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
+                        console.log(`✅ Updated DOH badge for "${cleanedName}": ${initialDohStatus} -> ${late}`);
                     }
+                } else if (late !== 'NONE' && imageContainer.children.length === 0) {
+                    updateDohImage(late);
                 }
-                
-                // Re-normalize DOH value with same comprehensive logic
-                const currentDohUpper = currentDohValue && currentDohValue.length > 0 ? String(currentDohValue).trim().toUpperCase() : '';
-                let currentNormalizedDoh = currentDohUpper;
-                if (currentDohUpper && currentDohUpper.length > 0) {
-                    if (currentDohUpper === 'YES' || currentDohUpper === 'Y' || 
-                        currentDohUpper.includes('DOH') || currentDohUpper === 'COMPLIANT' ||
-                        currentDohUpper.startsWith('DOH') || currentDohUpper.endsWith('DOH')) {
-                        currentNormalizedDoh = 'DOH';
-                    } else if (currentDohUpper === 'THC') {
-                        currentNormalizedDoh = 'THC';
-                    } else if (currentDohUpper === 'CBD') {
-                        currentNormalizedDoh = 'CBD';
-                    } else {
-                        currentNormalizedDoh = 'NONE';
-                    }
-                } else {
-                    currentNormalizedDoh = 'NONE';
-                }
-                
-                // CRITICAL DEBUG: Log DOH re-check for first few tags
-                if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
-                    console.log(`🔍 DOH Re-check [${window._dohDebugCount}]: "${cleanedName}"`, {
-                        currentRawDoh: currentRawDoh,
-                        currentDohValue: currentDohValue,
-                        currentNormalizedDoh: currentNormalizedDoh,
-                        initialDohStatus: initialDohStatus,
-                        willUpdate: currentNormalizedDoh !== initialDohStatus && currentNormalizedDoh !== 'NONE'
-                    });
-                }
-                
-                // CRITICAL FIX: Update badge if DOH value changed OR if initial status was NONE but now we have a value
-                if (currentNormalizedDoh !== initialDohStatus) {
-                    if (currentNormalizedDoh !== 'NONE' || initialDohStatus === 'NONE') {
-                        updateDohImage(currentNormalizedDoh);
-                        if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
-                            console.log(`✅ Updated DOH badge for "${cleanedName}": ${initialDohStatus} -> ${currentNormalizedDoh}`);
-                        }
-                    }
-                }
-            }, 100); // First check - small delay to allow DOH enrichment to complete
+            }, 100);
             
-            // Additional check after longer delay to catch late-enriched tags
             setTimeout(() => {
-                const currentRawDoh = tag['DOH Compliant (Yes/No)'] || 
-                                     tag['DOH Compliant (Yes/No)*'] ||
-                                     tag.DOH || 
-                                     tag['DOH'] ||
-                                     tag['DOH*'] ||
-                                     tag.doh || 
-                                     tag['doh'] ||
-                                     tag['DOH Compliant'] || 
-                                     tag['DOH Compliant*'] ||
-                                     '';
-                if (currentRawDoh && String(currentRawDoh).trim() && 
-                    String(currentRawDoh).trim().toUpperCase() !== 'NONE' &&
-                    String(currentRawDoh).trim().toUpperCase() !== 'NO' &&
-                    String(currentRawDoh).trim().toUpperCase() !== 'N') {
-                    const dohStr = String(currentRawDoh).trim().toUpperCase();
-                    let normalizedDoh = 'NONE';
-                    if (dohStr === 'YES' || dohStr === 'Y' || dohStr.includes('DOH') || dohStr === 'COMPLIANT') {
-                        normalizedDoh = 'DOH';
-                    } else if (dohStr === 'THC') {
-                        normalizedDoh = 'THC';
-                    } else if (dohStr === 'CBD') {
-                        normalizedDoh = 'CBD';
-                    }
-                    
-                    // Only update if we have a valid DOH status and badge isn't already showing
-                    if (normalizedDoh !== 'NONE' && imageContainer.children.length === 0) {
-                        updateDohImage(normalizedDoh);
-                        console.log(`✅ Late DOH enrichment: Added badge for "${cleanedName}": ${normalizedDoh}`);
-                    }
+                const late = resolveDohBadgeStatusFromTag(tag);
+                if (late !== 'NONE' && imageContainer.children.length === 0) {
+                    updateDohImage(late);
+                    console.log(`✅ Late DOH enrichment: Added badge for "${cleanedName}": ${late}`);
                 }
-            }, 500); // Second check - longer delay for late-enriched tags
+            }, 500);
             
-            // CRITICAL DEBUG: Always log DOH status for first few tags to diagnose badge issues
             if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
                 console.log(`🔍 DOH Status [${window._dohDebugCount}]: "${cleanedName}"`, {
-                    dohValue: dohValue,
-                    dohValueUpper: dohValueUpper,
-                    normalized: normalizedDohValue,
+                    rawDoh: rawDoh,
                     initialDohStatus: initialDohStatus,
                     imageContainerChildren: imageContainer.children.length
                 });
             }
-            
-            // DEBUG: Only log DOH status if verbose logging is enabled (to reduce console spam)
             if (typeof verboseLog === 'function') {
-                verboseLog(`🔍 DOH Status Check for "${cleanedName}": dohValue="${dohValue}", dohValueUpper="${dohValueUpper}", normalized="${normalizedDohValue}", initialDohStatus="${initialDohStatus}"`);
+                verboseLog(`🔍 DOH Status Check for "${cleanedName}": rawDoh="${rawDoh}", initialDohStatus="${initialDohStatus}"`);
                 if (initialDohStatus === 'DOH' || initialDohStatus === 'THC' || initialDohStatus === 'CBD') {
                     verboseLog(`✅ DOH badge SHOULD appear for "${cleanedName}" (status: ${initialDohStatus})`);
                 }
@@ -8706,7 +8698,7 @@ const TagManager = {
         } else {
             // CRITICAL DEBUG: Log when badge should NOT appear
             if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
-                console.log(`❌ DOH badge NOT shown for "${cleanedName}" - initialDohStatus: ${initialDohStatus}, dohValue: ${dohValue}`);
+                console.log(`❌ DOH badge NOT shown for "${cleanedName}" - initialDohStatus: ${initialDohStatus}, rawDoh: ${rawDoh}`);
             }
         }
         
@@ -9024,32 +9016,15 @@ const TagManager = {
         // Use the same logic as initialDohStatus to determine current dropdown state
         // For high CBD products, CBD trumps DOH (High CBD implies DOH compliance)
         if (isHighCbdProduct) {
-            // If DOH/Yes status exists, CBD trumps it for High CBD products
-            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
-                currentDropdownStatus = 'CBD';
-            } else if (dohValue === 'THC') {
-                // Keep THC if explicitly set
+            if (initialDohStatus === 'THC') {
                 currentDropdownStatus = 'THC';
-            } else if (dohValue === 'CBD') {
-                currentDropdownStatus = 'CBD';
             } else {
-                // Default to CBD for High CBD products (no status, No, or NONE)
                 currentDropdownStatus = 'CBD';
             }
         } else {
-            // Non-High CBD products: Check explicit DOH field first
-            if (dohValue === 'DOH' || dohValue === 'YES' || dohValue === 'Y') {
-                currentDropdownStatus = 'DOH';
-            } else if (dohValue === 'THC') {
-                currentDropdownStatus = 'THC';
-            } else if (dohValue === 'CBD') {
-                currentDropdownStatus = 'CBD';
-            } else if (dohValue === 'NO' || dohValue === 'NONE') {
-                // Explicitly no DOH image
-                currentDropdownStatus = 'NONE';
-            } 
-            // Then check product type for High THC indicators (DOH High THC)
-            else if (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc')) {
+            currentDropdownStatus = initialDohStatus;
+            if (currentDropdownStatus === 'NONE' &&
+                (productTypeForImages.startsWith('high thc') || productTypeForImages.includes('doh high thc') || productTypeForImages.includes('high thc'))) {
                 currentDropdownStatus = 'THC';
             }
         }
@@ -9899,44 +9874,13 @@ const TagManager = {
                        this.state.originalTags.find(t => t['Product Name*'] === tagName);
             if (!tag) return;
             
-            // Get current DOH value from tag - use same comprehensive checking as createTagElement
-            const rawDoh = tag['DOH Compliant (Yes/No)'] || 
-                          tag['DOH Compliant (Yes/No)*'] ||
-                          tag.DOH || 
-                          tag['DOH'] ||
-                          tag['DOH*'] ||
-                          tag.doh || 
-                          tag['doh'] ||
-                          tag['DOH Compliant'] || 
-                          tag['DOH Compliant*'] ||
-                          '';
-            let dohValue = '';
-            if (rawDoh !== null && rawDoh !== undefined && rawDoh !== '') {
-                const dohStr = String(rawDoh).trim();
-                if (dohStr.length > 0 && 
-                    dohStr.toLowerCase() !== 'none' && 
-                    dohStr.toLowerCase() !== 'null' && 
-                    dohStr.toLowerCase() !== 'undefined' && 
-                    dohStr.toLowerCase() !== 'nan' &&
-                    dohStr.toLowerCase() !== 'no' &&
-                    dohStr.toLowerCase() !== 'n') {
-                    dohValue = dohStr.toUpperCase();
-                }
-            }
-            
-            // Normalize DOH value - use same comprehensive logic as createTagElement
-            const dohValueUpper = dohValue && dohValue.length > 0 ? String(dohValue).trim().toUpperCase() : '';
-            let normalizedDoh = 'NONE';
-            if (dohValueUpper && dohValueUpper.length > 0) {
-                if (dohValueUpper === 'YES' || dohValueUpper === 'Y' || 
-                    dohValueUpper.includes('DOH') || dohValueUpper === 'COMPLIANT' ||
-                    dohValueUpper.startsWith('DOH') || dohValueUpper.endsWith('DOH')) {
-                    normalizedDoh = 'DOH';
-                } else if (dohValueUpper === 'THC') {
-                    normalizedDoh = 'THC';
-                } else if (dohValueUpper === 'CBD') {
-                    normalizedDoh = 'CBD';
-                }
+            const rawDoh = getRawDohFromTag(tag);
+            let normalizedDoh = typeof resolveDohBadgeStatusFromTag === 'function'
+                ? resolveDohBadgeStatusFromTag(tag)
+                : 'NONE';
+            const nameLower = (tag['Product Name*'] || tag.ProductName || tagName || '').toString().toLowerCase();
+            if (normalizedDoh === 'DOH' && nameLower.includes('high thc')) {
+                normalizedDoh = 'THC';
             }
             
             // DEBUG: Log DOH refresh for first few tags
@@ -9944,8 +9888,6 @@ const TagManager = {
             if (window._dohRefreshDebugCount < 5) {
                 console.log(`🔍 DOH Refresh [${window._dohRefreshDebugCount}]: "${tagName}"`, {
                     rawDoh: rawDoh,
-                    dohValue: dohValue,
-                    dohValueUpper: dohValueUpper,
                     normalizedDoh: normalizedDoh,
                     tagFound: !!tag,
                     elementFound: !!el
@@ -10362,7 +10304,7 @@ const TagManager = {
 
         // CRITICAL FIX: If there's an active lineage filter and the updated tag's new lineage doesn't match,
         // clear the lineage filter so the tag remains visible
-        const lineageFilterElement = document.getElementById('lineageFilter');
+        const lineageFilterElement = getMainPageLineageFilterEl();
         if (lineageFilterElement) {
             const activeLineageFilter = lineageFilterElement.value || '';
             if (activeLineageFilter.trim() !== '' && activeLineageFilter.toLowerCase() !== 'all') {
@@ -10604,7 +10546,7 @@ const TagManager = {
 
         // CRITICAL FIX: If there's an active lineage filter and the updated tag's new lineage doesn't match,
         // clear the lineage filter so the tag remains visible
-        const lineageFilterElement = document.getElementById('lineageFilter');
+        const lineageFilterElement = getMainPageLineageFilterEl();
         if (lineageFilterElement) {
             const activeLineageFilter = lineageFilterElement.value || '';
             if (activeLineageFilter.trim() !== '' && activeLineageFilter.toLowerCase() !== 'all') {
@@ -14245,10 +14187,10 @@ const TagManager = {
         
         // Collect filter values from dropdowns (adjust IDs as needed)
         const filters = {
-            vendor: document.getElementById('vendorFilter')?.value || null,
+            vendor: getMainPageVendorFilterEl()?.value || null,
             brand: document.getElementById('brandFilter')?.value || null,
             productType: document.getElementById('productTypeFilter')?.value || null,
-            lineage: document.getElementById('lineageFilter')?.value || null,
+            lineage: getMainPageLineageFilterEl()?.value || null,
             weight: document.getElementById('weightFilter')?.value || null,
         };
 
@@ -14389,7 +14331,7 @@ const TagManager = {
             }
             
             // CRITICAL FIX: Always ensure vendor filter is empty on page load, regardless of saved filters
-            const vendorFilterElement = document.getElementById('vendorFilter');
+            const vendorFilterElement = getMainPageVendorFilterEl();
             if (vendorFilterElement) {
                 vendorFilterElement.value = '';
                 console.log('✅ Vendor filter cleared on page load');
@@ -15207,6 +15149,23 @@ const TagManager = {
                 window.location.hostname.includes('agtpricetags.com') ||
                 (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
             const initialDataFastLoad = isWebClient ? 1 : 0;
+
+            // Background cache bust — doesn't block the initial load.
+            // After cache clears, re-fetch silently and update inventory if count changed.
+            fetch('/api/performance/cache/clear', { method: 'POST' }).then(() =>
+                fetch('/api/initial-data?fast_load=1&nocache=1').then(r => r.ok ? r.json() : null)
+            ).then(freshData => {
+                if (!freshData || !freshData.data_loaded) return;
+                const newTotal = freshData.total_records || 0;
+                const currentTotal = window.TagManager && window.TagManager.state
+                    ? (window.TagManager.state.tags || []).length : 0;
+                if (newTotal !== currentTotal && typeof window.TagManager !== 'undefined'
+                    && typeof window.TagManager.loadTagsFromData === 'function') {
+                    console.log(`[PageLoad] Inventory updated: ${currentTotal} → ${newTotal}`);
+                    window.TagManager.loadTagsFromData(freshData);
+                }
+            }).catch(() => {});
+
             const response = await Promise.race([
                 fetch(`/api/initial-data?fast_load=${initialDataFastLoad}`),
                 timeoutPromise
@@ -18804,7 +18763,7 @@ const TagManager = {
                 'highCbd': 'highCbd',
                 'strain': 'strain'
             };
-            
+
             const stateKey = filterTypeMap[filterType];
             if (stateKey) {
                 self.state.filters[stateKey] = value || 'All';
@@ -18885,7 +18844,10 @@ const TagManager = {
         let missingFilters = [];
         
         filterIds.forEach(filterId => {
-            const filterElement = document.getElementById(filterId);
+            const filterElement =
+                filterId === 'vendorFilter' ? getMainPageVendorFilterEl() :
+                filterId === 'lineageFilter' ? getMainPageLineageFilterEl() :
+                document.getElementById(filterId);
             
             if (filterElement) {
                 foundCount++;
@@ -18908,10 +18870,11 @@ const TagManager = {
                 // Single, fast event handler with throttling for better performance
                 filterElement._filterChangeHandler = (event) => {
                     try {
-                        console.log(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
-                        verboseLog(`🔥 FILTER CHANGED: ${filterId} = "${event.target.value}"`);
+                        const target = (event && event.target) ? event.target : filterElement;
+                        const value = target && 'value' in target ? target.value : '';
+                        console.log(`🔥 FILTER CHANGED: ${filterId} = "${value}"`);
+                        verboseLog(`🔥 FILTER CHANGED: ${filterId} = "${value}"`);
                         const filterType = self.getFilterTypeFromId(filterId);
-                        const value = event.target.value;
                         console.log(`🔥 Filter type: ${filterType}, value: ${value}`);
                         
                         // Clear existing throttle timer for this filter
@@ -18921,14 +18884,23 @@ const TagManager = {
                         
                         // Throttle filter updates (25ms delay for ultra-fast response)
                         self._filterThrottleTimers[filterId] = setTimeout(() => {
-                            // Special handling for vendor filter
+                            // Supplier change: clear other filters, rebuild dropdowns, then apply — all async.
+                            // Do NOT run immediateFilterUpdate in parallel (it would applyFilters before
+                            // innerHTML refresh and could wipe the supplier selection / use stale cache).
                             if (filterId === 'vendorFilter' && value && value.trim() !== '' && value.toLowerCase() !== 'all') {
+                                if (self.state.filters) {
+                                    self.state.filters.vendor = value;
+                                    ['brand', 'productType', 'lineage', 'weight', 'price', 'doh', 'highCbd', 'strain'].forEach((k) => {
+                                        self.state.filters[k] = 'All';
+                                    });
+                                }
+                                if (self.saveFiltersToStorage) self.saveFiltersToStorage();
                                 if (self.resetAllOtherFilters) {
                                     self.resetAllOtherFilters();
                                 }
+                                return;
                             }
-                            
-                            // Filter update with requestAnimationFrame for smoother rendering
+
                             requestAnimationFrame(() => {
                                 verboseLog(`🔥 Calling immediateFilterUpdate for ${filterType}: ${value}`);
                                 immediateFilterUpdate(filterType, value);
@@ -19323,15 +19295,18 @@ const TagManager = {
     // Function to reset all other filters when vendor changes (but keep vendor filter)
     resetAllOtherFilters() {
         verboseLog('Resetting all other filters while keeping vendor filter...');
-        
-        // Get the current vendor filter value to preserve it
-        const vendorFilter = document.getElementById('vendorFilter');
-        const currentVendorValue = vendorFilter ? vendorFilter.value : '';
-        
-        // List of all filters except vendor
-        const otherFilterIds = ['brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'dohFilter', 'highCbdFilter'];
-        
-        // Clear all other filter dropdowns
+
+        // Avoid serving a cached filter result from the previous supplier/brand/etc.
+        this.state.filterCache = null;
+
+        const vendorEl = getMainPageVendorFilterEl();
+        const currentVendorValue = vendorEl ? String(vendorEl.value || '') : '';
+
+        const otherFilterIds = [
+            'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter',
+            'priceFilter', 'dohFilter', 'highCbdFilter', 'strainFilter'
+        ];
+
         otherFilterIds.forEach(filterId => {
             const filterElement = document.getElementById(filterId);
             if (filterElement) {
@@ -19339,15 +19314,30 @@ const TagManager = {
                 verboseLog(`Cleared ${filterId}`);
             }
         });
-        
-        // Update filter options to reflect the new vendor selection
-        this.updateFilterOptions();
-        
-        // Apply the updated filters (vendor only)
-        this.applyFilters();
-        this.renderActiveFilters();
-        
-        verboseLog('All other filters reset successfully, vendor filter preserved:', currentVendorValue);
+
+        // updateFilterOptions is async and rebuilds <select> innerHTML; we must wait,
+        // then re-apply the chosen supplier so filtering matches the visible dropdown.
+        const self = this;
+        Promise.resolve(self.updateFilterOptions())
+            .then(() => {
+                const vEl = getMainPageVendorFilterEl();
+                if (vEl && currentVendorValue) {
+                    vEl.value = currentVendorValue;
+                }
+                if (typeof self.applyFilters === 'function') {
+                    self.applyFilters(true);
+                }
+                if (typeof self.renderActiveFilters === 'function') {
+                    self.renderActiveFilters();
+                }
+                verboseLog('All other filters reset; vendor preserved:', currentVendorValue);
+            })
+            .catch((err) => {
+                console.warn('updateFilterOptions after vendor change failed:', err);
+                if (typeof self.applyFilters === 'function') {
+                    self.applyFilters(true);
+                }
+            });
     },
 
     // Emergency function to clear stuck upload UI
@@ -19592,10 +19582,10 @@ const TagManager = {
     // Ensure proper scrolling behavior for tag containers
     hasActiveFilters() {
         // Check if any filters are currently active (not set to "All")
-        const vendorFilter = document.getElementById('vendorFilter')?.value || '';
+        const vendorFilter = getMainPageVendorFilterEl()?.value || '';
         const brandFilter = document.getElementById('brandFilter')?.value || '';
         const productTypeFilter = document.getElementById('productTypeFilter')?.value || '';
-        const lineageFilter = document.getElementById('lineageFilter')?.value || '';
+        const lineageFilter = getMainPageLineageFilterEl()?.value || '';
         const weightFilter = document.getElementById('weightFilter')?.value || '';
         const dohFilter = document.getElementById('dohFilter')?.value || '';
         const highCbdFilter = document.getElementById('highCbdFilter')?.value || '';
@@ -19858,7 +19848,7 @@ const TagManager = {
                     const lineages = filterData.lineage || [];
 
                 if (lineages.length > 0) {
-                    const lineageFilter = document.getElementById('lineageFilter');
+                    const lineageFilter = getMainPageLineageFilterEl();
                     if (lineageFilter) {
                         // Clear existing options
                         lineageFilter.innerHTML = '';
@@ -20474,7 +20464,7 @@ const ABBREVIATED_LINEAGE = window.ABBREVIATED_LINEAGE; // Keep for backward com
 
 // When populating the lineage filter dropdown, use abbreviated lineage names
 function populateLineageFilterOptions(options) {
-  const lineageFilter = document.getElementById('lineageFilter');
+  const lineageFilter = getMainPageLineageFilterEl();
   if (!lineageFilter) return;
   lineageFilter.innerHTML = '';
   const defaultOption = document.createElement('option');

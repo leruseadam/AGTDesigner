@@ -79,13 +79,15 @@ def compute_display_lineage_like_ui(record: Dict[str, Any]) -> str:
         if result in ('CBD', 'CBG', 'CBN', 'CBC'):
             result = 'CBD_BLEND'
         return result
-    # Resolve lineage from most authoritative fields
+    # Resolve lineage from most authoritative fields.
+    # Product Lineage before canonical_lineage: products."Lineage" (SATIVA) must win over
+    # strains.canonical_lineage (HYBRID). currentLineage last (POS session).
     lineage_candidates = [
         record.get("sovereign_lineage"),
-        record.get("canonical_lineage"),
-        record.get("currentLineage"),
         record.get("Lineage"),
         record.get("lineage"),
+        record.get("canonical_lineage"),
+        record.get("currentLineage"),
     ]
     lineage: str | None = None
     for cand in lineage_candidates:
@@ -200,9 +202,32 @@ def compute_display_lineage_like_ui(record: Dict[str, Any]) -> str:
     is_classic_lineage = lineage in classic_lineages
     is_nonclassic = not is_classic_type
 
+    def _non_sovereign(v: Any) -> bool:
+        if v is None:
+            return False
+        s = str(v).strip()
+        if not s:
+            return False
+        return s.upper() != "SOVEREIGN"
+
+    trust_strain_db_lineage = _non_sovereign(record.get("sovereign_lineage")) or _non_sovereign(
+        record.get("canonical_lineage")
+    )
+
     # Paraphernalia override (driven by Product Type*, not name parsing)
     if is_paraphernalia_type:
         return "PARAPHERNALIA"
+
+    # High CBD category (product type) still overrides lineage label
+    if lower_product_type.startswith("high cbd"):
+        return "CBD_BLEND"
+
+    # Strain table / user override: do not rewrite with product-name CBD heuristics (matches main.js)
+    if trust_strain_db_lineage:
+        out = lineage or ("HYBRID" if is_classic_type else "MIXED")
+        if out in ("CBD", "CBG", "CBN", "CBC"):
+            return "CBD_BLEND"
+        return out
 
     display_lineage = lineage
 

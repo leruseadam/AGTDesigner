@@ -114,11 +114,10 @@ const getUniqueLineages = (productType = null) => {
 };
 
 function createTagRow(tag) {
-  // CRITICAL: Check sovereign_lineage first (user edits), then canonical_lineage, currentLineage, or Lineage
-  // CRITICAL FIX: Correct lineage priority - matches DOCX generation and backend
-  // Priority: sovereign_lineage (user edits) > canonical_lineage (strains table) > currentLineage > Lineage (Excel)
-  // This ensures database lineage (canonical_lineage) takes priority over Excel lineage
-  let rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
+  // Use the canonical resolver — same priority as main.js / _ui_lineage_port.py
+  let rawLineage = (typeof window.resolveRawLineageFromTag === 'function')
+    ? window.resolveRawLineageFromTag(tag)
+    : (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '');
   
   // Normalize to uppercase, but keep the original value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -161,26 +160,20 @@ function createTagRow(tag) {
   } else if (!lineage) {
     lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
-    // CRITICAL FIX: Extract DOH status and normalize it consistently (same as TagsTable.createTagRow)
-    const rawDohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '';
-    const dohStatusNormalized = rawDohStatus.toString().trim().toUpperCase();
-    
-    // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE, empty -> NONE
-    let dohStatus = 'NONE';
-    if (dohStatusNormalized === 'YES' || dohStatusNormalized === 'Y') {
-      dohStatus = 'DOH';
-    } else if (dohStatusNormalized === 'DOH' || dohStatusNormalized.includes('DOH') || dohStatusNormalized === 'COMPLIANT') {
-      dohStatus = 'DOH';
-    } else if (dohStatusNormalized === 'CBD') {
-      dohStatus = 'CBD';
-    } else if (dohStatusNormalized === 'THC') {
-      dohStatus = 'THC';
-    } else if (dohStatusNormalized === 'NO' || dohStatusNormalized === 'N' || dohStatusNormalized === 'NONE' || !dohStatusNormalized) {
-      dohStatus = 'NONE';
-    } else {
-      // Keep original value if it's something else
-      dohStatus = dohStatusNormalized;
+    // Prefer Compliant column + technical DOH (same as main.js resolveDohBadgeStatusFromTag)
+    let dohStatus = (typeof window.resolveDohBadgeStatusFromTag === 'function')
+      ? window.resolveDohBadgeStatusFromTag(tag)
+      : 'NONE';
+    if (dohStatus === 'NONE') {
+      const rawDohStatus = tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || tag.DOH || tag.doh || '';
+      const dohStatusNormalized = rawDohStatus.toString().trim().toUpperCase();
+      if (dohStatusNormalized === 'YES' || dohStatusNormalized === 'Y' || dohStatusNormalized.includes('DOH') || dohStatusNormalized === 'COMPLIANT') {
+        dohStatus = 'DOH';
+      } else if (dohStatusNormalized === 'CBD') dohStatus = 'CBD';
+      else if (dohStatusNormalized === 'THC') dohStatus = 'THC';
     }
+    const tagNameLower = (tag['Product Name*'] || tag.ProductName || '').toString().toLowerCase();
+    if (dohStatus === 'DOH' && tagNameLower.includes('high thc')) dohStatus = 'THC';
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;
@@ -382,9 +375,9 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Same order as main.js resolveRawLineageFromTag / backend DOCX:
-  // sovereign > canonical (strain) > currentLineage > Excel Lineage
-  let rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
+  let rawLineage = (typeof window.resolveRawLineageFromTag === 'function')
+    ? window.resolveRawLineageFromTag(tag)
+    : (tag.sovereign_lineage || tag.Lineage || tag.lineage || tag.canonical_lineage || tag.currentLineage || '');
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();
@@ -412,28 +405,21 @@ class TagsTable {
     lineage = isClassicType ? 'HYBRID' : 'MIXED';
   }
   
-    // CRITICAL FIX: Extract DOH status and normalize it consistently
-    const rawDohStatus = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '';
-    const dohStatusNormalized = rawDohStatus.toString().trim().toUpperCase();
-    
-    // Normalize DOH values: YES/Y -> DOH, NO/N -> NONE, empty -> NONE
-    let dohStatus = 'NONE';
-    if (dohStatusNormalized === 'YES' || dohStatusNormalized === 'Y') {
-      dohStatus = 'DOH';
-    } else if (dohStatusNormalized === 'DOH' || dohStatusNormalized.includes('DOH') || dohStatusNormalized === 'COMPLIANT') {
-      dohStatus = 'DOH';
-    } else if (dohStatusNormalized === 'CBD') {
-      dohStatus = 'CBD';
-    } else if (dohStatusNormalized === 'THC') {
-      dohStatus = 'THC';
-    } else if (dohStatusNormalized === 'NO' || dohStatusNormalized === 'N' || dohStatusNormalized === 'NONE' || !dohStatusNormalized) {
-      dohStatus = 'NONE';
-    } else {
-      // Keep original value if it's something else (like CBD, THC, etc.)
-      dohStatus = dohStatusNormalized;
+    let dohStatus = (typeof window.resolveDohBadgeStatusFromTag === 'function')
+      ? window.resolveDohBadgeStatusFromTag(tag)
+      : 'NONE';
+    if (dohStatus === 'NONE') {
+      const rawDohStatus = tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || tag.DOH || tag.doh || '';
+      const dohStatusNormalized = rawDohStatus.toString().trim().toUpperCase();
+      if (dohStatusNormalized === 'YES' || dohStatusNormalized === 'Y' || dohStatusNormalized.includes('DOH') || dohStatusNormalized === 'COMPLIANT') {
+        dohStatus = 'DOH';
+      } else if (dohStatusNormalized === 'CBD') dohStatus = 'CBD';
+      else if (dohStatusNormalized === 'THC') dohStatus = 'THC';
     }
+    const _tn = (tag['Product Name*'] || tag.ProductName || '').toString().toLowerCase();
+    if (dohStatus === 'DOH' && _tn.includes('high thc')) dohStatus = 'THC';
     
-    console.log('🏷️ DOH Status for tag:', tag['Product Name*'] || tag.ProductName, 'rawDohStatus=', rawDohStatus, 'normalized=', dohStatus); // Debug log
+    console.log('🏷️ DOH Status for tag:', tag['Product Name*'] || tag.ProductName, 'dohStatus=', dohStatus); // Debug log
     
     // For JSON matched tags and educated guess tags, prioritize the original display information over derived product names
     let tagName;

@@ -5515,10 +5515,9 @@ class ProductDatabase:
                 return None
             
             # Try exact match first (fastest) - also get strain for sativa hybrid check
-            # Strains-sheet lineage path: never fall back to products."Lineage" here.
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage
+            # Same COALESCE as UI / DOCX: sovereign > products."Lineage" > strain sovereign > canonical
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
+                SELECT COALESCE(p.sovereign_lineage, p."Lineage", s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -5557,10 +5556,8 @@ class ProductDatabase:
                 return lineage
             
             # Fallback: Case-insensitive and whitespace-insensitive match
-            # Strains-sheet lineage path: never fall back to products."Lineage" here.
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
+                SELECT COALESCE(p.sovereign_lineage, p."Lineage", s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id
@@ -5591,10 +5588,8 @@ class ProductDatabase:
                 return lineage
             
             # Last resort: Partial match (in case product name has extra characters)
-            # Strains-sheet lineage path: never fall back to products."Lineage" here.
-            # Priority: product.sovereign_lineage > strain.sovereign_lineage > strain.canonical_lineage
             cursor.execute('''
-                SELECT COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage) as lineage,
+                SELECT COALESCE(p.sovereign_lineage, p."Lineage", s.sovereign_lineage, s.canonical_lineage) as lineage,
                        p."Product Strain"
                 FROM products p
                 LEFT JOIN strains s ON p.strain_id = s.id

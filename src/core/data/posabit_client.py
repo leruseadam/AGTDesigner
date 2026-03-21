@@ -407,6 +407,25 @@ def _menu_item_to_product_row(item: Dict, price_variant: Optional[Dict], categor
             row["weight_with_units"] = inferred
             logger.debug("POSaBit inferred weight for %r: %r -> %r", name, weight_val, inferred)
     _merge_doh_from_posabit_sources(row, item, price_variant or {})
+    # If the API payload had no DOH field, default to DOH-compliant.
+    # All WA POSaBit products are state-regulated; DB alignment will override later if needed.
+    if not row.get("DOH"):
+        pt = normalized_product_type.lower()
+        if "high thc" in pt:
+            row["DOH"] = "THC"
+            row["DOH Compliant (Yes/No)"] = "Yes"
+            row["DOH Compliant"] = "Yes"
+            row["doh"] = "thc"
+        elif "high cbd" in pt:
+            row["DOH"] = "CBD"
+            row["DOH Compliant (Yes/No)"] = "Yes"
+            row["DOH Compliant"] = "Yes"
+            row["doh"] = "cbd"
+        else:
+            row["DOH"] = "Yes"
+            row["DOH Compliant (Yes/No)"] = "Yes"
+            row["DOH Compliant"] = "Yes"
+            row["doh"] = "yes"
     return row
 
 
@@ -520,6 +539,24 @@ def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
             row["weight_with_units"] = inferred
             logger.debug("POSaBit venue inferred weight for %r: %r -> %r", name, unit, inferred)
     _merge_doh_from_posabit_sources(row, sku)
+    # Default to DOH-compliant if API payload had no DOH field.
+    if not row.get("DOH"):
+        pt = normalized_product_type.lower()
+        if "high thc" in pt:
+            row["DOH"] = "THC"
+            row["DOH Compliant (Yes/No)"] = "Yes"
+            row["DOH Compliant"] = "Yes"
+            row["doh"] = "thc"
+        elif "high cbd" in pt:
+            row["DOH"] = "CBD"
+            row["DOH Compliant (Yes/No)"] = "Yes"
+            row["DOH Compliant"] = "Yes"
+            row["doh"] = "cbd"
+        else:
+            row["DOH"] = "Yes"
+            row["DOH Compliant (Yes/No)"] = "Yes"
+            row["DOH Compliant"] = "Yes"
+            row["doh"] = "yes"
     return row
 
 
