@@ -740,3 +740,32 @@ def get_cached_product_rows(store_name: Optional[str] = None) -> Optional[List[D
         _posabit_product_rows_cache_time[cache_key] = now
         return disk_rows
     return None
+
+
+def clear_cache(store_name: Optional[str] = None) -> None:
+    """Flush in-memory and disk caches for this store (or all stores if store_name is None)."""
+    global _posabit_product_rows_cache, _posabit_product_rows_cache_time
+    if store_name is None:
+        _posabit_product_rows_cache.clear()
+        _posabit_product_rows_cache_time.clear()
+        # Delete all disk cache files
+        try:
+            for f in _DISK_CACHE_DIR.glob("posabit_products*.json"):
+                try:
+                    f.unlink()
+                    logger.info(f"POSaBit cache cleared: deleted {f.name}")
+                except Exception as e:
+                    logger.warning(f"Could not delete {f}: {e}")
+        except Exception as e:
+            logger.warning(f"POSaBit disk cache clear failed: {e}")
+    else:
+        cache_key = _store_slug(store_name)
+        _posabit_product_rows_cache.pop(cache_key, None)
+        _posabit_product_rows_cache_time.pop(cache_key, None)
+        path = _disk_cache_path(store_name)
+        try:
+            if path.exists():
+                path.unlink()
+                logger.info(f"POSaBit cache cleared: deleted {path.name}")
+        except Exception as e:
+            logger.warning(f"Could not delete {path}: {e}")

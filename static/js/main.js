@@ -17,6 +17,103 @@ function abbreviateLineage(lineage) {
     const key = lineage.toString().trim().toUpperCase();
     return map[key] || key;
 }
+
+/**
+ * Single source of truth for which lineage field wins before UI heuristics.
+ * MUST match backend `compute_display_lineage_like_ui` in
+ * `src/core/generation/_ui_lineage_port.py` (and SQL COALESCE used when hydrating tags).
+ *
+ * Priority: sovereign_lineage (user override) > canonical_lineage (strain DB) >
+ * currentLineage (session/excel) > Lineage > lineage
+ *
+ * Without this, a stale `currentLineage` (e.g. HYBRID) can hide the correct
+ * `canonical_lineage` (e.g. SATIVA), so badges disagree with generated DOCX.
+ */
+function resolveRawLineageFromTag(tag) {
+    if (!tag || typeof tag !== 'object') return '';
+    const candidates = [
+        tag.sovereign_lineage,
+        tag.canonical_lineage,
+        tag.currentLineage,
+        tag.Lineage,
+        tag.lineage,
+        tag['Lineage*'],
+    ];
+    for (const cand of candidates) {
+        if (cand === null || cand === undefined) continue;
+        const s = String(cand).trim();
+        if (!s) continue;
+        const u = s.toUpperCase();
+        if (u === 'SOVEREIGN') continue;
+        return s;
+    }
+    return '';
+}
+if (typeof window !== 'undefined') {
+    window.resolveRawLineageFromTag = resolveRawLineageFromTag;
+}
+
+/** Raw DOH / compliant fields from a tag (aligned with app.py normalize_doh_value). */
+function getRawDohFromTag(tag) {
+    if (!tag) return '';
+    const v = tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || tag['DOH*'] || '';
+    return v.toString().trim();
+}
+
+/** Normalize DOH for comparisons (returns DOH | NONE | THC | CBD | other uppercased). */
+function normalizeDohTagValue(raw) {
+    if (raw === undefined || raw === null) return '';
+    const s = String(raw).trim();
+    if (!s) return '';
+    const u = s.toUpperCase();
+    if (['NONE', 'NULL', 'NAN', 'UNDEFINED', '-', 'N/A', 'NA'].includes(u)) return '';
+    if (['NO', 'N', 'FALSE', 'F', '0'].includes(u)) return 'NONE';
+    if (['YES', 'Y', 'DOH', 'COMPLIANT', 'TRUE', 'T', '1'].includes(u)) return 'DOH';
+    if (u.includes('GENERAL USE') || u.includes('MEDICAL USE') || (u.includes('GENERAL') && u.includes('USE'))) return 'DOH';
+    if (u.includes('DOH') || u === 'COMPLIANT') return 'DOH';
+    if (u === 'THC' || u === 'CBD') return u;
+    return u;
+}
+
+/** Dropdown uses lowercase "none" for empty / non-DOH bucket (matches existing UI). */
+function dohDropdownLabelFromRaw(raw) {
+    const n = normalizeDohTagValue(raw);
+    if (!n || n === 'NONE') return 'none';
+    if (n === 'DOH') return 'DOH';
+    return n;
+}
+
+/** Single implementation for DOH yes/no/none/THC filter matching. */
+function tagMatchesDohFilter(tag, dohFilter) {
+    if (!dohFilter || !String(dohFilter).trim() || String(dohFilter).toLowerCase() === 'all') return true;
+    const tagDohRaw = getRawDohFromTag(tag);
+    const tagU = tagDohRaw.toUpperCase();
+    const normTag = normalizeDohTagValue(tagDohRaw);
+    const filterDohLower = dohFilter.toString().trim().toLowerCase();
+    const filterDoh = dohFilter.toString().trim().toUpperCase();
+
+    let normalizedTagDoh = tagU;
+    if (normTag === 'DOH') normalizedTagDoh = 'DOH';
+    else if (normTag === 'NONE') normalizedTagDoh = 'NONE';
+    else if (normTag && normTag !== '') normalizedTagDoh = normTag;
+    else normalizedTagDoh = tagU;
+
+    let normalizedFilterDoh = filterDoh;
+    if (filterDohLower === 'none') normalizedFilterDoh = 'NONE';
+    else if (filterDoh === 'YES' || filterDoh === 'Y') normalizedFilterDoh = 'DOH';
+    else if (filterDoh === 'NO' || filterDoh === 'N' || filterDoh === 'NONE') normalizedFilterDoh = 'NONE';
+    else if (normalizeDohTagValue(dohFilter) === 'DOH') normalizedFilterDoh = 'DOH';
+    else if (normalizeDohTagValue(dohFilter) === 'NONE') normalizedFilterDoh = 'NONE';
+
+    if (filterDohLower === 'none') {
+        if (tagU !== '' && normalizedTagDoh !== 'NONE') return false;
+        return true;
+    }
+    return normalizedTagDoh === normalizedFilterDoh ||
+        tagU === filterDoh ||
+        normalizedTagDoh === filterDoh ||
+        tagU === normalizedFilterDoh;
+}
 // Detect Windows platform for optimizations
 // navigator.platform is deprecated; use userAgentData when available, fallback to userAgent
 const isWindows = (() => {
@@ -2124,7 +2221,7 @@ const TagManager = {
 
                 if (tag) {
                     // Use full lineage name for data-lineage — CSS rules key on the full value
-                    let lineageValue = (tag.canonical_lineage || tag.currentLineage || tag.Lineage || 'MIXED').toString().trim().toUpperCase();
+                    let lineageValue = (resolveRawLineageFromTag(tag) || 'MIXED').toString().trim().toUpperCase();
                     // Normalize non-standard values (NON E, THC, etc.) to standard ones
                     const _validL = ['SATIVA','INDICA','HYBRID','HYBRID/SATIVA','HYBRID/INDICA','CBD','CBD_BLEND','MIXED','PARA','PARAPHERNALIA'];
                     if (!_validL.includes(lineageValue)) lineageValue = 'HYBRID';
@@ -2206,11 +2303,10 @@ const TagManager = {
                 }
                 
                 // CRITICAL FIX: Ensure all lineage fields are present for color generation
-                // The backend expects canonical_lineage, currentLineage, or Lineage fields
-                // CRITICAL: Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
-                let lineageValue = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                // Same precedence as DOCX (resolveRawLineageFromTag). Reject "SOVEREIGN" placeholder.
+                let lineageValue = resolveRawLineageFromTag(tag) || 'MIXED';
                 if (lineageValue && lineageValue.toString().toUpperCase().trim() === 'SOVEREIGN') {
-                    lineageValue = tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || 'MIXED';
+                    lineageValue = resolveRawLineageFromTag({ ...tag, sovereign_lineage: null }) || tag.Lineage || tag.lineage || 'MIXED';
                 }
                 const lineage = lineageValue;
                 if (!tag.canonical_lineage) tag.canonical_lineage = lineage;
@@ -2487,25 +2583,11 @@ const TagManager = {
             if (tag.Lineage) lineages.add(tag.Lineage);
             if (tag.WeightUnits || tag.CombinedWeight) weights.add(tag.WeightUnits || tag.CombinedWeight);
             if (tag.ProductStrain || tag['Product Strain']) strains.add(tag.ProductStrain || tag['Product Strain']);
-            // DOH - CRITICAL FIX: Check all possible DOH field variations and normalize values
-            const tagDoh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || '';
-            if (tagDoh && tagDoh.trim()) {
-                const dohTrimmed = tagDoh.trim().toUpperCase();
-                // Normalize DOH values: YES/Y -> DOH, NO/N -> none
-                let normalizedDoh = dohTrimmed;
-                if (dohTrimmed === 'YES' || dohTrimmed === 'Y') {
-                    normalizedDoh = 'DOH';
-                } else if (dohTrimmed === 'NO' || dohTrimmed === 'N' || dohTrimmed === 'NONE') {
-                    normalizedDoh = 'none';
-                } else if (dohTrimmed.includes('DOH') || dohTrimmed === 'COMPLIANT') {
-                    normalizedDoh = 'DOH';
-                }
-                // Add normalized value (including none so users can filter for non-DOH products)
-                if (normalizedDoh) {
-                    doh.add(normalizedDoh);
-                }
+            // DOH - same normalization as filter matching (TRUE/1/General Use -> DOH; NO -> none bucket)
+            const tagDoh = getRawDohFromTag(tag);
+            if (tagDoh) {
+                doh.add(dohDropdownLabelFromRaw(tagDoh));
             } else {
-                // If no DOH value, add none so users can filter for products without DOH status
                 doh.add('none');
             }
             if (tag.Ratio) highCbd.add(tag.Ratio);
@@ -3023,32 +3105,11 @@ const TagManager = {
                     filterOptions.price.add('No Price');
                 }
                 
-                // DOH - CRITICAL FIX: Check all possible DOH field variations and normalize values
-                let doh = tag.DOH || tag.doh || tag['DOH Compliant (Yes/No)'] || tag['DOH Compliant'] || tag['DOH*'] || '';
-                
-                // Normalize DOH value - handle None, null, undefined, empty strings
-                if (doh === null || doh === undefined || doh === 'None' || doh === 'null' || doh === 'undefined') {
-                    doh = '';
-                }
-                doh = String(doh || '').trim();
-                
-                if (doh) {
-                    const dohTrimmed = doh.trim().toUpperCase();
-                    // Normalize DOH values: YES/Y -> DOH, NO/N -> none
-                    let normalizedDoh = dohTrimmed;
-                    if (dohTrimmed === 'YES' || dohTrimmed === 'Y') {
-                        normalizedDoh = 'DOH';
-                    } else if (dohTrimmed === 'NO' || dohTrimmed === 'N' || dohTrimmed === 'NONE') {
-                        normalizedDoh = 'none';
-                    } else if (dohTrimmed.includes('DOH') || dohTrimmed === 'COMPLIANT') {
-                        normalizedDoh = 'DOH';
-                    }
-                    // Add normalized value (including none so users can filter for non-DOH products)
-                    if (normalizedDoh && normalizedDoh !== 'NULL' && normalizedDoh !== 'UNDEFINED') {
-                        filterOptions.doh.add(normalizedDoh);
-                    }
+                // DOH - same rules as tagMatchesDohFilter / _extractFiltersFromTags
+                const dohRaw = getRawDohFromTag(tag);
+                if (dohRaw) {
+                    filterOptions.doh.add(dohDropdownLabelFromRaw(dohRaw));
                 } else {
-                    // If no DOH value, add none so users can filter for products without DOH status
                     filterOptions.doh.add('none');
                 }
                 
@@ -3401,7 +3462,7 @@ const TagManager = {
                 // Check lineage filter - only apply if not empty and not "All"
                 if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
                     // Use canonical_lineage, currentLineage, or Lineage in priority order
-                    const tagLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                    const tagLineage = (resolveRawLineageFromTag(tag) || '').toString().trim();
                     if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) {
                         return false;
                     }
@@ -3470,9 +3531,7 @@ const TagManager = {
                 
                 // Check DOH filter - only apply if not empty and not "All"
                 if (currentFilters.doh && currentFilters.doh.trim() !== '' && currentFilters.doh.toLowerCase() !== 'all') {
-                    const tagDoh = (tag.DOH || tag.doh || '').toString().trim().toUpperCase();
-                    const filterDoh = currentFilters.doh.toString().trim().toUpperCase();
-                    if (tagDoh !== filterDoh) {
+                    if (!tagMatchesDohFilter(tag, currentFilters.doh)) {
                         return false;
                     }
                 }
@@ -3554,8 +3613,8 @@ const TagManager = {
                 }
                 
                 // Always add lineage options (show all lineages)
-                // Use canonical_lineage, currentLineage, or Lineage in priority order
-                const rawLineage = (tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                // Same field priority as DOCX / backend (resolveRawLineageFromTag)
+                const rawLineage = (resolveRawLineageFromTag(tag) || '').toString().trim();
                 if (rawLineage) {
                     availableOptions.lineage.add(rawLineage);
                 }
@@ -3652,8 +3711,7 @@ const TagManager = {
                 if (normalizedTagProductType.toLowerCase() !== normalizedFilterType) return false;
             }
             if (currentFilters.lineage && currentFilters.lineage.trim() !== '' && currentFilters.lineage.toLowerCase() !== 'all') {
-                // CRITICAL: Prioritize manual edits, then use DOCX output lineage
-                const tagLineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                const tagLineage = (resolveRawLineageFromTag(tag) || '').toString().trim();
                 if (tagLineage.toLowerCase() !== currentFilters.lineage.toLowerCase()) return false;
             }
             return true;
@@ -3975,8 +4033,7 @@ const TagManager = {
             
             // Check lineage filter - only apply if not empty and not "All"
             if (lineageFilter && lineageFilter.trim() !== '' && lineageFilter.toLowerCase() !== 'all') {
-                // CRITICAL: Prioritize manual edits, then use DOCX output lineage
-                const tagLineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '').toString().trim();
+                const tagLineage = (resolveRawLineageFromTag(tag) || '').toString().trim();
                 if (tagLineage.toLowerCase() !== lineageFilter.toLowerCase()) {
                     return false;
                 }
@@ -4047,55 +4104,8 @@ const TagManager = {
             
             // Check DOH filter - only apply if not empty and not "All"
             if (dohFilter && dohFilter.trim() !== '' && dohFilter.toLowerCase() !== 'all') {
-                // CRITICAL FIX: Check all possible DOH field names (same as badge rendering)
-                const tagDoh = (tag.DOH || tag['DOH Compliant (Yes/No)'] || tag.doh || tag['DOH Compliant'] || '').toString().trim().toUpperCase();
-                const filterDohLower = dohFilter.toString().trim().toLowerCase();
-                const filterDoh = dohFilter.toString().trim().toUpperCase();
-                
-                // Normalize DOH values for comparison
-                // Map common variations: "Yes"/"Y" -> "DOH", "No"/"N" -> "NONE"
-                let normalizedTagDoh = tagDoh;
-                if (tagDoh === 'YES' || tagDoh === 'Y') {
-                    normalizedTagDoh = 'DOH';
-                } else if (tagDoh === 'NO' || tagDoh === 'N' || tagDoh === 'NONE') {
-                    normalizedTagDoh = 'NONE';
-                }
-                
-                // Normalize filter value too (handle both "none" and "NONE")
-                let normalizedFilterDoh = filterDoh;
-                if (filterDohLower === 'none') {
-                    // Filter is "none" - match tags with no DOH or NONE/NO
-                    normalizedFilterDoh = 'NONE';
-                } else if (filterDoh === 'YES' || filterDoh === 'Y') {
-                    normalizedFilterDoh = 'DOH';
-                } else if (filterDoh === 'NO' || filterDoh === 'N' || filterDoh === 'NONE') {
-                    normalizedFilterDoh = 'NONE';
-                }
-                
-                // Also normalize tag DOH to handle "none" case
-                if (normalizedTagDoh === 'NONE' || normalizedTagDoh === 'none') {
-                    normalizedTagDoh = 'NONE';
-                }
-                
-                // Check if filter matches (exact match or normalized match)
-                // Special case: if filter is "none", match tags with no DOH value or NONE/NO
-                if (filterDohLower === 'none') {
-                    // Match if tag has no DOH value (empty) or has NONE/NO
-                    // Return false only if tag has a DOH value that is NOT NONE
-                    if (tagDoh !== '' && normalizedTagDoh !== 'NONE') {
-                        return false;
-                    }
-                    // Otherwise, tag has no DOH or has NONE - match!
-                } else {
-                    // For other DOH values, use normal matching
-                    const matches = normalizedTagDoh === normalizedFilterDoh || 
-                                   tagDoh === filterDoh ||
-                                   normalizedTagDoh === filterDoh ||
-                                   tagDoh === normalizedFilterDoh;
-                    
-                    if (!matches) {
-                        return false;
-                    }
+                if (!tagMatchesDohFilter(tag, dohFilter)) {
+                    return false;
                 }
             }
             
@@ -4658,8 +4668,8 @@ const TagManager = {
             const productType = isValidType
               ? normalizedProductType.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ')
               : fallbackType;
-            // CRITICAL FIX: Always prioritize database lineage fields (currentLineage/canonical_lineage) over Excel Lineage
-            const lineage = (tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
+            // CRITICAL FIX: Same precedence as DOCX generation (resolveRawLineageFromTag)
+            const lineage = (resolveRawLineageFromTag(tag) || tag.Lineage || tag.lineage || 'MIXED').toString().trim().toUpperCase();
             const weight = (tag.weight || tag['Weight*'] || tag['Weight'] || tag['WeightUnits'] || '').toString().trim();
             // CRITICAL FIX: Ensure weightWithUnits is properly populated from multiple possible sources
             let weightWithUnits = (tag.weightWithUnits || tag.WeightWithUnits || tag.WeightUnits || 
@@ -7989,20 +7999,14 @@ const TagManager = {
         }
         
         // Set data-lineage attribute for CSS coloring on both row and tagElement
-        // DB-first lineage priority: preserve user saved lineage first.
-        // Priority: sovereign_lineage > currentLineage > canonical_lineage > Excel Lineage
-        let lineage;
-        if (tag.sovereign_lineage) {
-            lineage = tag.sovereign_lineage;
-        } else if (tag.currentLineage) {
-            lineage = tag.currentLineage;
-        } else if (tag.canonical_lineage) {
-            lineage = tag.canonical_lineage;
-        } else {
-            lineage = tag.Lineage || tag.lineage || tag['Lineage*'] || 'MIXED';
-            if (lineage && lineage !== 'MIXED') {
-                console.warn(`⚠️ TagManager: Tag "${displayName}" missing database lineage, using Excel Lineage: "${lineage}"`);
-            }
+        // DB-first lineage priority — MUST match backend / DOCX (see resolveRawLineageFromTag).
+        // Priority: sovereign_lineage > canonical_lineage > currentLineage > Excel Lineage
+        let lineage = resolveRawLineageFromTag(tag);
+        if (!lineage) {
+            lineage = 'MIXED';
+            console.warn(`⚠️ TagManager: Tag "${displayName}" missing lineage fields, defaulting MIXED`);
+        } else if (!tag.sovereign_lineage && !tag.canonical_lineage && !tag.currentLineage) {
+            console.warn(`⚠️ TagManager: Tag "${displayName}" using Excel Lineage only: "${lineage}"`);
         }
         
         // Normalize lineage to uppercase for consistent matching - respect database value
@@ -8787,30 +8791,13 @@ const TagManager = {
         // Make available globally for legacy code
         window.allLineageOptions = lineageOptions;
         
-        // CRITICAL: Calculate normalized lineage BEFORE creating options, so option selection uses database lineage
-        // Set the dropdown value - handle mappings for display
-        // CRITICAL: Use EXACT same priority as DOCX generation:
-        // COALESCE(p.sovereign_lineage, s.sovereign_lineage, s.canonical_lineage, p."Lineage")
-        // This matches template_processor.py and app.py lineage alignment
-        
-        // CRITICAL FIX: Start with database lineage, NOT Excel lineage
-        // Priority: sovereign_lineage > currentLineage > canonical_lineage > Lineage (Excel)
-        // Reject "SOVEREIGN" as invalid - it's a field name, not a lineage value
-        let normalizedLineage = '';
-        for (const lineageField of ['sovereign_lineage', 'currentLineage', 'canonical_lineage', 'Lineage']) {
-            const candidate = tag[lineageField];
-            if (candidate) {
-                const lineageStr = candidate.toString().toUpperCase().trim();
-                if (lineageStr && lineageStr !== 'SOVEREIGN' && lineageStr !== 'NONE') {
-                    normalizedLineage = lineageStr;
-                    break;
-                }
-            }
-        }
-        
-        // Fallback to Excel lineage if no database lineage found
-        if (!normalizedLineage) {
-            normalizedLineage = (lineage || '').toString().toUpperCase().trim();
+        // CRITICAL: Dropdown selected value MUST match the tag row (displayLineage / data-lineage).
+        // A previous bug looped raw fields as sovereign > currentLineage > canonical_lineage, which
+        // let stale session Excel (HYBRID) beat strain DB (SATIVA) — wrong letter on the server
+        // even after resolveRawLineageFromTag() fixed the row color.
+        let normalizedLineage = (displayLineage || '').toString().toUpperCase().trim();
+        if (!normalizedLineage || normalizedLineage === 'NONE') {
+            normalizedLineage = (resolveRawLineageFromTag(tag) || lineage || '').toString().toUpperCase().trim();
         }
         
         // CRITICAL FIX: Validate database lineage for classic types - MIXED is invalid for classic products
@@ -8826,7 +8813,7 @@ const TagManager = {
         }
         
         // Log if we're using Excel lineage instead of database lineage (for debugging)
-        const hasDbLineage = tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage;
+        const hasDbLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage;
         if (!hasDbLineage && normalizedLineage && normalizedLineage !== 'MIXED') {
             console.warn(`⚠️ Tag "${displayName}" has no database lineage, using Excel Lineage: ${normalizedLineage}`);
         }
@@ -15926,7 +15913,7 @@ const TagManager = {
             const tagNameElement = tagElement.querySelector('.tag-name, .product-name');
             if (tagNameElement && tagNameElement.textContent.trim() === productName) {
                 // Update the data-lineage attribute which triggers CSS color changes (programmatically with or without actual lineage)
-                const lineage = tag.Lineage || tag.lineage || tag.currentLineage || tag.canonical_lineage;
+                const lineage = resolveRawLineageFromTag(tag);
                 const lineageForColor = lineage ? lineage.toString().trim().toUpperCase() : this.determineLineageFromBackendRules(tag);
                 if (lineageForColor) {
                     tagElement.dataset.lineage = lineageForColor;
@@ -15943,7 +15930,7 @@ const TagManager = {
         (this.state.tags || []).forEach(t => {
             const name = t['Product Name*'] || t.ProductName || t.displayName;
             if (!name) return;
-            const lineage = (t.Lineage || t.lineage || t.currentLineage || t.canonical_lineage || '').toString().trim().toUpperCase();
+            const lineage = (resolveRawLineageFromTag(t) || '').toString().trim().toUpperCase();
             const lineageForColor = lineage || this.determineLineageFromBackendRules(t) || 'MIXED';
             tagMap.set(name, lineageForColor);
         });
@@ -16077,7 +16064,8 @@ const TagManager = {
         
         const productType = (productData['Product Type*'] || productData.Type || '').toString().trim().toLowerCase();
         const productStrain = (productData['Product Strain'] || '').toString().trim();
-        const currentLineage = productData.Lineage || productData.lineage || '';
+        const currentLineage = resolveRawLineageFromTag(productData) ||
+            productData.Lineage || productData.lineage || '';
         
         // CRITICAL FIX: Paraphernalia products should ALWAYS get PARAPHERNALIA lineage (pink color)
         // Check if product type is "paraphernalia" - this takes priority over everything else

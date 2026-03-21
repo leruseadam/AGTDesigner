@@ -382,8 +382,9 @@ class TagsTable {
 
   // Render a tag row as a div with an inline dropdown for lineage and DOH
   static createTagRow(tag, isSelected = false) {
-  // CRITICAL: Check sovereign_lineage first (user edits), then canonical_lineage, currentLineage, or Lineage
-  let rawLineage = tag.sovereign_lineage || tag.currentLineage || tag.canonical_lineage || tag.Lineage || tag.lineage || '';
+  // CRITICAL: Same order as main.js resolveRawLineageFromTag / backend DOCX:
+  // sovereign > canonical (strain) > currentLineage > Excel Lineage
+  let rawLineage = tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || tag.Lineage || tag.lineage || '';
   
   // Normalize to uppercase, but keep the original database value
   let lineage = String(rawLineage || '').trim().toUpperCase();

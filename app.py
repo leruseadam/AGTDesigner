@@ -264,6 +264,75 @@ def normalize_product_name_columns(df):
         logging.warning(f"normalize_product_name_columns failed: {e}")
         return df
 
+
+def normalize_doh_value(val):
+    """Normalize DOH / DOH Compliant fields from DB, Excel, POS, or cache.
+
+    Returns:
+        None: missing / empty / not applicable
+        'DOH': compliant (yes/true/general-use style labels)
+        'NO': explicitly not compliant
+        str: other labels (e.g. THC, CBD) uppercased for display/filters
+    """
+    if val is None:
+        return None
+    txt = str(val).strip().upper()
+    if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0', '-', 'N/A', 'NA', 'UNDEFINED']:
+        return None
+    if txt in ['NO', 'N', 'FALSE', 'F']:
+        return 'NO'
+    # Explicit non-compliance / non-DOH (must run before generic 'DOH' substring match)
+    if ('NON' in txt and 'DOH' in txt) or ('NOT' in txt and 'DOH' in txt):
+        return 'NO'
+    if 'NON' in txt and 'COMPLIANT' in txt:
+        return 'NO'
+    if txt in ['YES', 'Y', 'DOH', 'COMPLIANT', 'TRUE', 'T', '1']:
+        return 'DOH'
+    if 'GENERAL' in txt and 'USE' in txt:
+        return 'DOH'
+    if txt.startswith('MEDICAL') and 'USE' in txt:
+        return 'DOH'
+    if 'REC' in txt and 'USE' in txt:
+        return 'DOH'
+    if 'DOH' in txt or 'COMPLIANT' in txt:
+        return 'DOH'
+    return txt
+
+
+def _apply_tag_doh_from_lineage_info(tag, lineage_info, product_name_for_log=''):
+    """Apply DOH from lineage_map entry to tag (all common DOH field variants)."""
+    if not isinstance(tag, dict) or not isinstance(lineage_info, dict):
+        return False
+    if lineage_info.get('doh') is None:
+        return False
+    db_doh = lineage_info.get('doh')
+    tag['DOH'] = db_doh
+    tag['DOH Compliant (Yes/No)'] = db_doh
+    tag['doh'] = db_doh.lower() if isinstance(db_doh, str) else (str(db_doh).lower() if db_doh is not None else '')
+    tag['DOH Compliant'] = db_doh
+    if product_name_for_log:
+        logging.debug(f"✅ Applied DB DOH for '{product_name_for_log}': '{db_doh}'")
+    return True
+
+
+def _coalesce_doh_from_db_row(doh_raw, doh_compliant_raw):
+    """Prefer DOH column, then DOH Compliant; normalize; fall back to raw uppercase if needed."""
+    v = normalize_doh_value(doh_raw) or normalize_doh_value(doh_compliant_raw)
+    if v is not None:
+        return v
+    raw = ''
+    if doh_raw is not None and str(doh_raw).strip():
+        raw = str(doh_raw).strip()
+    elif doh_compliant_raw is not None and str(doh_compliant_raw).strip():
+        raw = str(doh_compliant_raw).strip()
+    if raw:
+        upper = raw.upper()
+        if upper in ('NONE', 'NULL', 'NAN', ''):
+            return None
+        return upper
+    return None
+
+
 def timeout_handler(signum, frame):
     raise TimeoutError("File operation timed out")
 
@@ -8670,18 +8739,6 @@ def _quick_align_tags_lineage(tags, store_name):
                 return None
             return txt
 
-        def _qdoh(val):
-            if val is None:
-                return None
-            txt = str(val).strip().upper()
-            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
-                return None
-            if txt in ['YES', 'Y', 'DOH', 'COMPLIANT']:
-                return 'DOH'
-            if txt in ['NO', 'N']:
-                return 'NO'
-            return txt
-
         aligned_tags = [tag.copy() if isinstance(tag, dict) else tag for tag in tags]
         product_names = []
         for tag in aligned_tags:
@@ -8795,7 +8852,7 @@ def _quick_align_tags_lineage(tags, store_name):
 
                 lin = _qlin(db_lineage_raw)
                 brand = _qbrand(pb_raw)
-                doh_v = _qdoh(doh_raw) or _qdoh(dohc_raw)
+                doh_v = _coalesce_doh_from_db_row(doh_raw, dohc_raw)
                 vend = _qbrand(vend_raw)
                 if not (lin or brand or doh_v or vend):
                     continue
@@ -8951,18 +9008,6 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 return None
             return txt
 
-        def _clean_doh(val):
-            if val is None:
-                return None
-            txt = str(val).strip().upper()
-            if txt in ['', 'NONE', 'NULL', 'NAN', '0', '0.0']:
-                return None
-            if txt in ['YES', 'Y', 'DOH', 'COMPLIANT']:
-                return 'DOH'
-            elif txt in ['NO', 'N']:
-                return 'NO'
-            return txt
-
         # CRITICAL FIX: Same data as before, faster plan — join to pre-aggregated latest row ids
         # (avoids redundant double IN + per-row subquery evaluation on large SKU lists).
         chunk_size = 500
@@ -9004,7 +9049,7 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 strain_sovereign = _clean_lineage(strain_sovereign_raw)
                 strain_canonical = _clean_lineage(strain_canonical_raw)
                 product_brand = _clean_brand(product_brand_raw)  # CRITICAL FIX: Clean brand value
-                doh_value = _clean_doh(doh_raw) or _clean_doh(doh_compliant_raw)  # CRITICAL FIX: Clean DOH value (prefer DOH field, fallback to DOH Compliant)
+                doh_value = _coalesce_doh_from_db_row(doh_raw, doh_compliant_raw)
                 vendor_value = _clean_brand(vendor_raw)  # Reuse _clean_brand (same logic: strip whitespace, reject empty/null)
 
                 if db_name and (db_lineage or product_brand or doh_value or vendor_value):
@@ -9159,6 +9204,29 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 tag['sovereign_lineage'] = manual_lineage
                 if manual_source:
                     tag['lineage_source'] = f"manual:{manual_source}"
+                # Manual lineage skips DB lineage overwrite, but DOH / brand / vendor still hydrate from DB
+                _li_manual = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
+                if isinstance(_li_manual, dict) and _li_manual.get('doh') is not None:
+                    _dd = _li_manual.get('doh')
+                    tag['DOH'] = _dd
+                    tag['DOH Compliant (Yes/No)'] = _dd
+                    tag['doh'] = _dd.lower() if isinstance(_dd, str) else (str(_dd).lower() if _dd is not None else '')
+                    tag['DOH Compliant'] = _dd
+                if isinstance(_li_manual, dict) and _li_manual.get('product_brand'):
+                    _db_brand_m = _li_manual.get('product_brand')
+                    _cur_bm = tag.get('Product Brand') or tag.get('ProductBrand') or tag.get('productBrand') or tag.get('Brand') or tag.get('brand') or ''
+                    _cur_bm_clean = str(_cur_bm).strip() if _cur_bm else ''
+                    if not _cur_bm_clean or _cur_bm_clean.lower() in ['none', 'null', 'nan', 'undefined', '', 'unknown brand', 'unknown']:
+                        tag['Product Brand'] = _db_brand_m
+                        tag['ProductBrand'] = _db_brand_m
+                        tag['productBrand'] = _db_brand_m
+                if isinstance(_li_manual, dict) and _li_manual.get('vendor'):
+                    _db_v_m = _li_manual.get('vendor')
+                    _cur_vm = tag.get('Vendor/Supplier*') or tag.get('Vendor') or tag.get('vendor') or ''
+                    _cur_vm_clean = str(_cur_vm).strip() if _cur_vm else ''
+                    if not _cur_vm_clean or _cur_vm_clean.lower() in ['none', 'null', 'nan', 'undefined', '', 'unknown vendor', 'unknown']:
+                        tag['Vendor/Supplier*'] = _db_v_m
+                        tag['Vendor'] = _db_v_m
                 aligned_count += 1
                 continue
             # Try exact match first (like docx generation), then normalized, then lowercase
@@ -9311,6 +9379,8 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                     tag['Lineage*'] = neutral
                     tag['lineage'] = neutral.lower()
                     aligned_count += 1
+                    # Paraphernalia path skips main DOH enrichment below — still merge DB DOH when present
+                    _apply_tag_doh_from_lineage_info(tag, lineage_info, product_name_for_log=name)
                     continue
 
                 # CRITICAL: Use EXACT same priority as DOCX generation:
@@ -9391,23 +9461,11 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         tag['productBrand'] = db_brand  # Also set lowercase variant
                         logging.debug(f"✅ Enriched tag '{name}' with Product Brand '{db_brand}' from database (was: '{current_brand_clean}')")
                 
-                # CRITICAL FIX: Enrich tag with DOH from database if missing
-                # Always ensure DOH fields exist on tag (even if empty) so frontend can check them
+                # CRITICAL FIX: Enrich tag with DOH from database (DB-first when lineage_map has a value)
                 current_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)') or tag.get('doh') or tag.get('DOH Compliant') or ''
-                
-                if isinstance(lineage_info, dict) and lineage_info.get('doh'):
-                    db_doh = lineage_info.get('doh')
-                    # Normalize current_doh for comparison
-                    current_doh_clean = str(current_doh).strip().upper() if current_doh else ''
-                    # Enrich if DOH is missing, empty, or invalid (NO, NONE, NULL, etc.)
-                    if not current_doh_clean or current_doh_clean in ['', 'NONE', 'NULL', 'NAN', 'NO', 'N', 'UNDEFINED']:
-                        tag['DOH'] = db_doh
-                        tag['DOH Compliant (Yes/No)'] = db_doh
-                        tag['doh'] = db_doh.lower() if db_doh else ''
-                        tag['DOH Compliant'] = db_doh  # Also set variant without parentheses
-                        logging.info(f"✅ Enriched tag '{name}' with DOH '{db_doh}' from database (was: '{current_doh_clean}')")
-                    else:
-                        logging.debug(f"⏭️ Tag '{name}' already has DOH '{current_doh_clean}', skipping enrichment")
+
+                if _apply_tag_doh_from_lineage_info(tag, lineage_info, product_name_for_log=name):
+                    logging.debug(f"✅ Applied DB DOH for '{name}' (previous tag DOH: '{current_doh}')")
                 else:
                     # Ensure DOH fields exist even if database doesn't have a value
                     # Set to empty string (not None) so frontend can check for them
@@ -13216,17 +13274,13 @@ def get_available_tags():
                                         # Use COALESCE result first, fallback to individual columns
                                         db_doh_final = db_doh_coalesced or db_doh_compliant or db_doh
                                         if db_doh_final and str(db_doh_final).strip():
-                                            clean_doh_raw = str(db_doh_final).strip().upper()
-                                            # Normalize YES/Y/COMPLIANT to DOH (same as _clean_doh)
-                                            if clean_doh_raw in ['YES', 'Y', 'COMPLIANT']:
-                                                clean_doh = 'DOH'
-                                            elif clean_doh_raw in ['NO', 'N', 'NONE', 'NULL', 'NAN', '']:
-                                                clean_doh = None  # Don't add to map if it's NO/NONE
-                                            else:
-                                                clean_doh = clean_doh_raw
-                                            
-                                            # Only add to map if we have a valid DOH value
-                                            if clean_doh and clean_doh not in ['NO', 'N', 'NONE', 'NULL', 'NAN']:
+                                            clean_doh = normalize_doh_value(db_doh_final)
+                                            if clean_doh is None:
+                                                raw_u = str(db_doh_final).strip().upper()
+                                                if raw_u and raw_u not in ('NONE', 'NULL', 'NAN', ''):
+                                                    clean_doh = raw_u
+                                            # Include YES/NO/DOH/THC/etc. so cache enrichment matches UI filters
+                                            if clean_doh is not None:
                                                 doh_map[db_name] = clean_doh
                                                 excel_key = db_name.lower().strip()
                                                 if excel_key in excel_lower_map:
@@ -13445,17 +13499,12 @@ def get_available_tags():
                                     # Use COALESCE result first, fallback to individual columns
                                     db_doh_final = db_doh_coalesced or db_doh_compliant or db_doh
                                     if db_doh_final and str(db_doh_final).strip():
-                                        clean_doh_raw = str(db_doh_final).strip().upper()
-                                        # Normalize YES/Y/COMPLIANT to DOH (same as _clean_doh)
-                                        if clean_doh_raw in ['YES', 'Y', 'COMPLIANT']:
-                                            clean_doh = 'DOH'
-                                        elif clean_doh_raw in ['NO', 'N', 'NONE', 'NULL', 'NAN', '']:
-                                            clean_doh = None  # Don't add to map if it's NO/NONE
-                                        else:
-                                            clean_doh = clean_doh_raw
-                                        
-                                        # Only add to map if we have a valid DOH value
-                                        if clean_doh and clean_doh not in ['NO', 'N', 'NONE', 'NULL', 'NAN']:
+                                        clean_doh = normalize_doh_value(db_doh_final)
+                                        if clean_doh is None:
+                                            raw_u = str(db_doh_final).strip().upper()
+                                            if raw_u and raw_u not in ('NONE', 'NULL', 'NAN', ''):
+                                                clean_doh = raw_u
+                                        if clean_doh is not None:
                                             doh_map[db_name] = clean_doh
                                             excel_key = db_name.lower().strip()
                                             if excel_key in excel_lower_map:
@@ -28637,6 +28686,16 @@ def clear_cache_route():
         #  - Trigger garbage collection
         import gc, importlib, shutil
         global _product_database, _json_matcher
+
+        # 0) Clear POSaBit in-memory + disk cache (this is the main culprit for stale inventory)
+        try:
+            from src.core.data.posabit_client import clear_cache as _pb_clear_cache
+            _pb_clear_cache()
+        except Exception as e:
+            logging.debug(f'posabit_client.clear_cache() failed: {e}')
+
+        # Also bust the initial data cache immediately
+        clear_initial_data_cache()
 
         # 1) Clear Flask cache if available
         try:
