@@ -3388,7 +3388,7 @@ const TagManager = {
             // Show/hide filter groups based on whether the dataset has data for each filter.
             // This makes the sidebar adapt to POSaBit (no manifest, no DOH) vs Excel (has both).
             const filterGroupVisibility = {
-                'filterGroup_manifestRef': tags.some(t => t['Manifest Ref No'] || t['Manifest Ref'] || t.manifest_ref_no || t.manifest_ref),
+                'filterGroup_manifestRef': tags.some(t => t['Manifest Ref No'] || t['Manifest Ref'] || t['Manifest Ref #'] || t.manifest_ref_no || t.manifest_ref || t['Lot Number'] || t.lot_number),
                 'filterGroup_vendor':      filterOptionsArrays.vendor.length > 0,
                 'filterGroup_brand':       filterOptionsArrays.brand.length > 0,
                 'filterGroup_productType': filterOptionsArrays.productType.length > 0,
@@ -4102,24 +4102,43 @@ const TagManager = {
                 }
             }
 
-            // Manifest ref lookup (substring match)
+            // Manifest ref lookup — Cultivera/POSaBit use varying columns; also match lot/batch if user pastes a long ref
             if (manifestRefFilter && manifestRefFilter.trim() !== '') {
                 const term = manifestRefFilter.toLowerCase().trim();
-                const manifestRef = (
-                    tag['Manifest Ref No'] ||
-                    tag['Manifest Ref'] ||
-                    tag['ManifestRefNo'] ||
-                    tag.manifest_ref_no ||
-                    tag.manifestRefNo ||
-                    tag.manifest_ref ||
-                    tag.manifestRef ||
-                    tag.ManifestRefNo ||
-                    tag.manifest_number ||
-                    tag.manifestNumber ||
-                    ''
-                ).toString().toLowerCase().trim();
-                if (!manifestRef.includes(term)) {
-                    return false;
+                const termDigits = term.replace(/\D/g, '');
+                const parts = [
+                    tag['Manifest Ref No'],
+                    tag['Manifest Ref'],
+                    tag['Manifest Ref #'],
+                    tag['ManifestRefNo'],
+                    tag.manifest_ref_no,
+                    tag.manifestRefNo,
+                    tag.manifest_ref,
+                    tag.manifestRef,
+                    tag.ManifestRefNo,
+                    tag.manifest_number,
+                    tag.manifestNumber,
+                    tag.manifest_id,
+                    tag.manifest_item_id,
+                    tag['Lot Number'],
+                    tag.lot_number,
+                    tag['Batch Number'],
+                    tag.batch_number,
+                    tag.inventory_transfer_id,
+                    tag._db_product && (tag._db_product.manifest_ref || tag._db_product.lot_number)
+                ];
+                const hay = parts.filter((p) => p !== undefined && p !== null && String(p).trim() !== '')
+                    .map((p) => String(p).toLowerCase())
+                    .join(' ');
+                if (!hay.includes(term)) {
+                    if (termDigits.length >= 6) {
+                        const hayDigits = hay.replace(/\D/g, '');
+                        if (!hayDigits.includes(termDigits)) {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
                 }
             }
 
@@ -6395,16 +6414,20 @@ const TagManager = {
         // Preserve scroll position during re-render
         const savedScroll = this._saveAvailableScrollPosition();
 
-        const tags = filteredTags || originalTags;
+        const tags = (filteredTags !== null && filteredTags !== undefined)
+            ? filteredTags
+            : (originalTags || []);
 
-        // CRITICAL FIX: Don't clear tags if they're already displayed and we're just getting an empty update
-        // This prevents tags from disappearing when background operations return empty results
+        // CRITICAL FIX: Don't clear tags if we're getting an empty update from a *background* race — but
+        // DO render when filters legitimately match zero products (otherwise the list never updates = "nothing happens").
+        const explicitFilteredEmpty = Array.isArray(filteredTags) && filteredTags.length === 0
+            && Array.isArray(originalTags) && originalTags.length > 0;
+
         if (!tags || tags.length === 0) {
             const currentTagCount = availableTagsContainer.querySelectorAll('.tag-item').length;
-            // CRITICAL FIX: Check if tags exist in state FIRST before showing upload prompt
             const hasTagsInState = this.state.tags && this.state.tags.length > 0;
-            
-            if (currentTagCount > 0 || hasTagsInState) {
+
+            if (!explicitFilteredEmpty && (currentTagCount > 0 || hasTagsInState)) {
                 verboseLog(`⏭️ Skipping empty tag update - ${currentTagCount} tags displayed or ${this.state.tags?.length || 0} tags in state`);
                 reenableScaling();
                 return;
@@ -19163,7 +19186,7 @@ const TagManager = {
                 verboseLog('🔍 Active Filter Detected:', {
                     id: id,
                     label: label,
-                    value: select.value,
+                    value: el.value,
                     isActive: true
                 });
                 
