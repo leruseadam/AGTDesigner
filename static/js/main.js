@@ -1885,21 +1885,14 @@ const TagManager = {
             }
             
             // ⚡ AUTO CACHE INVALIDATION: Must match saveAvailableTagsToCache CACHE_VERSION
-            const CURRENT_VERSION = 4;
+            const CURRENT_VERSION = 5;
             const cacheVersion = payload.cacheVersion || 1;
-            
-            // PERFORMANCE: Only invalidate if version is 2+ steps behind (not just 1)
-            // This prevents unnecessary cache clears during gradual rollouts
-            if (cacheVersion < CURRENT_VERSION - 1) {
-                console.log(`🔄 Cache very outdated (v${cacheVersion} << v${CURRENT_VERSION}) - auto-invalidating`);
+
+            // Hard-invalidate any cache that is behind the current version
+            if (cacheVersion < CURRENT_VERSION) {
+                console.log(`🔄 Cache outdated (v${cacheVersion} < v${CURRENT_VERSION}) - auto-invalidating`);
                 storage.removeItem(cacheKey);
                 return null;
-            }
-            
-            // For cache that's only 1 version behind, use it but mark for background refresh
-            if (cacheVersion < CURRENT_VERSION) {
-                console.log(`ℹ️ Cache slightly outdated (v${cacheVersion} vs v${CURRENT_VERSION}) - using but will refresh in background`);
-                payload._needsRefresh = true;
             }
             
             const age = Date.now() - payload.timestamp;
@@ -1974,7 +1967,7 @@ const TagManager = {
             }
             
             // ⚡ AUTO CACHE VERSIONING: Increment on data structure changes
-            const CACHE_VERSION = 4; // Increment when tag structure changes (v4: Added DOH and Brand fields)
+            const CACHE_VERSION = 5; // v5: Force-invalidate stale DOH-field cache (DOH was NO for many products)
 
             // CRITICAL FIX: Clear old cache entries FIRST to make space
             // Also clear cache from different platform (Chrome sync can share cache between Mac/Windows)
@@ -13142,6 +13135,9 @@ const TagManager = {
                  // Create maps of cached/existing tags by product name for vendor and user-edited lineage lookup
                 const existingTagsMap = new Map();
                 const existingSovereignLineageMap = new Map();
+                let _lineagePreservedRecentCount = 0;
+                let _lineagePreservedCachedCount = 0;
+                let _lineageFreshBackendCount = 0;
                 tagsToCompareAgainst.forEach(existingTag => {
                     const productName = existingTag['Product Name*'] || existingTag.ProductName || '';
                     if (productName) {
@@ -13193,7 +13189,7 @@ const TagManager = {
                             tag.Lineage = recentLineage;
                             tag.lineage = recentLineage.toLowerCase();
                             tag['Lineage*'] = recentLineage;
-                            console.log(`✅ Preserved recently updated lineage for "${productName}": ${recentLineage} (updated ${Math.round(age/1000)}s ago)`);
+                            _lineagePreservedRecentCount++;
                             continue; // Skip to next tag - don't check other sources
                         } else {
                             // Too old - remove from tracking
@@ -13214,7 +13210,7 @@ const TagManager = {
                         tag.Lineage = sovereignLineage;
                         tag.lineage = sovereignLineage.toLowerCase();
                         tag['Lineage*'] = sovereignLineage;
-                         console.log(`✅ Preserved cached user-edited lineage for "${productName}": ${sovereignLineage} (preventing flip)`);
+                        _lineagePreservedCachedCount++;
                     } else {
                         // No existing sovereign_lineage - use fresh data from backend
                         const freshHasSovereign = tag.sovereign_lineage && 
@@ -13229,8 +13225,16 @@ const TagManager = {
                             tag.Lineage = sovereignLineage;
                             tag.lineage = sovereignLineage.toLowerCase();
                             tag['Lineage*'] = sovereignLineage;
-                             console.log(`✅ Using fresh user-edited lineage from backend for "${productName}": ${sovereignLineage}`);
+                            _lineageFreshBackendCount++;
                         }
+                    }
+                }
+                const _lineageTotal = _lineagePreservedRecentCount + _lineagePreservedCachedCount + _lineageFreshBackendCount;
+                if (_lineageTotal > 0) {
+                    if (TAG_MANAGER_DEBUG_ENABLED) {
+                        verboseLog(`✅ Lineage merge: ${_lineagePreservedRecentCount} recent, ${_lineagePreservedCachedCount} cached, ${_lineageFreshBackendCount} fresh backend (preventing flip)`);
+                    } else {
+                        verboseLog(`✅ Lineage preserved/merged for ${_lineageTotal} tag(s) (recent/cached/backend — per-item logs suppressed)`);
                     }
                 }
             }
