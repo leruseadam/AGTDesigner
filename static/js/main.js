@@ -1330,7 +1330,7 @@ const AppLoadingSplash = {
         this.updateProgress(100, 'Welcome to Auto Generating Tag Designer!');
         setTimeout(() => {
             this.hide();
-        }, 1000);
+        }, 300);
     },
 
     hide() {
@@ -1365,22 +1365,14 @@ const AppLoadingSplash = {
 
             if (mainContent) {
                 mainContent.classList.add('store-selected');
-                setTimeout(() => {
-                    mainContent.classList.add('loaded');
-                    mainContent.style.opacity = '1';
-                    mainContent.style.pointerEvents = '';
-                    if (window.scaleAppToFit) {
-                        requestAnimationFrame(() => {
-                            requestAnimationFrame(() => {
-                                try {
-                                    window.scaleAppToFit();
-                                } catch (e) {
-                                    console.warn('scaleAppToFit error', e);
-                                }
-                            });
-                        });
-                    }
-                }, 200);
+                mainContent.classList.add('loaded');
+                mainContent.style.opacity = '1';
+                mainContent.style.pointerEvents = '';
+                if (window.scaleAppToFit) {
+                    requestAnimationFrame(() => {
+                        try { window.scaleAppToFit(); } catch (e) { console.warn('scaleAppToFit error', e); }
+                    });
+                }
             }
 
             verboseLog('Splash screen hidden');
@@ -1753,8 +1745,8 @@ const TagManager = {
                 return null;
             }
             
-            // ⚡ AUTO CACHE INVALIDATION: Check version for automatic invalidation
-            const CURRENT_VERSION = 3;
+            // ⚡ AUTO CACHE INVALIDATION: Must match saveAvailableTagsToCache CACHE_VERSION
+            const CURRENT_VERSION = 4;
             const cacheVersion = payload.cacheVersion || 1;
             
             // PERFORMANCE: Only invalidate if version is 2+ steps behind (not just 1)
@@ -1772,15 +1764,17 @@ const TagManager = {
             }
             
             const age = Date.now() - payload.timestamp;
-            // Database/POSaBit mode: use 15-minute TTL so inventory stays reasonably fresh
-            const effectiveTtl = this.isDatabaseOnlyMode() ? 15 * 60 * 1000 : this.CACHE_TTL_MS;
+            // Database/POSaBit: longer TTL so a slow /api/available-tags still leaves usable cache
+            const effectiveTtl = this.isDatabaseOnlyMode() ? 60 * 60 * 1000 : this.CACHE_TTL_MS;
             if (payload.timestamp && age > effectiveTtl) {
+                console.warn(`⚠️ Available-tags cache expired (age ${Math.round(age / 60000)}m > TTL ${Math.round(effectiveTtl / 60000)}m)`);
                 return null;
             }
 
             // CRITICAL: Do not use old cached tags without proper lineage (even if cache is recent)
             if (!this.cacheHasProperLineage(payload.tags)) {
-                console.warn('⚠️ Cached tags lack proper lineage - invalidating cache and fetching fresh data');
+                const withL = payload.tags.filter(t => t && (t.manual_lineage || t.sovereign_lineage || t.canonical_lineage || t.currentLineage || t.Lineage || t.lineage || t['Lineage*'])).length;
+                console.warn(`⚠️ Cached tags lack proper lineage (${withL}/${payload.tags.length}) - invalidating cache and fetching fresh data`);
                 try {
                     const key = this.getAvailableTagsCacheKey();
                     const normKey = this.getNormalizedCacheKey();
@@ -1812,11 +1806,12 @@ const TagManager = {
         if (!Array.isArray(tags) || tags.length === 0) return false;
         const withLineage = tags.filter(t => {
             if (!t || typeof t !== 'object') return false;
-            const L = (t.manual_lineage || t.sovereign_lineage || t.canonical_lineage || t.currentLineage || t.Lineage || '').toString().trim();
+            const L = (t.manual_lineage || t.sovereign_lineage || t.canonical_lineage || t.currentLineage || t.Lineage || t.lineage || t['Lineage*'] || '').toString().trim();
             return L !== '';
         });
         const ratio = withLineage.length / tags.length;
-        return ratio >= 0.8;
+        // POS/DB often has sparse lineage on accessories; 0.55 still rejects truly empty caches
+        return ratio >= 0.55;
     },
 
     saveAvailableTagsToCache(tags) {
@@ -8500,10 +8495,8 @@ const TagManager = {
         const updateDohImage = (status) => {
             const startTime = performanceUtils.startTiming();
             
-            // Clear existing images efficiently
-            while (imageContainer.firstChild) {
-                imageContainer.removeChild(imageContainer.firstChild);
-            }
+            // Clear existing images (replaceChildren avoids removeChild races)
+            imageContainer.replaceChildren();
             
             if (status === 'CBD') {
                 // Add High CBD image with optimized loading
@@ -8590,9 +8583,7 @@ const TagManager = {
         let initialDohStatus = 'NONE';
         
         if (isHighCbdProduct) {
-            while (imageContainer.firstChild) {
-                imageContainer.removeChild(imageContainer.firstChild);
-            }
+            imageContainer.replaceChildren();
             const highCbdImg = document.createElement('img');
             highCbdImg.src = '/static/img/HighCBD.png';
             highCbdImg.alt = 'High CBD';
@@ -9101,14 +9092,10 @@ const TagManager = {
                     } else if (typeof updateDohImage === 'function') {
                         updateDohImage(prevValue);
                     }
-                    // Remove temporary Saving option if it's still present
-                    if (savingOption.parentNode) {
-                        try {
-                            dohSelect.removeChild(savingOption);
-                        } catch (e) {
-                            // ignore
-                        }
-                    }
+                    // Remove temporary Saving option if still attached
+                    try {
+                        savingOption.remove();
+                    } catch (e) { /* ignore */ }
                 } catch (e) {
                     console.error('DOH safety timeout cleanup failed:', e);
                 }
@@ -9131,6 +9118,11 @@ const TagManager = {
                 
                 const data = await response.json();
                 if (data.success) {
+                    // Drop "Saving..." before setting value / syncing panels — avoids select+removeChild
+                    // issues in some browsers when the temp option is still attached.
+                    try {
+                        savingOption.remove();
+                    } catch (e) { /* ignore */ }
                     // On success, update tag DOH status in state
                     tag.DOH = backendDohStatus;
                     tag.doh = backendDohStatus;
@@ -9153,11 +9145,11 @@ const TagManager = {
                     } else if (typeof updateDohImage === 'function') {
                         updateDohImage(prevValue);
                     }
+                    try {
+                        savingOption.remove();
+                    } catch (e) { /* ignore */ }
                     throw new Error(data.message || 'Failed to update DOH status');
                 }
-                
-                // Remove saving option
-                dohSelect.removeChild(savingOption);
             } catch (error) {
                 console.error(`Failed to update DOH status:`, error);
                 // On failure, revert to previous value
@@ -9170,10 +9162,9 @@ const TagManager = {
                     updateDohImage(prevValue);
                 }
                 alert(`Failed to update DOH status: ` + error.message);
-                // Remove saving option
-                if (savingOption.parentNode) {
-                    dohSelect.removeChild(savingOption);
-                }
+                try {
+                    savingOption.remove();
+                } catch (e) { /* ignore */ }
             } finally {
                 dohSelect.disabled = false;
                 if (safetyTimeout) {
@@ -9968,10 +9959,7 @@ const TagManager = {
                 }
                 
                 if (imageContainer) {
-                    // Clear existing images
-                    while (imageContainer.firstChild) {
-                        imageContainer.removeChild(imageContainer.firstChild);
-                    }
+                    imageContainer.replaceChildren();
                     
                     // Add appropriate image
                     if (finalStatus === 'CBD') {
@@ -10078,10 +10066,7 @@ const TagManager = {
                     imageContainer.style.visibility = 'visible';
                     imageContainer.style.opacity = '1';
                     
-                    // Clear existing images
-                    while (imageContainer.firstChild) {
-                        imageContainer.removeChild(imageContainer.firstChild);
-                    }
+                    imageContainer.replaceChildren();
                     
                     // Add appropriate image based on DOH status
                     if (newDohStatus === 'CBD') {
@@ -10136,10 +10121,7 @@ const TagManager = {
                     imageContainer.style.visibility = 'visible';
                     imageContainer.style.opacity = '1';
                     
-                    // Clear existing images
-                    while (imageContainer.firstChild) {
-                        imageContainer.removeChild(imageContainer.firstChild);
-                    }
+                    imageContainer.replaceChildren();
                     
                     // Add appropriate image based on DOH status
                     if (newDohStatus === 'CBD') {
@@ -12401,11 +12383,10 @@ const TagManager = {
             let response;
             let responseData;
             
-            // ⚡ WEB CLIENT: Use longer timeout to avoid premature aborts (60s for large datasets on web)
-            // Desktop/localhost should respond quickly with fast_load=1
-            const maxRetries = isWebClient ? 2 : 2; // Allow 2 retries for web (was 1, but timeouts need retries)
-            const maxProcessingRetries = isWebClient ? 2 : 2; // Allow 2 processing retries for web
-            const fetchTimeout = isWebClient ? 120000 : 45000; // 120s timeout for web clients (POSaBit cold fetch can take 30-60s), 45s for desktop
+            // Large /api/available-tags payloads (POSaBit + lineage alignment) often exceed 45s on localhost/dev.
+            const maxRetries = isWebClient ? 2 : 2;
+            const maxProcessingRetries = isWebClient ? 2 : 2;
+            const fetchTimeout = 120000; // 120s for all — cold DB + alignment can exceed 45s
             
             let retryCount = 0;
             let processingRetryCount = 0;
@@ -12432,8 +12413,7 @@ const TagManager = {
                 try {
                     console.log(`🔄 Retry attempt ${retryCount + 1} (processing retries: ${processingRetryCount})`);
                     const controller = new AbortController();
-                    // PERFORMANCE: Faster timeout for web clients - use cache for slow loads
-                    const timeoutId = setTimeout(() => {
+                    let timeoutId = setTimeout(() => {
                         controller.abort();
                         console.warn(`⚠️ Tag loading timeout after ${fetchTimeout}ms - will try cache or show error`);
                     }, fetchTimeout);
@@ -12470,15 +12450,20 @@ const TagManager = {
                     
                     // ⚡ AGGRESSIVE CACHING: Web clients use longer cache (30 min), desktop uses shorter (5 min)
                     const cacheMaxAge = isWebClient ? 1800 : 300; // Web: 30min, Desktop: 5min
-                    response = await fetch(optimizedFetchUrl, {
-                        signal: controller.signal,
-                        // Default cache strategy - let browser handle it intelligently
-                        cache: 'default',
-                        headers: {
-                            'Cache-Control': `max-age=${cacheMaxAge}`
+                    try {
+                        response = await fetch(optimizedFetchUrl, {
+                            signal: controller.signal,
+                            cache: 'default',
+                            headers: {
+                                'Cache-Control': `max-age=${cacheMaxAge}`
+                            }
+                        });
+                    } finally {
+                        if (timeoutId) {
+                            clearTimeout(timeoutId);
+                            timeoutId = null;
                         }
-                    });
-                    clearTimeout(timeoutId);
+                    }
                     
                     console.log(`✅ Fetch completed with status: ${response.status} at ${new Date().toISOString()}`);
 
@@ -15163,21 +15148,9 @@ const TagManager = {
                 (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
             const initialDataFastLoad = isWebClient ? 1 : 0;
 
-            // Background cache bust — doesn't block the initial load.
-            // After cache clears, re-fetch silently and update inventory if count changed.
-            fetch('/api/performance/cache/clear', { method: 'POST' }).then(() =>
-                fetch('/api/initial-data?fast_load=1&nocache=1').then(r => r.ok ? r.json() : null)
-            ).then(freshData => {
-                if (!freshData || !freshData.data_loaded) return;
-                const newTotal = freshData.total_records || 0;
-                const currentTotal = window.TagManager && window.TagManager.state
-                    ? (window.TagManager.state.originalTags || window.TagManager.state.tags || []).length : 0;
-                if (newTotal !== currentTotal && typeof window.TagManager !== 'undefined'
-                    && typeof window.TagManager.loadTagsFromData === 'function') {
-                    console.log(`[PageLoad] Inventory updated: ${currentTotal} → ${newTotal}`);
-                    window.TagManager.loadTagsFromData(freshData);
-                }
-            }).catch(() => {});
+            // Note: cache refresh on page load was removed — it caused lag by hitting
+            // /api/performance/cache/clear while the initial data fetch was in-flight.
+            // New inventory is detected by the 2-minute auto-refresh poll instead.
 
             const response = await Promise.race([
                 fetch(`/api/initial-data?fast_load=${initialDataFastLoad}`),

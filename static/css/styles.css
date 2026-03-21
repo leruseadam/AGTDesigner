@@ -1020,26 +1020,27 @@ body.modal-open #mainContent.store-selection-disabled,
     z-index: 1;
   }
   
-  /* CRITICAL FIX: Ensure body::before doesn't cause white space */
+  /* Full-viewport lava layer — avoid near-black end stops (read as a “split” / muddy band) */
   body::before {
     content: '';
-    position: fixed; /* Fixed to viewport, not document */
-    top: 0;
-    left: 0;
+    position: fixed;
+    inset: 0;
     width: 100%;
-    height: 100vh; /* Fixed to viewport height */
-    max-height: 100vh; /* Prevent exceeding viewport */
+    min-height: 100vh;
+    min-height: 100dvh;
     pointer-events: none;
-    z-index: -1; /* Behind content */
-    background: linear-gradient(135deg, 
-      #ff0066 0%, 
-      #ff3366 15%,
-      #ff6699 25%, 
-      #9966ff 45%,
-      #6633ff 60%,
-      #3300ff 75%,
-      #0033cc 90%,
-      #001a66 100%);
+    z-index: -1;
+    /* Softer tail: keep chroma; old #001a66 read as a dark overlay on the lower half */
+    background: linear-gradient(145deg,
+      #ff0066 0%,
+      #ff4488 18%,
+      #dd66cc 32%,
+      #aa66ff 48%,
+      #8866ee 62%,
+      #6b4dc9 78%,
+      #4a3a7a 100%);
+    background-size: 120% 120%;
+    background-position: 50% 40%;
   }
   
   @keyframes trippyTieDye {
