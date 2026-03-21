@@ -13342,8 +13342,14 @@ const TagManager = {
                             
                             if (updatedCount > 0) {
                                 console.log(`✅ Database lineage applied to ${updatedCount} tags`);
-                                // Re-render to show lineage colors
-                                this._updateAvailableTags(this.state.tags);
+                                // Re-render to show lineage colors — use applyFilters if filters are active
+                                // to avoid overwriting originalTags with a filtered subset
+                                if (typeof this.hasActiveFilters === 'function' && this.hasActiveFilters()
+                                    && typeof this.applyFilters === 'function') {
+                                    this.applyFilters(true);
+                                } else {
+                                    this._updateAvailableTags(this.state.originalTags || this.state.tags);
+                                }
                             } else {
                                 console.warn('⚠️ Background lineage fetch: No tags were updated (possible name mismatch)');
                             }
@@ -13362,13 +13368,20 @@ const TagManager = {
             // Update the UI with new tags
             this._updateAvailableTags(tags);
             this._restoreAvailableScrollPosition(savedScroll);
-            
+
             // CRITICAL FIX: ALWAYS rebuild filters when tags are received from API
             // This ensures filters are populated with brand/DOH data even if tags were enriched
             if (tags && tags.length > 0 && this.state.originalTags && this.state.originalTags.length > 0) {
                 console.log('🔧 Rebuilding filters after API response - ensuring filters have latest data');
                 // Use originalTags (which should have enriched data) for filter building
                 this.buildFilterOptionsFromTags(this.state.originalTags);
+            }
+
+            // Re-apply any active filters so loading all tags doesn't wipe the user's filter selection
+            if (typeof this.hasActiveFilters === 'function' && this.hasActiveFilters()) {
+                if (typeof this.applyFilters === 'function') {
+                    this.applyFilters(true);
+                }
             }
             
             // CRITICAL FIX: Call _waitForTagsToAppear to ensure loading flag stays true until tags are rendered
@@ -15158,7 +15171,7 @@ const TagManager = {
                 if (!freshData || !freshData.data_loaded) return;
                 const newTotal = freshData.total_records || 0;
                 const currentTotal = window.TagManager && window.TagManager.state
-                    ? (window.TagManager.state.tags || []).length : 0;
+                    ? (window.TagManager.state.originalTags || window.TagManager.state.tags || []).length : 0;
                 if (newTotal !== currentTotal && typeof window.TagManager !== 'undefined'
                     && typeof window.TagManager.loadTagsFromData === 'function') {
                     console.log(`[PageLoad] Inventory updated: ${currentTotal} → ${newTotal}`);
@@ -22819,7 +22832,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const newTotal = data.total_records || 0;
             const currentTotal = window.TagManager && window.TagManager.state
-                ? (window.TagManager.state.tags || []).length
+                ? (window.TagManager.state.originalTags || window.TagManager.state.tags || []).length
                 : 0;
 
             // Only re-render if the inventory count changed
