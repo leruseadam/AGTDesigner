@@ -9271,9 +9271,10 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                 tag['sovereign_lineage'] = manual_lineage
                 if manual_source:
                     tag['lineage_source'] = f"manual:{manual_source}"
-                # Manual lineage skips DB lineage overwrite, but DOH / brand / vendor still hydrate from DB
+                # Manual lineage skips DB lineage overwrite; DOH also preserved if already set on tag
                 _li_manual = lineage_map.get(name) or lineage_map.get(product_db._normalize_product_name(name)) or lineage_map.get(str(name).lower().strip())
-                if isinstance(_li_manual, dict) and _li_manual.get('doh') is not None:
+                _existing_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)') or tag.get('doh') or tag.get('DOH Compliant') or ''
+                if not _existing_doh and isinstance(_li_manual, dict) and _li_manual.get('doh') is not None:
                     _dd = _li_manual.get('doh')
                     tag['DOH'] = _dd
                     tag['DOH Compliant (Yes/No)'] = _dd
@@ -9528,22 +9529,14 @@ def _align_tags_with_db_lineage(tags, store_name, skip_if_aligned: bool = False,
                         tag['productBrand'] = db_brand  # Also set lowercase variant
                         logging.debug(f"✅ Enriched tag '{name}' with Product Brand '{db_brand}' from database (was: '{current_brand_clean}')")
                 
-                # CRITICAL FIX: Enrich tag with DOH from database (DB-first when lineage_map has a value)
+                # DOH enrichment: Excel/POS value wins; only fill from DB when tag has no DOH set.
+                # Staff explicitly set Yes/No in the spreadsheet — never overwrite that with DB.
                 current_doh = tag.get('DOH') or tag.get('DOH Compliant (Yes/No)') or tag.get('doh') or tag.get('DOH Compliant') or ''
-
-                if _apply_tag_doh_from_lineage_info(tag, lineage_info, product_name_for_log=name):
-                    logging.debug(f"✅ Applied DB DOH for '{name}' (previous tag DOH: '{current_doh}')")
+                if not current_doh:
+                    # Tag has no DOH value — fill from DB if available
+                    _apply_tag_doh_from_lineage_info(tag, lineage_info, product_name_for_log=name)
                 else:
-                    # Ensure DOH fields exist even if database doesn't have a value
-                    # Set to empty string (not None) so frontend can check for them
-                    if 'DOH' not in tag or not tag.get('DOH'):
-                        tag['DOH'] = ''
-                    if 'DOH Compliant (Yes/No)' not in tag or not tag.get('DOH Compliant (Yes/No)'):
-                        tag['DOH Compliant (Yes/No)'] = ''
-                    if 'doh' not in tag or not tag.get('doh'):
-                        tag['doh'] = ''
-                    if 'DOH Compliant' not in tag or not tag.get('DOH Compliant'):
-                        tag['DOH Compliant'] = ''
+                    logging.debug(f"⏭️ Keeping existing tag DOH '{current_doh}' for '{name}' (not overwriting with DB)")
                 
                 aligned_count += 1
             else:
