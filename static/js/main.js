@@ -6497,9 +6497,14 @@ const TagManager = {
 
         // Show busy cursor for the duration of the DOM render
         const _popCursorRender = window.UICursor ? window.UICursor.push() : () => {};
+        // Safety net: always release cursor within 3s regardless of which code path is taken
+        const _cursorSafetyTimer = setTimeout(() => {
+            if (window.UICursor) window.UICursor.forceReset();
+        }, 3000);
 
         // Re-enable scaling after rendering completes (will be called at end of function)
         const reenableScaling = () => {
+            clearTimeout(_cursorSafetyTimer);
             _popCursorRender();
             if (window.setTagRenderingState) {
                 // Delay re-enabling to ensure DOM is stable
@@ -6887,6 +6892,7 @@ const TagManager = {
         this.state.simplifiedAvailableTagsActive = shouldUseSimplified;
         if (shouldUseSimplified) {
             verboseLog(`⚡ Simplified available-tag rendering enabled for ${tags.length} tags`);
+            reenableScaling();
             this.renderSimplifiedAvailableTags(tags, savedScroll);
             return;
         } else if (this.state.forceFullAvailableTagRender && tags.length > this.SIMPLIFIED_RENDER_THRESHOLD) {
