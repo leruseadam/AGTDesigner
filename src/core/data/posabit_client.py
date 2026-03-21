@@ -14,6 +14,69 @@ from src.core.utils.product_weight_inference import (
 
 logger = logging.getLogger(__name__)
 
+# Explicit POSaBit / JSON keys only — no inference from product type. If the API omits these,
+# DOH is filled later from the product database by _align_tags_with_db_lineage (actual DB columns).
+# Prefer DOH Compliant (Yes/No) first (same as app._coalesce_doh_from_db_row).
+_POSABIT_DOH_KEYS = (
+    "DOH Compliant (Yes/No)",
+    "DOH Yes/No",
+    "DOH yes/no",
+    "doh_yes_no",
+    "doh_compliant_yes_no",
+    "DOH",
+    "doh",
+    "doh_compliant",
+    "DOH Compliant",
+    "is_doh",
+    "dohStatus",
+    "doh_status",
+    "compliance_type",
+    "wa_doh_compliant",
+    "medical_compliance",
+)
+
+
+def _raw_doh_to_compliant_yes_no(val: str) -> str:
+    """Match app._doh_value_to_compliant_yes_no: Yes / No / empty for DOH Compliant (Yes/No) column."""
+    if not val:
+        return ""
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "null", "nan", "-", "n/a", "undefined"):
+        return ""
+    u = s.upper()
+    if u in ("NO", "N", "FALSE", "F"):
+        return "No"
+    if ("NON" in u and "DOH" in u) or ("NOT" in u and "DOH" in u):
+        return "No"
+    if "NON" in u and "COMPLIANT" in u:
+        return "No"
+    return "Yes"
+
+
+def _merge_doh_from_posabit_sources(row: Dict[str, Any], *sources: Any) -> None:
+    """Set DOH fields on row only when present on API payloads (menu_item, price variant, SKU)."""
+    if not isinstance(row, dict):
+        return
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        for key in _POSABIT_DOH_KEYS:
+            if key not in src:
+                continue
+            raw = src.get(key)
+            if raw is None:
+                continue
+            val = str(raw).strip()
+            if not val or val.lower() in ("none", "null", "nan"):
+                continue
+            row["DOH"] = val
+            yn = _raw_doh_to_compliant_yes_no(val)
+            row["DOH Compliant (Yes/No)"] = yn
+            row["DOH Compliant"] = yn
+            row["doh"] = val.lower()
+            return
+
+
 # Cache for product list (keyed by store so switching store uses correct feed key). TTL in seconds.
 _posabit_product_rows_cache: Dict[str, List[Dict[str, Any]]] = {}
 _posabit_product_rows_cache_time: Dict[str, float] = {}
@@ -343,6 +406,7 @@ def _menu_item_to_product_row(item: Dict, price_variant: Optional[Dict], categor
             row["CombinedWeight"] = inferred
             row["weight_with_units"] = inferred
             logger.debug("POSaBit inferred weight for %r: %r -> %r", name, weight_val, inferred)
+    _merge_doh_from_posabit_sources(row, item, price_variant or {})
     return row
 
 
@@ -455,6 +519,7 @@ def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
             row["CombinedWeight"] = inferred
             row["weight_with_units"] = inferred
             logger.debug("POSaBit venue inferred weight for %r: %r -> %r", name, unit, inferred)
+    _merge_doh_from_posabit_sources(row, sku)
     return row
 
 

@@ -307,30 +307,51 @@ def _apply_tag_doh_from_lineage_info(tag, lineage_info, product_name_for_log='')
         return False
     db_doh = lineage_info.get('doh')
     tag['DOH'] = db_doh
-    tag['DOH Compliant (Yes/No)'] = db_doh
+    yn = _doh_value_to_compliant_yes_no(db_doh)
+    tag['DOH Compliant (Yes/No)'] = yn
     tag['doh'] = db_doh.lower() if isinstance(db_doh, str) else (str(db_doh).lower() if db_doh is not None else '')
-    tag['DOH Compliant'] = db_doh
+    tag['DOH Compliant'] = yn
     if product_name_for_log:
         logging.debug(f"✅ Applied DB DOH for '{product_name_for_log}': '{db_doh}'")
     return True
 
 
 def _coalesce_doh_from_db_row(doh_raw, doh_compliant_raw):
-    """Prefer DOH column, then DOH Compliant; normalize; fall back to raw uppercase if needed."""
-    v = normalize_doh_value(doh_raw) or normalize_doh_value(doh_compliant_raw)
+    """Prefer DOH Compliant (Yes/No), then DOH; normalize; fall back to raw uppercase if needed."""
+    v = normalize_doh_value(doh_compliant_raw) or normalize_doh_value(doh_raw)
     if v is not None:
         return v
     raw = ''
-    if doh_raw is not None and str(doh_raw).strip():
-        raw = str(doh_raw).strip()
-    elif doh_compliant_raw is not None and str(doh_compliant_raw).strip():
+    if doh_compliant_raw is not None and str(doh_compliant_raw).strip():
         raw = str(doh_compliant_raw).strip()
+    elif doh_raw is not None and str(doh_raw).strip():
+        raw = str(doh_raw).strip()
     if raw:
         upper = raw.upper()
         if upper in ('NONE', 'NULL', 'NAN', ''):
             return None
         return upper
     return None
+
+
+def _doh_value_to_compliant_yes_no(db_doh):
+    """
+    Map stored DOH / compliance values to the DOH Compliant (Yes/No) column as Yes or No.
+    Technical DOH (THC/CBD/DOH/…) stays on tag['DOH'] for badges; this is for the Yes/No field only.
+    """
+    if db_doh is None:
+        return ''
+    s = str(db_doh).strip()
+    if not s or s.lower() in ('none', 'null', 'nan', '-', 'n/a', 'undefined'):
+        return ''
+    u = s.upper()
+    if u in ('NO', 'N', 'FALSE', 'F'):
+        return 'No'
+    if ('NON' in u and 'DOH' in u) or ('NOT' in u and 'DOH' in u):
+        return 'No'
+    if 'NON' in u and 'COMPLIANT' in u:
+        return 'No'
+    return 'Yes'
 
 
 def timeout_handler(signum, frame):
@@ -8896,8 +8917,9 @@ def _quick_align_tags_lineage(tags, store_name):
             doh_v = info.get('doh')
             if doh_v:
                 tag['DOH'] = doh_v
-                tag['DOH Compliant (Yes/No)'] = doh_v
+                tag['DOH Compliant (Yes/No)'] = _doh_value_to_compliant_yes_no(doh_v)
                 tag['doh'] = doh_v.lower() if isinstance(doh_v, str) else doh_v
+                tag['DOH Compliant'] = tag['DOH Compliant (Yes/No)']
             vend = info.get('vendor')
             if vend:
                 cv = str(tag.get('Vendor/Supplier*') or tag.get('Vendor') or '').strip().lower()

@@ -14007,7 +14007,7 @@
   })();
   </script>
   
-  <!-- Store Selection Modal — outside #mainContent so visibility:hidden doesn't affect it -->
+  <!-- Store Selection Modal — outside #mainContent; original Bootstrap + backdrop behavior -->
   <div
     class="modal fade show"
     id="storeSelectionModal"
@@ -14046,125 +14046,119 @@
       </div>
     </div>
   </div>
-  <div
-    id="storeSelectionShield"
-    aria-hidden="true"
-    style="position: fixed; inset: 0; z-index: 1999; background: rgba(18, 12, 30, 0.82); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); pointer-events: auto; display: block;"
-  ></div>
+  <div class="modal-backdrop fade show" id="storeSelectionBackdrop" style="z-index: 1990;"></div>
+  <style>
+    body.modal-open { overflow: hidden; }
+  </style>
   <script>
-    // Hard-enforce store modal visibility when no store is selected.
-    (function() {
-      const modalEl = document.getElementById('storeSelectionModal');
-      const shieldEl = document.getElementById('storeSelectionShield');
-      if (!modalEl) return;
-
-      const hasStoreFromServer = {{ 'true' if current_store else 'false' }};
-      const storeLabel = (document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase();
-      const hasStoreFromUi = storeLabel && !storeLabel.includes('no store selected');
-      const needsStoreModal = !hasStoreFromServer || !hasStoreFromUi;
-
-      const enforceVisible = () => {
-        modalEl.style.display = 'block';
-        modalEl.classList.add('show');
-        modalEl.setAttribute('aria-hidden', 'false');
-        modalEl.setAttribute('aria-modal', 'true');
-        modalEl.setAttribute('role', 'dialog');
-        document.body.classList.add('modal-open');
-        document.body.style.overflow = 'hidden';
-        if (shieldEl) shieldEl.style.display = 'block';
-      };
-
-      if (needsStoreModal) {
-        enforceVisible();
-        // Re-assert for cases where later scripts/modal cleanup hide it.
-        let attempts = 0;
-        const maxAttempts = 12; // ~3 seconds total
-        const t = setInterval(() => {
-          attempts += 1;
-          const stillNoStore = !((document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase().trim()) ||
-                               (document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase().includes('no store selected');
-          if (!stillNoStore || attempts >= maxAttempts) {
-            clearInterval(t);
-            return;
-          }
-          enforceVisible();
-        }, 250);
+    (function () {
+      const hasCurrentStore = {{ 'true' if user_has_store and current_store else 'false' }};
+      if (hasCurrentStore) {
+        const modalEl = document.getElementById('storeSelectionModal');
+        if (modalEl) {
+          modalEl.classList.remove('show');
+          modalEl.style.display = 'none';
+          modalEl.setAttribute('aria-hidden', 'true');
+        }
+        const backdrop = document.getElementById('storeSelectionBackdrop');
+        if (backdrop) backdrop.remove();
+        document.body.classList.remove('modal-open');
       } else {
-        modalEl.style.display = 'none';
-        modalEl.classList.remove('show');
-        modalEl.setAttribute('aria-hidden', 'true');
-        if (shieldEl) shieldEl.style.display = 'none';
+        document.body.classList.add('modal-open');
       }
     })();
   </script>
-
-  <!-- Hard fallback: visible store picker if scripts/bootstrap modal fail -->
-  <div
-    id="storeSelectionFallback"
-    style="{% if current_store %}display:none;{% else %}display:block;{% endif %} position:fixed; inset:0; z-index:2100; background:rgba(14,10,24,0.9); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);"
-  >
-    <div style="position:absolute; left:50%; top:50%; transform:translate(-50%, -50%); width:min(900px, 92vw); background:rgba(40,30,56,0.96); border:1px solid rgba(160,132,232,0.38); border-radius:14px; box-shadow:0 20px 50px rgba(0,0,0,0.45); padding:18px 16px 14px 16px;">
-      <div style="color:#fff; font-weight:700; font-size:1.25rem; margin-bottom:6px;">Select Store</div>
-      <div style="color:rgba(255,255,255,0.74); font-size:0.95rem; margin-bottom:12px;">Choose which store database to use for tag data.</div>
-      <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px;">
-        {% for store in stores %}
-          <button
-            type="button"
-            onclick="selectStore('{{ store }}')"
-            style="background:rgba(59,47,83,0.95); color:#fff; border:1px solid rgba(160,132,232,0.4); border-radius:10px; padding:10px 10px; font-weight:700; text-align:center;"
-          >
-            <div>{{ store|replace("_", " ") }}</div>
-            <div style="font-size:0.75rem; color:rgba(255,255,255,0.7); font-weight:500;">Inventory</div>
-          </button>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
   <script>
-    (function(){
-      // Keep fallback synced in case store is restored dynamically after load.
-      const fallback = document.getElementById('storeSelectionFallback');
-      if (!fallback) return;
-      const storeLabel = (document.getElementById('currentStoreDisplay')?.textContent || '').toLowerCase();
-      const hasStore = storeLabel && !storeLabel.includes('no store selected');
-      fallback.style.display = hasStore ? 'none' : 'block';
-    })();
-  </script>
-
-  <script>
-    window.openStoreSelection = function() {
-      const modalEl = document.getElementById('storeSelectionModal');
-      const fallback = document.getElementById('storeSelectionFallback');
-      const shield = document.getElementById('storeSelectionShield');
-      if (modalEl) {
-        modalEl.style.display = 'block';
-        modalEl.classList.add('show');
-        modalEl.setAttribute('aria-hidden', 'false');
-      }
-      if (shield) shield.style.display = 'block';
-      if (fallback) fallback.style.display = 'block';
-      document.body.classList.add('modal-open');
-      document.body.style.overflow = 'hidden';
-    };
-
-    window.selectStore = async function(storeValue) {
+    window.selectStore = async function selectStore(storeValue) {
       try {
-        const r = await fetch('/api/set-store', {
+        const response = await fetch('/api/set-store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ store: storeValue })
         });
-        const d = await r.json();
-        if (!r.ok || !d.success) { alert(d.error || 'Failed to set store.'); return; }
-        window.location.reload();
-      } catch(e) { alert('Failed to set store. Please try again.'); }
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          console.error('Store selection failed:', data);
+          alert(data.error || data.message || 'Failed to set store.');
+          return;
+        }
+        setTimeout(function () { window.location.reload(); }, 400);
+      } catch (e) {
+        console.error('selectStore error:', e);
+        alert('Failed to set store. Please try again.');
+      }
+    };
+
+    (function ensureStoreModalShown() {
+      const hasCurrentStore = {{ 'true' if user_has_store and current_store else 'false' }};
+      if (hasCurrentStore) return;
+
+      const modalEl = document.getElementById('storeSelectionModal');
+      if (!modalEl) return;
+
+      const alreadyVisible = modalEl.classList.contains('show') || modalEl.style.display === 'block';
+
+      function tryBootstrapShow() {
+        if (typeof bootstrap === 'undefined' || !bootstrap.Modal) return false;
+        const manualBackdrop = document.getElementById('storeSelectionBackdrop');
+        if (manualBackdrop) manualBackdrop.remove();
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false });
+        if (!alreadyVisible) modal.show();
+        return true;
+      }
+
+      if (tryBootstrapShow()) return;
+      var tries = 0;
+      function tick() {
+        tries += 1;
+        if (tryBootstrapShow() || tries > 60) return;
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+
+      fetch('/api/check-store-required', { method: 'GET' })
+        .then(function (r) { return r.json(); })
+        .then(function (payload) {
+          if (payload && payload.requires_store === false) {
+            modalEl.classList.remove('show');
+            modalEl.style.display = 'none';
+            document.body.classList.remove('modal-open');
+            var manualBackdrop = document.getElementById('storeSelectionBackdrop');
+            if (manualBackdrop) manualBackdrop.remove();
+          }
+        })
+        .catch(function () {});
+    })();
+
+    window.openStoreSelection = function () {
+      var modalEl = document.getElementById('storeSelectionModal');
+      if (!modalEl) return;
+      if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+        var manualBackdrop = document.getElementById('storeSelectionBackdrop');
+        if (manualBackdrop) manualBackdrop.remove();
+        bootstrap.Modal.getOrCreateInstance(modalEl, { backdrop: 'static', keyboard: false }).show();
+        document.body.classList.add('modal-open');
+        return;
+      }
+      modalEl.style.display = 'block';
+      modalEl.classList.add('show');
+      modalEl.setAttribute('aria-hidden', 'false');
+      var bd = document.getElementById('storeSelectionBackdrop');
+      if (!bd) {
+        bd = document.createElement('div');
+        bd.id = 'storeSelectionBackdrop';
+        bd.className = 'modal-backdrop fade show';
+        bd.style.zIndex = '1990';
+        document.body.appendChild(bd);
+      } else {
+        bd.style.display = 'block';
+      }
+      document.body.classList.add('modal-open');
+      document.body.style.overflow = 'hidden';
     };
   </script>
 
-  </body>
-</html> 
-
-<script>
+  <script>
   // Centered-select shim: mirrors selected option text into an overlay
   (function(){
     function initTemplateOverlay(){
@@ -14175,17 +14169,16 @@
         var opt = sel.options[sel.selectedIndex];
         overlay.textContent = opt ? opt.text : '';
       }
-      // Update on changes and on initialization
       sel.addEventListener('change', update, {passive:true});
-      // Some browsers update selectedIndex after click; listen to input as well
       sel.addEventListener('input', update, {passive:true});
-      // Init after a tick to ensure DOM ready
       setTimeout(update,50);
-      // Also update if options are changed dynamically
       var mo = new MutationObserver(update);
       mo.observe(sel, {childList:true, subtree:true});
     }
     if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', initTemplateOverlay);
     else initTemplateOverlay();
   })();
-</script>
+  </script>
+
+  </body>
+</html>

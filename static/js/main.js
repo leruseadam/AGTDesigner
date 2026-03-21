@@ -4160,13 +4160,15 @@ const TagManager = {
                     if (body && body.tags && body.tags.length > 0) {
                         console.log(`✅ Fast background fetch returned ${body.tags.length} tags - hydrating UI`);
                         try {
-                            // Use existing updater to inject tags into UI
-                            if (window.TagManager && typeof window.TagManager.updateAvailableTags === 'function') {
-                                window.TagManager.updateAvailableTags(body.tags);
-                            } else if (window.TagManager && typeof window.TagManager.updateSelectedTags === 'function') {
-                                window.TagManager.updateSelectedTags(body.tags);
+                            // Hydrate AVAILABLE inventory only — never pass full payload to updateSelectedTags
+                            // (that would merge every product into persistentSelectedTags and "select all" by accident).
+                            const TM = window.TagManager;
+                            if (TM && typeof TM._updateAvailableTags === 'function') {
+                                TM._updateAvailableTags(body.tags, null);
+                            } else if (TM && typeof TM.debouncedUpdateAvailableTags === 'function') {
+                                TM.debouncedUpdateAvailableTags(body.tags, null);
                             } else {
-                                console.log('⚠️ TagManager update functions not found - skipping immediate hydration');
+                                console.log('⚠️ TagManager _updateAvailableTags not found - skipping bg hydration');
                             }
                         } catch (err) {
                             console.warn('Error hydrating tags from bg fetch:', err);
@@ -8903,9 +8905,9 @@ const TagManager = {
             }
         }
         
-        // CRITICAL DEBUG: Log what lineage value was set in dropdown
-        if (isForSelectedTags) {
-            console.log(`🎯 Set lineage dropdown for SELECTED TAG "${displayName}":`, {
+        // Verbose-only: per-tag lineage logs were flooding the console when many SKUs were selected.
+        if (isForSelectedTags && window.AGT_DEBUG_LINEAGE && typeof verboseLog === 'function') {
+            verboseLog(`🎯 Set lineage dropdown for SELECTED TAG "${displayName}":`, {
                 'sovereign_lineage': tag.sovereign_lineage || 'NONE',
                 'canonical_lineage': tag.canonical_lineage || 'NONE',
                 'currentLineage': tag.currentLineage || 'NONE',
@@ -8913,12 +8915,11 @@ const TagManager = {
                 'resolved lineage (used)': normalizedLineage,
                 'dropdown value set to': lineageSelect.value
             });
-            // Check if database lineage differs from Excel
             const dbLin = (tag.sovereign_lineage || tag.canonical_lineage || tag.currentLineage || '').toString().toUpperCase();
             if (dbLin && tag.Lineage) {
                 const excelLin = (tag.Lineage || '').toString().toUpperCase();
                 if (dbLin !== excelLin) {
-                    console.warn(`⚠️ LINEAGE MISMATCH for "${displayName}": database=${dbLin}, excel=${excelLin}, dropdown should show=${dbLin}, actual=${lineageSelect.value}`);
+                    verboseLog(`⚠️ LINEAGE MISMATCH for "${displayName}": database=${dbLin}, excel=${excelLin}`);
                 }
             }
         }
@@ -10983,21 +10984,10 @@ const TagManager = {
         // Build the tags array from persistentSelectedTags to ensure consistency
         const persistentTagNames = [...this.state.persistentSelectedTags];
         
-        // Handle new tags being passed in (e.g., from JSON matching) - add them to persistentSelectedTags
-        if (tags.length > 0) {
-            verboseLog('Processing tags for updateSelectedTags:', tags.length);
-            tags.forEach(tag => {
-                if (tag && tag['Product Name*']) {
-                    const tagName = tag['Product Name*'];
-                    if (!this.state.persistentSelectedTags.includes(tagName)) {
-                        this.state.persistentSelectedTags.push(tagName);
-                        if (!persistentTagNames.includes(tagName)) {
-                            persistentTagNames.push(tagName);
-                        }
-                    }
-                }
-            });
-        }
+        // NEVER merge the incoming `tags` array into persistentSelectedTags here.
+        // That caused a critical bug: any code passing the full inventory (e.g. mistaken fallback)
+        // selected thousands of products. Selection changes must only happen via checkboxes,
+        // select-all, or explicit persistentSelectedTags.push(...) in those code paths.
         
         // CRITICAL FIX: Build fullTags from persistentSelectedTags to ensure checkbox state matches
         // Find tag objects for all persistentSelectedTags, preserving order
@@ -22820,3 +22810,45 @@ document.addEventListener('DOMContentLoaded', function() {
                 renderPlaceholderSettings(sel.value);
         });
 });
+
+// ── Auto-refresh inventory ───────────────────────────────────────────────────
+// Silently polls for new inventory every 2 minutes so accepted orders appear
+// without the user having to manually Reset Cache or refresh the page.
+(function startInventoryAutoRefresh() {
+    const POLL_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+
+    async function refreshInventory() {
+        // Don't interrupt if user is actively generating labels
+        if (window.TagManager && window.TagManager.state && window.TagManager.state.isGenerating) return;
+
+        try {
+            const res = await fetch('/api/initial-data?fast_load=1&nocache=1');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!data || !data.data_loaded) return;
+
+            const newTotal = data.total_records || 0;
+            const currentTotal = window.TagManager && window.TagManager.state
+                ? (window.TagManager.state.tags || []).length
+                : 0;
+
+            // Only re-render if the inventory count changed
+            if (newTotal !== currentTotal && typeof window.TagManager !== 'undefined') {
+                console.log(`[AutoRefresh] Inventory changed: ${currentTotal} → ${newTotal}, reloading tags`);
+                if (typeof window.TagManager.loadTagsFromData === 'function') {
+                    window.TagManager.loadTagsFromData(data);
+                } else if (typeof window.TagManager.init === 'function') {
+                    // Lightweight re-init — don't splash
+                    window.TagManager.init({ silent: true });
+                }
+            }
+        } catch (e) {
+            // Silent fail — don't bother the user with network noise
+        }
+    }
+
+    // Start polling after the app has had time to fully initialize
+    setTimeout(() => {
+        setInterval(refreshInventory, POLL_INTERVAL_MS);
+    }, 15000); // Wait 15s after page load before first poll
+})();
