@@ -4125,6 +4125,8 @@ const TagManager = {
                     tag['Batch Number'],
                     tag.batch_number,
                     tag.inventory_transfer_id,
+                    tag['Internal Product Identifier'],
+                    tag.internal_product_identifier,
                     tag._db_product && (tag._db_product.manifest_ref || tag._db_product.lot_number)
                 ];
                 const hay = parts.filter((p) => p !== undefined && p !== null && String(p).trim() !== '')
@@ -8286,6 +8288,15 @@ const TagManager = {
         const validDatabaseLineages = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA', 'CBD', 'CBD_BLEND', 'MIXED', 'PARA', 'PARAPHERNALIA'];
         const hasValidDatabaseLineage = validDatabaseLineages.includes(lineage);
         
+        // Determine nonclassic here so trustStrainDbLineage block can also use it
+        const classicTypesForNonclassicTrust = (Array.isArray(window.CLASSIC_TYPES) ? window.CLASSIC_TYPES : [
+            'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
+            'flower - outdoor', 'flower - indoor', 'flower - greenhouse',
+            'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'
+        ]);
+        const isNonclassicTrust = !classicTypesForNonclassicTrust.map(ct => String(ct).toLowerCase()).includes(lowerProductType);
+        const classicLineagesTrust = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
+
         if (trustStrainDbLineage) {
             displayLineage = lineage;
             if (lowerProductType === 'paraphernalia') {
@@ -8294,6 +8305,16 @@ const TagManager = {
             } else if (lowerProductType.startsWith('high cbd')) {
                 displayLineage = 'CBD_BLEND';
                 verboseLog(`🎯 Trusted lineage + high CBD type: "${displayName}" → CBD_BLEND`);
+            } else if (isNonclassicTrust && classicLineagesTrust.includes(lineage)) {
+                // Nonclassic types (edibles, capsules, tinctures, etc.) must never show classic lineage colors.
+                // Even if DB has HYBRID/SATIVA/INDICA, remap to MIXED (or CBD_BLEND if CBD indicator present).
+                if (hasCbdIndicator()) {
+                    displayLineage = 'CBD_BLEND';
+                    verboseLog(`🎯 Trusted lineage but nonclassic+CBD: "${displayName}" (${lowerProductType}) → CBD_BLEND`);
+                } else {
+                    displayLineage = 'MIXED';
+                    verboseLog(`🎯 Trusted lineage but nonclassic type: "${displayName}" (${lowerProductType}) overrides DB "${lineage}" → MIXED`);
+                }
             } else {
                 verboseLog(`🎯 Trusted strain/sovereign lineage (no name heuristics): "${displayName}" → ${displayLineage}`);
             }
@@ -9883,9 +9904,12 @@ const TagManager = {
             const tagName = el.getAttribute('data-tag-name') || (checkbox ? checkbox.value : null);
             if (!tagName) return;
             
-            // Find the tag in state
-            const tag = this.state.tags.find(t => t['Product Name*'] === tagName) || 
-                       this.state.originalTags.find(t => t['Product Name*'] === tagName);
+            // Find the tag in state — match by displayName first (data-tag-name uses displayName),
+            // then fall back to Product Name* for tags without a separate displayName
+            const findTag = (arr) => arr.find(t =>
+                (t.displayName && t.displayName === tagName) || t['Product Name*'] === tagName
+            );
+            const tag = findTag(this.state.tags) || findTag(this.state.originalTags || []);
             if (!tag) return;
             
             const rawDoh = getRawDohFromTag(tag);
