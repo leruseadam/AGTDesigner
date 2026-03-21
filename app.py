@@ -12715,13 +12715,16 @@ _TAG_KEEP_FIELDS = frozenset([
     # Lineage — include manual override fields so UI colors are correct
     'Lineage', 'Lineage*', 'sovereign_lineage', 'canonical_lineage', 'currentLineage',
     'manual_lineage', 'manual_lineage_source',
-    # Compliance
-    'DOH', 'doh', 'DOH Compliant', 'DOH Compliant (Yes/No)',
+    # Compliance (POS/Excel column name variants)
+    'DOH', 'doh', 'DOH Compliant', 'DOH Compliant (Yes/No)', 'DOH Compliant (Yes/No)*', 'DOH Compliant*', 'DOH*',
     # CBD / THC
     'CBD test result', 'THC test result', 'Ratio', 'JointRatio', 'Ratio_or_THC_CBD',
-    # Manifest ref — needed for manifest ref filter
-    'Manifest Ref No', 'Manifest Ref', 'ManifestRefNo', 'manifest_ref_no', 'manifest_ref',
-    'manifestRefNo', 'manifestRef', 'ManifestRef', 'manifest_number',
+    # Internal id — sometimes same long ref as manifest in POS exports
+    'Internal Product Identifier', 'internal_product_identifier',
+    # Manifest ref — needed for manifest ref filter (Cultivera/POSaBit column names vary)
+    'Manifest Ref No', 'Manifest Ref', 'Manifest Ref #', 'ManifestRefNo', 'manifest_ref_no', 'manifest_ref',
+    'manifestRefNo', 'manifestRef', 'ManifestRef', 'manifest_number', 'manifest_id', 'manifest_item_id',
+    'Lot Number', 'lot_number', 'Batch Number', 'batch_number', 'inventory_transfer_id',
     # Misc display
     'Description', 'Source',
 ])
@@ -27184,6 +27187,7 @@ def diagnose_json_matching():
         return jsonify(diagnosis)
         
     except Exception as e:
+        
         logging.error(f"Error diagnosing JSON matching: {e}")
         return jsonify({'error': f'Diagnosis failed: {str(e)}'}), 500
 

@@ -711,7 +711,30 @@ def extract_products_from_manifest(manifest_json):
             product['Product Type*'] = item.get('inventory_type', '') or item.get('product_type', '') or 'Edible (Solid)'
             product['ProductType'] = product['Product Type*']
             logging.info(f"🔍 DEBUG: Fallback product type: '{product['Product Type*']}'")
-        
+
+        if not product.get("Manifest Ref No"):
+            mref = None
+            for key in (
+                "inventory_transfer_id",
+                "manifest_number",
+                "manifest_ref_no",
+                "manifest_ref",
+                "manifest_id",
+                "vendor_manifest_id",
+                "external_manifest_id",
+            ):
+                v = item.get(key)
+                if v is not None and str(v).strip():
+                    mref = str(v).strip()
+                    break
+            if not mref:
+                lot = item.get("lot_number") or item.get("lotNumber") or item.get("lot")
+                if lot is not None and str(lot).strip():
+                    mref = str(lot).strip()
+            if mref:
+                product["Manifest Ref No"] = mref
+                product["manifest_ref_no"] = mref
+
         # Normalize weight/units using the centralized WeightNormalizer so that
         # JSON-sourced weights default to the correct units (e.g., oz) where
         # appropriate instead of always falling back to grams.

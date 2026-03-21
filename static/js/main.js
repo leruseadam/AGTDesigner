@@ -124,23 +124,43 @@ if (typeof window !== 'undefined') {
 function getRawDohFromTag(tag) {
     if (!tag) return '';
     // Prefer compliance column over technical DOH (same as API / DOCX intent)
-    const v = tag['DOH Compliant (Yes/No)'] ?? tag['DOH Compliant'] ?? tag.DOH ?? tag.doh ?? tag['DOH*'] ?? '';
-    if (v === undefined || v === null) return '';
-    return v.toString().trim();
+    const direct = tag['DOH Compliant (Yes/No)'] ?? tag['DOH Compliant (Yes/No)*'] ?? tag['DOH Compliant']
+        ?? tag.DOH ?? tag['DOH'] ?? tag.doh ?? tag['DOH*'] ?? '';
+    if (direct !== undefined && direct !== null && String(direct).trim()) {
+        return String(direct).trim();
+    }
+    // Fallback: any field key that looks like DOH/compliance (POS/Excel column name drift)
+    try {
+        for (const k of Object.keys(tag)) {
+            const kl = k.toLowerCase();
+            if (!/doh|compliant/.test(kl)) continue;
+            if (/vendor|supplier|product name|product type|description|brand|strain/i.test(k)) continue;
+            const v = tag[k];
+            if (v === undefined || v === null) continue;
+            const t = String(v).trim();
+            if (t) return t;
+        }
+    } catch (e) { /* ignore */ }
+    return '';
 }
 
-/** Normalize DOH for comparisons (returns DOH | NONE | THC | CBD | other uppercased). */
+/** Normalize DOH for comparisons (returns DOH | NONE | THC | CBD | other uppercased). Mirrors app.py normalize_doh_value. */
 function normalizeDohTagValue(raw) {
     if (raw === undefined || raw === null) return '';
     const s = String(raw).trim();
     if (!s) return '';
     const u = s.toUpperCase();
-    if (['NONE', 'NULL', 'NAN', 'UNDEFINED', '-', 'N/A', 'NA'].includes(u)) return '';
-    if (['NO', 'N', 'FALSE', 'F', '0'].includes(u)) return 'NONE';
+    if (['NONE', 'NULL', 'NAN', 'UNDEFINED', '-', 'N/A', 'NA', '0', '0.0'].includes(u)) return '';
+    if (['NO', 'N', 'FALSE', 'F'].includes(u)) return 'NONE';
+    if ((u.includes('NON') && u.includes('DOH')) || (u.includes('NOT') && u.includes('DOH'))) return 'NONE';
+    if (u.includes('NON') && u.includes('COMPLIANT')) return 'NONE';
+    if (u.includes('NOT') && u.includes('COMPLIANT')) return 'NONE';
     if (['YES', 'Y', 'DOH', 'COMPLIANT', 'TRUE', 'T', '1'].includes(u)) return 'DOH';
-    if (u.includes('GENERAL USE') || u.includes('MEDICAL USE') || (u.includes('GENERAL') && u.includes('USE'))) return 'DOH';
-    if (u.includes('DOH') || u === 'COMPLIANT') return 'DOH';
+    if (u.includes('GENERAL') && u.includes('USE')) return 'DOH';
+    if (u.startsWith('MEDICAL') && u.includes('USE')) return 'DOH';
+    if (u.includes('REC') && u.includes('USE')) return 'DOH';
     if (u === 'THC' || u === 'CBD') return u;
+    if (u.includes('DOH') || u.includes('COMPLIANT')) return 'DOH';
     return u;
 }
 
@@ -153,7 +173,7 @@ function normalizeDohTagValue(raw) {
 function resolveDohBadgeStatusFromTag(tag) {
     if (!tag) return 'NONE';
     const techRaw = tag.DOH ?? tag['DOH'] ?? tag['DOH*'];
-    const compRaw = tag['DOH Compliant (Yes/No)'] ?? tag['DOH Compliant'] ?? tag['DOH Compliant (Yes/No)*'];
+    const compRaw = tag['DOH Compliant (Yes/No)'] ?? tag['DOH Compliant (Yes/No)*'] ?? tag['DOH Compliant'] ?? tag['DOH Compliant*'];
     const tech = techRaw !== undefined && techRaw !== null ? String(techRaw).trim() : '';
     const comp = compRaw !== undefined && compRaw !== null ? String(compRaw).trim() : '';
     const techNorm = tech ? normalizeDohTagValue(tech) : '';
@@ -172,6 +192,10 @@ function resolveDohBadgeStatusFromTag(tag) {
         const ln = normalizeDohTagValue(legacy);
         if (ln && ln !== 'NONE') return ln;
     }
+    // Last resort: same keys as getRawDohFromTag (including odd POS/Excel column names)
+    const scanned = normalizeDohTagValue(getRawDohFromTag(tag));
+    if (scanned === 'THC' || scanned === 'CBD') return scanned;
+    if (scanned === 'DOH') return 'DOH';
     return 'NONE';
 }
 

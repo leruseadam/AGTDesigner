@@ -1207,6 +1207,12 @@ ENHANCED_JSON_FIELD_MAP = {
     "sku": "Internal Product Identifier",
     "batch_number": "Batch Number",
     "lot_number": "Lot Number",
+    "inventory_transfer_id": "Manifest Ref No",
+    "manifest_number": "Manifest Ref No",
+    "manifest_ref_no": "Manifest Ref No",
+    "manifest_ref": "Manifest Ref No",
+    "manifest_id": "Manifest Ref No",
+    "vendor_manifest_id": "Manifest Ref No",
     "room": "Room*",
     "quantity": "Quantity*",
     "qty": "Quantity*",  # Cultivera uses qty for quantity

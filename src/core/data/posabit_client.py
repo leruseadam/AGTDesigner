@@ -53,6 +53,47 @@ def _raw_doh_to_compliant_yes_no(val: str) -> str:
     return "Yes"
 
 
+def _merge_manifest_fields_from_posabit(row: Dict[str, Any], src: Dict[str, Any]) -> None:
+    """
+    Populate Manifest Ref / Lot fields from POSaBit menu or venue inventory payloads.
+    WA retail UIs often show a long numeric manifest ref as 'lot' or transfer id — include all for filtering.
+    """
+    if not isinstance(row, dict) or not isinstance(src, dict):
+        return
+    manifest_keys = (
+        "manifest_ref_no",
+        "manifest_number",
+        "manifest_ref",
+        "manifest_id",
+        "vendor_manifest_id",
+        "inventory_transfer_id",
+        "transfer_id",
+        "external_manifest_id",
+        "manifest_number_external",
+    )
+    mref = None
+    for k in manifest_keys:
+        v = src.get(k)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s and s.lower() not in ("none", "null", "nan", "-", ""):
+            mref = s
+            break
+    lot_raw = src.get("lot_number") or src.get("lot") or src.get("lotNumber") or src.get("lot_id")
+    lot_s = str(lot_raw).strip() if lot_raw is not None else ""
+    if lot_s and lot_s.lower() not in ("none", "null", "nan", "-"):
+        row["Lot Number"] = lot_s
+        row["lot_number"] = lot_s
+    if mref:
+        row["Manifest Ref No"] = mref
+        row["manifest_ref_no"] = mref
+    elif lot_s:
+        # Lot is often the visible manifest ref when POSaBit omits a separate manifest field
+        row["Manifest Ref No"] = lot_s
+        row["manifest_ref_no"] = lot_s
+
+
 def _merge_doh_from_posabit_sources(row: Dict[str, Any], *sources: Any) -> None:
     """Set DOH fields on row only when present on API payloads (menu_item, price variant, SKU)."""
     if not isinstance(row, dict):
@@ -407,6 +448,9 @@ def _menu_item_to_product_row(item: Dict, price_variant: Optional[Dict], categor
             row["weight_with_units"] = inferred
             logger.debug("POSaBit inferred weight for %r: %r -> %r", name, weight_val, inferred)
     _merge_doh_from_posabit_sources(row, item, price_variant or {})
+    _merge_manifest_fields_from_posabit(row, item)
+    if price_variant and isinstance(price_variant, dict):
+        _merge_manifest_fields_from_posabit(row, price_variant)
     # Only infer DOH from product type when the API didn't provide it — and only for
     # High THC / High CBD types where the type name itself signals compliance flavor.
     if not row.get("DOH"):
@@ -534,6 +578,7 @@ def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
             row["weight_with_units"] = inferred
             logger.debug("POSaBit venue inferred weight for %r: %r -> %r", name, unit, inferred)
     _merge_doh_from_posabit_sources(row, sku)
+    _merge_manifest_fields_from_posabit(row, sku)
     # Only infer DOH from product type for High THC / High CBD names.
     if not row.get("DOH"):
         pt = normalized_product_type.lower()

@@ -210,8 +210,12 @@ def compute_display_lineage_like_ui(record: Dict[str, Any]) -> str:
             return False
         return s.upper() != "SOVEREIGN"
 
-    trust_strain_db_lineage = _non_sovereign(record.get("sovereign_lineage")) or _non_sovereign(
-        record.get("canonical_lineage")
+    trust_strain_db_lineage = (
+        _non_sovereign(record.get("sovereign_lineage"))
+        or _non_sovereign(record.get("Lineage"))
+        or _non_sovereign(record.get("lineage"))
+        or _non_sovereign(record.get("Lineage*"))
+        or _non_sovereign(record.get("canonical_lineage"))
     )
 
     # Paraphernalia override (driven by Product Type*, not name parsing)
@@ -222,11 +226,15 @@ def compute_display_lineage_like_ui(record: Dict[str, Any]) -> str:
     if lower_product_type.startswith("high cbd"):
         return "CBD_BLEND"
 
-    # Strain table / user override: do not rewrite with product-name CBD heuristics (matches main.js)
+    # Strain / Excel lineage present: still upgrade nonclassic ratio & CBD-family products (matches main.js)
     if trust_strain_db_lineage:
         out = lineage or ("HYBRID" if is_classic_type else "MIXED")
-        if out in ("CBD", "CBG", "CBN", "CBC"):
+        if out in ("CBD", "CBG", "CBN", "CBC") or out == "CBD_BLEND":
             return "CBD_BLEND"
+        if is_nonclassic and has_cbd_indicator():
+            return "CBD_BLEND"
+        if is_nonclassic and out in classic_lineages:
+            return "MIXED"
         return out
 
     display_lineage = lineage
