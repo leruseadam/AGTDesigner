@@ -53,6 +53,73 @@ if (typeof window !== 'undefined') {
     window.resolveRawLineageFromTag = resolveRawLineageFromTag;
 }
 
+/**
+ * CBD / ratio detection from product fields only (not resolved lineage).
+ * Must stay in sync with TagManager.hasCbdIndicator closure (selected-tags row).
+ */
+function tagHasCbdFamilyIndicator(tag) {
+    if (!tag || typeof tag !== 'object') return false;
+    const nameStr = (tag['Product Name*'] || tag.ProductName || tag.productName || '').toString().toLowerCase();
+    const descStr = (tag.Description || tag.description || '').toString().toLowerCase();
+    const brandStr = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.brand || '').toString().toLowerCase();
+    const ratioStr = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().toLowerCase();
+    const lowerProductType = (tag['Product Type*'] || tag.productType || tag.ProductType || '').toString().toLowerCase();
+    const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
+    const ratioHasNumericValue = ratioStr && /[\d%]|mg\b/i.test(ratioStr);
+    const effectiveRatioStr = ratioHasNumericValue ? ratioStr : '';
+    const sources = [nameStr, descStr, brandStr, effectiveRatioStr];
+    const tokenRegex = new RegExp(`\\b(${tokens.join('|')})\\b`);
+    if (sources.some(text => text && tokenRegex.test(text))) return true;
+    const ratioSources = [nameStr, effectiveRatioStr, descStr];
+    if (ratioSources.some(s => s && /\b\d+\s*:\s*\d+(?:\s*:\s*\d+)*\b/.test(s))) return true;
+    const cbdFamilyInProductType = ['high cbd', 'cbd', 'high cbg', 'cbg', 'high cbn', 'cbn', 'high cbc', 'cbc'];
+    return cbdFamilyInProductType.some(indicator => lowerProductType.includes(indicator));
+}
+
+function trustStrainDbLineageFromTag(tag) {
+    if (!tag || typeof tag !== 'object') return false;
+    const ok = (v) => {
+        if (v == null || v === undefined) return false;
+        const s = String(v).trim();
+        if (!s) return false;
+        return s.toUpperCase() !== 'SOVEREIGN';
+    };
+    return ok(tag.sovereign_lineage) || ok(tag.Lineage) || ok(tag.lineage) || ok(tag['Lineage*']) || ok(tag.canonical_lineage);
+}
+
+/**
+ * Lineage used for filter dropdown + row coloring when DB has "trusted" fields but
+ * nonclassic products still need 1:1 / CBD family names to map to CBD_BLEND.
+ */
+function effectiveDisplayLineageForFilter(tag) {
+    let lineage = (resolveRawLineageFromTag(tag) || '').toString().trim().toUpperCase();
+    if (!lineage) lineage = 'MIXED';
+    const productTypeCheck = tag['Product Type*'] || tag.productType || tag.ProductType || '';
+    const lowerProductType = (productTypeCheck || '').toString().toLowerCase().trim();
+    // Must match TagManager trust block (isNonclassicTrust), not getUniqueLineages — lists differ for concentrate/disposable
+    const classicTypesForNonclassic = (Array.isArray(window.CLASSIC_TYPES) ? window.CLASSIC_TYPES : [
+        'flower', 'pre-roll', 'joint', 'blunt', 'cone', 'preroll',
+        'flower - outdoor', 'flower - indoor', 'flower - greenhouse',
+        'vape cartridge', 'vape pen', 'disposable', 'rso/co2 tankers'
+    ]);
+    const isNonclassic = !classicTypesForNonclassic.map(ct => String(ct).toLowerCase()).includes(lowerProductType);
+    const classicLineagesTrust = ['SATIVA', 'INDICA', 'HYBRID', 'HYBRID/SATIVA', 'HYBRID/INDICA'];
+    const trust = trustStrainDbLineageFromTag(tag);
+    if (lowerProductType === 'paraphernalia') return 'PARAPHERNALIA';
+    if (lowerProductType.startsWith('high cbd')) return 'CBD_BLEND';
+    if (trust && isNonclassic) {
+        if (tagHasCbdFamilyIndicator(tag)) return 'CBD_BLEND';
+        if (classicLineagesTrust.includes(lineage)) return 'MIXED';
+        if (['CBD', 'CBG', 'CBN', 'CBC', 'CBD_BLEND'].includes(lineage)) return 'CBD_BLEND';
+    }
+    return lineage;
+}
+
+if (typeof window !== 'undefined') {
+    window.tagHasCbdFamilyIndicator = tagHasCbdFamilyIndicator;
+    window.effectiveDisplayLineageForFilter = effectiveDisplayLineageForFilter;
+}
+
 /** Raw DOH / compliant fields from a tag (aligned with app.py normalize_doh_value). */
 function getRawDohFromTag(tag) {
     if (!tag) return '';
@@ -708,6 +775,54 @@ function restoreBodyScroll() {
   document.body.style.paddingRight = '';
   document.body.style.pointerEvents = '';
 }
+
+/**
+ * UICursor — ref-counted busy cursor manager.
+ * Call UICursor.push() to show the wait cursor; call the returned pop() to release it.
+ * The cursor reverts to normal only when all outstanding pushes have been popped.
+ *
+ * Usage:
+ *   const done = UICursor.push();
+ *   try { await someWork(); } finally { done(); }
+ */
+const UICursor = (() => {
+    let _depth = 0;
+    let _clearTimer = null;
+
+    function _apply() {
+        if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+        document.body.classList.add('ui-busy');
+    }
+
+    function _release() {
+        // Small defer so a push/pop that completes synchronously still gives
+        // the browser one paint cycle with the wait cursor visible.
+        _clearTimer = setTimeout(() => {
+            if (_depth <= 0) document.body.classList.remove('ui-busy');
+        }, 60);
+    }
+
+    return {
+        push() {
+            _depth++;
+            _apply();
+            let released = false;
+            return function pop() {
+                if (released) return;
+                released = true;
+                _depth = Math.max(0, _depth - 1);
+                if (_depth === 0) _release();
+            };
+        },
+        // Escape hatch — force-clear without caring about depth
+        forceReset() {
+            _depth = 0;
+            if (_clearTimer) { clearTimeout(_clearTimer); _clearTimer = null; }
+            document.body.classList.remove('ui-busy');
+        }
+    };
+})();
+window.UICursor = UICursor;
 
 // Function to open strain lineage editor
 async function openStrainLineageEditor() {
@@ -4203,7 +4318,9 @@ const TagManager = {
             
             // Check lineage filter - only apply if not empty and not "All"
             if (lineageFilter && lineageFilter.trim() !== '' && lineageFilter.toLowerCase() !== 'all') {
-                const tagLineage = (resolveRawLineageFromTag(tag) || '').toString().trim();
+                const tagLineage = (typeof effectiveDisplayLineageForFilter === 'function'
+                    ? effectiveDisplayLineageForFilter(tag)
+                    : (resolveRawLineageFromTag(tag) || '')).toString().trim();
                 if (tagLineage.toLowerCase() !== lineageFilter.toLowerCase()) {
                     return false;
                 }
@@ -6360,9 +6477,13 @@ const TagManager = {
         if (window.setTagRenderingState) {
             window.setTagRenderingState(true);
         }
-        
+
+        // Show busy cursor for the duration of the DOM render
+        const _popCursorRender = window.UICursor ? window.UICursor.push() : () => {};
+
         // Re-enable scaling after rendering completes (will be called at end of function)
         const reenableScaling = () => {
+            _popCursorRender();
             if (window.setTagRenderingState) {
                 // Delay re-enabling to ensure DOM is stable
                 setTimeout(() => {
@@ -8246,41 +8367,9 @@ const TagManager = {
         // CRITICAL FIX: Use database lineage FIRST for all product types
         // Only fall back to Product Strain logic if database lineage is missing or invalid
         let displayLineage = lineage; // Start with database lineage (already converted if classic type)
-        const nameStr = (tag['Product Name*'] || tag.ProductName || tag.productName || displayName || '').toString().toLowerCase();
-        const descStr = (tag.Description || tag.description || '').toString().toLowerCase();
-        const brandStr = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.brand || '').toString().toLowerCase();
-        const ratioStr = (tag.Ratio || tag['Ratio_or_THC_CBD'] || '').toString().toLowerCase();
-        const lineageStr = (lineage || '').toString().toLowerCase();
         const lowerProductType = (productTypeCheck || '').toString().toLowerCase();
 
-        const hasCbdIndicator = () => {
-            // Check for all CBD family cannabinoids: CBD, CBG, CBN, CBC
-            // Use word boundaries to avoid false matches (e.g. "abc" containing "bc")
-            // Do NOT include lineageStr — lineage is already resolved above and checked separately
-            const tokens = ['cbd', 'cbg', 'cbn', 'cbc'];
-            // CRITICAL FIX: Ratio_or_THC_CBD template values like "THC: | BR | CBD:" contain
-            // the word "CBD" but have no actual CBD content. Only include ratioStr in the CBD
-            // token check if it contains a numeric value (%, mg, or a digit) — otherwise it's
-            // just an empty placeholder template and should not trigger CBD detection.
-            const ratioHasNumericValue = ratioStr && /[\d%]|mg\b/i.test(ratioStr);
-            const effectiveRatioStr = ratioHasNumericValue ? ratioStr : '';
-            const sources = [nameStr, descStr, brandStr, effectiveRatioStr];
-            const tokenRegex = new RegExp(`\\b(${tokens.join('|')})\\b`);
-            if (sources.some(text => text && tokenRegex.test(text))) {
-                return true;
-            }
-            // Ratio patterns (1:1, 2:1, 1:1:1, etc.) in name or ratio mean CBD
-            const ratioSources = [nameStr, effectiveRatioStr, descStr];
-            if (ratioSources.some(s => s && /\b\d+\s*:\s*\d+(?:\s*:\s*\d+)*\b/.test(s))) {
-                return true;
-            }
-            // Also check product type for CBD family indicators
-            const cbdFamilyInProductType = ['high cbd', 'cbd', 'high cbg', 'cbg', 'high cbn', 'cbn', 'high cbc', 'cbc'];
-            if (cbdFamilyInProductType.some(indicator => lowerProductType.includes(indicator))) {
-                return true;
-            }
-            return false;
-        };
+        const hasCbdIndicator = () => tagHasCbdFamilyIndicator(tag);
         
         // CRITICAL: Define validDatabaseLineages and hasValidDatabaseLineage BEFORE the if/else block
         // so it's always available regardless of which path is taken
@@ -8305,16 +8394,14 @@ const TagManager = {
             } else if (lowerProductType.startsWith('high cbd')) {
                 displayLineage = 'CBD_BLEND';
                 verboseLog(`🎯 Trusted lineage + high CBD type: "${displayName}" → CBD_BLEND`);
+            } else if (isNonclassicTrust && tagHasCbdFamilyIndicator(tag)) {
+                // Stale MIXED/HYBRID from strain/Excel must not hide 1:1 CBD / ratio products when lineage is "trusted"
+                displayLineage = 'CBD_BLEND';
+                verboseLog(`🎯 Trusted lineage + nonclassic CBD/ratio: "${displayName}" (${lowerProductType}) → CBD_BLEND`);
             } else if (isNonclassicTrust && classicLineagesTrust.includes(lineage)) {
-                // Nonclassic types (edibles, capsules, tinctures, etc.) must never show classic lineage colors.
-                // Even if DB has HYBRID/SATIVA/INDICA, remap to MIXED (or CBD_BLEND if CBD indicator present).
-                if (hasCbdIndicator()) {
-                    displayLineage = 'CBD_BLEND';
-                    verboseLog(`🎯 Trusted lineage but nonclassic+CBD: "${displayName}" (${lowerProductType}) → CBD_BLEND`);
-                } else {
-                    displayLineage = 'MIXED';
-                    verboseLog(`🎯 Trusted lineage but nonclassic type: "${displayName}" (${lowerProductType}) overrides DB "${lineage}" → MIXED`);
-                }
+                // Nonclassic types must never show classic sativa/indica/hybrid colors from DB alone
+                displayLineage = 'MIXED';
+                verboseLog(`🎯 Trusted lineage but nonclassic type: "${displayName}" (${lowerProductType}) overrides DB "${lineage}" → MIXED`);
             } else {
                 verboseLog(`🎯 Trusted strain/sovereign lineage (no name heuristics): "${displayName}" → ${displayLineage}`);
             }
@@ -12285,6 +12372,9 @@ const TagManager = {
         // Declare cacheUsedForDisplay at function scope so it's accessible throughout
         let cacheUsedForDisplay = false;
 
+        // Show busy cursor for the duration of the network fetch + render
+        const _popCursorFetch = window.UICursor ? window.UICursor.push() : () => {};
+
         try {
             console.log('=== fetchAndUpdateAvailableTags START ===');
             // Ensure flag is initialized
@@ -13571,6 +13661,9 @@ const TagManager = {
 
             return false;
         } finally {
+            // Release busy cursor now that fetch+render is done
+            _popCursorFetch();
+
             // Clear safety timeout since operation completed
             if (this._fetchingTimeout) {
                 clearTimeout(this._fetchingTimeout);
@@ -15704,6 +15797,7 @@ const TagManager = {
             return;
         }
         this.isGenerating = true;
+        const _popCursorGenerate = window.UICursor ? window.UICursor.push() : () => {};
 
         try {
             // CRITICAL FIX: Send full tag objects with lineage, not just names
@@ -15869,6 +15963,7 @@ const TagManager = {
             generateBtn.disabled = false;
             generateBtn.innerHTML = 'Generate Tags';
             this.isGenerating = false; // Release generation lock
+            _popCursorGenerate();
             console.timeEnd('debouncedGenerate');
         }
     }, 300), // 300ms debounce for faster response
