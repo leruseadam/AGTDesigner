@@ -4467,7 +4467,12 @@ const TagManager = {
                             // Hydrate AVAILABLE inventory only — never pass full payload to updateSelectedTags
                             // (that would merge every product into persistentSelectedTags and "select all" by accident).
                             const TM = window.TagManager;
-                            if (TM && typeof TM._updateAvailableTags === 'function') {
+                            // CRITICAL FIX: Skip hydration if any filter is currently active.
+                            // Without this guard, the background fetch overwrites the filtered view with all tags.
+                            const filtersActive = TM && TM.state && TM.state.activeFilteredTags !== null && TM.state.activeFilteredTags !== undefined;
+                            if (filtersActive) {
+                                console.log('⏭️ Skipping bg hydration — filters are active, not overwriting filtered view');
+                            } else if (TM && typeof TM._updateAvailableTags === 'function') {
                                 TM._updateAvailableTags(body.tags, null);
                             } else if (TM && typeof TM.debouncedUpdateAvailableTags === 'function') {
                                 TM.debouncedUpdateAvailableTags(body.tags, null);
