@@ -3,6 +3,7 @@
 # Docs: https://developer.posabit.com/pos.html
 
 import os
+import re
 import time
 import logging
 from typing import List, Dict, Any, Optional
@@ -226,9 +227,22 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
             return "Vape Cartridge"
         if "concentrate" in s or "extract" in s or "wax" in s or "shatter" in s or "rosin" in s or "resin" in s or "hash" in s or "kief" in s or "distillate" in s:
             return "Concentrate"
-        if "liquid edible" in s or "beverage" in s or "drink" in s or "shot" in s or "soda" in s or "lemonade" in s:
+        # Liquid edibles BEFORE generic "edible" — POSaBit often uses "Tincture" / "Edible" for oils & drinks
+        if (
+            "liquid edible" in s
+            or "edible liquid" in s
+            or "beverage" in s
+            or "drink" in s
+            or "shot" in s
+            or "soda" in s
+            or "lemonade" in s
+            or "tincture" in s
+            or "elixir" in s
+            or "sublingual" in s
+            or "syrup" in s
+        ):
             return "Edible (Liquid)"
-        if "edible" in s or "gummy" in s or "gummi" in s or "candy" in s or "chocolate" in s or "tincture" in s or "capsule" in s or "cookie" in s or "brownie" in s:
+        if "edible" in s or "gummy" in s or "gummi" in s or "candy" in s or "chocolate" in s or "capsule" in s or "cookie" in s or "brownie" in s:
             return "Edible (Solid)"
         if "topical" in s or "lotion" in s or "salve" in s or "balm" in s or "cream" in s or "patch" in s:
             return "Topical"
@@ -247,6 +261,10 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
         return "Disposable"
     if "cartridge" in lower_name or " cart " in lower_name or lower_name.endswith(" cart"):
         return "Vape Cartridge"
+    if "tincture" in lower_name or " elixir" in lower_name or lower_name.endswith("elixir"):
+        return "Edible (Liquid)"
+    if re.search(r"\bshot\b|wildside|fizz|lemonade|beverage|soda|smoothie", lower_name):
+        return "Edible (Liquid)"
 
     # Pass through the raw type if it's meaningful
     return raw or cat or "Uncategorized"

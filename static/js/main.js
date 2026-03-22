@@ -693,7 +693,8 @@ const PRODUCT_TYPE_OVERRIDES = {
   "edible liquid": "Edible (Liquid)",
   "Edible Liquid": "Edible (Liquid)",
   "edible (liquid)": "Edible (Liquid)",
-  "tincture": "Tincture",
+  // POS/Excel "Tincture" is a liquid edible — must match Edible (Liquid) filter & grouping
+  "tincture": "Edible (Liquid)",
   "capsule": "Capsule",
   "topical": "Topical",
   "paraphernalia": "Paraphernalia",
@@ -750,6 +751,34 @@ function reconcileProductTypeWithProductName(rawType, productName) {
         return 'Infused Pre-Roll';
     }
     return rawType || '';
+}
+
+/**
+ * POSaBit often classifies tinctures / shots under generic "Edible" or "Edible (Solid)".
+ * Align those rows with Edible (Liquid) when the name clearly indicates a liquid format.
+ */
+function reconcileLiquidEdibleProductType(rawType, productName) {
+    const t = (rawType || '').trim();
+    const tl = t.toLowerCase();
+    const name = String(productName || '').toLowerCase();
+    if (tl === 'tincture' || tl.endsWith(' tincture')) {
+        return 'Edible (Liquid)';
+    }
+    const liquidHints =
+        /\btincture\b|wildside|fizz|lemonade|beverage|\bshot\b|shotz|soda|smoothie|elixir|sublingual|defense tincture|companion tincture|cantina/;
+    if (name && liquidHints.test(name)) {
+        if (
+            tl === 'edible (solid)' ||
+            tl === 'edible solid' ||
+            tl === 'edible' ||
+            tl === 'capsule' ||
+            tl === 'other' ||
+            !tl
+        ) {
+            return 'Edible (Liquid)';
+        }
+    }
+    return t;
 }
 
 function formatProductTypeLabel(value) {
@@ -2838,8 +2867,11 @@ const TagManager = {
             // CRITICAL FIX: Check all possible brand field names consistently
             const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
             if (brand && brand.trim()) brands.add(brand.trim());
-            // Product Type - exclude deactivated and sample types
-            const pt = tag.ProductType || tag['Product Type*'];
+            // Product Type - exclude deactivated and sample types (reconcile liquid edibles like tinctures)
+            let pt = tag.ProductType || tag['Product Type*'] || '';
+            const pnameFt = tag['Product Name*'] || tag.ProductName || '';
+            pt = reconcileProductTypeWithProductName(pt.trim(), pnameFt);
+            pt = reconcileLiquidEdibleProductType(pt, pnameFt);
             if (pt && pt.trim()) {
                 const ptLower = pt.trim().toLowerCase();
                 // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample, and excluded types
@@ -3339,8 +3371,11 @@ const TagManager = {
                     }
                 }
                 
-                // Product Type - exclude deactivated and sample types
-                const productType = tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '';
+                // Product Type - exclude deactivated and sample types (reconcile tinctures → Edible (Liquid))
+                let productType = tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '';
+                const pnameFo = tag['Product Name*'] || tag.ProductName || '';
+                productType = reconcileProductTypeWithProductName(productType.trim(), pnameFo);
+                productType = reconcileLiquidEdibleProductType(productType, pnameFo);
                 if (productType && productType.trim()) {
                     const ptLower = productType.trim().toLowerCase();
                     // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample, and excluded types
@@ -4316,17 +4351,11 @@ const TagManager = {
             
             // Check product type filter - only apply if not empty and not "All"
             if (productTypeFilter && productTypeFilter.trim() !== '' && productTypeFilter.toLowerCase() !== 'all') {
-                const tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                const pname = tag['Product Name*'] || tag.ProductName || '';
+                let tagProductType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                tagProductType = reconcileProductTypeWithProductName(tagProductType, pname);
+                tagProductType = reconcileLiquidEdibleProductType(tagProductType, pname);
                 const normalizedTagProductType = normalizeProductType(tagProductType);
-                
-                // DEBUG: Log product type filtering details
-                verboseLog('🔍 Product Type Filtering Debug:', {
-                    tagProductType: tagProductType,
-                    normalizedTagProductType: normalizedTagProductType,
-                    productTypeFilter: productTypeFilter,
-                    match: normalizedTagProductType.toLowerCase() === productTypeFilter.toLowerCase()
-                });
-                
                 const normalizedFilterType = normalizeProductType(productTypeFilter || '').toLowerCase();
                 if (normalizedTagProductType.toLowerCase() !== normalizedFilterType) {
                     return false;
@@ -4964,6 +4993,7 @@ const TagManager = {
             const productNameForReconcile = tag['Product Name*'] || tag.ProductName || tag.displayName || '';
             let rawProductType = tag.productType || tag['Product Type*'] || tag['Product Type'] || '';
             rawProductType = reconcileProductTypeWithProductName(rawProductType.trim(), productNameForReconcile);
+            rawProductType = reconcileLiquidEdibleProductType(rawProductType.trim(), productNameForReconcile);
             const normalizedProductType = normalizeProductType(rawProductType.trim());
             const normalizedLower = normalizedProductType.toLowerCase();
             
@@ -4975,7 +5005,8 @@ const TagManager = {
             
             // When type is invalid/Other, infer from product name so shots/beverages show as Edible (Liquid)
             const productNameForType = (tag['Product Name*'] || tag.ProductName || tag.displayName || '').toString().toLowerCase();
-            const looksLikeLiquidEdible = /\bshot\b|lemonade|drink|beverage|soda|juice\b/.test(productNameForType);
+            const looksLikeLiquidEdible =
+                /\bshot\b|lemonade|drink|beverage|soda|juice\b|tincture|wildside|fizz|elixir|sublingual/.test(productNameForType);
             const fallbackType = looksLikeLiquidEdible ? 'Edible (Liquid)' : 'Other';
             
             const productType = isValidType
