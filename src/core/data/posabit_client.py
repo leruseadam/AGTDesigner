@@ -239,6 +239,7 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
         if "concentrate" in s or "extract" in s or "wax" in s or "shatter" in s or "rosin" in s or "resin" in s or "hash" in s or "kief" in s or "distillate" in s:
             return "Concentrate"
         # Liquid edibles BEFORE generic "edible" — POSaBit often uses "Tincture" / "Edible" for oils & drinks
+        # NOTE: "lemonade" removed here — it's a flavor name (e.g. "Pink Lemonade Hash Gummies") not a type indicator
         if (
             "liquid edible" in s
             or "edible liquid" in s
@@ -246,7 +247,6 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
             or "drink" in s
             or "shot" in s
             or "soda" in s
-            or "lemonade" in s
             or "tincture" in s
             or "elixir" in s
             or "sublingual" in s
@@ -274,7 +274,7 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
         return "Vape Cartridge"
     if "tincture" in lower_name or " elixir" in lower_name or lower_name.endswith("elixir"):
         return "Edible (Liquid)"
-    if re.search(r"\bshot\b|wildside|fizz|lemonade|beverage|soda|smoothie", lower_name):
+    if re.search(r"\bshot\b|wildside|fizz|beverage|soda|smoothie", lower_name):
         return "Edible (Liquid)"
 
     # Pass through the raw type if it's meaningful

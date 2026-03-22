@@ -6038,14 +6038,15 @@
                     <span>Templates</span>
                   </button>
 
-                  <button class="btn-tool-modern btn-cache" onclick="resetAllCaches()" title="Reset Cache - Clear all cached data and refresh">
+                  <button class="btn-tool-modern btn-analytics" type="button" id="lineageEditorToolbarBtn" onclick="openEnhancedLineageEditor()" title="Open Lineage Editor">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
-                      <path d="M21 3v5h-5"></path>
-                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
-                      <path d="M3 21v-5h5"></path>
+                      <circle cx="6" cy="6" r="3"></circle>
+                      <circle cx="18" cy="6" r="3"></circle>
+                      <circle cx="12" cy="18" r="3"></circle>
+                      <line x1="6" y1="9" x2="12" y2="15"></line>
+                      <line x1="18" y1="9" x2="12" y2="15"></line>
                     </svg>
-                    <span>Reset Cache</span>
+                    <span>Lineage Editor</span>
                   </button>
 
                   <button class="btn-help-modern" id="help-btn" title="Click for help with downloading LOTs data and using the application" data-bs-toggle="modal" data-bs-target="#helpModal">
@@ -6076,6 +6077,16 @@
                           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
                         </svg>
                         Clear Filters
+                      </button>
+                      <!-- Reset Cache -->
+                      <button class="btn btn-secondary filter-action-button" onclick="resetAllCaches()" title="Reset Cache - Clear all cached data and refresh">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                          <path d="M21 3v5h-5"></path>
+                          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                          <path d="M3 21v-5h5"></path>
+                        </svg>
+                        Reset Cache
                       </button>
                   </div>
                   
@@ -6174,12 +6185,21 @@
                     </div>
                     
                     <!-- Instructional blurb for dropdown usage -->
-                    <div id="dropdownInstructionBlurb" class="dropdown-instruction-blurb mb-3">
+                    <div id="dropdownInstructionBlurb" class="dropdown-instruction-blurb mb-2">
                       <div class="instruction-content">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="instruction-icon">
                           <path d="M7 10l5 5 5-5z"/>
                         </svg>
                         <span class="instruction-text">Click the dropdown arrows (▶) to reveal products in each category</span>
+                      </div>
+                    </div>
+                    <!-- Lineage tip -->
+                    <div class="dropdown-instruction-blurb mb-3" style="border-color: rgba(100,160,255,0.25); background: rgba(80,120,220,0.08);">
+                      <div class="instruction-content">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7aadff" stroke-width="2" class="instruction-icon" style="flex-shrink:0; margin-top:1px;">
+                          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <span class="instruction-text" style="color:#9bbfff;">To change a product's lineage, click the colored <strong style="color:#c8daff;">H / I / S</strong> badge on its row</span>
                       </div>
                     </div>
                     

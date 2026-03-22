@@ -1256,6 +1256,27 @@ def extract_potency_from_lab_data(lab_result_data: Dict) -> Dict[str, float]:
     
     return potency_data
 
+
+def _document_vendor_from_wcia_payload(payload: dict) -> Optional[str]:
+    """
+    WCIA / Bamboo transfer JSON: for inbound delivery to a retailer, match against the
+    destination store's POS (to_license_name), not the shipper (from_license_name).
+    Otherwise items are tagged as the grower while POS rows use the retail license — vendor
+    guards block every match.
+    """
+    if not isinstance(payload, dict):
+        return None
+    tl_type = (payload.get("to_license_type") or "").strip().lower()
+    if tl_type == "retailer" and payload.get("to_license_name"):
+        return str(payload.get("to_license_name")).strip()
+    v = (
+        (payload.get("from_license_name") or "").strip()
+        or (payload.get("vendor_name") or "").strip()
+        or (payload.get("supplier_name") or "").strip()
+    )
+    return v or None
+
+
 class EnhancedJSONMatcher:
     """
     Enhanced JSON Matcher with comprehensive improvements:
@@ -2953,19 +2974,41 @@ class EnhancedJSONMatcher:
             print(f"🔍 EnhancedJSONMatcher: Error loading database products: {e}")  # Debug print
             logging.warning(f"EnhancedJSONMatcher: Could not load from ProductDatabase: {e}")
             
-        # Fallback to excel processor
-        if not self.excel_processor or self.excel_processor.df.empty:
-            logging.warning("EnhancedJSONMatcher: No database or excel processor data available")
-            return []
-            
-        df = self.excel_processor.df
-        products = df.to_dict('records')
-        logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from Excel processor")
-        
-        # Cache for 1 hour
-        self.cache.set(cache_key, products, ttl=3600)
-        
-        return products
+        # Fallback to excel processor DataFrame
+        if self.excel_processor and not self.excel_processor.df.empty:
+            df = self.excel_processor.df
+            products = df.to_dict('records')
+            logging.info(f"EnhancedJSONMatcher: Loaded {len(products)} products from Excel processor")
+            self.cache.set(cache_key, products, ttl=3600)
+            return products
+
+        # POSaBit-only sessions: inventory may never be written to SQLite — use menu feed / cache
+        try:
+            from src.core.data.posabit_client import (
+                is_posabit_configured,
+                is_posabit_products_enabled,
+                get_cached_product_rows,
+                get_menu_feed_as_product_rows,
+            )
+            if is_posabit_configured() or is_posabit_products_enabled():
+                store_name = 'AGT_Bothell'
+                if self.excel_processor and getattr(self.excel_processor, '_store_name', None):
+                    store_name = self.excel_processor._store_name or store_name
+                rows = get_cached_product_rows(store_name=store_name)
+                if not rows:
+                    rows = get_menu_feed_as_product_rows(store_name=store_name)
+                if rows:
+                    logging.info(
+                        "EnhancedJSONMatcher: Loaded %s products from POSaBit for JSON matching",
+                        len(rows),
+                    )
+                    self.cache.set(cache_key, rows, ttl=3600)
+                    return rows
+        except Exception as pos_err:
+            logging.warning(f"EnhancedJSONMatcher: POSaBit catalog fallback failed: {pos_err}")
+
+        logging.warning("EnhancedJSONMatcher: No database, Excel, or POSaBit data available")
+        return []
         
     def _combine_match_results(self, matches1: List[MatchResult], matches2: List[MatchResult], 
                              weights: Tuple[float, float] = (0.5, 0.5)) -> List[MatchResult]:
@@ -3182,11 +3225,8 @@ class EnhancedJSONMatcher:
             if isinstance(payload, list):
                 json_items = payload
             elif isinstance(payload, dict):
-                # Check for document-level vendor information first
-                document_vendor = (payload.get("from_license_name") or 
-                                 payload.get("vendor_name") or 
-                                 payload.get("supplier_name"))
-                                 
+                document_vendor = _document_vendor_from_wcia_payload(payload)
+
                 json_items = payload.get("inventory_transfer_items", [])
                 if not json_items:
                     json_items = payload.get("items", [])
@@ -3514,10 +3554,7 @@ class EnhancedJSONMatcher:
             if isinstance(payload, list):
                 items = payload
             elif isinstance(payload, dict):
-                # Extract document-level vendor so per-item matching can restrict to same vendor
-                document_vendor = (payload.get("from_license_name") or
-                                   payload.get("vendor_name") or
-                                   payload.get("supplier_name"))
+                document_vendor = _document_vendor_from_wcia_payload(payload)
                 items = payload.get("inventory_transfer_items", [])
                 if not items:
                     items = payload.get("items", [])

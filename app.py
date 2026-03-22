@@ -21889,11 +21889,39 @@ def json_match():
                 logging.info(f"JSON MATCH: Using store '{store_name}' with {product_count} products")
                 
                 if product_count == 0:
-                    return jsonify({
-                        'error': f'The selected store database ({store_name}) is empty.',
-                        'message': 'Please upload an Excel file with product data before using JSON matching.',
-                        'store_name': store_name
-                    }), 400
+                    # POSaBit / live menu: products often never hit SQLite — allow match against API/catalog
+                    excel_row_estimate = 0
+                    pos_row_estimate = 0
+                    try:
+                        _ep = get_session_excel_processor()
+                        if _ep and getattr(_ep, 'df', None) is not None and not _ep.df.empty:
+                            excel_row_estimate = len(_ep.df)
+                    except Exception:
+                        pass
+                    try:
+                        from src.core.data.posabit_client import (
+                            is_posabit_configured,
+                            is_posabit_products_enabled,
+                            get_cached_product_rows,
+                            get_menu_feed_as_product_rows,
+                        )
+                        if is_posabit_configured() or is_posabit_products_enabled():
+                            _pr = get_cached_product_rows(store_name=store_name)
+                            if not _pr:
+                                _pr = get_menu_feed_as_product_rows(store_name=store_name)
+                            pos_row_estimate = len(_pr) if _pr else 0
+                    except Exception:
+                        pass
+                    if excel_row_estimate == 0 and pos_row_estimate == 0:
+                        return jsonify({
+                            'error': f'The selected store database ({store_name}) is empty.',
+                            'message': 'Upload Excel with product data, or load POSaBit inventory first, then try JSON matching again.',
+                            'store_name': store_name
+                        }), 400
+                    logging.info(
+                        f"JSON MATCH: SQLite empty; continuing with excel_rows≈{excel_row_estimate} "
+                        f"pos_rows≈{pos_row_estimate}"
+                    )
 
                 # CRITICAL CLEANUP: purge synthetic JSON rows persisted by prior matcher versions.
                 # These rows can poison UI grouping and future matches.
