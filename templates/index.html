@@ -6240,6 +6240,16 @@
                 </select>
               </div>
 
+              <div class="cc-field cc-field--switch cc-field--slider-toggle" title="Download a PDF: labels are generated as DOCX on the server, then converted with LibreOffice (requires soffice on the server)">
+                <div class="cc-slider-toggle">
+                  <input type="checkbox" id="docxTagsHtmlSwitch" class="cc-slider-toggle__input" aria-label="Download labels as PDF instead of DOCX" />
+                  <label for="docxTagsHtmlSwitch" class="cc-slider-toggle__label">
+                    <span class="cc-slider-toggle__track" aria-hidden="true"><span class="cc-slider-toggle__thumb"></span></span>
+                    <span class="cc-slider-toggle__text">PDF</span>
+                  </label>
+                </div>
+              </div>
+
               <!-- Action Row -->
               <div class="cc-action-row">
                 <button type="button" id="undo-move-btn" class="cc-action-btn" title="Undo last selection">
@@ -14045,6 +14055,7 @@
   </script>
   
   <!-- Store Selection Modal — outside #mainContent; original Bootstrap + backdrop behavior -->
+  <div id="storeModalBackdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:1999;"></div>
   <div
     class="modal fade show"
     id="storeSelectionModal"
@@ -14099,6 +14110,8 @@
         }
         const backdrop = document.getElementById('storeSelectionBackdrop');
         if (backdrop) backdrop.remove();
+        const extraBackdrop = document.getElementById('storeModalBackdrop');
+        if (extraBackdrop) extraBackdrop.remove();
         document.body.classList.remove('modal-open');
       } else {
         document.body.classList.add('modal-open');
@@ -14162,6 +14175,8 @@
             document.body.classList.remove('modal-open');
             var manualBackdrop = document.getElementById('storeSelectionBackdrop');
             if (manualBackdrop) manualBackdrop.remove();
+            var extraBd = document.getElementById('storeModalBackdrop');
+            if (extraBd) extraBd.remove();
           }
         })
         .catch(function () {});

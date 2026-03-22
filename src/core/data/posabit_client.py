@@ -238,8 +238,11 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
             return "RSO/CO2 Tankers"
         if "concentrate" in s or "extract" in s or "wax" in s or "shatter" in s or "rosin" in s or "resin" in s or "hash" in s or "kief" in s or "distillate" in s:
             return "Concentrate"
-        # Liquid edibles BEFORE generic "edible" — POSaBit often uses "Tincture" / "Edible" for oils & drinks
-        # NOTE: "lemonade" removed here — it's a flavor name (e.g. "Pink Lemonade Hash Gummies") not a type indicator
+        if "capsule" in s:
+            return "Capsule"
+        if "tincture" in s or "sublingual" in s:
+            return "Tincture"
+        # Liquid edibles BEFORE generic "edible" — POSaBit often uses "Edible" for oils & drinks
         if (
             "liquid edible" in s
             or "edible liquid" in s
@@ -247,13 +250,11 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
             or "drink" in s
             or "shot" in s
             or "soda" in s
-            or "tincture" in s
             or "elixir" in s
-            or "sublingual" in s
             or "syrup" in s
         ):
             return "Edible (Liquid)"
-        if "edible" in s or "gummy" in s or "gummi" in s or "candy" in s or "chocolate" in s or "capsule" in s or "cookie" in s or "brownie" in s:
+        if "edible" in s or "gummy" in s or "gummi" in s or "candy" in s or "chocolate" in s or "cookie" in s or "brownie" in s:
             return "Edible (Solid)"
         if "topical" in s or "lotion" in s or "salve" in s or "balm" in s or "cream" in s or "patch" in s:
             return "Topical"
@@ -272,8 +273,10 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
         return "Disposable"
     if "cartridge" in lower_name or " cart " in lower_name or lower_name.endswith(" cart"):
         return "Vape Cartridge"
-    if "tincture" in lower_name or " elixir" in lower_name or lower_name.endswith("elixir"):
-        return "Edible (Liquid)"
+    if "tincture" in lower_name or "sublingual" in lower_name or " elixir" in lower_name or lower_name.endswith("elixir"):
+        return "Tincture"
+    if "capsule" in lower_name:
+        return "Capsule"
     if re.search(r"\bshot\b|wildside|fizz|beverage|soda|smoothie", lower_name):
         return "Edible (Liquid)"
 
