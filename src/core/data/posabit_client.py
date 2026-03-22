@@ -225,6 +225,17 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
             return "Disposable"
         if "vape cartridge" in s or "cartridge" in s or "vape" in s:
             return "Vape Cartridge"
+        # RSO must be checked BEFORE generic "extract"/"concentrate" to avoid misclassification
+        if (
+            "rso" in s
+            or "alcohol/ethanol" in s
+            or "alcohol ethanol" in s
+            or "co2/ethanol" in s
+            or "co2 ethanol" in s
+            or "co2 tanker" in s
+            or "co2 concentrate" in s
+        ):
+            return "RSO/CO2 Tankers"
         if "concentrate" in s or "extract" in s or "wax" in s or "shatter" in s or "rosin" in s or "resin" in s or "hash" in s or "kief" in s or "distillate" in s:
             return "Concentrate"
         # Liquid edibles BEFORE generic "edible" — POSaBit often uses "Tincture" / "Edible" for oils & drinks

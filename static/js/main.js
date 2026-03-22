@@ -781,6 +781,28 @@ function reconcileLiquidEdibleProductType(rawType, productName) {
     return t;
 }
 
+/** Substrings for Product Type* values to hide from filters and inventory (POS "Sample", "Trade Sample", etc.). */
+const EXCLUDED_PRODUCT_TYPE_SUBSTRINGS = [
+    'x-deactivated', 'deactivated', 'trade sample', 'sample', 'excluded',
+    'x-deactivated 1', 'x-deactivated 2',
+    'samples - educational', 'sample - vendor'
+];
+
+/**
+ * True if this product type should not appear in product-type dropdowns or default inventory.
+ * Matches _extractFiltersFromTags / backend intent: deactivated + trade/sample lines.
+ */
+function isExcludedProductTypeForFilters(ptLower) {
+    if (!ptLower || typeof ptLower !== 'string') return false;
+    const s = ptLower.trim().toLowerCase();
+    const isDeactivated = s.includes('deactivated') ||
+        s === 'x-deactivated 1' || s === 'x-deactivated 2' ||
+        s.startsWith('x-deactivated');
+    if (isDeactivated) return true;
+    if (s.includes('trade sample')) return true;
+    return EXCLUDED_PRODUCT_TYPE_SUBSTRINGS.some((ex) => s.includes(ex));
+}
+
 function formatProductTypeLabel(value) {
   if (!value) return value;
   if (value.toString().trim().toLowerCase() === 'rso') {
@@ -1376,7 +1398,7 @@ function openLineageEditorForStrain(strainName, currentLineage) {
 const VALID_PRODUCT_TYPES = [
   "flower", "pre-roll", "infused pre-roll", "concentrate", "solventless concentrate", "vape cartridge",
   "disposable", "edible (solid)", "edible (liquid)", "edible", "high cbd edible liquid",
-  "tincture", "topical", "capsule", "paraphernalia", "rso/co2 tankers", "sample"
+  "tincture", "topical", "capsule", "paraphernalia", "rso/co2 tankers"
 ];
 
 // Mac-like ultra-fast debounce function with performance adaptation
@@ -2855,12 +2877,6 @@ const TagManager = {
         const doh = new Set();
         const highCbd = new Set();
 
-        // Exclusion logic for product types
-        const excludedTypesLower = [
-            'x-deactivated', 'deactivated', 'trade sample', 'sample', 'excluded', 'x-deactivated 1', 'x-deactivated 2',
-            'x-deactivated 1', 'x-deactivated 2'  // Explicitly exclude these variations
-        ];
-
         tags.forEach(tag => {
             const vendor = getVendorFromTagForFilter(tag);
             if (vendor) vendors.add(vendor);
@@ -2874,14 +2890,7 @@ const TagManager = {
             pt = reconcileLiquidEdibleProductType(pt, pnameFt);
             if (pt && pt.trim()) {
                 const ptLower = pt.trim().toLowerCase();
-                // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample, and excluded types
-                const isDeactivated = ptLower.includes('deactivated') || 
-                                     ptLower === 'x-deactivated 1' || 
-                                     ptLower === 'x-deactivated 2' ||
-                                     ptLower.startsWith('x-deactivated');
-                if (!isDeactivated &&
-                    !ptLower.includes('trade sample') &&
-                    !excludedTypesLower.some(ex => ptLower.includes(ex))) {
+                if (!isExcludedProductTypeForFilters(ptLower)) {
                     productTypes.add(normalizeProductType(pt.trim()));
                 }
             }
@@ -3310,15 +3319,6 @@ const TagManager = {
                 highCbd: new Set()
             };
             
-            // Excluded product types (matching backend logic)
-            const excludedTypes = [
-                "Samples - Educational",
-                "Sample - Vendor",
-                "x-DEACTIVATED 1",
-                "x-DEACTIVATED 2"
-            ];
-            const excludedTypesLower = excludedTypes.map(t => t.toLowerCase());
-            
             tags.forEach(tag => {
                 const vendor = getVendorFromTagForFilter(tag);
                 if (vendor && vendor.trim()) {
@@ -3378,14 +3378,7 @@ const TagManager = {
                 productType = reconcileLiquidEdibleProductType(productType, pnameFo);
                 if (productType && productType.trim()) {
                     const ptLower = productType.trim().toLowerCase();
-                    // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample, and excluded types
-                    const isDeactivated = ptLower.includes('deactivated') || 
-                                         ptLower === 'x-deactivated 1' || 
-                                         ptLower === 'x-deactivated 2' ||
-                                         ptLower.startsWith('x-deactivated');
-                    if (!isDeactivated && 
-                        !ptLower.includes('trade sample') && 
-                        !excludedTypesLower.includes(ptLower)) {
+                    if (!isExcludedProductTypeForFilters(ptLower)) {
                         filterOptions.productType.add(normalizeProductType(productType.trim()));
                     }
                 }
@@ -3445,15 +3438,7 @@ const TagManager = {
             // CRITICAL FIX: Remove deactivated/sample product types from dropdowns (matching backend logic)
             filterOptionsArrays.productType = filterOptionsArrays.productType.filter(pt => {
                 if (!pt || !pt.trim()) return false;
-                const ptLower = pt.trim().toLowerCase();
-                // Check for deactivated patterns (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.)
-                const isDeactivated = ptLower.includes('deactivated') || 
-                                     ptLower === 'x-deactivated 1' || 
-                                     ptLower === 'x-deactivated 2' ||
-                                     ptLower.startsWith('x-deactivated');
-                return !isDeactivated && 
-                       !ptLower.includes('trade sample') && 
-                       !excludedTypesLower.includes(ptLower);
+                return !isExcludedProductTypeForFilters(pt.trim().toLowerCase());
             });
             
             // Special sorting for price: "No Price" first, then by numeric value
@@ -3750,6 +3735,15 @@ const TagManager = {
             
             // Apply current filters to get the subset of tags that would be shown
             const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
+                {
+                    const pnameC = tag['Product Name*'] || tag.ProductName || '';
+                    let ptC = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                    ptC = reconcileProductTypeWithProductName(ptC, pnameC);
+                    ptC = reconcileLiquidEdibleProductType(ptC, pnameC);
+                    if (isExcludedProductTypeForFilters((normalizeProductType(ptC) || '').toLowerCase())) {
+                        return false;
+                    }
+                }
                 // Check vendor filter - only apply if not empty and not "All"
                 if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
                     if (!tagMatchesVendorFilter(tag, currentFilters.vendor)) {
@@ -3912,16 +3906,14 @@ const TagManager = {
                 const brand = (tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '').toString().trim();
                 if (brand) availableOptions.brand.add(brand);
                 
-                // Always add product type options (show all types)
-                const productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                // Product type options (hide sample/trade/deactivated — same as filter dropdowns)
+                const pnameOpt = (tag['Product Name*'] || tag.ProductName || '').toString();
+                let productType = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                productType = reconcileProductTypeWithProductName(productType, pnameOpt);
+                productType = reconcileLiquidEdibleProductType(productType, pnameOpt);
                 if (productType) {
                     const ptLower = productType.toLowerCase();
-                    // Filter out deactivated (including X-DEACTIVATED 1, X-DEACTIVATED 2, etc.), trade sample types
-                    const isDeactivated = ptLower.includes('deactivated') || 
-                                         ptLower === 'x-deactivated 1' || 
-                                         ptLower === 'x-deactivated 2' ||
-                                         ptLower.startsWith('x-deactivated');
-                    if (!isDeactivated && !ptLower.includes('trade sample')) {
+                    if (!isExcludedProductTypeForFilters(ptLower)) {
                         const normalizedType = normalizeProductType(productType);
                         if (normalizedType) availableOptions.productType.add(normalizedType);
                     }
@@ -4009,6 +4001,13 @@ const TagManager = {
         
         // Apply filters to get weight options
         const filteredTags = shouldLimitOptions ? tagsToFilter.filter(tag => {
+            {
+                const pnameW = tag['Product Name*'] || tag.ProductName || '';
+                let ptW = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                ptW = reconcileProductTypeWithProductName(ptW, pnameW);
+                ptW = reconcileLiquidEdibleProductType(ptW, pnameW);
+                if (isExcludedProductTypeForFilters((normalizeProductType(ptW) || '').toLowerCase())) return false;
+            }
             if (currentFilters.vendor && currentFilters.vendor.trim() !== '' && currentFilters.vendor.toLowerCase() !== 'all') {
                 if (!tagMatchesVendorFilter(tag, currentFilters.vendor)) return false;
             }
@@ -4308,6 +4307,18 @@ const TagManager = {
                     } else {
                         return false;
                     }
+                }
+            }
+
+            // Hide sample / trade sample / deactivated product types from default inventory
+            {
+                const pnameHide = tag['Product Name*'] || tag.ProductName || '';
+                let ptHide = (tag['Product Type*'] || tag.productType || '').toString().trim();
+                ptHide = reconcileProductTypeWithProductName(ptHide, pnameHide);
+                ptHide = reconcileLiquidEdibleProductType(ptHide, pnameHide);
+                const ptHideLower = (normalizeProductType(ptHide) || '').toLowerCase();
+                if (isExcludedProductTypeForFilters(ptHideLower)) {
+                    return false;
                 }
             }
 
@@ -4996,6 +5007,11 @@ const TagManager = {
             rawProductType = reconcileLiquidEdibleProductType(rawProductType.trim(), productNameForReconcile);
             const normalizedProductType = normalizeProductType(rawProductType.trim());
             const normalizedLower = normalizedProductType.toLowerCase();
+
+            if (isExcludedProductTypeForFilters(normalizedLower)) {
+                skippedTags++;
+                return;
+            }
             
             // CRITICAL FIX: Accept High CBD and High THC product types (any product type starting with "high cbd" or "high thc")
             // Also accept any product type that's in VALID_PRODUCT_TYPES
@@ -5255,7 +5271,7 @@ const TagManager = {
         });
 
         if (skippedTags > 0) {
-            console.info(`Skipped ${skippedTags} tags due to missing vendor information`);
+            console.info(`Skipped ${skippedTags} tags (excluded product types: sample, trade sample, deactivated, etc.)`);
         }
         
         // CRITICAL DEBUG: Log vendor statistics

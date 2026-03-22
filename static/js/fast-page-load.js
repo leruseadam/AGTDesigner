@@ -90,26 +90,30 @@
                 return;
             }
 
-            // CRITICAL FIX: Check for uploaded file OR POSaBit data source before trying to load tags
+            // CRITICAL FIX: Check for uploaded file OR POSaBit data source before trying to load tags.
+            // Backend sets has_file true when Excel exists OR POSaBit is configured (see /api/current-file).
             let hasFile = false;
             let posabitActive = false;
+            let currentFileJson = null;
             try {
                 const fileResponse = await fetch('/api/current-file');
                 if (fileResponse.ok) {
-                    const fileData = await fileResponse.json();
-                    if (fileData && fileData.success && fileData.has_file) {
-                        hasFile = true;
-                        posabitActive = !!fileData.posabit_active;
-                        const displayName = fileData.filename || (posabitActive ? 'POSaBit / API' : '');
-                        console.log(`📄 Found data source: ${displayName}`);
-                        // Update file info
-                        const fileInfoText = document.getElementById('fileInfoText');
-                        if (fileInfoText && displayName) {
-                            fileInfoText.textContent = displayName;
-                        }
-                        const currentFileInfo = document.getElementById('currentFileInfo');
-                        if (currentFileInfo && displayName) {
-                            currentFileInfo.textContent = displayName;
+                    currentFileJson = await fileResponse.json();
+                    if (currentFileJson && currentFileJson.success) {
+                        posabitActive = !!currentFileJson.posabit_active;
+                        // has_file is true when Excel exists OR POSaBit is configured (server-side)
+                        hasFile = !!currentFileJson.has_file;
+                        const displayName = currentFileJson.filename || (posabitActive ? 'POSaBit / API' : '');
+                        if (displayName) {
+                            console.log(`📄 Found data source: ${displayName}`);
+                            const fileInfoText = document.getElementById('fileInfoText');
+                            if (fileInfoText) {
+                                fileInfoText.textContent = displayName;
+                            }
+                            const currentFileInfo = document.getElementById('currentFileInfo');
+                            if (currentFileInfo) {
+                                currentFileInfo.textContent = displayName;
+                            }
                         }
                     }
                 }
@@ -117,10 +121,16 @@
                 console.log('Error checking for current file:', error);
             }
 
-            // If no file and no POSaBit, show upload prompt.
+            // Excel-only empty state: ONLY when API definitively says there is no data source (no Excel, no POS).
+            // If /api/current-file failed, timed out, or returned success:false, still try cache + /api/available-tags —
+            // otherwise POS-only stores see "Upload Excel" after Reset Cache or transient errors.
             const availableTagsContainer = document.getElementById('availableTags');
-            if (!hasFile && availableTagsContainer) {
-                console.log('📤 No file uploaded and POSaBit not configured - showing upload prompt');
+            const definitiveNoDataSource =
+                currentFileJson &&
+                currentFileJson.success === true &&
+                !currentFileJson.has_file;
+            if (definitiveNoDataSource && availableTagsContainer) {
+                console.log('📤 No Excel and no POS per /api/current-file — showing upload prompt');
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
