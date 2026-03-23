@@ -82,7 +82,7 @@ def _load_font_sizing_config():
                     'default': [(30, 16), (60, 14), (100, 12), (float('inf'), 10)]
                 },
                 'horizontal': {
-                    'description': [(10, 36), (20, 34), (25, 32), (30, 30), (35, 28), (40, 27), (45, 26), (50, 25), (55, 24), (60, 23), (65, 22), (70, 21), (100, 20), (120, 18), (130, 16), (140, 15), (float('inf'), 14)],
+                    'description': [(10, 36), (20, 34), (25, 32), (30, 30), (35, 28), (40, 27), (45, 26), (50, 25), (55, 24), (60, 23), (80, 22), (100, 21), (120, 20), (130, 18), (140, 16), (float('inf'), 14)],
                     'brand': [(20, 18), (40, 16), (120, 14), (140, 12), (160, 10), (float('inf'), 10)],
                     'price': [(5, 40), (10, 38), (20, 36), (80, 20), (float('inf'), 18)],
                     'lineage': [(80, 18), (float('inf'), 10)],
@@ -219,8 +219,8 @@ def _get_brand_guardrail_size(text: str, orientation_norm: str, scale_factor: fl
         )
         return Pt(final_size)
     
-    # Double: brands with 8+ letters → 8pt
-    if orientation_norm == 'double' and brand_len >= 8:
+    # Double: only very long brands (15+ letters) get reduced to 8pt
+    if orientation_norm == 'double' and brand_len >= 15:
         final_size = 8 * scale_factor
         logger.debug(
             f"Double brand length rule: text='{text}' "
