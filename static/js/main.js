@@ -6976,18 +6976,7 @@ const TagManager = {
         const tagList = document.createElement('div');
         tagList.className = 'tag-list';
 
-        // Add "Select All" checkbox
-        const selectAllContainer = document.createElement('div');
-        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3 select-all-sticky-row';
-        selectAllContainer.innerHTML = `
-            <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
-                <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
-                <span class="text-secondary fw-semibold">SELECT ALL</span>
-            </label>
-        `;
-        tagList.appendChild(selectAllContainer);
-
-        // Add event listener for available tags select all checkbox
+        // Select All checkbox lives in the static HTML header above #availableTags
         const selectAllAvailable = document.getElementById('selectAllAvailable');
         if (selectAllAvailable && !selectAllAvailable.hasAttribute('data-listener-added')) {
             selectAllAvailable.setAttribute('data-listener-added', 'true');
@@ -7898,16 +7887,6 @@ const TagManager = {
         listWrapper.style.maxHeight = 'none';
         listWrapper.style.paddingTop = '0';
         availableTagsContainer.appendChild(listWrapper);
-
-        const selectAllContainer = document.createElement('div');
-        selectAllContainer.className = 'd-flex align-items-center gap-3 mb-2 px-3 select-all-sticky-row';
-        selectAllContainer.innerHTML = `
-            <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
-                <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
-                <span class="text-secondary fw-semibold">SELECT ALL</span>
-            </label>
-        `;
-        listWrapper.appendChild(selectAllContainer);
 
         const showDetailedBtn = banner.querySelector('.show-detailed-tags-btn');
         if (showDetailedBtn) {
@@ -12240,6 +12219,16 @@ const TagManager = {
             if (this.hideActionSplash) {
                 this.hideActionSplash();
             }
+            // CRITICAL: Also remove the "Loading tags..." modal.
+            // Full /api/available-tags can still take a long time; without hiding this,
+            // the UI looks hung even though lite tags are already rendered.
+            if (this.hideTagRenderModal) {
+                this.hideTagRenderModal();
+            }
+            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                AppLoadingSplash.stopAutoAdvance();
+                AppLoadingSplash.complete();
+            }
 
             verboseLog(`✅ Lite tags prefetch rendered ${liteTags.length} tags for instant load`);
         } catch (e) {
@@ -15939,7 +15928,7 @@ const TagManager = {
             // Disable button and show loading spinner
             generateBtn.disabled = true;
             generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Generating...';
-            // Always use DOCX generation
+            // DOCX generation
             const apiEndpoint = '/api/generate';
 
             const response = await fetch(apiEndpoint, {
@@ -15965,8 +15954,8 @@ const TagManager = {
             
             // Extract filename from Content-Disposition header
             const contentDisposition = response.headers.get('Content-Disposition');
-            let filename = 'labels.docx'; // Default filename
-            
+            let filename = 'labels.docx';
+
             if (contentDisposition) {
                 const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
                 if (filenameMatch && filenameMatch[1]) {

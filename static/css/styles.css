@@ -11152,6 +11152,13 @@ input.filter-select#manifestRefFilter:active {
     background: rgba(42, 32, 64, 0.95) !important;
   }
 
+  /* Header above the scrolling tag list — always visible, never wiped by JS */
+  .available-tags-sticky-header {
+    flex-shrink: 0 !important;
+    border-bottom: 1px solid rgba(160, 132, 232, 0.15) !important;
+    padding-bottom: 6px !important;
+  }
+
   /* Instructional blurb styling */
   .dropdown-instruction-blurb {
     background: rgba(160, 132, 232, 0.1) !important;
@@ -12378,6 +12385,11 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+}
+
+.cc-field--switch {
+  margin-top: 0.1rem;
+  padding-top: 0.15rem;
 }
 
 .cc-label {

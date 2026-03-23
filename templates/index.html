@@ -6175,34 +6175,25 @@
                 </div>
               </div>
               <div class="card-body p-2 pt-0 d-flex flex-column flex-grow-1">
+                <!-- Static header — lives outside #availableTags so JS never wipes it -->
+                <div class="available-tags-sticky-header mb-2">
+                  <div class="d-flex align-items-center gap-3 mb-2 select-all-sticky-row">
+                    <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
+                      <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
+                      <span class="filter-subcategory-label mb-0">SELECT ALL</span>
+                    </label>
+                  </div>
+                  <div class="dropdown-instruction-blurb mb-0">
+                    <div class="instruction-content">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a084e8" stroke-width="2" class="instruction-icon" style="flex-shrink:0;">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                      </svg>
+                      <span class="instruction-text">Click the <strong>H / I / S</strong> badge to change lineage &nbsp;·&nbsp; Click <strong>DOH</strong> to change compliance</span>
+                    </div>
+                  </div>
+                </div>
                 <div id="availableTags" class="tag-list-container">
                   <div class="tag-list">
-                    <div class="d-flex align-items-center gap-3 mb-2 select-all-sticky-row">
-                      <label class="d-flex align-items-center gap-2 cursor-pointer mb-0 select-all-container">
-                        <input type="checkbox" id="selectAllAvailable" class="custom-checkbox">
-                        <span class="filter-subcategory-label mb-0">SELECT ALL</span>
-                      </label>
-                    </div>
-                    
-                    <!-- Instructional blurb for dropdown usage -->
-                    <div id="dropdownInstructionBlurb" class="dropdown-instruction-blurb mb-2">
-                      <div class="instruction-content">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="instruction-icon">
-                          <path d="M7 10l5 5 5-5z"/>
-                        </svg>
-                        <span class="instruction-text">Click the dropdown arrows (▶) to reveal products in each category</span>
-                      </div>
-                    </div>
-                    <!-- Lineage tip -->
-                    <div class="dropdown-instruction-blurb mb-3" style="border-color: rgba(100,160,255,0.25); background: rgba(80,120,220,0.08);">
-                      <div class="instruction-content">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7aadff" stroke-width="2" class="instruction-icon" style="flex-shrink:0; margin-top:1px;">
-                          <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                        </svg>
-                        <span class="instruction-text" style="color:#9bbfff;">To change a product's lineage, click the colored <strong style="color:#c8daff;">H / I / S</strong> badge on its row</span>
-                      </div>
-                    </div>
-                    
                     <div class="tag-entry">Loading Tags...</div>
                    
                     <!-- more tags -->
@@ -6238,16 +6229,6 @@
                   <option value="preroll">Preroll</option>
                   <option value="inventory">Inventory</option>
                 </select>
-              </div>
-
-              <div class="cc-field cc-field--switch cc-field--slider-toggle" title="Download a PDF: labels are generated as DOCX on the server, then converted with LibreOffice (requires soffice on the server)">
-                <div class="cc-slider-toggle">
-                  <input type="checkbox" id="docxTagsHtmlSwitch" class="cc-slider-toggle__input" aria-label="Download labels as PDF instead of DOCX" />
-                  <label for="docxTagsHtmlSwitch" class="cc-slider-toggle__label">
-                    <span class="cc-slider-toggle__track" aria-hidden="true"><span class="cc-slider-toggle__thumb"></span></span>
-                    <span class="cc-slider-toggle__text">PDF</span>
-                  </label>
-                </div>
               </div>
 
               <!-- Action Row -->
@@ -14055,7 +14036,7 @@
   </script>
   
   <!-- Store Selection Modal — outside #mainContent; original Bootstrap + backdrop behavior -->
-  <div id="storeModalBackdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:1999;"></div>
+  <div id="storeModalBackdrop" style="position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:1999;{% if current_store %} display:none{% endif %}"></div>
   <div
     class="modal fade show"
     id="storeSelectionModal"

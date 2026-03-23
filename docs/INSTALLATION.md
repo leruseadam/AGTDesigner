@@ -20,6 +20,16 @@ python3 install_requirements.py
 python3 install_requirements.py
 ```
 
+**Python 3.13:** If `pip` tries to **compile** pandas (Meson/Ninja), upgrade pip and force binary wheels:
+
+```bash
+pip install -U pip setuptools wheel
+PIP_ONLY_BINARY=pandas,numpy,Pillow pip install -r requirements.txt
+python3 patch_docxcompose.py
+```
+
+(`patch_docxcompose.py` lives in the project root and runs `scripts/utilities/patch_docxcompose.py`.)
+
 This will automatically:
 - Install all dependencies from `requirements.txt`
 - Apply the `docxcompose` patch to fix the pkg_resources deprecation warning

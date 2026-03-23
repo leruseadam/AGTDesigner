@@ -10012,3 +10012,95 @@ class TemplateProcessor:
         except Exception as e:
             self.logger.error(f"Error fixing arbitrary strain concatenation: {e}")
             return False
+
+
+def _serialize_docx_context_value_for_html(val: Any) -> str:
+    """Convert merge-context values to readable strings for HTML preview (DOCX uses InlineImage for QR/DOH)."""
+    if val is None:
+        return ''
+    try:
+        from docxtpl import InlineImage
+
+        if isinstance(val, InlineImage):
+            return '[Image — same embedded object as printed DOCX]'
+    except Exception:
+        pass
+    try:
+        s = str(val)
+    except Exception:
+        return f'[{type(val).__name__}]'
+    if len(s) > 12000:
+        return s[:12000] + '…'
+    return s
+
+
+def build_docx_placeholder_preview_html(
+    template_type: str,
+    records: List[Dict[str, Any]],
+    excel_processor,
+    scale_factor: float = 1.0,
+    template_group: str = 'classic',
+    user_template_path: Optional[str] = None,
+) -> str:
+    """
+    One HTML page per request: for each product row, show placeholder names {{Label1.Field}}
+    and the exact values the DOCX merge step uses (same dict as template rendering).
+    """
+    import html
+    from docx import Document
+
+    font_scheme = get_font_scheme(template_type)
+    fast_mode = len(records) >= int(os.environ.get('FAST_MODE_THRESHOLD', '500'))
+    processor = TemplateProcessor(
+        template_type,
+        font_scheme,
+        scale_factor,
+        excel_processor,
+        fast_mode=fast_mode,
+        user_template_path=user_template_path,
+    )
+    doc = Document(processor._template_path)
+
+    parts = [
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        '<title>DOCX merge preview</title>',
+        '<style>',
+        'body{font-family:system-ui,-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;padding:1rem;line-height:1.45;max-width:56rem;margin:0 auto}',
+        'h1{font-size:1.15rem;font-weight:600;color:#7dd3fc;margin:0 0 .5rem}',
+        '.sub{color:#94a3b8;font-size:.85rem;margin:0 0 1rem}',
+        '.tagname{color:#fde047;font-weight:600;margin:1.25rem 0 .5rem;font-size:.95rem}',
+        'table{border-collapse:collapse;width:100%;font-size:.8rem;margin:.25rem 0 1rem}',
+        'th,td{border:1px solid #334155;padding:.35rem .45rem;vertical-align:top}',
+        'th{background:#1e293b;text-align:left;color:#cbd5e1}',
+        'code{color:#86efac;background:#1e293b;padding:.1rem .3rem;border-radius:4px;font-size:.78rem}',
+        'pre{white-space:pre-wrap;margin:0;font-family:ui-monospace,monospace;font-size:.78rem;color:#e2e8f0}',
+        '</style></head><body>',
+        '<h1>DOCX merge fields</h1>',
+        '<p class="sub">Placeholder names follow <code>{{Label1.&hellip;}}</code> (first label slot). '
+        f'Template <strong>{html.escape(str(template_type))}</strong>, group <strong>{html.escape(str(template_group))}</strong>.</p>',
+    ]
+
+    for idx, record in enumerate(records):
+        pname = record.get('Product Name*') or record.get('ProductName') or f'Row {idx + 1}'
+        parts.append(f'<div class="tagname">{html.escape(str(pname))}</div>')
+        if processor.template_type == 'inventory':
+            ctx = processor._build_inventory_context(record)
+        else:
+            ctx = processor._build_label_context(record, doc, {}, {}, {}, {}, {})
+
+        keys = sorted(ctx.keys())
+        parts.append('<table><thead><tr><th>Placeholder</th><th>Value</th></tr></thead><tbody>')
+        for k in keys:
+            if str(k).startswith('_'):
+                continue
+            placeholder = f'{{{{Label1.{k}}}}}'
+            disp = _serialize_docx_context_value_for_html(ctx[k])
+            parts.append(
+                '<tr><td><code>' + html.escape(placeholder) + '</code></td><td><pre>'
+                + html.escape(disp) + '</pre></td></tr>'
+            )
+        parts.append('</tbody></table>')
+
+    parts.append('</body></html>')
+    return ''.join(parts)

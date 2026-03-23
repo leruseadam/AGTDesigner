@@ -9776,6 +9776,47 @@ def _merge_template_settings_from_request(request_data):
     return {**session.get('template_settings', {}), **request_template_settings}
 
 
+@app.route('/api/preview-docx-tags-html', methods=['POST'])
+def preview_docx_tags_html():
+    """Return HTML document body listing {{Label1.*}} placeholders and resolved merge values (same as DOCX); client downloads as .html."""
+    try:
+        from flask import Response
+        from src.core.generation.template_processor import build_docx_placeholder_preview_html
+
+        data = request.get_json(silent=True) or {}
+        selected_tags = _coerce_selected_tags(data.get('selected_tags', []))
+        records = [t for t in selected_tags if isinstance(t, dict)]
+        if not records:
+            return jsonify({'error': 'Select at least one tag'}), 400
+
+        template_type = data.get('template_type', 'horizontal')
+        template_group = data.get('template_group', 'classic')
+        scale_factor = float(data.get('scale_factor', 1.0))
+
+        excel_processor = get_excel_processor()
+        try:
+            excel_processor.enable_product_db_integration(True)
+        except Exception:
+            pass
+
+        user_template_path = get_user_template_path(template_type) if template_group == 'user' else None
+        if template_group == 'user' and not user_template_path:
+            logging.warning("preview-docx-tags-html: user template missing — using classic DOCX")
+
+        html_out = build_docx_placeholder_preview_html(
+            template_type,
+            records,
+            excel_processor,
+            scale_factor=scale_factor,
+            template_group=template_group,
+            user_template_path=user_template_path,
+        )
+        return Response(html_out, mimetype='text/html; charset=utf-8')
+    except Exception as e:
+        logging.exception('preview_docx_tags_html failed')
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/generate', methods=['POST'])
 @performance_monitor if PERFORMANCE_ENABLED else lambda x: x
 def generate_labels():
@@ -11338,15 +11379,16 @@ def generate_labels():
 
             logging.info(f"INVENTORY LIST: Returning inventory list file '{filename}'")
 
+            doc_mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             response = send_file(
                 output_buffer,
                 as_attachment=True,
                 download_name=filename,
-                mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                mimetype=doc_mimetype,
             )
 
             response = set_download_filename(response, filename)
-            response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            response.headers['Content-Type'] = doc_mimetype
             return response
 
         # PREROLL TEMPLATE: Group by unique vendor + description combination
@@ -11975,18 +12017,20 @@ def generate_labels():
 
         # TRACE: Check store before returning file
         logging.info(f"🔍 TRACE END: Current store before return = {get_current_store_name()}")
-        
+
+        doc_mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
         # Create response with explicit headers
         response = send_file(
             output_buffer,
             as_attachment=True,
             download_name=filename,
-            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            mimetype=doc_mimetype,
         )
-        
+
         # Set proper download filename with headers
         response = set_download_filename(response, filename)
-        # Note: Content-Type is already set by send_file mimetype parameter
+        # Note: Content-Type matches send_file mimetype (DOCX or PDF)
 
         _total_time = time.time() - _start_time
         logging.info(f"⏱️ PERFORMANCE: Total generation time {_total_time:.2f}s for {len(records)} records ({_total_time/len(records):.3f}s per record)")

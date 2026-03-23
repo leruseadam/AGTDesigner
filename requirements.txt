@@ -1,7 +1,12 @@
 # AGT Label Maker - Python Dependencies for PythonAnywhere Deployment
 #
 # Install with: pip install --user -r requirements.txt
-# Then patch docxcompose: python patch_docxcompose.py (if available)
+# Then: python3 patch_docxcompose.py
+#
+# Python 3.13 (avoid pandas compiling from source — slow and may fail):
+#   pip install -U pip setuptools wheel
+#   PIP_ONLY_BINARY=pandas,numpy,Pillow pip install -r requirements.txt
+#   # or: pip install --only-binary=pandas,numpy -r requirements.txt
 
 # Core Flask
 Flask==3.0.0
@@ -12,15 +17,16 @@ Flask-Caching==2.1.0
 Werkzeug==3.0.1
 
 # Data Processing
-pandas==2.1.4
-numpy==1.26.2
+# Python 3.13: always use wheels — if pip builds pandas from source, upgrade pip and use only-binary (see below).
+pandas==2.3.3
+numpy==2.1.3
 openpyxl==3.1.2
 xlrd==2.0.1
 
 # Document Generation
 python-docx==1.1.0
 docxtpl==0.16.7
-Pillow==10.1.0
+Pillow==11.3.0
 
 # QR Code Generation
 qrcode==7.4.2
@@ -43,3 +49,4 @@ python-dotenv==1.0.0
 # git+https://github.com/tvuotila/docxcompose.git
 # OR if that fails, use: docxcompose==1.4.0 and apply patch
 docxcompose==1.4.0
+

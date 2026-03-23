@@ -62,7 +62,12 @@
       "Bash(/dev/null echo:*)",
       "Bash(head -10 grep -rn \"serviceWorker\\\\|sw\\\\.js\" \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/templates/index.html\")",
       "Bash(/dev/null sleep:*)",
-      "Read(//<style>/,/<\\\\/**)"
+      "Read(//<style>/,/<\\\\/**)",
+      "Bash(python3 -c \":*)",
+      "Bash(head -20 grep -n \"lineage-indicator\\\\|lineage_indicator\" \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/templates/index.html\")",
+      "Bash(head -20 grep -n \"tag-lineage\\\\|tagLineage\\\\|lineage-pill\\\\|lineagePill\" \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/templates/index.html\")",
+      "Read(//Users/adminpcm/Desktop/labelMaker_ QR copy final/**)",
+      "Bash(head -30 grep -n \"CLASSIC_TYPES\\\\|classic_types\" \"/Users/adamcordova/Desktop/labelMaker_ QR copy final/app.py\")"
     ],
     "deny": [],
     "ask": [],
