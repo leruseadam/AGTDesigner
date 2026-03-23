@@ -9,19 +9,22 @@ IS_PYTHONANYWHERE = os.environ.get('PYTHONANYWHERE_DOMAIN') is not None
 
 # Server configuration
 bind = "0.0.0.0:8000"
-workers = 1 if IS_PYTHONANYWHERE else multiprocessing.cpu_count() * 2 + 1
-worker_class = "sync"
+# Single worker with threads: this app uses global singletons, file-based sessions,
+# and SQLite — multiple worker processes cause file corruption and lock contention.
+workers = 1
+worker_class = "gthread"
+threads = 4
 worker_connections = 1000
 
-# Timeout settings
-timeout = 30
+# Timeout settings — label generation can take >30s
+timeout = 120
 keepalive = 2
 graceful_timeout = 30
 
 # Memory and process settings
 max_requests = 1000
 max_requests_jitter = 100
-preload_app = True
+preload_app = False  # Don't preload — avoids background threads forking into workers
 
 # Logging
 accesslog = "-"
@@ -37,9 +40,9 @@ limit_request_field_size = 8190
 # PythonAnywhere specific settings
 if IS_PYTHONANYWHERE:
     # PythonAnywhere limitations
-    workers = 1
+    threads = 2
     worker_connections = 100
-    timeout = 60
+    timeout = 120
     max_requests = 500
     print("🐍 PythonAnywhere Gunicorn configuration applied")
 else:

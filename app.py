@@ -540,8 +540,12 @@ def save_available_tags_cache(store_name, tags):
     """Persist the latest successful available-tags payload for emergency fallbacks."""
     try:
         cache_path = get_available_tags_cache_path(store_name)
-        with open(cache_path, 'w', encoding='utf-8') as cache_file:
+        tmp_path = cache_path + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as cache_file:
             json.dump(tags, cache_file, ensure_ascii=False)
+            cache_file.flush()
+            os.fsync(cache_file.fileno())
+        os.replace(tmp_path, cache_path)
     except Exception as e:
         logging.warning(f"Failed to save available tags cache for {store_name}: {e}")
 
@@ -552,9 +556,11 @@ def load_available_tags_cache(store_name):
         cache_path = get_available_tags_cache_path(store_name)
         if not os.path.exists(cache_path):
             return None
-            last = _robust_load_persistent_json(cache_path)
-            if last is None:
-                raise ValueError("Could not parse persistent upload JSON")
+        last = _robust_load_persistent_json(cache_path)
+        if last is None:
+            logging.warning(f"Could not parse available tags cache for {store_name}")
+            return None
+        return last
     except Exception as e:
         logging.warning(f"Failed to load available tags cache for {store_name}: {e}")
         return None
@@ -957,8 +963,12 @@ def save_store_selections():
     try:
         with _ip_store_lock:
             os.makedirs('sessions', exist_ok=True)
-            with open(_store_selections_file, 'wb') as f:
+            tmp_path = _store_selections_file + '.tmp'
+            with open(tmp_path, 'wb') as f:
                 pickle.dump(_ip_store_selections, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, _store_selections_file)
             logging.debug(f"Saved {len(_ip_store_selections)} store selections to disk")
     except Exception as e:
         logging.warning(f"Failed to save store selections: {e}")
