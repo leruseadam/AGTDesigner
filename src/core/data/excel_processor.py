@@ -4994,7 +4994,9 @@ class ExcelProcessor:
                             pass
                     
                     self.logger.info(f"Found identical product with ounce weight: {found_name} -> {weight}{units}")
-                    return f"{weight}{units}"
+                    combined = f"{weight}{units}".strip()
+                    combined = re.sub(r'(\d+\.?\d*)\s+(oz|g|gm|mg|ml|kg|lb|lbs)\b', r'\1\2', combined, flags=re.IGNORECASE)
+                    return combined
                 
                 return None
                 
@@ -5509,7 +5511,11 @@ class ExcelProcessor:
         # Debug: Log result for first few records
         if self._debug_count <= 5:
             self.logger.info(f"Record {self._debug_count} result: '{result}'")
-            
+
+        # Final pass: remove any space between number and unit (e.g. "1.47 oz" -> "1.47oz")
+        if result:
+            result = re.sub(r'(\d+\.?\d*)\s+(oz|g|gm|mg|ml|kg|lb|lbs)\b', r'\1\2', result, flags=re.IGNORECASE)
+
         return result
 
     def get_dynamic_filter_options(self, current_filters: Dict[str, str]) -> Dict[str, list]:
