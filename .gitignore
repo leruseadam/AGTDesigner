@@ -57,6 +57,10 @@ logs/
 *.sqlite3
 *.db-shm
 *.db-wal
+AGT_Bothell
+AGT_Bothell-shm
+AGT_Bothell-wal
+AGT_*
 
 # Temporary files
 *.tmp
@@ -79,6 +83,13 @@ secrets.py
 # Backup files
 *_backup_*
 backup/
+*.bak
+*.bak.*
+dump.sql
+
+# Local dev files
+*.local
+21.0pt
 
 # PythonAnywhere specific
 pythonanywhere.log product_database_fixed.db.gz
