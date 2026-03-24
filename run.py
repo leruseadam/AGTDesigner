@@ -3,5 +3,5 @@ import subprocess
 import sys
 import os
 
-# Simple one-liner for CodeRunner
-subprocess.run(['/usr/bin/python3', 'app.py'])
+# Cross-platform launcher — uses the same Python that's running this script
+subprocess.run([sys.executable, 'app.py'])

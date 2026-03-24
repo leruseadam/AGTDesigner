@@ -561,7 +561,10 @@ def save_available_tags_cache(store_name, tags):
         with open(tmp_path, 'w', encoding='utf-8') as cache_file:
             json.dump(tags, cache_file, ensure_ascii=False)
             cache_file.flush()
-            os.fsync(cache_file.fileno())
+            try:
+                os.fsync(cache_file.fileno())
+            except OSError:
+                pass  # fsync not supported on all platforms/filesystems
         os.replace(tmp_path, cache_path)
     except Exception as e:
         logging.warning(f"Failed to save available tags cache for {store_name}: {e}")
@@ -984,7 +987,10 @@ def save_store_selections():
             with open(tmp_path, 'wb') as f:
                 pickle.dump(_ip_store_selections, f)
                 f.flush()
-                os.fsync(f.fileno())
+                try:
+                    os.fsync(f.fileno())
+                except OSError:
+                    pass  # fsync not supported on all platforms/filesystems
             os.replace(tmp_path, _store_selections_file)
             logging.debug(f"Saved {len(_ip_store_selections)} store selections to disk")
     except Exception as e:
@@ -10084,7 +10090,7 @@ def generate_labels():
                 if store_name:
                     # Try store-specific file first
                     store_display = store_name.replace('_', ' ').replace('AGT ', '')
-                    default_file = f"uploads/A Greener Today - {store_display}_inventory*.xlsx"
+                    default_file = os.path.join(UPLOADS_DIR, f"A Greener Today - {store_display}_inventory*.xlsx")
                     import glob
                     matching_files = glob.glob(default_file)
                     if matching_files:
