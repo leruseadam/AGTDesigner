@@ -166,6 +166,23 @@ VALID_STORES = ['AGT_Bothell', 'AGT_Burien', 'AGT_Goldbar', 'AGT_Lynnwood', 'AGT
 CACHE_DIR = os.path.join(UPLOADS_DIR, 'cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# Stable cache-bust token — changes only when static files are modified, not on every request.
+# Browsers can cache JS/CSS between page loads; the token changes on next deploy.
+def _compute_cache_bust():
+    try:
+        static_dir = os.path.join(BASE_DIR, 'static')
+        newest = max(
+            os.path.getmtime(os.path.join(root, f))
+            for root, _, files in os.walk(static_dir)
+            for f in files
+        )
+        return f"v{int(newest)}"
+    except Exception:
+        import time
+        return f"v{int(time.time())}"
+
+STATIC_CACHE_BUST = _compute_cache_bust()
+
 
 def _is_preserved_disk_cache_filename(filename):
     """When wiping CACHE_DIR, keep snapshots so the UI can still show tags after Reset Cache.
@@ -3325,10 +3342,9 @@ def index():
             logging.info(f"User has valid store selection: {current_store}")
         
         # --- LIGHTWEIGHT PAGE LOAD (minimal work) ---
-        # AUTOMATIC CACHE BUSTING: Use timestamp to force browser reload of updated files
-        # This ensures users always get the latest JavaScript without manual cache clearing
-        import time
-        cache_bust = f"v2.1.{int(time.time())}"  # Timestamp ensures automatic cache invalidation
+        # Use stable cache-bust token (based on static file mtimes, computed at startup).
+        # This allows browsers to cache JS/CSS across page loads and only re-fetch when files change.
+        cache_bust = STATIC_CACHE_BUST
         
         # CRITICAL FIX: Don't clear uploaded file from session on page refresh
         # This was causing uploads to disappear when users refreshed the page
@@ -3474,8 +3490,7 @@ def index():
         logging.error(f"Index route traceback: {traceback.format_exc()}")
         # Ensure cache_bust and store variables are always available
         try:
-            import time
-            cache_bust = f"v2.1.{int(time.time())}"  # Use timestamp for automatic cache busting
+            cache_bust = STATIC_CACHE_BUST
             user_has_store = False
             current_store = None
             uploaded_filename = ''
