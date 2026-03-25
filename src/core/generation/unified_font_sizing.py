@@ -219,14 +219,15 @@ def _get_brand_guardrail_size(text: str, orientation_norm: str, scale_factor: fl
         )
         return Pt(final_size)
     
-    # Double: brands with 15+ letters AND 3+ words get reduced to 8pt
+    # Double: brands with any word >9 letters → cap at 10pt
     normalized_brand = _normalize_brand_text(text)
-    brand_word_count = len(normalized_brand.split())
-    if orientation_norm == 'double' and brand_len >= 15 and brand_word_count >= 3:
-        final_size = 8 * scale_factor
+    brand_words = normalized_brand.split()
+    max_word_len = max((len(w) for w in brand_words), default=0)
+    if orientation_norm == 'double' and max_word_len > 9:
+        final_size = min(10 * scale_factor, 10 * scale_factor)
         logger.debug(
-            f"Double brand length rule: text='{text}' "
-            f"(letters={brand_len}, words={brand_word_count}) -> {final_size}pt"
+            f"Double brand long-word rule: text='{text}' "
+            f"(max_word_len={max_word_len}) -> {final_size}pt"
         )
         return Pt(final_size)
     
