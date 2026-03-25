@@ -248,13 +248,13 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
             or "edible liquid" in s
             or "beverage" in s
             or "drink" in s
-            or "shot" in s
+            or re.search(r'\bshot\b', s)   # word boundary — avoids matching "moonshot"
             or "soda" in s
             or "elixir" in s
             or "syrup" in s
         ):
             return "Edible (Liquid)"
-        if "edible" in s or "gummy" in s or "gummi" in s or "candy" in s or "chocolate" in s or "cookie" in s or "brownie" in s:
+        if "edible" in s or "gummy" in s or "gummi" in s or "jell" in s or "candy" in s or "chocolate" in s or "cookie" in s or "brownie" in s:
             return "Edible (Solid)"
         if "topical" in s or "lotion" in s or "salve" in s or "balm" in s or "cream" in s or "patch" in s:
             return "Topical"
