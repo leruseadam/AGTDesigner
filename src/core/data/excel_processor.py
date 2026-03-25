@@ -5295,6 +5295,8 @@ class ExcelProcessor:
 
         out = re.sub(r'([\d.]+)\s*(?:grams?|gm)\b', repl_gram, s, flags=re.IGNORECASE)
         out = re.sub(r'([\d.]+)\s+g\b(?!\w)', repl_gram, out, flags=re.IGNORECASE)
+        # Also strip space between number and oz/mg/ml inline (e.g. "- 1.4 oz" -> "- 1.4oz")
+        out = re.sub(r'([\d.]+)\s+(oz|mg|ml|lb|lbs)\b', r'\1\2', out, flags=re.IGNORECASE)
         return out
 
     def _format_weight_units(self, record, excel_priority=True):
