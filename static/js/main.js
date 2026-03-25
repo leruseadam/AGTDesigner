@@ -693,8 +693,7 @@ const PRODUCT_TYPE_OVERRIDES = {
   "edible liquid": "Edible (Liquid)",
   "Edible Liquid": "Edible (Liquid)",
   "edible (liquid)": "Edible (Liquid)",
-  // POS/Excel "Tincture" is a liquid edible — must match Edible (Liquid) filter & grouping
-  "tincture": "Edible (Liquid)",
+  "tincture": "Tincture",
   "capsule": "Capsule",
   "topical": "Topical",
   "paraphernalia": "Paraphernalia",
@@ -754,18 +753,20 @@ function reconcileProductTypeWithProductName(rawType, productName) {
 }
 
 /**
- * POSaBit often classifies tinctures / shots under generic "Edible" or "Edible (Solid)".
+ * POSaBit often classifies shots/beverages under generic "Edible" or "Edible (Solid)".
  * Align those rows with Edible (Liquid) when the name clearly indicates a liquid format.
+ * Tinctures are kept as their own group and never remapped to Edible (Liquid).
  */
 function reconcileLiquidEdibleProductType(rawType, productName) {
     const t = (rawType || '').trim();
     const tl = t.toLowerCase();
     const name = String(productName || '').toLowerCase();
+    // Tinctures stay as Tincture — never remap to Edible (Liquid)
     if (tl === 'tincture' || tl.endsWith(' tincture')) {
-        return 'Edible (Liquid)';
+        return 'Tincture';
     }
     const liquidHints =
-        /\btincture\b|wildside|fizz|lemonade|beverage|\bshot\b|shotz|soda|smoothie|elixir|sublingual|defense tincture|companion tincture|cantina/;
+        /wildside|fizz|lemonade|beverage|\bshot\b|shotz|soda|smoothie|elixir|sublingual|defense tincture|companion tincture|cantina/;
     if (name && liquidHints.test(name)) {
         if (
             tl === 'edible (solid)' ||
@@ -2883,7 +2884,7 @@ const TagManager = {
             // CRITICAL FIX: Check all possible brand field names consistently
             const brand = tag['Product Brand'] || tag.ProductBrand || tag.productBrand || tag.Brand || tag.brand || '';
             if (brand && brand.trim()) brands.add(brand.trim());
-            // Product Type - exclude deactivated and sample types (reconcile liquid edibles like tinctures)
+            // Product Type - exclude deactivated and sample types
             let pt = tag.ProductType || tag['Product Type*'] || '';
             const pnameFt = tag['Product Name*'] || tag.ProductName || '';
             pt = reconcileProductTypeWithProductName(pt.trim(), pnameFt);
@@ -3371,7 +3372,7 @@ const TagManager = {
                     }
                 }
                 
-                // Product Type - exclude deactivated and sample types (reconcile tinctures → Edible (Liquid))
+                // Product Type - exclude deactivated and sample types
                 let productType = tag['Product Type*'] || tag.ProductType || tag['Product Type'] || '';
                 const pnameFo = tag['Product Name*'] || tag.ProductName || '';
                 productType = reconcileProductTypeWithProductName(productType.trim(), pnameFo);
