@@ -73,22 +73,32 @@
     
     // Define selectStore function EARLY so it's available when modal loads
 
-    // VIEWPORT NORMALIZATION FOR CONSISTENT SCALING
-    // Simplified: only maintain CSS viewport variables; do NOT change browser zoom.
+    // VIEWPORT VARS — no document zoom; use VisualViewport when present so 100% browser
+    // zoom / dynamic toolbars match the visible area consistently across monitors.
     (function() {
       'use strict';
 
+      function readCssViewportSize() {
+        var vv = window.visualViewport;
+        if (vv && typeof vv.width === 'number' && vv.width > 0) {
+          return { w: vv.width, h: vv.height };
+        }
+        return { w: window.innerWidth, h: window.innerHeight };
+      }
+
       function normalizeViewportVars() {
-        const vw = window.innerWidth / 100;
-        const vh = window.innerHeight / 100;
-        const vmin = Math.min(vw, vh);
-        const vmax = Math.max(vw, vh);
+        var vp = readCssViewportSize();
+        var vw = vp.w / 100;
+        var vh = vp.h / 100;
+        var vmin = Math.min(vw, vh);
+        var vmax = Math.max(vw, vh);
         document.documentElement.style.setProperty('--vw', vw + 'px');
         document.documentElement.style.setProperty('--vh', vh + 'px');
         document.documentElement.style.setProperty('--vmin', vmin + 'px');
         document.documentElement.style.setProperty('--vmax', vmax + 'px');
-        const baseWidth = 1920;
-        const scaleFactor = Math.min(Math.max(window.innerWidth / baseWidth, 0.5), 2);
+        var baseWidth = 1920;
+        var layoutW = window.innerWidth;
+        var scaleFactor = Math.min(Math.max(layoutW / baseWidth, 0.5), 2);
         document.documentElement.style.setProperty('--env-scale-factor', scaleFactor.toString());
         document.documentElement.style.setProperty('--env-font-multiplier', scaleFactor.toString());
       }
@@ -99,11 +109,13 @@
         normalizeViewportVars();
       }
 
-      // Only update CSS vars on resize/orientationchange — never reapply zoom
       window.addEventListener('resize', normalizeViewportVars, {passive: true});
       window.addEventListener('orientationchange', normalizeViewportVars, {passive: true});
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', normalizeViewportVars, {passive: true});
+        window.visualViewport.addEventListener('scroll', normalizeViewportVars, {passive: true});
+      }
 
-      // Re-calc CSS vars after short delays to catch late layout changes
       setTimeout(normalizeViewportVars, 100);
       setTimeout(normalizeViewportVars, 500);
     })();
@@ -5705,7 +5717,7 @@
       align-items: center !important;
     }
 
-    /* Side columns (Available & Selected Tags) establish shared height using CSS variables */
+    /* Side columns (Available & Selected Tags) should use full tag-list height */
     .d-flex[style*="gap: 6rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 6rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 4rem"] > div[data-container-type="available"],
@@ -5716,8 +5728,8 @@
     .d-flex[style*="gap: 0.75rem"] > div[data-container-type="selected"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="available"],
     .d-flex[style*="gap: 0.5rem"] > div[data-container-type="selected"] {
-      height: var(--center-panel-height) !important;
-      min-height: var(--center-panel-height) !important;
+      height: var(--tag-list-height) !important;
+      min-height: var(--tag-list-height) !important;
     }
 
     /* Filter column: auto height so all filters fully visible, no clipping */
@@ -6064,7 +6076,7 @@
       <!-- Main Content Area -->
       <div class="w-100">
         <!-- Main Content Row -->
-        <div class="main-content-row fade-in d-flex flex-wrap" style="animation-delay: 0.6s;">
+        <div class="main-content-row fade-in" style="animation-delay: 0.6s;">
           <!-- Filter Bar (left column) -->
           <div class="mb-2 mt-0" data-container-type="filter">
               <div class="enhanced-filter-bar d-flex flex-column align-items-stretch gap-2 p-3" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 72px;">
@@ -6086,7 +6098,7 @@
                           <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
                           <path d="M3 21v-5h5"></path>
                         </svg>
-                        Reset Cache
+                        Refresh Products
                       </button>
                   </div>
                   
@@ -6100,6 +6112,14 @@
                     <div class="filter-group" id="filterGroup_manifestRef">
                       <label for="manifestRefFilter" class="filter-label">MANIFEST REF #</label>
                       <input id="manifestRefFilter" class="form-control filter-select" type="text" placeholder="Manifest ref..." aria-label="Filter by manifest ref number">
+                    </div>
+
+                    <div class="filter-group" id="filterGroup_acceptedDate">
+                      <label for="acceptedDateFilter" class="filter-label">ACCEPTED DATE</label>
+                      <select id="acceptedDateFilter" class="form-select filter-select" aria-label="Filter by accepted date" style="width: 100% !important; min-height: 52px !important; border: 2px solid #00d4aa !important; box-shadow: 0 0 14px rgba(0, 212, 170, 0.4) !important; padding: 0.7rem 36px 0.7rem 1.1rem !important; font-size: 18px !important; line-height: 1.4 !important; text-align: left !important; text-align-last: left !important;">
+                        <option value="">All Accepted Dates</option>
+                        <option value="mostRecent">Most Recently Accepted</option>
+                      </select>
                     </div>
 
                     <div class="filter-group" id="filterGroup_vendor">
@@ -6160,12 +6180,16 @@
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">CURRENT INVENTORY</h5>
-                  <div class="d-flex align-items-center gap-2">
+                  <div class="d-flex align-items-center gap-2 list-header-actions">
                     <button type="button" class="btn btn-sm btn-collapse-all" onclick="collapseAllDropdowns('available')" title="Collapse all category dropdowns">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="18 15 12 9 6 15"></polyline>
                       </svg>
                       <span>Collapse All</span>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-header-icon" onclick="window.resetPrintIcons && window.resetPrintIcons()" title="Reset print icons">
+                      <i class="bi bi-printer"></i>
+                      <span>Reset Print Icons</span>
                     </button>
                     <span class="badge badge-modern" id="availableTagsCount">(0)</span>
                   </div>
@@ -6188,7 +6212,7 @@
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a084e8" stroke-width="2" class="instruction-icon" style="flex-shrink:0;">
                         <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                       </svg>
-                      <span class="instruction-text">Click the <strong>H / I / S</strong> badge to change lineage &nbsp;·&nbsp; Click <strong>DOH</strong> to change compliance</span>
+                      <span class="instruction-text">Click <strong>H / I / S</strong> to set lineage &nbsp;·&nbsp; click <strong>DOH</strong> to set compliance</span>
                     </div>
                   </div>
                 </div>
@@ -6276,7 +6300,7 @@
               <div class="card-header border-0 bg-transparent p-2">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="filter-label mb-0">SELECTED TAGS</h5>
-                  <div class="d-flex align-items-center gap-2">
+                  <div class="d-flex align-items-center gap-2 list-header-actions">
                     <button type="button" class="btn btn-sm btn-collapse-all" onclick="collapseAllDropdowns('selected')" title="Collapse all category dropdowns">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="18 15 12 9 6 15"></polyline>
@@ -6285,7 +6309,7 @@
                     </button>
                     <span class="badge badge-modern" id="selectedTagsCount">(0)</span>
                     <button type="button" class="btn btn-sm saved-lists-btn" onclick="openSavedListsModal()" title="Save/Load Tag Lists">
-                      <i class="bi bi-bookmark-star-fill me-1"></i><span class="saved-lists-label">Save</span>
+                      <i class="bi bi-bookmark-star-fill"></i><span class="saved-lists-label">Save</span>
                     </button>
                   </div>
                 </div>

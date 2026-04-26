@@ -612,20 +612,18 @@ img, video, canvas, svg {
   height: auto;
 }
 
-/* Exception for lava lamp canvas - needs to be full screen */
+/* Lava lamp: fill layout viewport — avoid 100vw (scrollbar width on Windows breaks 100% zoom layout) */
 #lava-lamp-canvas {
   display: block !important;
   position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
   z-index: 0 !important;
   pointer-events: none !important;
-  /* Fix for fullscreen canvas */
   box-sizing: border-box !important;
   overflow: hidden !important;
 }
@@ -637,7 +635,7 @@ canvas#lava-lamp-canvas {
   min-width: 0 !important;
   min-height: 0 !important;
   transform: none !important;
-  object-fit: fill !important;
+  object-fit: cover !important;
   /* Ensure no shadows or borders affect positioning */
   box-shadow: none !important;
   border-radius: 0 !important;
@@ -977,11 +975,11 @@ body.modal-open #mainContent.store-selection-disabled,
     --lineage-mixed: rgba(0, 33, 245, 0.8);
     --lineage-para: rgba(200, 50, 120, 0.8);
     
-    /* Column Width Variables - Flexible for natural layout */
-    --canvas-max-width: 100%;        /* Allow full width with padding */
-    --filter-column-width: auto;      /* Bootstrap columns (1-12) - can use decimals */
-    --center-column-width: 1.0;      /* Bootstrap columns (1-12) - can use decimals */
-    --tag-list-column-width: 5.1;   /* Bootstrap columns (1-12) - can use decimals */
+    /* Column width vars: numeric only (used in calc(x/12*100%)); auto breaks calc on some paths */
+    --canvas-max-width: 100%;
+    --filter-column-width: 2.5;
+    --center-column-width: 2.75;
+    --tag-list-column-width: 3.325;
     
     /* Height Variables - Flexible for natural layout */
     --tag-list-height: max(var(--tag-list-min-height), calc(100vh - var(--tag-list-vertical-offset)));        /* Height of tag list containers */
@@ -3709,13 +3707,20 @@ body.modal-open #mainContent.store-selection-disabled,
 }
 
 .saved-lists-btn .saved-lists-label {
-  display: inline-block !important;
+  display: none !important;
   font-size: 1rem !important;
   line-height: 1 !important;
   margin-left: 0 !important;
   padding: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
+}
+
+.saved-lists-btn {
+  min-width: 36px !important;
+  width: 36px !important;
+  padding: 0 !important;
+  gap: 0 !important;
 }
 
 /* If you want the button even more compact (icon-only), uncomment below */
@@ -3767,6 +3772,44 @@ body.modal-open #mainContent.store-selection-disabled,
 .btn-collapse-all span {
   font-size: 0.85rem !important;
   line-height: 1 !important;
+}
+
+/* UI cleanup: normalize list header action row behavior without resizing controls. */
+.list-header-actions {
+  flex-wrap: nowrap !important;
+}
+
+.list-header-actions > * {
+  flex: 0 0 auto !important;
+}
+
+.btn-header-icon {
+  min-height: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  width: auto !important;
+  padding: 0 0.6rem !important;
+  gap: 0.4rem !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(108, 117, 125, 0.28) !important;
+  background: rgba(108, 117, 125, 0.08) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.2s ease !important;
+}
+
+.btn-header-icon:hover {
+  background: rgba(108, 117, 125, 0.18) !important;
+  color: #fff !important;
+  border-color: rgba(108, 117, 125, 0.45) !important;
+}
+
+.btn-header-icon span {
+  font-size: 0.85rem !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
 }
 
   /* Tag items with dropdowns */
@@ -7831,12 +7874,12 @@ body.modal-open #mainContent.store-selection-disabled,
   min-height: 80vh;
   align-items: start !important;
   display: grid !important;
-  /* Left vertical filter sidebar + 2 side lists + center controls */
-  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) minmax(170px, 210px) minmax(0, 1fr);
+  /* Left filter sidebar + tag lists + center — tracks own widths; stretch fills 1fr on all monitors */
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr) minmax(260px, 320px) minmax(0, 1fr);
   gap: 1rem !important;
   padding-top: 0 !important;
   margin-top: 0 !important;
-  justify-items: center !important;
+  justify-items: stretch !important;
 }
 
 .main-content-row > [data-container-type] {
@@ -7942,12 +7985,13 @@ body.modal-open #mainContent.store-selection-disabled,
   }
 }
 
-/* Center column fixed width — must come after generic rules to win */
+/* Center column — align with grid track minmax(260px,320px); higher spec than legacy [data-container-type] % rules */
 .main-content-row > [data-container-type="center"] {
-  flex: 0 0 240px !important;
-  width: 240px !important;
-  min-width: 240px !important;
-  max-width: 240px !important;
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  min-width: 260px !important;
+  max-width: 320px !important;
+  box-sizing: border-box !important;
 }
 
 /* Left sidebar filter (vertical) */
@@ -8621,17 +8665,10 @@ input.filter-select#manifestRefFilter:active {
   }
 }
 
-/* Let main content containers shrink without overlapping when viewport narrows */
-.main-content-row > [data-container-type] {
-  flex: 1 1 0 !important;
+/* Grid row: only side lists need min-width 0 for fr overflow; center sizing is above (~7946) */
+.main-content-row > [data-container-type="available"],
+.main-content-row > [data-container-type="selected"] {
   min-width: 0 !important;
-}
-/* Center column overrides the generic rule above */
-.main-content-row > [data-container-type="center"] {
-  flex: 0 0 240px !important;
-  width: 240px !important;
-  min-width: 240px !important;
-  max-width: 240px !important;
 }
 .main-content-row .glass-card {
   min-height: 0 !important;
@@ -11564,16 +11601,13 @@ input.filter-select#manifestRefFilter:active {
 /* ========================================
    FULLSCREEN CANVAS FIX - FINAL OVERRIDE
    ======================================== */
-/* CRITICAL: Ensure lava lamp canvas fills entire screen without any gaps or shadows */
+/* Lava lamp mid-file override — match inset/% (no 100vw) so canvas layer matches layout at 100% zoom */
 #lava-lamp-canvas {
   display: block !important;
   position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   margin: 0 !important;
   padding: 0 !important;
   border: none !important;
@@ -11586,18 +11620,15 @@ input.filter-select#manifestRefFilter:active {
   overflow: hidden !important;
   transform: none !important;
   object-fit: cover !important;
-  /* Ensure no browser default spacing */
   background: transparent !important;
 }
-/* Override any inherited styles that might affect canvas positioning */
 canvas#lava-lamp-canvas {
   max-width: none !important;
   max-height: none !important;
-  min-width: 100vw !important;
-  min-height: 100vh !important;
-  /* Force exact viewport dimensions */
-  width: 100vw !important;
-  height: 100vh !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* ========================================
@@ -11633,11 +11664,11 @@ canvas#lava-lamp-canvas {
   overflow: hidden !important;
 }
 
-/* Ensure body and html don't interfere */
+/* Do not force overflow-x: visible — it overrides earlier hidden and causes horizontal scroll on some PCs */
 html, body {
   margin: 0 !important;
   padding: 0 !important;
-  overflow-x: visible !important;
+  overflow-x: hidden !important;
 }
 
 /* Remove shadows from modals only - don't break responsive design */
@@ -13145,11 +13176,119 @@ html, body {
 .main-content-row > [data-container-type="center"] .cc-field > #templateGroupSelect:focus,
 .main-content-row > [data-container-type="center"] .cc-field > #templateSelect:hover,
 .main-content-row > [data-container-type="center"] .cc-field > #templateGroupSelect:hover {
-  width: 86% !important;
-  max-width: 86% !important;
+  width: 96% !important;
+  max-width: 96% !important;
   min-width: 0 !important;
   margin-left: auto !important;
   margin-right: auto !important;
+}
+
+/*
+ * Main grid: global [data-container-type] flex/% rules (~8986) still apply and cap
+ * side columns (~28vw), which breaks 1fr tracks (notably 1920×1080). Reset with
+ * higher specificity; load after that block.
+ */
+.main-content-row > [data-container-type="filter"],
+.main-content-row > [data-container-type="available"],
+.main-content-row > [data-container-type="selected"] {
+  flex: unset !important;
+  flex-basis: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  width: 100% !important;
+}
+
+/* Short viewports (e.g. 1080p): 80vh tag floor + chrome overflows — cap min height */
+@media (min-width: 1200px) and (max-height: 1100px) {
+  :root {
+    --tag-list-min-height: min(68vh, calc(100vh - 280px));
+  }
+}
+@supports (height: 100dvh) {
+  @media (min-width: 1200px) and (max-height: 1100px) {
+    :root {
+      --tag-list-min-height: min(68vh, calc(100dvh - 280px));
+    }
+  }
+}
+
+/* Stop stretching list rows/sections; keep natural stacked spacing. */
+#availableTags .tag-list,
+#selectedTags .tag-list {
+  display: block !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+#availableTags .vendor-section,
+#availableTags .brand-section,
+#availableTags .product-type-section,
+#availableTags .weight-section,
+#availableTags .vendor-content,
+#availableTags .brand-content,
+#availableTags .product-type-content,
+#availableTags .weight-content,
+#selectedTags .vendor-section,
+#selectedTags .brand-section,
+#selectedTags .product-type-section,
+#selectedTags .weight-section,
+#selectedTags .vendor-content,
+#selectedTags .brand-content,
+#selectedTags .product-type-content,
+#selectedTags .weight-content {
+  display: block !important;
+  flex: 0 0 auto !important;
+  min-height: auto !important;
+  max-height: none !important;
+}
+
+/* Scroll/filters stability patch: avoid trapped overflow from recent height overrides. */
+.main-content-row {
+  min-height: auto !important;
+  align-items: stretch !important;
+}
+
+/* Final monitor-consistency lock: one bounded viewport-derived height for all side panes. */
+:root {
+  --tag-pane-height: clamp(32rem, calc(100vh - 250px), 78rem);
+}
+@supports (height: 100dvh) {
+  :root {
+    --tag-pane-height: clamp(32rem, calc(100dvh - 250px), 78rem);
+  }
+}
+
+.main-content-row > [data-container-type="filter"] {
+  max-height: var(--tag-pane-height) !important;
+  height: var(--tag-pane-height) !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+.main-content-row > [data-container-type="available"],
+.main-content-row > [data-container-type="selected"] {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.main-content-row > [data-container-type="available"] .glass-card,
+.main-content-row > [data-container-type="selected"] .glass-card,
+.main-content-row > [data-container-type="available"] .card-body,
+.main-content-row > [data-container-type="selected"] .card-body {
+  min-height: 0 !important;
+  overflow: visible !important;
+}
+
+.main-content-row > [data-container-type="available"] #availableTags,
+.main-content-row > [data-container-type="selected"] #selectedTags {
+  height: var(--tag-pane-height) !important;
+  min-height: 0 !important;
+  max-height: var(--tag-pane-height) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
 }
 
 /* ========================================

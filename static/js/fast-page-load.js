@@ -82,7 +82,6 @@
 
             if (alreadyHydrated || tagsAlreadyRendered) {
                 console.log(`✅ Tags already ${alreadyHydrated ? 'hydrated from cache' : 'rendered in DOM'} (${alreadyHydrated ? this.state.tags.length : 'rendered'} tags), skipping load`);
-                // Still load selected tags and filters in background
                 Promise.allSettled([
                     this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
                     this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
@@ -231,7 +230,8 @@
                 }).catch(err => {
                     console.warn('⚠️ Background load error (non-critical):', err);
                 });
-                
+
+
                 return; // Exit early - we have cached data
             }
             

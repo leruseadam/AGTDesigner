@@ -27,18 +27,35 @@
   // Show canvas as soon as WebGL context is available
   showCanvas();
 
+  function readViewportCssPixels() {
+    const vv = window.visualViewport;
+    if (vv && typeof vv.width === 'number') {
+      return {
+        width: vv.width,
+        height: vv.height,
+        offsetLeft: vv.offsetLeft || 0,
+        offsetTop: vv.offsetTop || 0,
+      };
+    }
+    return {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      offsetLeft: 0,
+      offsetTop: 0,
+    };
+  }
+
   function resize() {
-    // Get actual viewport dimensions
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const vp = readViewportCssPixels();
+    const vw = vp.width;
+    const vh = vp.height;
     const dpr = window.devicePixelRatio || 1;
-    
-    // Set CSS dimensions to fill viewport
+
     canvas.style.position = 'fixed';
-    canvas.style.top = '0px';
-    canvas.style.left = '0px';
-    canvas.style.right = '0px';
-    canvas.style.bottom = '0px';
+    canvas.style.left = vp.offsetLeft + 'px';
+    canvas.style.top = vp.offsetTop + 'px';
+    canvas.style.right = 'auto';
+    canvas.style.bottom = 'auto';
     canvas.style.width = vw + 'px';
     canvas.style.height = vh + 'px';
     canvas.style.zIndex = '-1';
@@ -48,10 +65,9 @@
     canvas.style.border = 'none';
     canvas.style.display = 'block';
     canvas.style.background = 'transparent';
-    
-    // Set canvas internal resolution to match display size with device pixel ratio
-    const displayWidth = Math.floor(vw * dpr);
-    const displayHeight = Math.floor(vh * dpr);
+
+    const displayWidth = Math.max(1, Math.floor(vw * dpr));
+    const displayHeight = Math.max(1, Math.floor(vh * dpr));
     
     canvas.width = displayWidth;
     canvas.height = displayHeight;
@@ -60,6 +76,10 @@
     gl.viewport(0, 0, displayWidth, displayHeight);
   }
   window.addEventListener('resize', resize);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+    window.visualViewport.addEventListener('scroll', resize);
+  }
   resize();
 
   // Vertex shader (simple passthrough)

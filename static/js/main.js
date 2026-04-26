@@ -203,6 +203,103 @@ if (typeof window !== 'undefined') {
     window.resolveDohBadgeStatusFromTag = resolveDohBadgeStatusFromTag;
 }
 
+const RECENT_PRINTED_TAGS_KEY = 'agt_recently_printed_tags_v1';
+const RECENT_PRINTED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function _normalizeTagHistoryKey(name) {
+    if (name === undefined || name === null) return '';
+    return String(name).trim().toLowerCase();
+}
+
+function _readRecentPrintedMap() {
+    if (typeof window === 'undefined' || !window.localStorage) return {};
+    try {
+        const raw = window.localStorage.getItem(RECENT_PRINTED_TAGS_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function _writeRecentPrintedMap(mapObj) {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+        window.localStorage.setItem(RECENT_PRINTED_TAGS_KEY, JSON.stringify(mapObj || {}));
+    } catch (_) {
+        // Ignore storage/quota issues for this non-critical UX marker.
+    }
+}
+
+function _cleanupRecentPrintedMap(mapObj) {
+    const now = Date.now();
+    const cleaned = {};
+    if (!mapObj || typeof mapObj !== 'object') return cleaned;
+    for (const [nameKey, ts] of Object.entries(mapObj)) {
+        if (!nameKey) continue;
+        const tsNum = Number(ts);
+        if (!Number.isFinite(tsNum)) continue;
+        if (now - tsNum <= RECENT_PRINTED_WINDOW_MS) cleaned[nameKey] = tsNum;
+    }
+    return cleaned;
+}
+
+function markTagsAsRecentlyPrinted(tagNames) {
+    if (!Array.isArray(tagNames) || tagNames.length === 0) return;
+    const now = Date.now();
+    const recentMap = _cleanupRecentPrintedMap(_readRecentPrintedMap());
+    for (const name of tagNames) {
+        const key = _normalizeTagHistoryKey(name);
+        if (!key) continue;
+        recentMap[key] = now;
+    }
+    _writeRecentPrintedMap(recentMap);
+}
+
+function clearRecentPrintedTags() {
+    _writeRecentPrintedMap({});
+}
+
+function isTagRecentlyPrinted(tag, fallbackName = '') {
+    const recentMap = _cleanupRecentPrintedMap(_readRecentPrintedMap());
+    _writeRecentPrintedMap(recentMap);
+    const candidateKeys = [
+        _normalizeTagHistoryKey(tag && tag['Product Name*']),
+        _normalizeTagHistoryKey(tag && tag.ProductName),
+        _normalizeTagHistoryKey(tag && tag.displayName),
+        _normalizeTagHistoryKey(fallbackName),
+    ].filter(Boolean);
+    return candidateKeys.some((k) => {
+        const ts = Number(recentMap[k]);
+        return Number.isFinite(ts) && (Date.now() - ts <= RECENT_PRINTED_WINDOW_MS);
+    });
+}
+
+if (typeof window !== 'undefined') {
+    window.clearRecentPrintedTags = clearRecentPrintedTags;
+    window.resetPrintIcons = function resetPrintIcons() {
+        try {
+            clearRecentPrintedTags();
+            if (window.TagManager && Array.isArray(window.TagManager.state?.tags)) {
+                window.TagManager._updateAvailableTags(window.TagManager.state.tags, null);
+                const selectedNames = Array.isArray(window.TagManager.state?.persistentSelectedTags)
+                    ? window.TagManager.state.persistentSelectedTags
+                    : [];
+                if (selectedNames.length > 0) {
+                    const selectedObjects = selectedNames
+                        .map(name => window.TagManager._tagLookupMap?.get(name) || window.TagManager.state.tags.find(t => (t['Product Name*'] || t.ProductName) === name))
+                        .filter(Boolean);
+                    window.TagManager.updateSelectedTags(selectedObjects);
+                }
+            }
+            if (typeof showToast === 'function') showToast('Print icons reset', 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Could not reset print icons', 'error');
+        }
+    };
+}
+
 /** Dropdown uses lowercase "none" for empty / non-DOH bucket (matches existing UI). */
 function dohDropdownLabelFromRaw(raw) {
     const n = normalizeDohTagValue(raw);
@@ -241,6 +338,100 @@ function tagMatchesDohFilter(tag, dohFilter) {
         tagU === filterDoh ||
         normalizedTagDoh === filterDoh ||
         tagU === normalizedFilterDoh;
+}
+
+function getAcceptedDateFromTag(tag) {
+    if (!tag || typeof tag !== 'object') return '';
+    const db = tag._db_product || {};
+    const candidates = [
+        tag['Accepted Date'],
+        tag.accepted_date,
+        tag.acceptedDate,
+        tag['accepted date'],
+        tag.accepted_at,
+        tag.acceptedAt,
+        tag['Acceptance Date'],
+        tag.acceptance_date,
+        tag['Manifest Accepted Date'],
+        tag.manifest_accepted_date,
+        tag.manifestAcceptedDate,
+        db['Accepted Date'],
+        db.accepted_date,
+        db.acceptedDate,
+        db.accepted_at,
+        db.acceptedAt,
+        db['Manifest Accepted Date'],
+        db.manifest_accepted_date
+    ];
+    for (const v of candidates) {
+        if (v === undefined || v === null) continue;
+        const t = String(v).trim();
+        if (t) return t;
+    }
+    // Last-resort key scan for varying upstream names
+    try {
+        for (const [k, v] of Object.entries(tag)) {
+            if (v === undefined || v === null) continue;
+            const key = String(k).toLowerCase();
+            if (!/(accepted.*date|date.*accepted|accepted_at|acceptedat)/.test(key)) continue;
+            const t = String(v).trim();
+            if (t) return t;
+        }
+    } catch (_) { /* ignore */ }
+    return '';
+}
+
+function parseAcceptedDateToTs(raw) {
+    if (raw === undefined || raw === null) return null;
+    if (raw instanceof Date && Number.isFinite(raw.getTime())) return raw.getTime();
+    if (typeof raw === 'object') {
+        // Handle common JSON date wrappers
+        const wrapped = raw.date ?? raw.value ?? raw.$date;
+        if (wrapped !== undefined && wrapped !== null && wrapped !== raw) {
+            return parseAcceptedDateToTs(wrapped);
+        }
+    }
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+        if (raw < 100000) return Date.UTC(1899, 11, 30) + Math.floor(raw) * 86400000; // Excel serial
+        return raw < 1e12 ? raw * 1000 : raw;
+    }
+
+    const s = String(raw).trim();
+    if (!s) return null;
+
+    if (/^\d+(?:\.\d+)?$/.test(s)) {
+        const n = Number(s);
+        if (Number.isFinite(n)) {
+            if (n < 100000) return Date.UTC(1899, 11, 30) + Math.floor(n) * 86400000;
+            return n < 1e12 ? n * 1000 : n;
+        }
+    }
+
+    const direct = Date.parse(s);
+    if (!Number.isNaN(direct)) return direct;
+
+    // Try extracting a date token from noisy strings (e.g. "Accepted: 2026-04-21 10:22:00")
+    const token = s.match(/(\d{4}[\/-]\d{1,2}[\/-]\d{1,2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/);
+    if (token) {
+        const tokenParsed = Date.parse(token[1]);
+        if (!Number.isNaN(tokenParsed)) return tokenParsed;
+    }
+
+    const mdY = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})(?:\s+.*)?$/);
+    if (mdY) {
+        const m = Number(mdY[1]);
+        const d = Number(mdY[2]);
+        let y = Number(mdY[3]);
+        if (y < 100) y += 2000;
+        const ts = Date.UTC(y, m - 1, d);
+        return Number.isNaN(ts) ? null : ts;
+    }
+    return null;
+}
+
+function acceptedDateDayKey(ts) {
+    if (!Number.isFinite(ts)) return '';
+    return new Date(ts).toISOString().slice(0, 10);
 }
 
 /** Supplier/vendor on tag — same fields everywhere (dropdown options + applyFilters). */
@@ -1686,6 +1877,10 @@ const TagManager = {
     },
     initialDataRetryDelays: [1500, 3500, 6000, 10000],
     isGenerating: false, // Add generation lock flag
+    /** Prevents stacked background /api/available-tags calls (main cause of load “freezes”). */
+    _availableTagsLineageBgFetchInFlight: false,
+    /** Clears stuck full-screen tag-render overlay once #availableTags shows real rows. */
+    _tagRenderModalWatchdogInterval: null,
 
     getCurrentFileName() {
         // Get current file name from sessionStorage
@@ -2283,6 +2478,9 @@ const TagManager = {
         if (this.hideActionSplash) {
             this.hideActionSplash();
         }
+        if (typeof this.hideTagRenderModal === 'function') {
+            this.hideTagRenderModal();
+        }
         if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
             AppLoadingSplash.stopAutoAdvance();
             AppLoadingSplash.complete();
@@ -2345,8 +2543,10 @@ const TagManager = {
             }, 500);
         }
 
+
         return true;
     },
+
 
     hydrateAvailableTagsFromCache() {
         if (this.state.hydratedFromCache) {
@@ -3206,6 +3406,7 @@ const TagManager = {
     saveFiltersToStorage() {
         try {
             const filters = {
+                acceptedDate: document.getElementById('acceptedDateFilter')?.value || '',
                 vendor: getMainPageVendorFilterEl()?.value || '',
                 brand: document.getElementById('brandFilter')?.value || '',
                 productType: document.getElementById('productTypeFilter')?.value || '',
@@ -3542,6 +3743,7 @@ const TagManager = {
             // This makes the sidebar adapt to POSaBit (no manifest, no DOH) vs Excel (has both).
             const filterGroupVisibility = {
                 'filterGroup_manifestRef': tags.some(t => t['Manifest Ref No'] || t['Manifest Ref'] || t['Manifest Ref #'] || t.manifest_ref_no || t.manifest_ref || t['Lot Number'] || t.lot_number),
+                'filterGroup_acceptedDate': tags.some(t => getAcceptedDateFromTag(t)),
                 'filterGroup_vendor':      filterOptionsArrays.vendor.length > 0,
                 'filterGroup_brand':       filterOptionsArrays.brand.length > 0,
                 'filterGroup_productType': filterOptionsArrays.productType.length > 0,
@@ -4141,6 +4343,7 @@ const TagManager = {
         // Fast path: show all if no filters (Mac-like speed)
         const productNameFilter = document.getElementById('productNameFilter')?.value || '';
         const manifestRefFilter = document.getElementById('manifestRefFilter')?.value || '';
+        const acceptedDateFilter = document.getElementById('acceptedDateFilter')?.value || '';
         const vendorFilter = getMainPageVendorFilterEl()?.value || '';
         // CRITICAL FIX: Ensure brand filter value is always read correctly, with fallback to state
         const brandFilterElement = document.getElementById('brandFilter');
@@ -4168,10 +4371,10 @@ const TagManager = {
         const highCbdFilter = document.getElementById('highCbdFilter')?.value || '';
         const strainFilter = document.getElementById('strainFilter')?.value || '';
         
-        verboseLog('🔍 Current filter values:', { productNameFilter, manifestRefFilter, vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter, strainFilter });
+        verboseLog('🔍 Current filter values:', { productNameFilter, manifestRefFilter, acceptedDateFilter, vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter, strainFilter });
         
         // Check if all filters are "All" - show everything (fast path)
-        const allFiltersAll = [productNameFilter, manifestRefFilter, vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter, strainFilter]
+        const allFiltersAll = [productNameFilter, manifestRefFilter, acceptedDateFilter, vendorFilter, brandFilter, productTypeFilter, lineageFilter, weightFilter, priceFilter, dohFilter, highCbdFilter, strainFilter]
             .every(filter => !filter || filter.toString().trim() === '' || filter.toString().toLowerCase() === 'all');
         
         verboseLog('🔍 All filters empty?', allFiltersAll);
@@ -4207,6 +4410,7 @@ const TagManager = {
         const filterKey = [
             productNameFilter || '',
             manifestRefFilter || '',
+            acceptedDateFilter || '',
             vendorFilter || '',
             brandFilter || '',
             productTypeFilter || '',
@@ -4258,7 +4462,17 @@ const TagManager = {
         
         verboseLog('applyFilters - tagsToFilter length:', tagsToFilter.length);
         verboseLog('applyFilters - first tag sample:', tagsToFilter && tagsToFilter.length > 0 ? tagsToFilter[0] : null);
-        
+
+        let mostRecentAcceptedDayKey = '';
+        if (acceptedDateFilter === 'mostRecent') {
+            let maxTs = null;
+            for (const t of tagsToFilter) {
+                const ts = parseAcceptedDateToTs(getAcceptedDateFromTag(t));
+                if (Number.isFinite(ts) && (maxTs === null || ts > maxTs)) maxTs = ts;
+            }
+            if (maxTs !== null) mostRecentAcceptedDayKey = acceptedDateDayKey(maxTs);
+        }
+
         const filteredTags = tagsToFilter.filter(tag => {
             // Product name text filter (POSaBit-style)
             if (productNameFilter && productNameFilter.trim() !== '') {
@@ -4306,6 +4520,17 @@ const TagManager = {
                             return false;
                         }
                     } else {
+                        return false;
+                    }
+                }
+            }
+
+            // Accepted Date filter: keep only tags from the most recent accepted day
+            if (acceptedDateFilter === 'mostRecent') {
+                // If no parseable accepted date exists in current data, do not hide all products.
+                if (mostRecentAcceptedDayKey) {
+                    const ts = parseAcceptedDateToTs(getAcceptedDateFromTag(tag));
+                    if (!Number.isFinite(ts) || acceptedDateDayKey(ts) !== mostRecentAcceptedDayKey) {
                         return false;
                     }
                 }
@@ -5374,19 +5599,22 @@ const TagManager = {
         //     filteredTags: filteredTags ? filteredTags.slice(0, 2) : null
         // });
         
-        // Show loading splash IMMEDIATELY for tag population (no delay, no conditions)
-        const tagsToShow = filteredTags || originalTags;
         // CRITICAL FIX: Only show loading if store is confirmed
         // Don't show loading splash before store selection modal
         const selectedStore = (window.sessionStorage && (null)) || null;
         const storeConfirmed = true; // store always confirmed
         
-        // Show splash immediately when tags are being loaded, unless user is actively searching OR store not confirmed
-        if (!this.state.isSearching && storeConfirmed) {
+        // Show splash when loading — but do NOT wipe a huge rendered list on every filter tick.
+        // Replacing #availableTags with a spinner forces a full DOM teardown + rebuild (~2k nodes) and feels frozen.
+        const availableTagsContainer = document.getElementById('availableTags');
+        const filteredActive = filteredTags !== null && filteredTags !== undefined;
+        const hasExistingInventory =
+            availableTagsContainer &&
+            availableTagsContainer.querySelector('.tag-item, .vendor-section, .tag-list');
+        const skipDestructiveLoadingUi = Boolean(filteredActive && hasExistingInventory);
+
+        if (!this.state.isSearching && storeConfirmed && !skipDestructiveLoadingUi) {
             this.showActionSplash('Loading tags...');
-            
-            // Show loading indicator in container IMMEDIATELY to prevent blank screen
-            const availableTagsContainer = document.getElementById('availableTags');
             if (availableTagsContainer) {
                 availableTagsContainer.innerHTML = `
                     <div class="text-center py-4">
@@ -7055,6 +7283,7 @@ const TagManager = {
                 // CRITICAL FIX: Prevent duplicate organization if already in progress
                 if (this._isOrganizingTags) {
                     console.log('⏭️ Skipping tag organization - already in progress');
+                    reenableScaling();
                     return;
                 }
                 this._isOrganizingTags = true;
@@ -7972,6 +8201,9 @@ const TagManager = {
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
                     }
+                    if (typeof this.hideTagRenderModal === 'function') {
+                        this.hideTagRenderModal();
+                    }
                     if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                         AppLoadingSplash.stopAutoAdvance();
                         AppLoadingSplash.complete();
@@ -7992,6 +8224,9 @@ const TagManager = {
             console.log('⚡ Force hiding splash after 500ms timeout for instant UX');
             if (this.hideActionSplash) {
                 this.hideActionSplash();
+            }
+            if (typeof this.hideTagRenderModal === 'function') {
+                this.hideTagRenderModal();
             }
             if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                 AppLoadingSplash.stopAutoAdvance();
@@ -8046,6 +8281,9 @@ const TagManager = {
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
                 }
+                if (typeof this.hideTagRenderModal === 'function') {
+                    this.hideTagRenderModal();
+                }
                 // Also complete AppLoadingSplash if it's still showing
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
@@ -8061,6 +8299,9 @@ const TagManager = {
                 }
                 if (this.hideActionSplash) {
                     this.hideActionSplash();
+                }
+                if (typeof this.hideTagRenderModal === 'function') {
+                    this.hideTagRenderModal();
                 }
                 if (AppLoadingSplash && AppLoadingSplash.isVisible) {
                     AppLoadingSplash.stopAutoAdvance();
@@ -8674,8 +8915,18 @@ const TagManager = {
         // Create image container for dynamic updates
         const imageContainer = document.createElement('span');
         imageContainer.className = 'doh-image-container';
-        imageContainer.style.display = 'inline-block'; // CRITICAL: Ensure container is visible
-        imageContainer.style.verticalAlign = 'middle'; // CRITICAL: Align with text
+        imageContainer.style.display = 'inline-flex'; // keep a stable badge slot
+        imageContainer.style.alignItems = 'center';
+        imageContainer.style.justifyContent = 'center';
+        imageContainer.style.verticalAlign = 'middle';
+        imageContainer.style.marginLeft = '6px';
+        imageContainer.style.width = '28px';
+        imageContainer.style.minWidth = '28px';
+        imageContainer.style.maxWidth = '28px';
+        imageContainer.style.height = '18px';
+        imageContainer.style.lineHeight = '18px';
+        imageContainer.style.overflow = 'hidden';
+        imageContainer.style.boxSizing = 'border-box';
         
         // Function to update images based on DOH status with performance optimization
         const updateDohImage = (status) => {
@@ -8738,11 +8989,14 @@ const TagManager = {
                 };
                 imageContainer.appendChild(dohImg);
                 // CRITICAL: Ensure container is visible after adding image
-                imageContainer.style.display = 'inline-block';
+                imageContainer.style.display = 'inline-flex';
                 imageContainer.style.visibility = 'visible';
                 imageContainer.style.opacity = '1';
                 imageContainer.style.width = 'auto';
-                imageContainer.style.height = 'auto';
+                imageContainer.style.height = '18px';
+                imageContainer.style.border = 'none';
+                imageContainer.style.background = 'transparent';
+                imageContainer.style.marginLeft = '6px';
                 // CRITICAL DEBUG: Always log badge creation for first few tags
                 if (window._dohDebugCount !== undefined && window._dohDebugCount < 5) {
                     console.log(`✅ Added DOH badge for "${cleanedName}" (status: ${status}) - container children: ${imageContainer.children.length}, container display: ${imageContainer.style.display}, container parent: ${imageContainer.parentElement ? 'exists' : 'null'}`);
@@ -8751,8 +9005,17 @@ const TagManager = {
                 if (typeof verboseLog === 'function') {
                     verboseLog(`✅ Added DOH badge for "${cleanedName}" (status: ${status}) - container now has ${imageContainer.children.length} child(ren)`);
                 }
+            } else {
+                // NONE: do not render a separate left placeholder. Text lives in the dropdown label.
+                imageContainer.style.display = 'none';
+                imageContainer.style.width = '0';
+                imageContainer.style.minWidth = '0';
+                imageContainer.style.maxWidth = '0';
+                imageContainer.style.height = '0';
+                imageContainer.style.marginLeft = '0';
+                imageContainer.style.border = 'none';
+                imageContainer.style.background = 'transparent';
             }
-            // NONE shows no image
             
             performanceUtils.endTiming(startTime, 'DOH image update');
         };
@@ -8840,11 +9103,24 @@ const TagManager = {
             }
         }
         
+        // Show print marker for tags printed in the last 7 days.
+        if (isTagRecentlyPrinted(tag, displayName)) {
+            const printedRecentlyIcon = document.createElement('span');
+            printedRecentlyIcon.className = 'recent-print-icon';
+            printedRecentlyIcon.textContent = '🖨️';
+            printedRecentlyIcon.title = 'Printed in the last 7 days';
+            printedRecentlyIcon.setAttribute('aria-label', 'Printed in the last 7 days');
+            printedRecentlyIcon.style.cssText = 'display:inline-block;margin-left:6px;margin-right:4px;font-size:16px;line-height:1;vertical-align:middle;opacity:0.95;';
+            tagInfo.appendChild(printedRecentlyIcon);
+        }
+
         // CRITICAL FIX: Always append imageContainer, even if empty (for dynamic updates)
         // Ensure container is visible before appending
-        imageContainer.style.display = 'inline-block';
-        imageContainer.style.visibility = 'visible';
-        imageContainer.style.opacity = '1';
+        if (initialDohStatus !== 'NONE') {
+            imageContainer.style.display = 'inline-flex';
+            imageContainer.style.visibility = 'visible';
+            imageContainer.style.opacity = '1';
+        }
         tagInfo.appendChild(imageContainer);
         
         // CRITICAL DEBUG: Log container append for first few tags
@@ -9180,11 +9456,28 @@ const TagManager = {
         dohSelect.style.backgroundPosition = 'right 6px center';
         dohSelect.style.backgroundSize = '8px 8px'; /* Larger arrow */
 
+        const applyDohPlaceholderStyle = (value) => {
+            const isNone = (value || '').toString().toUpperCase() === 'NONE';
+            if (isNone) {
+                dohSelect.style.color = 'rgba(172, 179, 191, 0.52)';
+                dohSelect.style.fontStyle = 'italic';
+                dohSelect.style.fontWeight = '400';
+                dohSelect.style.fontSize = '8px';
+                dohSelect.style.textShadow = 'none';
+            } else {
+                dohSelect.style.color = '#ffffff';
+                dohSelect.style.fontStyle = 'normal';
+                dohSelect.style.fontWeight = '500';
+                dohSelect.style.fontSize = '9px';
+                dohSelect.style.textShadow = 'none';
+            }
+        };
+
         let currentDropdownStatus = 'NONE'; // Default to NONE
         
         // All products get normal DOH dropdown
         const dohOptions = [
-            { value: 'NONE', label: '' }, // Empty label for "No DOH"
+            { value: 'NONE', label: '(DOH)' }, // Show muted placeholder text when no badge is set
             { value: 'DOH', label: 'DOH' },
             { value: 'THC', label: 'THC' },
             { value: 'CBD', label: 'CBD' }
@@ -9215,6 +9508,7 @@ const TagManager = {
             }
             dohSelect.appendChild(optionElement);
         });
+        applyDohPlaceholderStyle(currentDropdownStatus);
 
         // Prevent DOH dropdown interactions from triggering drag/sort on parent
         // Stop propagation on multiple pointer events to ensure the native select opens reliably
@@ -9272,6 +9566,7 @@ const TagManager = {
                     // Revert dropdown and image
                     dohSelect.disabled = false;
                     dohSelect.value = prevValue;
+                    applyDohPlaceholderStyle(prevValue);
                     const tagElementTimeout = dohSelect.closest('.tag-row, .tag-item');
                     if (tagElementTimeout && typeof tagElementTimeout._updateDohImage === 'function') {
                         tagElementTimeout._updateDohImage(prevValue);
@@ -9314,6 +9609,7 @@ const TagManager = {
                     tag.doh = backendDohStatus;
                     tag['DOH Compliant (Yes/No)'] = backendDohStatus;
                     dohSelect.value = newDohStatus;  // Keep dropdown showing UI value
+                    applyDohPlaceholderStyle(newDohStatus);
                     verboseLog(`✅ DOH status updated for "${displayName}" to: ${backendDohStatus} (frontend dropdown: ${newDohStatus})`);
                     
                     // Image already updated above for immediate feedback
@@ -9340,6 +9636,7 @@ const TagManager = {
                 console.error(`Failed to update DOH status:`, error);
                 // On failure, revert to previous value
                 dohSelect.value = prevValue;
+                applyDohPlaceholderStyle(prevValue);
                 // Revert image - CRITICAL FIX: Get updateDohImage from tagElement
                 const tagElement = dohSelect.closest('.tag-row, .tag-item');
                 if (tagElement && typeof tagElement._updateDohImage === 'function') {
@@ -12271,6 +12568,9 @@ const TagManager = {
                         AppLoadingSplash.stopAutoAdvance();
                         AppLoadingSplash.complete();
                     }
+                    if (this.hideTagRenderModal) {
+                        this.hideTagRenderModal();
+                    }
                     return false;
                 }
             }
@@ -12312,8 +12612,8 @@ const TagManager = {
         this._fetchingAvailableTagsStartTime = Date.now();
 
         // Lock UI during tag fetch+render so users can't click partially-built DOM.
-        // Skip the lock when we are doing an instant-cache display (user can already interact).
-        const useInstantCacheDisplay = hasCache && !hasExistingTags && !forceReload;
+        // If we have a local cache, do not block the whole app — list can show while refresh runs.
+        const useInstantCacheDisplay = Boolean(hasCache && !forceReload);
         if (!useInstantCacheDisplay) {
             this.showTagRenderModal('Loading tags...');
         }
@@ -12453,9 +12753,12 @@ const TagManager = {
 
             // CRITICAL: Add safety timeout to hide spinner after longer delay
             // This prevents indefinite hanging even if error handling fails
-            if (!hasExistingTags) {
-                // PERFORMANCE: Much shorter timeout for faster failure recovery
-                const safetyTimeoutMs = isWebClient ? 4000 : 8000; // 4s for web, 8s for desktop
+            // Always arm on web: refreshes can have tags in state while a slow fetch runs, which used to
+            // skip this timeout and leave the full-screen modal up for the entire request.
+            if (!hasExistingTags || isWebClient) {
+                const safetyTimeoutMs = !hasExistingTags
+                    ? (isWebClient ? 4000 : 8000)
+                    : (isWebClient ? 10000 : 15000);
                 safetyTimeout = setTimeout(() => {
                     console.warn(`⚠️ Safety timeout: Hiding loading spinner (${safetyTimeoutMs}ms)`);
                     if (this.hideTagRenderModal) {
@@ -12524,6 +12827,9 @@ const TagManager = {
                     // Hide splash if we're skipping
                     if (this.hideActionSplash) {
                         this.hideActionSplash();
+                    }
+                    if (this.hideTagRenderModal) {
+                        this.hideTagRenderModal();
                     }
                     return false;
                 }
@@ -12597,17 +12903,6 @@ const TagManager = {
             console.log(`🔄 Entering retry loop (maxRetries: ${maxRetries}, maxProcessingRetries: ${maxProcessingRetries}, timeout: ${fetchTimeout}ms, web: ${isWebClient})`);
             console.log(`📊 Current state: retryCount=${retryCount}, processingRetryCount=${processingRetryCount}`);
             
-            // ⚡ CACHE FIRST: Try to load from cache before making network requests
-            if (retryCount === 0 && !forceReload) {
-                console.log('🔄 Attempting cache load before network request...');
-                const cacheLoaded = this.hydrateAvailableTagsFromCache();
-                if (cacheLoaded) {
-                    console.log('✅ Cache loaded successfully - skipping network request');
-                    return true;
-                }
-                console.log('📊 No cache available - proceeding with network request');
-            }
-            
             // CRITICAL: Continue retrying as long as EITHER condition is met (not both)
             // This allows 202 retries to continue even after error retries are exhausted
             while (retryCount < maxRetries || processingRetryCount < maxProcessingRetries) {
@@ -12626,6 +12921,16 @@ const TagManager = {
                     const isDatabaseMode = !currentFile || currentFile === 'nofile' || currentFile === '' || currentFile === 'database';
                     const lastLineageUpdateTime = sessionStorage.getItem('lastLineageUpdateTime') || localStorage.getItem('lastLineageUpdateTime');
                     const hasRecentLineageUpdate = lastLineageUpdateTime && (Date.now() - parseInt(lastLineageUpdateTime, 10)) < 300000; // 5 minutes
+                    let isNavigationReload = false;
+                    try {
+                        const nav = (typeof performance !== 'undefined' && performance.getEntriesByType)
+                            ? performance.getEntriesByType('navigation')[0]
+                            : null;
+                        if (nav && nav.type === 'reload') isNavigationReload = true;
+                    } catch (e) { /* ignore */ }
+                    if (!isNavigationReload && typeof performance !== 'undefined' && performance.navigation && performance.navigation.type === 1) {
+                        isNavigationReload = true;
+                    }
                     
                     // CRITICAL FIX: For web clients, if lineage was recently updated, force nocache to bypass stale cache
                     // Web endpoint will still get database lineage when needed (it checks lineage_update_timestamp)
@@ -12633,8 +12938,8 @@ const TagManager = {
                     // path returns an empty payload and permanently blocks tag loading. Let the backend handle DB/Excel
                     // fallbacks instead of hard-failing the entire request.
                     const forceDbLineage = false;
-                    // CRITICAL: Force nocache if lineage was recently updated (even for web clients) to get fresh lineage
-                    const useCache = retryCount === 0 && !forceReload && !hasRecentLineageUpdate;
+                    // POS/DB and full page reloads must bypass stale server/browser caches so new products appear.
+                    const useCache = retryCount === 0 && !forceReload && !hasRecentLineageUpdate && !isDatabaseMode && !isNavigationReload;
                     const cacheParam = useCache ? '' : '&nocache=1';
                     // Skip prefer_db entirely to avoid empty-error payloads; rely on backend fallbacks instead
                     const preferDbParam = '';
@@ -12642,21 +12947,24 @@ const TagManager = {
                     // Use web endpoint for web clients, regular endpoint for localhost/desktop
                     const baseEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
                     
-                    // PERFORMANCE: On first try with fast_load, skip nocache to hit backend cache
-                    const optimizedFetchUrl = retryCount === 0 && fastLoadParam ? 
-                        `${baseEndpoint}?t=${timestamp}${fastLoadParam}${preferDbParam}` :
-                        `${baseEndpoint}?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
+                    // Always include cacheParam so nocache is never dropped when fast_load is on (instant-cache path).
+                    const optimizedFetchUrl = `${baseEndpoint}?t=${timestamp}${cacheParam}${fastLoadParam}${preferDbParam}`;
                     
                     console.log(`🌐 Fetching tags from: ${optimizedFetchUrl} (web client: ${isWebClient})`);
                     console.log(`⏱️ Starting fetch at ${new Date().toISOString()}`);
                     
                     // ⚡ AGGRESSIVE CACHING: Web clients use longer cache (30 min), desktop uses shorter (5 min)
                     const cacheMaxAge = isWebClient ? 1800 : 300; // Web: 30min, Desktop: 5min
+                    const bypassBrowserCache = !useCache || forceReload || hasRecentLineageUpdate;
                     try {
                         response = await fetch(optimizedFetchUrl, {
                             signal: controller.signal,
-                            cache: 'default',
-                            headers: {
+                            cache: bypassBrowserCache ? 'no-store' : 'default',
+                            headers: bypassBrowserCache ? {
+                                'Cache-Control': 'no-cache, no-store, max-age=0',
+                                'Pragma': 'no-cache',
+                                'Expires': '0'
+                            } : {
                                 'Cache-Control': `max-age=${cacheMaxAge}`
                             }
                         });
@@ -13470,13 +13778,22 @@ const TagManager = {
                 this.updateTagCount('selected', this.state.persistentSelectedTags.length);
                 
                 // Background lineage refresh: keep web clients on the fast aligned endpoint.
-                // Desktop/localhost can still do a full-lineage refresh.
+                // Omit nocache=1 here — a second full cold rebuild right after fast_load contends with the main thread + server.
                 setTimeout(() => {
+                    if (this._availableTagsLineageBgFetchInFlight) {
+                        console.log('⏭️ Skipping background lineage fetch — request already in flight');
+                        return;
+                    }
+                    this._availableTagsLineageBgFetchInFlight = true;
+                    const releaseBgFetch = () => {
+                        this._availableTagsLineageBgFetchInFlight = false;
+                    };
+
                     const bgEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
                     const bgFastLoad = isWebClient ? 1 : 0;
                     console.log(`🔄 Background: Fetching lineage refresh (${bgEndpoint}, fast_load=${bgFastLoad})...`);
                     const timestamp = Date.now();
-                    fetch(`${bgEndpoint}?t=${timestamp}&fast_load=${bgFastLoad}&nocache=1`)
+                    fetch(`${bgEndpoint}?t=${timestamp}&fast_load=${bgFastLoad}`)
                         .then(res => {
                             if (!res.ok) {
                                 throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -13555,7 +13872,8 @@ const TagManager = {
                         .catch(err => {
                             console.error('❌ Background lineage fetch failed:', err);
                             console.error('Error details:', err.message, err.stack);
-                        });
+                        })
+                        .finally(releaseBgFetch);
                 }, 1000); // 1 second delay to let UI settle
                 
                 verboseLog(`Successfully updated available tags (fast): ${tags.length} tags`);
@@ -14560,32 +14878,12 @@ const TagManager = {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
 
-            // CRITICAL FIX: Only refresh in background if cache is old (older than 5 minutes)
-            // This prevents unnecessary reloads on every page refresh
-            try {
-                const cacheKey = this.getAvailableTagsCacheKey();
-                const cachedData = sessionStorage.getItem(cacheKey);
-                if (cachedData) {
-                    const payload = JSON.parse(cachedData);
-                    const cacheAge = Date.now() - (payload.timestamp || 0);
-                    const CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes
-
-                    if (cacheAge > CACHE_MAX_AGE) {
-                        console.log(`🔄 Cache is ${Math.round(cacheAge / 1000)}s old, refreshing in background...`);
-                        setTimeout(() => {
-                            if (!this._checkingExistingData && !this.state.initialized) {
-                                this.checkForExistingData().catch(err => {
-                                    console.warn('Background refresh after cache load failed (non-critical):', err);
-                                });
-                            }
-                        }, 2000); // Increased delay to avoid interfering with cache load
-                    } else {
-                        console.log(`✅ Cache is fresh (${Math.round(cacheAge / 1000)}s old), skipping background refresh`);
-                    }
-                }
-            } catch (e) {
-                console.warn('Could not check cache age:', e);
-            }
+            // Always pull fresh catalog from the API after instant cache paint so new products
+            // (e.g. POSaBit) appear on every page load without requiring Reset Cache.
+            this._suppressActionSplash = true;
+            this.fetchAndUpdateAvailableTags()
+                .catch(err => console.warn('Background tag sync after cache hydrate failed (non-critical):', err))
+                .finally(() => { this._suppressActionSplash = false; });
 
             // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();
@@ -14656,9 +14954,10 @@ const TagManager = {
         }
         
         // Set each filter dropdown to saved value or 'All' (or '')
-        const filterIds = ['productNameFilter', 'manifestRefFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter', 'strainFilter'];
+        const filterIds = ['productNameFilter', 'manifestRefFilter', 'acceptedDateFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter', 'strainFilter'];
         const filterMap = {
             'manifestRefFilter': 'manifestRef',
+            'acceptedDateFilter': 'acceptedDate',
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
@@ -14790,10 +15089,11 @@ const TagManager = {
         }
         
         // Set each filter dropdown to saved value or 'All' (or '')
-        const filterIds = ['productNameFilter', 'manifestRefFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter', 'strainFilter'];
+        const filterIds = ['productNameFilter', 'manifestRefFilter', 'acceptedDateFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter', 'strainFilter'];
         const filterMap = {
             'productNameFilter': 'productName',
             'manifestRefFilter': 'manifestRef',
+            'acceptedDateFilter': 'acceptedDate',
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
@@ -15972,6 +16272,7 @@ const TagManager = {
             a.click();
             document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
+            markTagsAsRecentlyPrinted(checkedTags.map(tag => tag['Product Name*'] || tag.ProductName || tag.displayName).filter(Boolean));
             
             // CRITICAL FIX: Mark that we just generated tags to prevent them from being cleared
             // This prevents fetchAndUpdateSelectedTags from clearing selections after generation
@@ -16901,7 +17202,7 @@ const TagManager = {
             this.resetSearchInputs();
             
             // INSTANTANEOUS: Clear all filter dropdowns
-            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
+            const filterIds = ['acceptedDateFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
                 if (filterElement) {
@@ -17488,13 +17789,48 @@ const TagManager = {
                 if (msgEl) msgEl.textContent = message;
             }
             modal.style.display = 'flex';
+            this._armTagRenderModalWatchdog();
         } catch (e) {
             console.warn('showTagRenderModal failed:', e);
         }
     },
 
+    _armTagRenderModalWatchdog() {
+        if (this._tagRenderModalWatchdogInterval != null) {
+            clearInterval(this._tagRenderModalWatchdogInterval);
+            this._tagRenderModalWatchdogInterval = null;
+        }
+        let ticks = 0;
+        const maxTicks = 600;
+        this._tagRenderModalWatchdogInterval = setInterval(() => {
+            ticks++;
+            const modal = document.getElementById('tagRenderModalOverlay');
+            if (!modal || modal.style.display === 'none' || window.getComputedStyle(modal).display === 'none') {
+                clearInterval(this._tagRenderModalWatchdogInterval);
+                this._tagRenderModalWatchdogInterval = null;
+                return;
+            }
+            const c = document.getElementById('availableTags');
+            if (!c) return;
+            const n = c.querySelectorAll('.tag-item, .vendor-section, .tag-row, .simplified-tag-list').length;
+            if (n > 0 && ticks >= 2) {
+                console.log('⚡ Tag render modal watchdog: inventory in DOM, releasing overlay');
+                this.hideTagRenderModal();
+                return;
+            }
+            if (ticks >= maxTicks) {
+                console.warn('⚡ Tag render modal watchdog: max wait, forcing overlay hide');
+                this.hideTagRenderModal();
+            }
+        }, 200);
+    },
+
     hideTagRenderModal() {
         try {
+            if (this._tagRenderModalWatchdogInterval != null) {
+                clearInterval(this._tagRenderModalWatchdogInterval);
+                this._tagRenderModalWatchdogInterval = null;
+            }
             const modal = document.getElementById('tagRenderModalOverlay');
             if (modal) modal.style.display = 'none';
             const availableTagsContainer = document.getElementById('availableTags');
@@ -18925,7 +19261,7 @@ const TagManager = {
     },
 
     setupFilterEventListeners() {
-        const filterIds = ['productNameFilter', 'manifestRefFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
+        const filterIds = ['productNameFilter', 'manifestRefFilter', 'acceptedDateFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
         
         verboseLog('Setting up Mac-like fast filter event listeners...');
         
@@ -18957,6 +19293,7 @@ const TagManager = {
             const filterTypeMap = {
                 'productName': 'productName',
                 'manifestRef': 'manifestRef',
+                'acceptedDate': 'acceptedDate',
                 'vendor': 'vendor',
                 'brand': 'brand',
                 'productType': 'productType',
@@ -19305,6 +19642,7 @@ const TagManager = {
         const idToType = {
             'productNameFilter': 'productName',
             'manifestRefFilter': 'manifestRef',
+            'acceptedDateFilter': 'acceptedDate',
             'vendorFilter': 'vendor',
             'brandFilter': 'brand',
             'productTypeFilter': 'productType',
@@ -19323,6 +19661,7 @@ const TagManager = {
         const filterIds = [
             { id: 'productNameFilter', label: 'Name' },
             { id: 'manifestRefFilter', label: 'Manifest' },
+            { id: 'acceptedDateFilter', label: 'Accepted Date' },
             { id: 'vendorFilter', label: 'Supplier' },
             { id: 'brandFilter', label: 'Brand' },
             { id: 'productTypeFilter', label: 'Type' },
@@ -19435,7 +19774,7 @@ const TagManager = {
             // Instead, do the filter clearing directly
             
             // Clear all filter dropdowns (don't trigger events yet to avoid multiple applyFilters calls)
-            const filterIds = ['vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
+            const filterIds = ['acceptedDateFilter', 'vendorFilter', 'brandFilter', 'productTypeFilter', 'lineageFilter', 'weightFilter', 'priceFilter', 'dohFilter', 'highCbdFilter'];
             
             filterIds.forEach(filterId => {
                 const filterElement = document.getElementById(filterId);
@@ -19624,6 +19963,7 @@ const TagManager = {
             this.state.filters = {
                 productName: '',
                 manifestRef: '',
+                acceptedDate: 'All',
                 vendor: 'All',
                 brand: 'All',
                 productType: 'All',
