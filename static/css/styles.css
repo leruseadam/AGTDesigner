@@ -8012,6 +8012,30 @@ body.modal-open #mainContent.store-selection-disabled,
   }
 }
 
+/*
+ * ~1200–1360px logical width (e.g. 1290px laptops): the default 4-column grid
+ * (320–360px filter + 260–320px center + 1rem gaps) often exceeds the usable
+ * row width once padding/scrollbars are accounted for. Slightly smaller
+ * tracks keep four columns without horizontal overflow.
+ */
+@media (min-width: 1200px) and (max-width: 1360px) {
+  .main-content-row {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(220px, 290px) minmax(0, 1fr);
+    gap: 0.75rem !important;
+  }
+
+  .main-content-row > [data-container-type="center"] {
+    min-width: 220px !important;
+    max-width: 290px !important;
+  }
+
+  .main-content-row > [data-container-type="available"],
+  .main-content-row > [data-container-type="selected"] {
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+}
+
 /* Left sidebar filter (vertical) */
 .main-content-row > [data-container-type="filter"] {
   align-self: stretch !important;
@@ -13268,14 +13292,13 @@ html, body {
   align-items: stretch !important;
 }
 
-/* Final monitor-consistency lock: one bounded viewport-derived height for all side panes. */
+/*
+ * Side panes (filter + tag columns): keep the same vertical budget as #availableTags /
+ * #selectedTags use via --tag-list-height. A separate clamp() here made main-grid
+ * lists visibly shorter than the global tag height rules.
+ */
 :root {
-  --tag-pane-height: clamp(36rem, calc(100vh - 170px), 90rem);
-}
-@supports (height: 100dvh) {
-  :root {
-    --tag-pane-height: clamp(36rem, calc(100dvh - 170px), 90rem);
-  }
+  --tag-pane-height: var(--tag-list-height);
 }
 
 .main-content-row > [data-container-type="filter"] {
@@ -13305,7 +13328,7 @@ html, body {
 .main-content-row > [data-container-type="available"] #availableTags,
 .main-content-row > [data-container-type="selected"] #selectedTags {
   height: var(--tag-pane-height) !important;
-  min-height: 0 !important;
+  min-height: var(--tag-pane-height) !important;
   max-height: var(--tag-pane-height) !important;
   overflow-y: auto !important;
   overflow-x: hidden !important;
