@@ -199,6 +199,70 @@ MENU_FEED_STAGING = "https://staging-app.posabit.com/api/v1/menu_feeds"
 MENU_FEED_PRODUCTION = "https://app.posabit.com/api/v1/menu_feeds"
 
 
+def _posabit_text_suggests_concentrate_or_inhalable(s: str) -> bool:
+    """
+    True when API type/category/name looks like a concentrate or inhalable product.
+
+    POSaBit often stores terp sauce / distillate / live resin *syrups* under generic
+    categories like 'Edible' or strings containing 'Syrup' — those must not become
+    'Edible (Liquid)' or every dab SKU mis-filters as a beverage.
+    """
+    if not s:
+        return False
+    t = str(s).lower()
+    markers = (
+        "terp syrup",
+        "terp sauce",
+        "distillate syrup",
+        "live resin syrup",
+        "rosin syrup",
+        "hash syrup",
+        "htfse",
+        "hcfse",
+        "liquid diamond",
+        "diamond sauce",
+        "sauce only",
+        "dab",
+        "dabs",
+        "for inhalation",
+        "inhalable",
+        "vape",
+        "cartridge",
+        "cart ",
+        "510",
+        "disposable",
+        " puff",
+        "extract",
+        "concentrate",
+        "solvent",
+        "badder",
+        "crumble",
+        "budder",
+        "wax",
+        "shatter",
+        "hash rosin",
+        "live resin",
+        " cured resin",
+        " cured rosin",
+        "distillate",
+        " co2 ",
+        " c02 ",
+        "butane",
+        "ethanol extract",
+        "infused joint",
+        "infused preroll",
+    )
+    if any(m in t for m in markers):
+        return True
+    # Standalone tokens (avoid matching unrelated words)
+    if re.search(
+        r"\b(rosin|resin|distillate|shatter|wax|sauce|badder|hash rosin|hash oil|kief|htfse|hcfse)\b",
+        t,
+    ):
+        return True
+    return False
+
+
 def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallback_category: str) -> str:
     """
     Normalize POSaBit's product_type/category into the app's expected display headers.
@@ -212,6 +276,16 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
     lower_name = name.lower()
     lower_raw = raw.lower()
     lower_cat = cat.lower()
+    combined_type_cat = f"{lower_raw} {lower_cat}".strip()
+
+    # If POSaBit says "Edible" in type but category (or combined) clearly names a dab SKU, classify as concentrate.
+    if combined_type_cat and _posabit_text_suggests_concentrate_or_inhalable(combined_type_cat):
+        if "edible" in lower_raw or "edible" in lower_cat:
+            if not re.search(
+                r"\b(beverage|beverages|soda|smoothie|smoothies|juice|juices|lemonade|cola|tonic|drink|drinks)\b",
+                combined_type_cat,
+            ):
+                return "Concentrate"
 
     # --- API type/category fields first (authoritative) ---
     for s in (lower_raw, lower_cat):
@@ -242,17 +316,20 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
             return "Capsule"
         if "tincture" in s or "sublingual" in s:
             return "Tincture"
-        # Liquid edibles BEFORE generic "edible" — POSaBit often uses "Edible" for oils & drinks
-        if (
-            "liquid edible" in s
-            or "edible liquid" in s
-            or "beverage" in s
-            or "drink" in s
-            or re.search(r'\bshot\b', s)   # word boundary — avoids matching "moonshot"
-            or "soda" in s
-            or "elixir" in s
-            or "syrup" in s
-        ):
+        # Liquid edibles BEFORE generic "edible" — POSaBit often uses "Edible" for oils & drinks.
+        # Do NOT treat terp / distillate / live resin "syrup" SKUs as beverages (see _posabit_text_suggests_concentrate_or_inhalable).
+        conc_like = _posabit_text_suggests_concentrate_or_inhalable(s)
+        explicit_liquid = "liquid edible" in s or "edible liquid" in s
+        if explicit_liquid:
+            return "Concentrate" if conc_like else "Edible (Liquid)"
+        beverage_like = (
+            "beverage" in s
+            or re.search(r"\b(soda|smoothie|smoothies|lemonade|cola|tonic|juice|juices)\b", s)
+            or re.search(r"\bshot\b", s)  # word boundary — avoids "moonshot"
+            or re.search(r"\bdrinks?\b", s)
+        )
+        syrup_or_elixir = "syrup" in s or "elixir" in s
+        if not conc_like and (beverage_like or syrup_or_elixir):
             return "Edible (Liquid)"
         if "edible" in s or "gummy" in s or "gummi" in s or "jell" in s or "candy" in s or "chocolate" in s or "cookie" in s or "brownie" in s:
             return "Edible (Solid)"
@@ -277,7 +354,9 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
         return "Tincture"
     if "capsule" in lower_name:
         return "Capsule"
-    if re.search(r"\bshot\b|wildside|fizz|beverage|soda|smoothie", lower_name):
+    if not _posabit_text_suggests_concentrate_or_inhalable(lower_name) and re.search(
+        r"\bshot\b|wildside|\bfizz\b|beverage|soda|\bsmoothie\b", lower_name
+    ):
         return "Edible (Liquid)"
 
     # Pass through the raw type if it's meaningful
