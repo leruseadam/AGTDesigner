@@ -27,7 +27,7 @@ Set these in your environment (e.g. `.env` or server config). **Do not commit se
 | `POSABIT_VENUE_INVENTORY_FALLBACK_THRESHOLD` | No | When menu feed returns fewer than this many rows (default `250`), auto-fetch venue inventories if larger. |
 | `POSABIT_MAX_PRODUCTS` | No | Max venue inventory rows to load (default `10000`; set `0` for no cap). |
 | `POSABIT_VENUE_INVENTORY_INCLUDE_INACTIVE` | No | When using venue inventories: set to `1`/`true` to include inactive SKUs. Default: active only. |
-| `POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY` | No | When using venue inventories: set to `1`/`true` to include SKUs with zero quantity on hand. Default: in-stock only. |
+| `POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY` | No | When using venue inventories: set to `1`/`true` to include SKUs with zero quantity on hand. Default: in-stock only (`q[quantity_on_hand_gt]=0`). Unfiltered inventory is 30k+ historical SKUs and will time out. |
 | `USE_POSABIT_PRODUCTS` | No | Set to `1`, `true`, or `yes` to use POSaBit as the product source instead of Excel. |
 | `USE_POSABIT_MANIFESTS` | No | Set to `1`, `true`, or `yes` to allow loading manifests from POSaBit in the UI. |
 

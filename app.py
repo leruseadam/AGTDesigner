@@ -18062,7 +18062,8 @@ def get_web_available_tags():
             try:
                 from src.core.data.posabit_client import (
                     is_posabit_configured, is_posabit_products_enabled,
-                    get_cached_product_rows, get_menu_feed_as_product_rows
+                    get_cached_product_rows, get_menu_feed_as_product_rows,
+                    is_incomplete_posabit_catalog,
                 )
                 if is_posabit_configured() or is_posabit_products_enabled():
                     store_for_posabit = get_current_store_name(allow_fallback=True)
@@ -18070,6 +18071,16 @@ def get_web_available_tags():
 
                     # Serve aligned POSaBit tags from Flask cache (instant)
                     _web_pb_cached = cache.get(_web_pb_cache_key) if not nocache else None
+                    if _web_pb_cached and is_incomplete_posabit_catalog(_web_pb_cached):
+                        logging.info(
+                            "WEB: ignoring incomplete Flask POSaBit cache (%s tags)",
+                            len(_web_pb_cached),
+                        )
+                        try:
+                            cache.delete(_web_pb_cache_key)
+                        except Exception:
+                            pass
+                        _web_pb_cached = None
                     if _web_pb_cached:
                         logging.info(f"⚡ WEB: Serving {len(_web_pb_cached)} POSaBit tags from Flask cache")
                         resp = make_response(jsonify({

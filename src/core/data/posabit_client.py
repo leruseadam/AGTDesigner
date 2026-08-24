@@ -214,6 +214,11 @@ def _is_incomplete_product_cache(rows: Optional[List[Dict[str, Any]]]) -> bool:
     return len(rows) < _venue_inventory_fallback_threshold()
 
 
+def is_incomplete_posabit_catalog(rows: Optional[List[Dict[str, Any]]]) -> bool:
+    """Public helper for Flask/web cache: reject menu-sized POSaBit payloads."""
+    return _is_incomplete_product_cache(rows)
+
+
 def _load_disk_cache(store_name: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Load POSaBit products from disk cache for this store if it exists and is fresh."""
     slug = _store_slug(store_name)
@@ -565,8 +570,9 @@ def _http_get(url: str, token: str, timeout: int = 30, query_params: Optional[Di
             parsed = list(urllib.parse.urlparse(url))
             qs = urllib.parse.parse_qs(parsed[4], keep_blank_values=True)
             for k, v in query_params.items():
-                if v:
-                    qs[k] = [v]
+                if v is None or v == "":
+                    continue
+                qs[k] = [v]
             parsed[4] = urllib.parse.urlencode(qs, doseq=True)
             url = urllib.parse.urlunparse(parsed)
         req = urllib.request.Request(url, method="GET")
@@ -731,6 +737,19 @@ def _parse_quantity(val: Any) -> Optional[float]:
         return None
 
 
+def _sku_stock_quantity(sku: Dict[str, Any]) -> Optional[float]:
+    """Best available on-hand quantity. Do not let string '0.0' hide sellable/ecomm stock."""
+    quantities = [
+        _parse_quantity(sku.get("quantity_on_hand")),
+        _parse_quantity(sku.get("sellable_quantity")),
+        _parse_quantity(sku.get("ecomm_quantity")),
+    ]
+    present = [q for q in quantities if q is not None]
+    if not present:
+        return None
+    return max(present)
+
+
 def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
     """
     Map one POSaBit venue inventory SKU (from GET /v2/venue/inventories) to app column names.
@@ -849,9 +868,14 @@ def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
 def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Fetch POSaBit venue inventories (GET /v2/venue/inventories) and return product rows.
-    No menu feed key required — uses venue API token only. Use when menu feed returns 0 products
-    or set POSABIT_USE_VENUE_INVENTORIES=1 to use this as the product source.
+    No menu feed key required — uses venue API token only.
+
+    The unfiltered inventory can be 30k+ historical SKUs and the API caps per_page at 100,
+    which times out on PythonAnywhere. By default we ask POSaBit for in-stock items only
+    (quantity_on_hand > 0), which is the full live catalog (~2,000 products, ~21 pages).
     """
+    import urllib.parse
+
     cfg = _get_config()
     tok = (token or cfg.get("effective_token") or cfg["token"] or cfg["venue_token"]).strip()
     if not tok:
@@ -861,13 +885,14 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
     url_template = f"{base}/v2/venue/inventories"
     rows: List[Dict[str, Any]] = []
     page = 1
-    per_page = 1000
+    try:
+        per_page = int(float(os.environ.get("POSABIT_PER_PAGE", "100") or "100"))
+    except Exception:
+        per_page = 100
     try:
         max_pages = int(float(os.environ.get("POSABIT_MAX_PAGES", "50") or "50"))
     except Exception:
         max_pages = 50
-    # Safety/perf guard: venue inventories can be extremely large (tens of thousands of SKUs).
-    # To keep the UI responsive, stop once we've collected enough filtered rows (0 = no cap).
     try:
         max_rows = int(float(os.environ.get("POSABIT_MAX_PRODUCTS", "10000") or "10000"))
     except Exception:
@@ -875,28 +900,54 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
     include_inactive = os.environ.get("POSABIT_VENUE_INVENTORY_INCLUDE_INACTIVE", "").strip().lower() in ("1", "true", "yes")
     include_zero_qty = os.environ.get("POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY", "").strip().lower() in ("1", "true", "yes")
     while page <= max_pages:
-        url = f"{url_template}?page={page}&per_page={per_page}"
-        data = _http_get(url, tok, timeout=_posabit_request_timeout(120))
+        params = {"page": str(page), "per_page": str(per_page)}
+        if not include_zero_qty:
+            # Server-side in-stock filter: avoids paging through 30k zero-qty historical SKUs.
+            params["q[quantity_on_hand_gt]"] = "0"
+        url = f"{url_template}?{urllib.parse.urlencode(params)}"
+        try:
+            data = _http_get(url, tok, timeout=_posabit_request_timeout(60))
+        except PosabitAuthError:
+            logger.warning("POSaBit venue inventories: auth failed on page %s", page)
+            break
         if not data:
             break
         inventory = data.get("inventory") or []
+        api_per_page = data.get("per_page") or data.get("max_per_page")
+        if api_per_page:
+            try:
+                per_page = int(api_per_page)
+            except Exception:
+                pass
         for sku in inventory:
-            if not include_inactive and sku.get("active") is False:
-                continue
-            if not include_zero_qty:
-                qty = _parse_quantity(sku.get("quantity_on_hand") or sku.get("sellable_quantity") or sku.get("ecomm_quantity"))
-                if qty is None or qty <= 0:
+            if include_zero_qty:
+                if not include_inactive and sku.get("active") is False:
+                    continue
+            else:
+                qty = _sku_stock_quantity(sku)
+                if qty is not None and qty <= 0:
                     continue
             rows.append(_inventory_sku_to_product_row(sku))
             if max_rows and len(rows) >= max_rows:
-                logger.info(f"POSaBit venue inventories: reached max_rows={max_rows}; stopping early")
-                logger.info(f"POSaBit venue inventories: loaded {len(rows)} product rows")
+                logger.info("POSaBit venue inventories: reached max_rows=%s; stopping early", max_rows)
+                logger.info("POSaBit venue inventories: loaded %s product rows", len(rows))
                 return rows
         total_pages = data.get("total_pages") or 1
+        try:
+            total_pages = int(total_pages)
+        except Exception:
+            total_pages = 1
+        logger.info(
+            "POSaBit venue inventories: page %s/%s (%s in-stock so far, api total_records=%s)",
+            page,
+            total_pages,
+            len(rows),
+            data.get("total_records"),
+        )
         if page >= total_pages or not inventory:
             break
         page += 1
-    logger.info(f"POSaBit venue inventories: loaded {len(rows)} product rows")
+    logger.info("POSaBit venue inventories: loaded %s product rows", len(rows))
     return rows
 
 
@@ -1046,13 +1097,21 @@ def get_menu_feed_as_product_rows(
     except Exception as live_err:
         logger.warning("POSaBit live fetch failed: %s; falling back to disk cache", live_err)
 
+    disk_rows = _load_disk_cache(store_name)
+    if rows and _is_incomplete_product_cache(rows) and disk_rows and len(disk_rows) > len(rows):
+        logger.warning(
+            "POSaBit live catalog has %d products; keeping larger cached catalog (%d)",
+            len(rows),
+            len(disk_rows),
+        )
+        rows = disk_rows
+
     if rows:
         _posabit_product_rows_cache[cache_key] = rows
         _posabit_product_rows_cache_time[cache_key] = time.time()
         _save_disk_cache(rows, store_name)
         return rows
 
-    disk_rows = _load_disk_cache(store_name)
     if disk_rows:
         logger.info(
             "POSaBit product list: API unavailable/empty; serving %d rows from disk cache (store=%s)",

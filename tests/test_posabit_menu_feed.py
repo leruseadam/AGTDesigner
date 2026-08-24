@@ -41,7 +41,7 @@ def test_available_tags_prefers_live_posabit_feed_over_stale_cache(client, monke
     assert data['tags'][0]['Product Name*'] == 'Fresh Item'
 
 
-def test_posabit_use_venue_inventories_when_env_set(monkeypatch):
+def test_posabit_use_venue_inventories_when_env_set(monkeypatch, tmp_path):
     posabit_client._posabit_product_rows_cache.clear()
     posabit_client._posabit_product_rows_cache_time.clear()
     monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
@@ -49,6 +49,7 @@ def test_posabit_use_venue_inventories_when_env_set(monkeypatch):
     monkeypatch.setenv("POSABIT_USE_VENUE_INVENTORIES", "1")
     monkeypatch.delenv("POSABIT_FORCE_VENUE_INVENTORIES", raising=False)
     monkeypatch.delenv("POSABIT_PREFER_MENU_FEED", raising=False)
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
 
     monkeypatch.setattr(
         "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
@@ -64,13 +65,14 @@ def test_posabit_use_venue_inventories_when_env_set(monkeypatch):
     assert rows[0]["Product Name*"] == "inventory item"
 
 
-def test_posabit_upgrades_small_menu_feed_to_venue_inventory(monkeypatch):
+def test_posabit_upgrades_small_menu_feed_to_venue_inventory(monkeypatch, tmp_path):
     posabit_client._posabit_product_rows_cache.clear()
     posabit_client._posabit_product_rows_cache_time.clear()
     monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
     monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
     monkeypatch.delenv("POSABIT_USE_VENUE_INVENTORIES", raising=False)
     monkeypatch.delenv("POSABIT_PREFER_MENU_FEED", raising=False)
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
 
     def fake_http_get(url, token, timeout=30, query_params=None):
         return {
@@ -199,6 +201,73 @@ def test_posabit_prefers_live_api_over_disk_cache(monkeypatch, tmp_path):
     rows = get_menu_feed_as_product_rows(force_refresh=True)
     assert len(rows) == 1
     assert rows[0]["Product Name*"] == "Fresh Item"
+
+
+def test_posabit_venue_inventory_requests_in_stock_items(monkeypatch):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.delenv("POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY", raising=False)
+
+    seen_urls = []
+
+    def fake_http_get(url, token, timeout=30, query_params=None):
+        seen_urls.append(url)
+        return {
+            "total_records": 2,
+            "current_page": 1,
+            "total_pages": 1,
+            "per_page": 100,
+            "inventory": [
+                {"name": "In Stock Flower", "active": True, "quantity_on_hand": "4.0", "product_family": "Flower"},
+                {"name": "Also In Stock", "active": True, "quantity_on_hand": "1.0", "product_family": "Edible Solid"},
+            ],
+        }
+
+    monkeypatch.setattr("src.core.data.posabit_client._http_get", fake_http_get)
+    rows = posabit_client.get_venue_inventories_as_product_rows()
+    assert any("quantity_on_hand_gt" in url for url in seen_urls)
+    assert len(rows) == 2
+    assert rows[0]["Product Name*"] == "In Stock Flower"
+
+
+def test_posabit_keeps_large_cache_when_live_catalog_is_menu_sized(monkeypatch, tmp_path):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
+
+    import json
+    disk_path = tmp_path / "posabit_products.json"
+    disk_path.write_text(
+        json.dumps([{"Product Name*": f"Cached SKU {i}", "Product Type*": "Flower"} for i in range(400)]),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
+        lambda token=None: [],
+    )
+
+    def fake_http_get(url, token, timeout=30, query_params=None):
+        return {
+            "menu_feed": {
+                "menu_groups": [{
+                    "name": "Featured",
+                    "menu_items": [{
+                        "name": "Tiny menu item",
+                        "state": "active",
+                        "prices": [{"price_cents": 1999}],
+                    }],
+                }]
+            }
+        }
+
+    monkeypatch.setattr("src.core.data.posabit_client._http_get", fake_http_get)
+    rows = get_menu_feed_as_product_rows(force_refresh=True)
+    assert len(rows) == 400
+    assert rows[0]["Product Name*"] == "Cached SKU 0"
 
 
 def test_posabit_ignores_small_disk_cache(monkeypatch, tmp_path):
