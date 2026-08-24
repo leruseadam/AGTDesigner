@@ -335,6 +335,34 @@ def test_posabit_venue_inventory_fetches_all_pages(monkeypatch):
     assert names == {"Page One", "Page Two", "Page Three"}
 
 
+def test_posabit_serves_complete_disk_cache_without_live_fetch(monkeypatch, tmp_path):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
+
+    import json
+    disk_path = tmp_path / "posabit_products.json"
+    disk_path.write_text(
+        json.dumps([{"Product Name*": f"Cached SKU {i}", "Product Type*": "Flower"} for i in range(400)]),
+        encoding="utf-8",
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("live POSaBit fetch should not run when a complete disk cache exists")
+
+    monkeypatch.setattr("src.core.data.posabit_client._http_get", fail_if_called)
+    monkeypatch.setattr(
+        "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
+        fail_if_called,
+    )
+
+    rows = get_menu_feed_as_product_rows(force_refresh=False)
+    assert len(rows) == 400
+    assert rows[0]["Product Name*"] == "Cached SKU 0"
+
+
 def test_posabit_keeps_larger_cache_when_live_fetch_is_partial(monkeypatch, tmp_path):
     posabit_client._posabit_product_rows_cache.clear()
     posabit_client._posabit_product_rows_cache_time.clear()

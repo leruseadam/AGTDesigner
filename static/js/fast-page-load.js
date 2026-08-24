@@ -256,7 +256,7 @@
                 window.location.hostname.includes('agtpricetags.com') ||
                 (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
             const fastTagsEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
-            const fastTagsTimeoutMs = isWebClient ? 90000 : 30000;
+            const fastTagsTimeoutMs = isWebClient ? 20000 : 15000;
             console.log(`⚡ Trying fast ${fastTagsEndpoint} endpoint first...`);
             let timeoutId = null;
             try {

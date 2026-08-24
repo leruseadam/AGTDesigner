@@ -12970,8 +12970,9 @@ const TagManager = {
                     // path returns an empty payload and permanently blocks tag loading. Let the backend handle DB/Excel
                     // fallbacks instead of hard-failing the entire request.
                     const forceDbLineage = false;
-                    // POS/DB and full page reloads must bypass stale server/browser caches so new products appear.
-                    const useCache = retryCount === 0 && !forceReload && !hasRecentLineageUpdate && !isDatabaseMode && !isNavigationReload;
+                    // POS/DB and reloads should use the server cache for instant paint.
+                    // Fresh products still appear via the 5-minute in-process/disk refresh.
+                    const useCache = retryCount === 0 && !forceReload && !hasRecentLineageUpdate;
                     const cacheParam = useCache ? '' : '&nocache=1';
                     // Skip prefer_db entirely to avoid empty-error payloads; rely on backend fallbacks instead
                     const preferDbParam = '';

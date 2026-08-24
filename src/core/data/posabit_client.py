@@ -206,6 +206,46 @@ def _posabit_request_timeout(default: int = 30) -> int:
     return default
 
 
+_refresh_in_flight = set()
+_refresh_lock = threading.Lock()
+
+
+def _disk_cache_age_seconds(store_name: Optional[str] = None) -> Optional[float]:
+    slug = _store_slug(store_name)
+    paths = [_disk_cache_path(store_name)]
+    if slug != "_default_":
+        paths.append(_disk_cache_path(None))
+    for path in paths:
+        try:
+            if path.exists():
+                return time.time() - path.stat().st_mtime
+        except Exception:
+            continue
+    return None
+
+
+def _schedule_background_refresh(store_name: Optional[str] = None) -> None:
+    """Refresh the live catalog without blocking the current request."""
+    cache_key = _store_slug(store_name)
+    with _refresh_lock:
+        if cache_key in _refresh_in_flight:
+            return
+        _refresh_in_flight.add(cache_key)
+
+    def _run():
+        try:
+            logger.info("POSaBit: background refresh starting (store=%s)", cache_key)
+            get_menu_feed_as_product_rows(store_name=store_name, force_refresh=True)
+            logger.info("POSaBit: background refresh finished (store=%s)", cache_key)
+        except Exception as err:
+            logger.warning("POSaBit background refresh failed: %s", err)
+        finally:
+            with _refresh_lock:
+                _refresh_in_flight.discard(cache_key)
+
+    threading.Thread(target=_run, daemon=True, name=f"posabit-refresh-{cache_key}").start()
+
+
 _live_expected_total = threading.local()
 
 
@@ -1240,7 +1280,8 @@ def get_menu_feed_as_product_rows(
     - Venue inventories: GET /v2/venue/inventories — full paginated inventory (thousands of SKUs).
     Set POSABIT_PREFER_MENU_FEED=1 to use the menu feed only (~100-200 menu-listed items).
     Venue inventories are used by default for the full product catalog.
-    Live API is always preferred; disk cache is only used when the API is unavailable or empty.
+    Live API is always preferred on force_refresh; otherwise a complete disk/memory
+    cache is served immediately and refreshed in the background when stale.
     In-process results are cached per store for POSABIT_PRODUCTS_CACHE_TTL seconds (default 300).
     """
     global _posabit_product_rows_cache, _posabit_product_rows_cache_time
@@ -1254,6 +1295,22 @@ def get_menu_feed_as_product_rows(
         cached = _posabit_product_rows_cache[cache_key]
         logger.info("POSaBit product list: serving %d rows from in-process cache (store=%s)", len(cached), cache_key)
         return cached
+
+    if not force_refresh:
+        disk_rows = _load_disk_cache(store_name)
+        if disk_rows:
+            _posabit_product_rows_cache[cache_key] = disk_rows
+            _posabit_product_rows_cache_time[cache_key] = now
+            age = _disk_cache_age_seconds(store_name)
+            if age is None or age > POSABIT_PRODUCTS_CACHE_TTL:
+                _schedule_background_refresh(store_name)
+            logger.info(
+                "POSaBit product list: serving %d rows from disk cache (store=%s, age=%.0fs)",
+                len(disk_rows),
+                cache_key,
+                age or 0,
+            )
+            return disk_rows
 
     rows: List[Dict[str, Any]] = []
     _set_live_expected_total(None)
