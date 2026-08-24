@@ -1,5 +1,44 @@
+import pytest
+import sys
+from pathlib import Path
+
 import src.core.data.posabit_client as posabit_client
 from src.core.data.posabit_client import _get_config, _is_active_item, get_menu_feed_as_product_rows
+
+
+@pytest.fixture
+def client():
+    project_root = Path(__file__).parent.parent
+    sys.path.insert(0, str(project_root))
+    import importlib
+
+    if 'app' in sys.modules:
+        importlib.reload(sys.modules['app'])
+
+    from app import app
+    app.config['TESTING'] = True
+    app.config['SECRET_KEY'] = 'test-secret-key'
+
+    with app.test_client() as client:
+        with app.app_context():
+            yield client
+
+
+def test_available_tags_prefers_live_posabit_feed_over_stale_cache(client, monkeypatch):
+    with client.session_transaction() as sess:
+        sess['data_source'] = 'posabit'
+        sess['selected_store'] = 'AGT_Bothell'
+
+    monkeypatch.setattr('src.core.data.posabit_client.is_posabit_configured', lambda: True)
+    monkeypatch.setattr('src.core.data.posabit_client.is_posabit_products_enabled', lambda: False)
+    monkeypatch.setattr('src.core.data.posabit_client.get_menu_feed_as_product_rows', lambda store_name=None: [{"Product Name*": "Fresh Item", "Product Type*": "Flower"}])
+    monkeypatch.setattr('src.core.data.posabit_client.get_cached_product_rows', lambda store_name=None: [{"Product Name*": "Old Item", "Product Type*": "Flower"}])
+
+    resp = client.get('/api/available-tags')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['source'] == 'posabit'
+    assert data['tags'][0]['Product Name*'] == 'Fresh Item'
 
 
 def test_posabit_prefers_menu_feed_over_venue_inventory_when_feed_key_exists(monkeypatch):

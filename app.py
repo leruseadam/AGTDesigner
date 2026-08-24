@@ -12851,27 +12851,12 @@ def get_available_tags():
         else:
             fast_load = fast_load_arg in ('1', 'true', 'True')
 
-        # If the user explicitly selected POSaBit, prefer the POSaBit product list over any stale Excel file.
+        # If the user explicitly selected POSaBit, use the live POSaBit feed as the source of truth.
+        # Cached rows are only a fallback when the live feed is unavailable or empty.
         if effective_source == 'posabit' and (is_posabit_configured() or is_posabit_products_enabled()):
             try:
                 from src.core.data.posabit_client import get_cached_product_rows, get_menu_feed_as_product_rows
                 store_for_posabit = get_current_store_name(allow_fallback=True)
-                cached_rows = get_cached_product_rows(store_name=store_for_posabit)
-                if cached_rows:
-                    safe_posabit_tags = make_json_safe(_slim_tags(cached_rows))
-                    try:
-                        store_name_align = get_current_store_name(allow_fallback=True)
-                        safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
-                    except Exception:
-                        pass
-                    safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
-                    return jsonify({
-                        'tags': safe_posabit_tags,
-                        'total_count': len(safe_posabit_tags),
-                        'source': 'posabit',
-                        'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
-                    }), 200
-
                 posabit_rows = get_menu_feed_as_product_rows(store_name=store_for_posabit)
                 if posabit_rows:
                     safe_posabit_tags = make_json_safe(_slim_tags(posabit_rows))
@@ -12889,6 +12874,22 @@ def get_available_tags():
                         'total_count': len(safe_posabit_tags),
                         'source': 'posabit',
                         'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
+                    }), 200
+
+                cached_rows = get_cached_product_rows(store_name=store_for_posabit)
+                if cached_rows:
+                    safe_posabit_tags = make_json_safe(_slim_tags(cached_rows))
+                    try:
+                        store_name_align = get_current_store_name(allow_fallback=True)
+                        safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
+                    except Exception:
+                        pass
+                    safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
+                    return jsonify({
+                        'tags': safe_posabit_tags,
+                        'total_count': len(safe_posabit_tags),
+                        'source': 'posabit',
+                        'message': f'POSaBit cache fallback ({len(safe_posabit_tags)} products)'
                     }), 200
             except Exception as posabit_err:
                 logging.warning(f"POSaBit source override in available-tags failed: {posabit_err}")
