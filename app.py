@@ -18139,16 +18139,6 @@ def get_web_available_tags():
                     if _web_cold_rows:
                         safe_posabit_tags = make_json_safe(_slim_tags(_web_cold_rows))
                         try:
-                            if store_for_posabit:
-                                # Quick align keeps this under PythonAnywhere request timeouts.
-                                # Full lineage refresh still runs in the background from the UI.
-                                safe_posabit_tags = _quick_align_tags_lineage(
-                                    safe_posabit_tags,
-                                    store_for_posabit,
-                                )
-                        except Exception:
-                            pass
-                        try:
                             safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
                         except Exception:
                             pass
@@ -18158,6 +18148,27 @@ def get_web_available_tags():
                                 cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=300)
                             except Exception:
                                 pass
+                            store_for_align = store_for_posabit
+                            tags_for_align = safe_posabit_tags
+                            cache_key_for_align = _web_pb_cache_key
+
+                            def _align_web_posabit_later():
+                                try:
+                                    aligned = _quick_align_tags_lineage(
+                                        [dict(t) for t in tags_for_align if isinstance(t, dict)],
+                                        store_for_align,
+                                    )
+                                    aligned = _enforce_nonclassic_lineage_rules(aligned)
+                                    cache.set(cache_key_for_align, aligned, timeout=300)
+                                except Exception as align_err:
+                                    logging.debug("WEB: background POSaBit align skipped: %s", align_err)
+
+                            if store_for_align:
+                                threading.Thread(
+                                    target=_align_web_posabit_later,
+                                    daemon=True,
+                                    name="web-posabit-align",
+                                ).start()
                         else:
                             logging.warning(
                                 "WEB: not caching incomplete POSaBit catalog (%s tags)",
@@ -24163,12 +24174,6 @@ def get_available_tags_lite():
                 cached_rows = get_cached_product_rows(store_name=store_pb)
                 if cached_rows:
                     lite_tags = [dict(t) if isinstance(t, dict) else t for t in cached_rows]
-                    store_align = get_current_store_name(allow_fallback=False)
-                    if store_align:
-                        try:
-                            lite_tags = _quick_align_tags_lineage(lite_tags, store_align)
-                        except Exception as _lite_al:
-                            logging.debug(f"Lite POS lineage align skipped: {_lite_al}")
                     safe_lite = make_json_safe(_slim_tags(lite_tags))
                     elapsed = (time.time() - start_time) * 1000
                     logging.info(

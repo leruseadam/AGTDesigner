@@ -95,7 +95,10 @@
             let posabitActive = false;
             let currentFileJson = null;
             try {
-                const fileResponse = await fetch('/api/current-file');
+                const fileController = new AbortController();
+                const fileTimeout = setTimeout(() => fileController.abort(), 800);
+                const fileResponse = await fetch('/api/current-file', { signal: fileController.signal });
+                clearTimeout(fileTimeout);
                 if (fileResponse.ok) {
                     currentFileJson = await fileResponse.json();
                     if (currentFileJson && currentFileJson.success) {
@@ -250,13 +253,49 @@
                 }
             }
 
-            // OPTIMIZED: Try direct available-tags FIRST (it's faster than /api/initial-data)
-            // Then fall back to /api/initial-data if needed
+            // OPTIMIZED: Serve cached lite tags first so the web UI paints immediately.
             const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
                 window.location.hostname.includes('agtpricetags.com') ||
                 (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            try {
+                const liteController = new AbortController();
+                const liteTimeout = setTimeout(() => liteController.abort(), 4000);
+                const liteResponse = await fetch(`/api/available-tags-lite?t=${Date.now()}`, {
+                    signal: liteController.signal
+                });
+                clearTimeout(liteTimeout);
+                if (liteResponse.ok) {
+                    const liteData = await liteResponse.json();
+                    if (liteData && Array.isArray(liteData.tags) && liteData.tags.length >= 250) {
+                        console.log(`⚡ Lite cache paint: ${liteData.tags.length} tags`);
+                        this.state.tags = [...liteData.tags];
+                        this.state.originalTags = [...liteData.tags];
+                        if (this.saveAvailableTagsToCache) {
+                            this.saveAvailableTagsToCache(liteData.tags);
+                        }
+                        if (this._updateAvailableTags) {
+                            this._updateAvailableTags(liteData.tags, null);
+                        }
+                        if (this.hideActionSplash) {
+                            this.hideActionSplash();
+                        }
+                        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                            AppLoadingSplash.stopAutoAdvance();
+                            AppLoadingSplash.complete();
+                        }
+                        Promise.allSettled([
+                            this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
+                            this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
+                        ]).catch(err => console.warn('⚠️ Background load error (non-critical):', err));
+                        return;
+                    }
+                }
+            } catch (liteErr) {
+                console.warn('⚠️ Lite tag prefetch skipped:', liteErr && liteErr.message ? liteErr.message : liteErr);
+            }
+
             const fastTagsEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
-            const fastTagsTimeoutMs = isWebClient ? 20000 : 15000;
+            const fastTagsTimeoutMs = isWebClient ? 8000 : 15000;
             console.log(`⚡ Trying fast ${fastTagsEndpoint} endpoint first...`);
             let timeoutId = null;
             try {

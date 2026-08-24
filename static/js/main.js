@@ -1642,12 +1642,12 @@ const AppLoadingSplash = {
         if (this._maxWaitTimer) {
             clearTimeout(this._maxWaitTimer);
         }
-        // Last resort if a hung network resource blocks `load` forever
+        // Last resort if something hangs — never keep the web UI behind a 2-minute splash
         this._maxWaitTimer = setTimeout(() => {
-            console.warn('⚡ Splash max wait (120s) — forcing unlock');
+            console.warn('⚡ Splash max wait (4s) — forcing unlock');
             this._maxWaitTimer = null;
             this.emergencyHide();
-        }, 120000);
+        }, 4000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -1760,7 +1760,7 @@ const AppLoadingSplash = {
             verboseLog('Splash screen hidden');
         };
 
-        this._whenDocumentFullyLoaded(runHide);
+        runHide();
     },
 
     // Auto-advance steps for visual feedback
@@ -14911,12 +14911,13 @@ const TagManager = {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
 
-            // Always pull fresh catalog from the API after instant cache paint so new products
-            // (e.g. POSaBit) appear on every page load without requiring Reset Cache.
+            // Refresh the catalog after the UI is interactive so page load stays fast.
             this._suppressActionSplash = true;
-            this.fetchAndUpdateAvailableTags()
-                .catch(err => console.warn('Background tag sync after cache hydrate failed (non-critical):', err))
-                .finally(() => { this._suppressActionSplash = false; });
+            setTimeout(() => {
+                this.fetchAndUpdateAvailableTags()
+                    .catch(err => console.warn('Background tag sync after cache hydrate failed (non-critical):', err))
+                    .finally(() => { this._suppressActionSplash = false; });
+            }, 2500);
 
             // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();
@@ -21481,8 +21482,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Show splash screen immediately (but don't load tags yet - wait for store selection)
-    AppLoadingSplash.show();
-    AppLoadingSplash.updateProgress(10, 'Initializing application...');
+    const alreadyHasTags = typeof TagManager !== 'undefined' &&
+        TagManager.state && Array.isArray(TagManager.state.tags) && TagManager.state.tags.length > 0;
+    if (alreadyHasTags) {
+        AppLoadingSplash.complete();
+    } else {
+        AppLoadingSplash.show();
+        AppLoadingSplash.updateProgress(10, 'Initializing application...');
+    }
 
     // DO NOT call TagManager.init() here - it will be called after store selection
     // in templates/index.html via checkStoreRequired() callback
