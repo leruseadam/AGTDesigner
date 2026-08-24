@@ -6164,13 +6164,18 @@ def api_posabit_refresh_cache():
     try:
         from src.core.data.posabit_client import (
             is_posabit_configured, is_posabit_products_enabled,
-            get_menu_feed_as_product_rows, clear_cache,
+            get_menu_feed_as_product_rows,
         )
         if not (is_posabit_configured() or is_posabit_products_enabled()):
             return jsonify({'ok': False, 'message': 'POSaBit not configured'}), 400
         store_name = get_current_store_name(allow_fallback=True)
-        clear_cache(store_name=store_name)
         rows = get_menu_feed_as_product_rows(store_name=store_name, force_refresh=True)
+        if not rows:
+            return jsonify({
+                'ok': False,
+                'count': 0,
+                'message': 'POSaBit refresh returned 0 products — previous cache kept',
+            }), 502
         count = len(rows)
         return jsonify({'ok': True, 'count': count, 'message': f'Cache refreshed: {count} products'})
     except Exception as e:

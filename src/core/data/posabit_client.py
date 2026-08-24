@@ -180,20 +180,37 @@ def _disk_cache_path(store_name: Optional[str]) -> _pathlib.Path:
 
 def _load_disk_cache(store_name: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Load POSaBit products from disk cache for this store if it exists and is fresh."""
-    path = _disk_cache_path(store_name)
-    try:
-        if not path.exists():
-            return None
-        age = time.time() - path.stat().st_mtime
-        if age > _DISK_CACHE_TTL:
-            logger.info(f"POSaBit disk cache expired ({path.name}, {age:.0f}s old, TTL={_DISK_CACHE_TTL}s)")
-            return None
-        rows = _json.loads(path.read_text(encoding="utf-8"))
-        logger.info(f"POSaBit disk cache hit: {len(rows)} products for {_store_slug(store_name)} ({age:.0f}s old)")
-        return rows
-    except Exception as e:
-        logger.warning(f"POSaBit disk cache load failed: {e}")
-        return None
+    slug = _store_slug(store_name)
+    paths = [_disk_cache_path(store_name)]
+    # Prefetch/warm paths often use the default file while requests are store-scoped.
+    if slug != "_default_":
+        paths.append(_disk_cache_path(None))
+    seen = set()
+    for path in paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            if not path.exists():
+                continue
+            age = time.time() - path.stat().st_mtime
+            if age > _DISK_CACHE_TTL:
+                logger.info(f"POSaBit disk cache expired ({path.name}, {age:.0f}s old, TTL={_DISK_CACHE_TTL}s)")
+                continue
+            rows = _json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(rows, list) or not rows:
+                continue
+            logger.info(
+                "POSaBit disk cache hit: %d products for %s via %s (%.0fs old)",
+                len(rows),
+                slug,
+                path.name,
+                age,
+            )
+            return rows
+        except Exception as e:
+            logger.warning(f"POSaBit disk cache load failed for {path.name}: {e}")
+    return None
 
 
 def _save_disk_cache(rows: List[Dict[str, Any]], store_name: Optional[str] = None) -> None:
@@ -942,7 +959,14 @@ def get_menu_feed_as_product_rows(
         logger.info("POSaBit product list: serving %d rows from in-process cache (store=%s)", len(cached), cache_key)
         return cached
 
-    rows = _fetch_live_menu_feed_rows(feed_key=feed_key, token=token, store_name=store_name)
+    rows: List[Dict[str, Any]] = []
+    try:
+        rows = _fetch_live_menu_feed_rows(feed_key=feed_key, token=token, store_name=store_name)
+    except PosabitAuthError as auth_err:
+        logger.warning("POSaBit live fetch auth failed (%s); falling back to disk cache", auth_err)
+    except Exception as live_err:
+        logger.warning("POSaBit live fetch failed: %s; falling back to disk cache", live_err)
+
     if rows:
         _posabit_product_rows_cache[cache_key] = rows
         _posabit_product_rows_cache_time[cache_key] = time.time()
