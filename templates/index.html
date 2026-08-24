@@ -6080,7 +6080,41 @@
           <!-- Filter Bar (left column) -->
           <div class="mb-2 mt-0" data-container-type="filter">
               <div class="enhanced-filter-bar d-flex flex-column align-items-stretch gap-2 p-3" style="background: rgba(45, 34, 58, 0.95); border-radius: 16px; backdrop-filter: blur(20px); border: 2px solid rgba(160, 132, 232, 0.6); min-height: 72px;">
-                  <!-- Top: Clear -->
+                  <!-- Top: Data source + Excel upload -->
+                  <div class="inventory-source-bar d-flex flex-column gap-2 w-100" style="flex-shrink: 0;">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                      <span class="filter-label mb-0" style="font-size: 0.72rem; letter-spacing: 0.06em;">DATA SOURCE</span>
+                      <div class="btn-group btn-group-sm" role="group" aria-label="Inventory data source">
+                        <button type="button" class="btn filter-action-button data-source-toggle" id="dataSourceBtnPosabit" title="Load inventory from POSaBit API" onclick="window.switchInventoryDataSource('posabit')">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1">
+                            <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                          </svg>
+                          POSaBit API
+                        </button>
+                        <button type="button" class="btn filter-action-button data-source-toggle" id="dataSourceBtnExcel" title="Use uploaded Excel file as inventory source" onclick="window.switchInventoryDataSource('excel')">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-1">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                          </svg>
+                          Excel
+                        </button>
+                      </div>
+                      <span id="dataSourceIndicatorBar" class="small fw-semibold" style="color: #4ade80;">POSaBit</span>
+                    </div>
+                    <div class="file-path-display">
+                      <span class="text-white" id="fileInfoText" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; font-size: 13px; font-weight: 600; padding: 6px 10px; background: rgba(255,255,255,0.08); border-radius: 8px; border: 1px solid rgba(160, 132, 232, 0.35);">{% if uploaded_filename %}{{ uploaded_filename }}{% else %}No file uploaded{% endif %}</span>
+                    </div>
+                    <input type="file" id="fileInput" accept=".xlsx" style="display:none;">
+                    <button type="button" class="btn filter-action-button w-100" id="uploadTriggerBtn" onclick="handleFileUploadClick();" aria-label="Upload Excel file" title="Upload an Excel inventory file" style="background: linear-gradient(135deg, rgba(160, 132, 232, 0.45), rgba(139, 92, 246, 0.55)) !important; border-color: rgba(160, 132, 232, 0.85) !important;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                      Upload Excel
+                    </button>
+                  </div>
+                  <!-- Clear / refresh -->
                   <div class="left-section d-flex align-items-center gap-2" style="flex-shrink: 0; width: 100%; flex-wrap: wrap;">
                     <!-- Clear Button -->
                       <button id="clearFiltersBtn" class="btn btn-danger filter-action-button" onclick="TagManager.clearAllFilters()" title="Clear all filters and reset app">

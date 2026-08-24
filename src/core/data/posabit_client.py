@@ -829,13 +829,38 @@ def get_menu_feed_as_product_rows(
         return []
 
     menu = data.get("menu_feed") or data
-    groups = menu.get("menu_groups") or []
-    if not groups and isinstance(menu, dict):
+    if not isinstance(menu, dict):
         logger.warning(
-            "POSaBit menu feed: no menu_groups in response; top-level keys: %s; "
-            "ensure the menu feed in app.posabit.com uses the 'Active' product list and has categories with items.",
-            list(menu.keys())[:20],
+            "POSaBit menu feed: expected menu object, got %s",
+            type(menu).__name__,
         )
+        menu = {}
+    raw_mg = menu.get("menu_groups")
+    if raw_mg is None:
+        groups = []
+        logger.warning(
+            "POSaBit menu feed: missing menu_groups key (cannot parse products from feed). "
+            "Keys on menu object: %s; product_list query was %r.",
+            list(menu.keys())[:25],
+            product_list,
+        )
+    elif not isinstance(raw_mg, list):
+        groups = []
+        logger.warning(
+            "POSaBit menu feed: menu_groups is type %s, expected list. Keys: %s",
+            type(raw_mg).__name__,
+            list(menu.keys())[:25],
+        )
+    else:
+        groups = raw_mg
+        if len(groups) == 0:
+            logger.warning(
+                "POSaBit menu feed: menu_groups is [] (feed metadata present but no categories/items). "
+                "POSaBit UI: ensure this feed has menu groups with items, or that product list %r is not "
+                "excluding everything. Keys: %s",
+                product_list,
+                list(menu.keys())[:25],
+            )
     def _is_active_item(item: Dict) -> bool:
         """Include only items from the Active product list: skip when explicitly inactive."""
         if "active" in item and item.get("active") is False:

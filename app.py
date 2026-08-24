@@ -11717,6 +11717,53 @@ def generate_labels():
         except Exception as ov_err:
             logging.warning(f"Skipping DOH overrides application: {ov_err}")
 
+        # Apply Discount session overrides (similar to DOH overrides)
+        try:
+            discount_overrides = session.get('discount_overrides', {})
+            if discount_overrides and isinstance(discount_overrides, dict):
+                def _norm_disc(n):
+                    try:
+                        from src.core.data.product_database import ProductDatabase
+                        return ProductDatabase()._normalize_product_name(n)
+                    except Exception:
+                        return str(n).lower().strip()
+
+                def _base_name(full_name):
+                    base = re.sub(r'\s+by\s+[^-]+(\s*-\s*\d+\s*\w+)?$', '', str(full_name), flags=re.IGNORECASE).strip()
+                    base = re.sub(r'\s*-\s*\d+\s*\w+$', '', base).strip()
+                    return base
+
+                applied_disc = 0
+                discount_norm_map = {_norm_disc(k): v for k, v in discount_overrides.items()}
+                for rec in records:
+                    name = rec.get('ProductName') or rec.get('Product Name*') or rec.get('product_name') or ''
+                    if not name:
+                        continue
+                    full_norm = _norm_disc(name)
+                    base_name_only = _base_name(name)
+                    base_norm = _norm_disc(base_name_only)
+                    matched_val = None
+                    if full_norm in discount_norm_map:
+                        matched_val = discount_norm_map[full_norm]
+                    elif base_norm in discount_norm_map:
+                        matched_val = discount_norm_map[base_norm]
+                    else:
+                        for ov_key, ov_val in discount_norm_map.items():
+                            if ov_key in full_norm or full_norm in ov_key:
+                                matched_val = ov_val
+                                break
+
+                    if matched_val is not None:
+                        # Set Discount fields on the record for downstream generators
+                        rec['Discount'] = matched_val
+                        rec['discount'] = matched_val
+                        applied_disc += 1
+
+                if applied_disc > 0:
+                    logging.info(f"✅ DISCOUNT OVERRIDE SUMMARY: Applied {applied_disc} discount override(s) to {len(records)} record(s)")
+        except Exception as disc_err:
+            logging.warning(f"Skipping Discount overrides application: {disc_err}")
+
         # CRITICAL FIX: Enrich records with lineage from database BEFORE passing to TemplateProcessor
         # PERFORMANCE OPTIMIZATION: Skip enrichment if records already came from database (they're already enriched!)
         _enrichment_start = time.time()
@@ -17707,6 +17754,60 @@ def update_doh():
 def log_viewer():
     """Serve the log viewer web interface"""
     return render_template('log_viewer.html')
+
+
+@app.route('/api/update-discount', methods=['POST'])
+def update_discount():
+    """Update discount override for a specific product (session-scoped)."""
+    try:
+        import re
+        data = request.get_json()
+        tag_name = data.get('tag_name') or data.get('product_name') or data.get('Product Name*')
+        discount_val = data.get('discount')
+        if not tag_name or discount_val is None:
+            return jsonify({'error': 'Missing tag_name or discount'}), 400
+
+        # Normalize variants
+        name_variants = generate_product_name_variants(tag_name) or [str(tag_name).strip()]
+        store_name = get_current_store_name()
+        product_db = get_product_database(store_name)
+
+        try:
+            overrides = session.get('discount_overrides', {})
+            for candidate in name_variants:
+                try:
+                    norm_key = product_db._normalize_product_name(candidate) if product_db else str(candidate).lower().strip()
+                except Exception:
+                    norm_key = str(candidate).lower().strip()
+                overrides[norm_key] = discount_val
+                # also store base name variant
+                base_name = re.sub(r'\s+by\s+[^-]+(\s*-\s*\d+\s*\w+)?$', '', str(candidate), flags=re.IGNORECASE).strip()
+                base_name = re.sub(r'\s*-\s*\d+\s*\w+$', '', base_name).strip()
+                if base_name and base_name != candidate:
+                    try:
+                        base_norm = product_db._normalize_product_name(base_name) if product_db else base_name.lower().strip()
+                    except Exception:
+                        base_norm = base_name.lower().strip()
+                    overrides[base_norm] = discount_val
+            session['discount_overrides'] = overrides
+            session.modified = True
+            logging.info(f"✅ DISCOUNT API: Saved discount overrides for {name_variants} -> {discount_val}")
+        except Exception as ov_err:
+            logging.warning(f"Could not save discount override in session: {ov_err}")
+
+        # Clear relevant caches so UI and generation see updated overrides
+        try:
+            cache.delete(get_session_cache_key('available_tags'))
+            cache.delete(get_session_cache_key('web_available_tags'))
+            session['discount_update_timestamp'] = time.time()
+            session.modified = True
+        except Exception as c_err:
+            logging.warning(f"Could not clear caches after discount update: {c_err}")
+
+        return jsonify({'success': True, 'message': f'Discount set to {discount_val}'}), 200
+    except Exception as e:
+        logging.error(f"Error updating discount: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs')
 def api_logs():
@@ -23936,19 +24037,28 @@ def get_available_tags_lite():
                 if hasattr(excel_processor, '_skip_enrichment'):
                     excel_processor._skip_enrichment = False
                 
-                # REMOVED LIMIT: Allow all Excel tags to be displayed (was limiting to 1000, causing missing products)
-                # Performance optimization: If memory becomes an issue, consider pagination instead of truncation
-                # if len(excel_tags) > 1000:
-                #     excel_tags = excel_tags[:1000]
-                
+                # Lightweight limit: return a capped subset for instant UI rendering
+                # Use ?full=1 to request the entire set (slower). Default cap is 1000 items.
+                try:
+                    lite_limit = int(request.args.get('limit', 1000))
+                except Exception:
+                    lite_limit = 1000
+                full_requested = request.args.get('full') in ('1', 'true', 'True')
+
+                total_count = len(excel_tags)
+                limited = False
+                if not full_requested and total_count > lite_limit:
+                    limited = True
+                    excel_tags = excel_tags[:lite_limit]
+
                 elapsed = (time.time() - start_time) * 1000
-                logging.info(f"✅ Lite tags returned {len(excel_tags)} tags ({elapsed:.1f}ms)")
-                
+                logging.info(f"✅ Lite tags returned {len(excel_tags)} tags (total={total_count}, limited={limited}) ({elapsed:.1f}ms)")
+
                 return jsonify({
                     'tags': excel_tags,
-                    'total_count': len(excel_tags),
+                    'total_count': total_count,
                     'source': 'excel-lite',
-                    'limited': False  # Removed limit - all products are now shown
+                    'limited': limited
                 })
             except Exception as e:
                 logging.error(f"Excel processor error in lite mode: {e}")

@@ -9658,6 +9658,121 @@ const TagManager = {
         });
         
         tagInfo.appendChild(dohSelect);
+        
+        // Create Discount dropdown (third small dropdown) - lets user pick a discount badge
+        const discountSelect = document.createElement('select');
+        discountSelect.className = 'form-select form-select-sm discount-select discount-dropdown discount-dropdown-mini';
+        discountSelect.style.height = '14px';
+        discountSelect.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+        discountSelect.style.border = '0.5px solid rgba(255, 255, 255, 0.12)';
+        discountSelect.style.borderRadius = '2px';
+        discountSelect.style.cursor = 'pointer';
+        discountSelect.style.color = 'rgba(172, 179, 191, 0.7)';
+        discountSelect.style.marginLeft = '6px';
+        discountSelect.style.width = '50px';
+        discountSelect.style.minWidth = '40px';
+        discountSelect.style.fontSize = '9px';
+        discountSelect.style.padding = '2px 6px';
+
+        const discountOptions = [
+            { value: 'NONE', label: '(Discount)' },
+            { value: '50%', label: '50%' }
+        ];
+        discountOptions.forEach(option => {
+            const o = document.createElement('option');
+            o.value = option.value;
+            o.textContent = option.label;
+            discountSelect.appendChild(o);
+        });
+
+        // Small container to show discount badge inline in tag UI
+        const discountImageContainer = document.createElement('span');
+        discountImageContainer.className = 'discount-image-container';
+        discountImageContainer.style.display = 'inline-flex';
+        discountImageContainer.style.alignItems = 'center';
+        discountImageContainer.style.justifyContent = 'center';
+        discountImageContainer.style.marginLeft = '6px';
+        discountImageContainer.style.width = '28px';
+        discountImageContainer.style.height = '18px';
+
+        const updateDiscountImage = (val) => {
+            discountImageContainer.replaceChildren();
+            if (val === '50%') {
+                const img = document.createElement('img');
+                img.src = '/static/img/50percent.png';
+                img.alt = '50%';
+                img.loading = 'lazy';
+                img.style.cssText = 'height:18px;width:auto;object-fit:contain;';
+                discountImageContainer.appendChild(img);
+                // Ensure container is visible when a discount image is present
+                discountImageContainer.style.display = 'inline-flex';
+            } else {
+                discountImageContainer.style.display = 'none';
+            }
+        };
+
+        // Initialize discount UI from tag if present
+        const initialDiscount = tag.discount || tag.Discount || 'NONE';
+        discountSelect.value = initialDiscount;
+        updateDiscountImage(initialDiscount);
+
+        // Prevent propagation
+        discountSelect.addEventListener('click', (e) => e.stopPropagation());
+        discountSelect.addEventListener('change', async (e) => {
+            if (this._fetchingAvailableTags || !this.state.initialized) {
+                e.target.value = tag.discount || 'NONE';
+                return;
+            }
+            const prevValue = tag.discount || 'NONE';
+            const newVal = e.target.value;
+
+            // Immediate UI feedback
+            updateDiscountImage(newVal);
+
+            discountSelect.disabled = true;
+            const savingOption = document.createElement('option');
+            savingOption.value = '';
+            savingOption.textContent = 'Saving...';
+            savingOption.selected = true;
+            savingOption.disabled = true;
+            discountSelect.appendChild(savingOption);
+
+            let safetyTimeout = setTimeout(() => {
+                discountSelect.disabled = false;
+                discountSelect.value = prevValue;
+                updateDiscountImage(prevValue);
+                try { savingOption.remove(); } catch (_) {}
+            }, 15000);
+
+            try {
+                const resp = await fetch('/api/update-discount', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_name: displayName, discount: newVal })
+                });
+                if (!resp.ok) throw new Error('Server error');
+                const data = await resp.json();
+                if (data.success) {
+                    tag.discount = newVal;
+                    discountSelect.value = newVal;
+                    updateDiscountImage(newVal);
+                } else {
+                    throw new Error(data.error || 'Failed to save');
+                }
+            } catch (err) {
+                console.error('Failed to update discount:', err);
+                discountSelect.value = prevValue;
+                updateDiscountImage(prevValue);
+                alert('Failed to save discount: ' + (err.message || err));
+            } finally {
+                discountSelect.disabled = false;
+                try { savingOption.remove(); } catch (_) {}
+                if (safetyTimeout) clearTimeout(safetyTimeout);
+            }
+        });
+
+        tagInfo.appendChild(discountSelect);
+        tagInfo.appendChild(discountImageContainer);
         tagElement.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             if (window.lineageEditor) {
@@ -12809,12 +12924,25 @@ const TagManager = {
                 console.log('⏳ No cache available or tags already exist - fetching from server');
             }
             
-            // Fire off a non-blocking lite prefetch to get instant tags while the
-            // full /api/available-tags endpoint is still loading.
-            // This should never throw or block the main flow.
-            this._prefetchLiteAvailableTags(savedScroll).catch(err => {
+            // Fire off a lite prefetch to get instant tags while the full /api/available-tags endpoint is still loading.
+            // If the lite path returns quickly, we can render it immediately for better perceived performance.
+            const litePrefetchPromise = this._prefetchLiteAvailableTags(savedScroll).catch(err => {
                 verboseLog('Lite prefetch error (non-critical):', err);
+                return false;
             });
+
+            if (!hasCache && !hasExistingTags) {
+                console.log('⚡ Waiting briefly for lite tag prefetch on initial load...');
+                const liteResult = await Promise.race([
+                    litePrefetchPromise,
+                    new Promise(resolve => setTimeout(() => resolve(false), 400))
+                ]);
+                if (liteResult) {
+                    console.log('⚡ Lite tags loaded quickly and rendered');
+                } else {
+                    console.log('⚡ Lite prefetch did not complete quickly; continuing with full tag fetch');
+                }
+            }
             
             // Rate limiting: prevent rapid successive calls (unless force reload)
             // Reduced to 50ms for much faster consecutive operations
@@ -21367,6 +21495,12 @@ let lastClickedCheckbox = null;
 let lastClickTime = 0;
 
 document.addEventListener('click', function(e) {
+    // Ignore clicks on non-checkbox interactive controls (selects/buttons/inputs)
+    const _tag = e.target && e.target.tagName ? e.target.tagName.toUpperCase() : '';
+    if (_tag === 'SELECT' || _tag === 'BUTTON' || (_tag === 'INPUT' && e.target.type && e.target.type.toLowerCase() !== 'checkbox')) {
+        // Let those controls handle their own events; do not treat as checkbox clicks
+        return;
+    }
     console.log('👆 Document click detected on:', e.target.tagName, 'classes:', e.target.className);
 
     // Check if the clicked element is ANY checkbox (tag checkbox, select-all, or group checkbox)

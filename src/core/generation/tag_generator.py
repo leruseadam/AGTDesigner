@@ -40,6 +40,33 @@ from src.core.constants import (
     LINEAGE_COLOR_MAP
 )
 
+DISCOUNT_50_IMAGE_TOKEN = "__DISCOUNT_50_IMAGE__"
+
+
+def _get_lane_image_width(orientation, lane_name):
+    """Compute an image width (in Mm) for a given lane using the font scheme.
+    """
+    try:
+        if orientation in ("mini", "miniroll"):
+            scheme = FONT_SCHEME_MINI
+        elif orientation == 'vertical':
+            scheme = FONT_SCHEME_VERTICAL
+        else:
+            scheme = FONT_SCHEME_HORIZONTAL
+
+        lane = scheme.get(lane_name) or scheme.get('DOH') or {'max': 10}
+        pt = lane.get('max', 10)
+        mm_val = float(pt) * 0.352778
+        if orientation in ("mini", "miniroll"):
+            mm_val = max(4.0, min(mm_val, 10.0))
+        elif orientation == 'vertical':
+            mm_val = max(6.0, min(mm_val, 14.0))
+        else:
+            mm_val = max(8.0, min(mm_val, 16.0))
+        return Mm(mm_val)
+    except Exception:
+        return Mm(10)
+
 # In-memory cache of template bytes to avoid repeated file I/O and speed up
 # template loading. Keys are absolute template paths.
 _template_bytes_cache = {}
@@ -910,6 +937,7 @@ def process_chunk(args):
     context = {}
     image_width = Mm(8) if orientation in ("mini", "miniroll") else Mm(9 if orientation == 'vertical' else 12)
     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
+    # image widths will use the unified font-size lane helper when attaching images
     if DEBUG_ENABLED:
         logger.debug(f"DOH image path: {doh_image_path}")
     
@@ -1027,19 +1055,19 @@ def process_chunk(args):
                     high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
                     if DEBUG_ENABLED:
                         logger.debug(f"Using HighCBD image: {high_cbd_image_path}")
-                    label_data["DOH"] = InlineImage(tpl, high_cbd_image_path, width=image_width)
+                    label_data["DOH"] = InlineImage(tpl, high_cbd_image_path, width=_get_lane_image_width(orientation, 'DOH'))
                 elif doh_value == "THC":
                     # Use High THC image
                     high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
                     if DEBUG_ENABLED:
                         logger.debug(f"Using HighTHC image: {high_thc_image_path}")
-                    label_data["DOH"] = InlineImage(tpl, high_thc_image_path, width=image_width)
+                    label_data["DOH"] = InlineImage(tpl, high_thc_image_path, width=_get_lane_image_width(orientation, 'DOH'))
                 else:
                     # Use regular DOH image
                     doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
                     if DEBUG_ENABLED:
                         logger.debug(f"Using DOH image: {doh_image_path}")
-                    label_data["DOH"] = InlineImage(tpl, doh_image_path, width=image_width)
+                    label_data["DOH"] = InlineImage(tpl, doh_image_path, width=_get_lane_image_width(orientation, 'DOH'))
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(f"DOH: '{product_name}' - Added image")
                 if DEBUG_ENABLED:
@@ -1048,6 +1076,19 @@ def process_chunk(args):
                 label_data["DOH"] = ""
                 if DEBUG_ENABLED:
                     logger.debug(f"Skipping DOH image - value is '{doh_value}' (not DOH/THC/CBD)")
+
+            try:
+                discount_raw = str(row.get('Discount', '') or row.get('discount', '') or '').strip()
+                if discount_raw in ['50%', '50']:
+                    discount_image_path = resource_path(os.path.join("templates", "50percent.png"))
+                    if not os.path.exists(discount_image_path):
+                        discount_image_path = resource_path(os.path.join("static", "img", "50percent.png"))
+                    label_data["Discount"] = InlineImage(tpl, discount_image_path, width=_get_lane_image_width(orientation, 'Discount'))
+                else:
+                    label_data["Discount"] = ""
+            except Exception as disc_e:
+                logger.warning(f"Could not attach discount image for '{product_name}': {disc_e}")
+                label_data["Discount"] = ""
                 
             # --- Wrap all fields with markers ---
             # Updated price mapping to use correct field names
@@ -1099,9 +1140,9 @@ def process_chunk(args):
                     logger.info(f"🔧 TAG_GENERATOR INFERRED TYPE: '{product_name}' -> 'flower' (from name)")
                 elif any(keyword in product_name.lower() for keyword in ['pre-roll', 'preroll', 'joint', 'blunt']):
                     product_type = 'pre-roll'
-                    logger.info(f"🔧 TAG_GENERATOR INFERRED TYPE: '{product_name}' -> 'pre-roll' (from name)")
-                else:
-                    product_type = 'flower'  # Default to flower for new products
+                    if orientation == "mini" or orientation == "miniroll":
+                        local_template_buffer = base_template
+                        num_labels = 20  # Use standard 4x5 grid
                     logger.info(f"🔧 TAG_GENERATOR DEFAULT TYPE: '{product_name}' -> 'flower' (default)")
             
             product_strain = str(row.get("Product Strain", "")).strip()
@@ -1378,7 +1419,7 @@ def process_chunk(args):
                 combined = f"{desc} - {weight_units}"
             else:
                 combined = desc
-            
+
             label_data["DescAndWeight"] = wrap_with_marker(combined, "DESC")
             
             context[f"Label{i+1}"] = label_data
@@ -1398,8 +1439,80 @@ def process_chunk(args):
     buffer.seek(0)
     if DEBUG_ENABLED:
         logger.debug("Template saved to buffer")
-    
+
     return buffer.getvalue()
+
+def _replace_discount_badge_tokens_in_docx_bytes(buffer, orientation):
+    """Replace fallback-generator discount tokens with the 50 percent PNG."""
+    try:
+        doc = Document(buffer)
+        image_path = Path(__file__).parent / "templates" / "50percent.png"
+        if not image_path.exists():
+            fallback_path = Path.cwd() / "static" / "img" / "50percent.png"
+            image_path = fallback_path if fallback_path.exists() else image_path
+        if not image_path.exists():
+            return buffer
+
+        width_map = {
+            "mini": 8,
+            "miniroll": 8,
+            "preroll": 8,
+            "double": 13,
+            "new": 13,
+            "horizontal": 13,
+            "vertical": 13,
+        }
+        image_width = Mm(width_map.get(orientation, 11))
+
+        def replace_in_paragraph(paragraph):
+            if DISCOUNT_50_IMAGE_TOKEN not in paragraph.text:
+                return
+            template_run = next((run for run in paragraph.runs if run.text), None)
+            full_text = ''.join(run.text for run in paragraph.runs)
+            full_text = re.sub(
+                rf'{re.escape(DISCOUNT_50_IMAGE_TOKEN)}\s*50\s*%',
+                DISCOUNT_50_IMAGE_TOKEN,
+                full_text,
+            )
+            parts = full_text.split(DISCOUNT_50_IMAGE_TOKEN)
+            for run in paragraph.runs:
+                run.text = ''
+            for idx, part in enumerate(parts):
+                if idx > 0:
+                    part = re.sub(r'^\s*50\s*%', '', part)
+                if part:
+                    text_run = paragraph.add_run(part)
+                    if template_run is not None:
+                        text_run.bold = template_run.bold
+                        text_run.italic = template_run.italic
+                        text_run.font.name = template_run.font.name or "Arial"
+                        text_run.font.size = template_run.font.size
+                if idx < len(parts) - 1:
+                    paragraph.add_run(' ')
+                    paragraph.add_run().add_picture(str(image_path), width=image_width)
+
+        def iter_table_paragraphs(table):
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        yield paragraph
+                    for nested_table in cell.tables:
+                        yield from iter_table_paragraphs(nested_table)
+
+        for table in doc.tables:
+            for paragraph in iter_table_paragraphs(table):
+                replace_in_paragraph(paragraph)
+        for paragraph in doc.paragraphs:
+            replace_in_paragraph(paragraph)
+
+        out = BytesIO()
+        doc.save(out)
+        out.seek(0)
+        return out
+    except Exception as e:
+        logger.warning(f"Discount image replacement skipped: {e}")
+        buffer.seek(0)
+        return buffer
 
 def combine_documents(docs):
     """Combine multiple documents into one using a safer method."""
@@ -1763,4 +1876,3 @@ def create_safe_document():
     except Exception as e:
         logger.error(f"Error creating safe document: {e}")
         raise
-

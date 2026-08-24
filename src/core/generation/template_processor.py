@@ -140,6 +140,8 @@ def _sanitize_document_for_word(doc):
 # Avoids re-rendering identical QR codes across tags within the same process.
 _qr_image_bytes_cache: dict = {}
 
+_DISCOUNT_50_IMAGE_TOKEN = "__DISCOUNT_50_IMAGE__"
+
 
 def _replace_mg_thc_cbd_with_weight(text, weight_units):
     """For non-classic types: replace trailing '100mg THC' / '50mg CBD' etc. with weight. Returns cleaned text + weight suffix."""
@@ -2051,6 +2053,7 @@ class TemplateProcessor:
             try:
                 self._post_process_and_replace_content(rendered_doc)
                 self._final_marker_cleanup(rendered_doc)
+                self._replace_discount_badge_tokens(rendered_doc)
             except Exception as processing_error:
                 self.logger.warning(f"Skipping post-processing due to table structure issue: {processing_error}")
                 # Continue processing without post-processing features
@@ -4891,6 +4894,8 @@ class TemplateProcessor:
             if 'ProductVendor' not in label_context:
                 label_context['ProductVendor'] = ""
                 self.logger.warning(f"⚠️ FINAL CHECK: ProductVendor was missing from context, set to empty")
+
+        self._apply_discount_badge_to_context(label_context, record, doc)
         
         # FINAL DEBUG: Log ProductVendor value for blunts and pre-rolls before returning context
         final_product_vendor = label_context.get('ProductVendor', 'NOT_SET')
@@ -4906,6 +4911,44 @@ class TemplateProcessor:
                 self.logger.warning(f"🔍 FINAL CONTEXT: '{product_name_final}' - ProductVendor: '{final_product_vendor}' (error unwrapping: {e})")
 
         return label_context
+
+    def _apply_discount_badge_to_context(self, label_context, record, doc):
+        """Attach the selected discount badge to the template's Discount placeholder."""
+        discount = (
+            label_context.get('Discount')
+            or label_context.get('discount')
+            or record.get('Discount')
+            or record.get('discount')
+            or ''
+        )
+        if str(discount).strip() not in ('50%', '50'):
+            label_context['Discount'] = ''
+            return
+
+        image_path = Path(__file__).parent / 'templates' / '50percent.png'
+        if not image_path.exists():
+            fallback_path = Path.cwd() / 'static' / 'img' / '50percent.png'
+            image_path = fallback_path if fallback_path.exists() else image_path
+
+        if not image_path.exists():
+            self.logger.warning(f"50 percent discount image not found: {image_path}")
+            label_context['Discount'] = ''
+            return
+
+        width_map = {
+            'mini': 8,
+            'miniroll': 8,
+            'preroll': 8,
+            'double': 13,
+            'new': 13,
+            'horizontal': 13,
+            'vertical': 13,
+        }
+        label_context['Discount'] = InlineImage(
+            doc,
+            str(image_path),
+            width=Mm(width_map.get(self.template_type, 11)),
+        )
 
     def _generate_qr_code(self, product_name, doc, is_url=False):
         """Generate QR code for the given product name (or URL for preroll template) and return as InlineImage."""
@@ -5219,6 +5262,8 @@ class TemplateProcessor:
             # NOTE: This must happen AFTER all font sizing is complete (which happens in _post_process_template_specific)
             # ProductStrain markers need to be processed for font sizing before being removed
             self._final_marker_cleanup(doc)
+
+            self._replace_discount_badge_tokens(doc)
             
             # PREROLL TEMPLATE: Center QR codes
             if self.template_type == 'preroll':
@@ -5268,6 +5313,73 @@ class TemplateProcessor:
             self.logger.warning(f"Final bold enforcement failed: {e}")
             
         return doc
+
+    def _replace_discount_badge_tokens(self, doc):
+        """Replace discount badge tokens with inline PNG images."""
+        image_path = Path(__file__).parent / 'templates' / '50percent.png'
+        if not image_path.exists():
+            fallback_path = Path.cwd() / 'static' / 'img' / '50percent.png'
+            image_path = fallback_path if fallback_path.exists() else image_path
+
+        if not image_path.exists():
+            self.logger.warning(f"50 percent discount image not found: {image_path}")
+            return
+
+        width_map = {
+            'mini': 8,
+            'miniroll': 8,
+            'preroll': 8,
+            'double': 13,
+            'new': 13,
+            'horizontal': 13,
+            'vertical': 13,
+        }
+        image_width = Mm(width_map.get(self.template_type, 11))
+
+        def replace_in_paragraph(paragraph):
+            if _DISCOUNT_50_IMAGE_TOKEN not in paragraph.text:
+                return
+
+            template_run = next((run for run in paragraph.runs if run.text), None)
+            full_text = ''.join(run.text for run in paragraph.runs)
+            full_text = re.sub(
+                rf'{re.escape(_DISCOUNT_50_IMAGE_TOKEN)}\s*50\s*%',
+                _DISCOUNT_50_IMAGE_TOKEN,
+                full_text,
+            )
+            parts = full_text.split(_DISCOUNT_50_IMAGE_TOKEN)
+
+            for run in paragraph.runs:
+                run.text = ''
+
+            for idx, part in enumerate(parts):
+                if idx > 0:
+                    part = re.sub(r'^\s*50\s*%', '', part)
+                if part:
+                    text_run = paragraph.add_run(part)
+                    if template_run is not None:
+                        text_run.bold = template_run.bold
+                        text_run.italic = template_run.italic
+                        text_run.font.name = template_run.font.name or 'Arial'
+                        text_run.font.size = template_run.font.size
+                if idx < len(parts) - 1:
+                    paragraph.add_run(' ')
+                    paragraph.add_run().add_picture(str(image_path), width=image_width)
+
+        def iter_table_paragraphs(table):
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        yield paragraph
+                    for nested_table in cell.tables:
+                        yield from iter_table_paragraphs(nested_table)
+
+        for table in doc.tables:
+            for paragraph in iter_table_paragraphs(table):
+                replace_in_paragraph(paragraph)
+
+        for paragraph in doc.paragraphs:
+            replace_in_paragraph(paragraph)
 
     def _force_descandweight_bold(self, doc):
         """CREATIVE FIX: Aggressively force bold formatting on DescAndWeight content."""

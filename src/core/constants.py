@@ -48,6 +48,7 @@ FONT_SCHEME_HORIZONTAL = {
     'Price': {'min': 12, 'max': 28, 'weight': 1},
     'Lineage': {'min': 10, 'max': 24, 'weight': 1},
     'DOH': {'min': 8, 'max': 12, 'weight': 1},
+    'Discount': {'min': 8, 'max': 12, 'weight': 1},
     'THC_CBD': {'min': 10, 'max': 24, 'weight': 1},
     'Ratio': {'min': 10, 'max': 24, 'weight': 1}
 }
@@ -59,6 +60,7 @@ FONT_SCHEME_VERTICAL = {
     'Price': {'min': 12, 'max': 26, 'weight': 1},
     'Lineage': {'min': 10, 'max': 22, 'weight': 1},
     'DOH': {'min': 8, 'max': 12, 'weight': 1},
+    'Discount': {'min': 8, 'max': 12, 'weight': 1},
     'THC_CBD': {'min': 10, 'max': 22, 'weight': 1},
     'Ratio': {'min': 10, 'max': 22, 'weight': 1}
 }
@@ -70,6 +72,7 @@ FONT_SCHEME_MINI = {
     'Price': {'min': 8, 'max': 16, 'weight': 1},
     'Lineage': {'min': 8, 'max': 14, 'weight': 1},
     'DOH': {'min': 6, 'max': 10, 'weight': 1},
+    'Discount': {'min': 6, 'max': 10, 'weight': 1},
     'THC_CBD': {'min': 8, 'max': 14, 'weight': 1},
     'Ratio': {'min': 8, 'max': 14, 'weight': 1}
 }
@@ -81,6 +84,7 @@ FONT_SCHEME_DOUBLE = {
     'Price': {'min': 10, 'max': 20, 'weight': 1},
     'Lineage': {'min': 8, 'max': 18, 'weight': 1},
     'DOH': {'min': 6, 'max': 12, 'weight': 1},
+    'Discount': {'min': 6, 'max': 12, 'weight': 1},
     'THC_CBD': {'min': 8, 'max': 18, 'weight': 1},
     'Ratio': {'min': 8, 'max': 18, 'weight': 1}
 }
