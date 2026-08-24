@@ -1909,6 +1909,11 @@ const TagManager = {
         return normalized === '' || normalized === 'nofile' || normalized === 'database';
     },
 
+    isIncompletePosabitTagCache(tags) {
+        if (!this.isDatabaseOnlyMode()) return false;
+        return Array.isArray(tags) && tags.length > 0 && tags.length < 250;
+    },
+
     getAvailableTagsCacheKey() {
         try {
             const store = (window.sessionStorage && (null)) ||
@@ -2120,6 +2125,11 @@ const TagManager = {
             if (!payload || !Array.isArray(payload.tags) || payload.tags.length === 0) {
                 return null;
             }
+            if (this.isIncompletePosabitTagCache(payload.tags)) {
+                console.warn(`⚠️ Cached POSaBit catalog looks truncated (${payload.tags.length} tags) - ignoring`);
+                try { storage.removeItem(cacheKey); } catch (e) { /* ignore */ }
+                return null;
+            }
             
             // CRITICAL FIX: Validate platform matches - Chrome sync can share cache between Mac/Windows
             // If platform doesn't match, cache is from different platform and should be invalidated
@@ -2132,7 +2142,7 @@ const TagManager = {
             }
             
             // ⚡ AUTO CACHE INVALIDATION: Must match saveAvailableTagsToCache CACHE_VERSION
-            const CURRENT_VERSION = 5;
+            const CURRENT_VERSION = 6;
             const cacheVersion = payload.cacheVersion || 1;
 
             // Hard-invalidate any cache that is behind the current version
@@ -2206,6 +2216,11 @@ const TagManager = {
                 return;
             }
 
+            if (this.isIncompletePosabitTagCache(tags)) {
+                verboseLog(`⏭️ Skipping available-tags cache save: incomplete POSaBit catalog (${tags.length} tags)`);
+                return;
+            }
+
             // CRITICAL FIX: Use localStorage instead of sessionStorage for larger capacity
             // localStorage: 10-50MB, sessionStorage: 5-10MB
             const storage = window.localStorage || window.sessionStorage;
@@ -2214,11 +2229,26 @@ const TagManager = {
             }
             
             // ⚡ AUTO CACHE VERSIONING: Increment on data structure changes
-            const CACHE_VERSION = 5; // v5: Force-invalidate stale DOH-field cache (DOH was NO for many products)
+            const CACHE_VERSION = 6; // v6: Drop truncated POSaBit caches (~127 SKUs)
 
             // CRITICAL FIX: Clear old cache entries FIRST to make space
             // Also clear cache from different platform (Chrome sync can share cache between Mac/Windows)
             const cacheKey = this.getAvailableTagsCacheKey();
+            try {
+                const existingRaw = storage.getItem(cacheKey);
+                if (existingRaw) {
+                    const existing = JSON.parse(existingRaw);
+                    if (
+                        existing &&
+                        Array.isArray(existing.tags) &&
+                        (existing.cacheVersion || 1) >= CACHE_VERSION &&
+                        existing.tags.length > tags.length * 1.1
+                    ) {
+                        verboseLog(`⏭️ Skipping overwrite of larger tag cache (${existing.tags.length} -> ${tags.length})`);
+                        return;
+                    }
+                }
+            } catch (e) { /* ignore */ }
             const currentPlatform = isWindows ? 'win' : 'mac';
             const keysToRemove = [];
             for (let i = 0; i < storage.length; i++) {
@@ -12503,7 +12533,9 @@ const TagManager = {
             this.state.tags = [...liteTags];
             this.state.originalTags = [...liteTags];
             this.state.hydratedFromCache = false;
-            this.saveAvailableTagsToCache(liteTags);
+            if (!this.isIncompletePosabitTagCache(liteTags)) {
+                this.saveAvailableTagsToCache(liteTags);
+            }
 
             this._updateAvailableTags(liteTags);
             if (savedScrollPosition) {

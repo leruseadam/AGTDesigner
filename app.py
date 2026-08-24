@@ -12936,7 +12936,11 @@ def get_available_tags():
         # Cached rows are only a fallback when the live feed is unavailable or empty.
         if effective_source == 'posabit' and (is_posabit_configured() or is_posabit_products_enabled()):
             try:
-                from src.core.data.posabit_client import get_cached_product_rows, get_menu_feed_as_product_rows
+                from src.core.data.posabit_client import (
+                    get_cached_product_rows,
+                    get_menu_feed_as_product_rows,
+                    is_incomplete_posabit_catalog,
+                )
                 store_for_posabit = get_current_store_name(allow_fallback=True)
                 posabit_rows = get_menu_feed_as_product_rows(
                     store_name=store_for_posabit,
@@ -12946,17 +12950,22 @@ def get_available_tags():
                     safe_posabit_tags = make_json_safe(_slim_tags(posabit_rows))
                     try:
                         store_name_align = get_current_store_name(allow_fallback=True)
-                        safe_posabit_tags = _align_tags_with_db_lineage(
-                            safe_posabit_tags, store_name_align,
-                            skip_if_aligned=False, force_overwrite=True
-                        )
+                        if fast_load:
+                            safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
+                        else:
+                            safe_posabit_tags = _align_tags_with_db_lineage(
+                                safe_posabit_tags, store_name_align,
+                                skip_if_aligned=False, force_overwrite=True
+                            )
                     except Exception:
                         pass
                     safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
+                    catalog_complete = not is_incomplete_posabit_catalog(safe_posabit_tags)
                     return jsonify({
                         'tags': safe_posabit_tags,
                         'total_count': len(safe_posabit_tags),
                         'source': 'posabit',
+                        'catalog_complete': catalog_complete,
                         'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
                     }), 200
 
@@ -13317,17 +13326,23 @@ def get_available_tags():
                         safe_posabit_tags = make_json_safe(_slim_tags(posabit_rows))
                         try:
                             store_name_align = get_current_store_name(allow_fallback=True)
-                            safe_posabit_tags = _align_tags_with_db_lineage(
-                                safe_posabit_tags, store_name_align,
-                                skip_if_aligned=False, force_overwrite=True
-                            )
+                            if fast_load:
+                                safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
+                            else:
+                                safe_posabit_tags = _align_tags_with_db_lineage(
+                                    safe_posabit_tags, store_name_align,
+                                    skip_if_aligned=False, force_overwrite=True
+                                )
                         except Exception:
                             pass
                         safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
+                        from src.core.data.posabit_client import is_incomplete_posabit_catalog as _incomplete_pos
+                        catalog_complete = not _incomplete_pos(safe_posabit_tags)
                         return jsonify({
                             'tags': safe_posabit_tags,
                             'total_count': len(safe_posabit_tags),
                             'source': 'posabit',
+                            'catalog_complete': catalog_complete,
                             'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
                         }), 200
 
@@ -17948,6 +17963,11 @@ def get_web_available_tags():
         fast_load = True  # Always fast for web
         prefer_db = False  # Skip database queries for speed
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
+        from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+        posabit_selected = (
+            session.get('data_source') == 'posabit'
+            and (is_posabit_configured() or is_posabit_products_enabled())
+        )
         
         # CRITICAL FIX: Check for recent lineage updates - ALWAYS skip cache if lineage was recently updated
         # This ensures UI shows fresh database lineage, not stale cached Excel lineage
@@ -17957,7 +17977,7 @@ def get_web_available_tags():
         # Use same freshness model as regular endpoint (lineage timestamp + cache bust).
         session_file_path = session.get('file_path', '')
         # If session missing file_path (e.g., after refresh), try to recover from persistent last-upload file
-        if not session_file_path:
+        if not session_file_path and not posabit_selected:
             try:
                 persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
                 if os.path.exists(persistence_file):
@@ -17990,7 +18010,7 @@ def get_web_available_tags():
         # FAST-PATH: Check for background-generated file tag cache created during upload processing
         # Background thread stores tags under a sha256(file_path) key with a version prefix
         try:
-            if session_file_path and not has_recent_lineage_update:
+            if session_file_path and not has_recent_lineage_update and not posabit_selected:
                 import hashlib
                 cache_version = TAGS_CACHE_VERSION
                 file_hash = hashlib.sha256(session_file_path.encode()).hexdigest()
@@ -18034,7 +18054,7 @@ def get_web_available_tags():
             excel_processor = get_excel_processor()
 
         # If we loaded a default fallback file earlier in this session, require explicit upload
-        if session.get('default_file_loaded'):
+        if session.get('default_file_loaded') and not posabit_selected:
             logging.info("WEB: Default fallback file is loaded for this session - requiring user upload before showing products")
             return jsonify({
                 'tags': [],
@@ -18057,7 +18077,7 @@ def get_web_available_tags():
                     logging.warning(f"WEB: Error loading default file: {load_err}")
         
         # CRITICAL: Check if Excel file exists BEFORE serving cache — but try POSaBit first
-        if excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
+        if posabit_selected or excel_processor is None or excel_processor.df is None or excel_processor.df.empty:
             # No Excel data — attempt POSaBit (same logic as /api/available-tags)
             try:
                 from src.core.data.posabit_client import (
@@ -18117,25 +18137,37 @@ def get_web_available_tags():
                             _web_cold_rows = cached_rows
 
                     if _web_cold_rows:
-                        safe_posabit_tags = make_json_safe(_web_cold_rows)
+                        safe_posabit_tags = make_json_safe(_slim_tags(_web_cold_rows))
                         try:
                             if store_for_posabit:
-                                safe_posabit_tags = _align_tags_with_db_lineage(
+                                # Quick align keeps this under PythonAnywhere request timeouts.
+                                # Full lineage refresh still runs in the background from the UI.
+                                safe_posabit_tags = _quick_align_tags_lineage(
                                     safe_posabit_tags,
                                     store_for_posabit,
-                                    skip_if_aligned=False,
-                                    force_overwrite=True,
                                 )
                         except Exception:
                             pass
                         try:
-                            cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=300)
+                            safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
                         except Exception:
                             pass
+                        catalog_complete = not is_incomplete_posabit_catalog(safe_posabit_tags)
+                        if catalog_complete:
+                            try:
+                                cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=300)
+                            except Exception:
+                                pass
+                        else:
+                            logging.warning(
+                                "WEB: not caching incomplete POSaBit catalog (%s tags)",
+                                len(safe_posabit_tags),
+                            )
                         resp = make_response(jsonify({
                             'tags': safe_posabit_tags,
                             'total_count': len(safe_posabit_tags),
-                            'source': 'posabit'
+                            'source': 'posabit',
+                            'catalog_complete': catalog_complete,
                         }))
                         return compress_response(resp)
 
@@ -24137,7 +24169,7 @@ def get_available_tags_lite():
                             lite_tags = _quick_align_tags_lineage(lite_tags, store_align)
                         except Exception as _lite_al:
                             logging.debug(f"Lite POS lineage align skipped: {_lite_al}")
-                    safe_lite = make_json_safe(lite_tags)
+                    safe_lite = make_json_safe(_slim_tags(lite_tags))
                     elapsed = (time.time() - start_time) * 1000
                     logging.info(
                         f"✅ Lite tags (POS cache) returned {len(safe_lite)} tags ({elapsed:.1f}ms)"

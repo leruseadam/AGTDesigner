@@ -6,6 +6,7 @@ import os
 import re
 import time
 import logging
+import threading
 from typing import List, Dict, Any, Optional
 
 from src.core.utils.product_weight_inference import (
@@ -205,6 +206,17 @@ def _posabit_request_timeout(default: int = 30) -> int:
     return default
 
 
+_live_expected_total = threading.local()
+
+
+def _set_live_expected_total(expected: Optional[int]) -> None:
+    _live_expected_total.value = expected
+
+
+def _get_live_expected_total() -> Optional[int]:
+    return getattr(_live_expected_total, "value", None)
+
+
 def _is_incomplete_product_cache(rows: Optional[List[Dict[str, Any]]]) -> bool:
     """Menu-feed-sized caches (~127 items) are not valid full-inventory caches for this app."""
     if not rows:
@@ -212,6 +224,20 @@ def _is_incomplete_product_cache(rows: Optional[List[Dict[str, Any]]]) -> bool:
     if _prefer_menu_feed_only():
         return False
     return len(rows) < _venue_inventory_fallback_threshold()
+
+
+def _live_catalog_is_incomplete(rows: Optional[List[Dict[str, Any]]]) -> bool:
+    """True when a live fetch is menu-sized or missing a large share of reported records."""
+    if _is_incomplete_product_cache(rows):
+        return True
+    expected = _get_live_expected_total()
+    try:
+        expected_n = int(expected) if expected else 0
+    except Exception:
+        expected_n = 0
+    if expected_n >= _venue_inventory_fallback_threshold() and rows and len(rows) < int(expected_n * 0.90):
+        return True
+    return False
 
 
 def is_incomplete_posabit_catalog(rows: Optional[List[Dict[str, Any]]]) -> bool:
@@ -271,6 +297,18 @@ def _save_disk_cache(rows: List[Dict[str, Any]], store_name: Optional[str] = Non
         return
     path = _disk_cache_path(store_name)
     try:
+        if path.exists() and not _prefer_menu_feed_only():
+            try:
+                existing = _json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(existing, list) and len(existing) > int(len(rows) * 1.15):
+                    logger.warning(
+                        "POSaBit disk cache not overwritten: existing %d products > live %d",
+                        len(existing),
+                        len(rows),
+                    )
+                    return
+            except Exception:
+                pass
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_json.dumps(rows, default=str), encoding="utf-8")
         logger.info(f"POSaBit disk cache saved: {len(rows)} products for {_store_slug(store_name)}")
@@ -865,6 +903,74 @@ def _inventory_sku_to_product_row(sku: Dict) -> Dict[str, Any]:
     return row
 
 
+def _venue_inventory_page_url(url_template: str, page: int, per_page: int, include_zero_qty: bool) -> str:
+    import urllib.parse
+
+    params = {"page": str(page), "per_page": str(per_page)}
+    if not include_zero_qty:
+        # Server-side in-stock filter: avoids paging through 30k zero-qty historical SKUs.
+        params["q[quantity_on_hand_gt]"] = "0"
+    return f"{url_template}?{urllib.parse.urlencode(params)}"
+
+
+def _venue_inventory_workers() -> int:
+    try:
+        return max(1, min(12, int(float(os.environ.get("POSABIT_VENUE_INVENTORY_WORKERS", "8") or "8"))))
+    except Exception:
+        return 8
+
+
+def _skus_to_product_rows(
+    inventory: List[Dict[str, Any]],
+    include_zero_qty: bool,
+    include_inactive: bool,
+    max_rows: int,
+    current_count: int,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for sku in inventory:
+        if include_zero_qty:
+            if not include_inactive and sku.get("active") is False:
+                continue
+        else:
+            qty = _sku_stock_quantity(sku)
+            if qty is not None and qty <= 0:
+                continue
+        rows.append(_inventory_sku_to_product_row(sku))
+        if max_rows and current_count + len(rows) >= max_rows:
+            break
+    return rows
+
+
+def _fetch_venue_inventory_page(
+    url_template: str,
+    token: str,
+    page: int,
+    per_page: int,
+    include_zero_qty: bool,
+    retries: int = 1,
+) -> Optional[Dict[str, Any]]:
+    url = _venue_inventory_page_url(url_template, page, per_page, include_zero_qty)
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            data = _http_get(url, token, timeout=_posabit_request_timeout(60))
+        except PosabitAuthError:
+            raise
+        except Exception as err:
+            last_err = err
+            data = None
+        if data:
+            return data
+        logger.warning(
+            "POSaBit venue inventories: page %s attempt %s failed%s",
+            page,
+            attempt + 1,
+            f" ({last_err})" if last_err else "",
+        )
+    return None
+
+
 def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Fetch POSaBit venue inventories (GET /v2/venue/inventories) and return product rows.
@@ -873,8 +979,9 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
     The unfiltered inventory can be 30k+ historical SKUs and the API caps per_page at 100,
     which times out on PythonAnywhere. By default we ask POSaBit for in-stock items only
     (quantity_on_hand > 0), which is the full live catalog (~2,000 products, ~21 pages).
+    Remaining pages are fetched in parallel so hosted workers finish before request timeout.
     """
-    import urllib.parse
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     cfg = _get_config()
     tok = (token or cfg.get("effective_token") or cfg["token"] or cfg["venue_token"]).strip()
@@ -883,8 +990,6 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
         return []
     base = cfg["base_url"].rstrip("/")
     url_template = f"{base}/v2/venue/inventories"
-    rows: List[Dict[str, Any]] = []
-    page = 1
     try:
         per_page = int(float(os.environ.get("POSABIT_PER_PAGE", "100") or "100"))
     except Exception:
@@ -899,54 +1004,115 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
         max_rows = 10000
     include_inactive = os.environ.get("POSABIT_VENUE_INVENTORY_INCLUDE_INACTIVE", "").strip().lower() in ("1", "true", "yes")
     include_zero_qty = os.environ.get("POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY", "").strip().lower() in ("1", "true", "yes")
-    while page <= max_pages:
-        params = {"page": str(page), "per_page": str(per_page)}
-        if not include_zero_qty:
-            # Server-side in-stock filter: avoids paging through 30k zero-qty historical SKUs.
-            params["q[quantity_on_hand_gt]"] = "0"
-        url = f"{url_template}?{urllib.parse.urlencode(params)}"
+
+    try:
+        first = _fetch_venue_inventory_page(url_template, tok, 1, per_page, include_zero_qty)
+    except PosabitAuthError:
+        logger.warning("POSaBit venue inventories: auth failed on page 1")
+        return []
+    if not first:
+        logger.warning("POSaBit venue inventories: page 1 returned no data")
+        return []
+
+    api_per_page = first.get("per_page") or first.get("max_per_page")
+    if api_per_page:
         try:
-            data = _http_get(url, tok, timeout=_posabit_request_timeout(60))
-        except PosabitAuthError:
-            logger.warning("POSaBit venue inventories: auth failed on page %s", page)
-            break
-        if not data:
-            break
-        inventory = data.get("inventory") or []
-        api_per_page = data.get("per_page") or data.get("max_per_page")
-        if api_per_page:
-            try:
-                per_page = int(api_per_page)
-            except Exception:
-                pass
-        for sku in inventory:
-            if include_zero_qty:
-                if not include_inactive and sku.get("active") is False:
-                    continue
-            else:
-                qty = _sku_stock_quantity(sku)
-                if qty is not None and qty <= 0:
-                    continue
-            rows.append(_inventory_sku_to_product_row(sku))
-            if max_rows and len(rows) >= max_rows:
-                logger.info("POSaBit venue inventories: reached max_rows=%s; stopping early", max_rows)
-                logger.info("POSaBit venue inventories: loaded %s product rows", len(rows))
-                return rows
-        total_pages = data.get("total_pages") or 1
-        try:
-            total_pages = int(total_pages)
+            per_page = int(api_per_page)
         except Exception:
-            total_pages = 1
+            pass
+    try:
+        total_pages = int(first.get("total_pages") or 1)
+    except Exception:
+        total_pages = 1
+    try:
+        expected_total = int(first.get("total_records") or 0)
+    except Exception:
+        expected_total = 0
+    total_pages = max(1, min(total_pages, max_pages))
+
+    page_payloads: Dict[int, Dict[str, Any]] = {1: first}
+    remaining_pages = [page for page in range(2, total_pages + 1)]
+    if remaining_pages:
+        workers = min(_venue_inventory_workers(), len(remaining_pages))
+        logger.info(
+            "POSaBit venue inventories: fetching pages 2-%s in parallel (%s workers, expected ~%s records)",
+            total_pages,
+            workers,
+            expected_total or "unknown",
+        )
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(
+                    _fetch_venue_inventory_page,
+                    url_template,
+                    tok,
+                    page,
+                    per_page,
+                    include_zero_qty,
+                ): page
+                for page in remaining_pages
+            }
+            for future in as_completed(futures):
+                page = futures[future]
+                try:
+                    data = future.result()
+                except PosabitAuthError:
+                    logger.warning("POSaBit venue inventories: auth failed on page %s", page)
+                    continue
+                except Exception as err:
+                    logger.warning("POSaBit venue inventories: page %s failed: %s", page, err)
+                    continue
+                if data:
+                    page_payloads[page] = data
+
+        missing = [page for page in remaining_pages if page not in page_payloads]
+        for page in missing:
+            try:
+                data = _fetch_venue_inventory_page(
+                    url_template, tok, page, per_page, include_zero_qty, retries=1
+                )
+            except PosabitAuthError:
+                break
+            if data:
+                page_payloads[page] = data
+
+    rows: List[Dict[str, Any]] = []
+    for page in range(1, total_pages + 1):
+        data = page_payloads.get(page)
+        if not data:
+            logger.warning("POSaBit venue inventories: missing page %s/%s after retries", page, total_pages)
+            continue
+        inventory = data.get("inventory") or []
+        rows.extend(
+            _skus_to_product_rows(
+                inventory,
+                include_zero_qty,
+                include_inactive,
+                max_rows,
+                len(rows),
+            )
+        )
         logger.info(
             "POSaBit venue inventories: page %s/%s (%s in-stock so far, api total_records=%s)",
             page,
             total_pages,
             len(rows),
-            data.get("total_records"),
+            expected_total or data.get("total_records"),
         )
-        if page >= total_pages or not inventory:
+        if max_rows and len(rows) >= max_rows:
+            logger.info("POSaBit venue inventories: reached max_rows=%s; stopping early", max_rows)
             break
-        page += 1
+
+    if expected_total and len(rows) < int(expected_total * 0.90):
+        logger.warning(
+            "POSaBit venue inventories: partial catalog %s of ~%s records",
+            len(rows),
+            expected_total,
+        )
+        _set_live_expected_total(expected_total)
+    else:
+        _set_live_expected_total(expected_total or len(rows))
+
     logger.info("POSaBit venue inventories: loaded %s product rows", len(rows))
     return rows
 
@@ -1090,6 +1256,7 @@ def get_menu_feed_as_product_rows(
         return cached
 
     rows: List[Dict[str, Any]] = []
+    _set_live_expected_total(None)
     try:
         rows = _fetch_live_menu_feed_rows(feed_key=feed_key, token=token, store_name=store_name)
     except PosabitAuthError as auth_err:
@@ -1098,18 +1265,32 @@ def get_menu_feed_as_product_rows(
         logger.warning("POSaBit live fetch failed: %s; falling back to disk cache", live_err)
 
     disk_rows = _load_disk_cache(store_name)
-    if rows and _is_incomplete_product_cache(rows) and disk_rows and len(disk_rows) > len(rows):
+    live_incomplete = (not rows) or _live_catalog_is_incomplete(rows)
+    if (
+        rows
+        and disk_rows
+        and len(disk_rows) > len(rows)
+        and not _prefer_menu_feed_only()
+        and (live_incomplete or len(disk_rows) >= int(len(rows) * 1.15))
+    ):
         logger.warning(
             "POSaBit live catalog has %d products; keeping larger cached catalog (%d)",
             len(rows),
             len(disk_rows),
         )
         rows = disk_rows
+        live_incomplete = False
 
     if rows:
         _posabit_product_rows_cache[cache_key] = rows
         _posabit_product_rows_cache_time[cache_key] = time.time()
-        _save_disk_cache(rows, store_name)
+        if live_incomplete:
+            logger.warning(
+                "POSaBit live catalog looks incomplete (%d products); not overwriting disk cache",
+                len(rows),
+            )
+        else:
+            _save_disk_cache(rows, store_name)
         return rows
 
     if disk_rows:

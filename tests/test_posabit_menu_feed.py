@@ -100,13 +100,14 @@ def test_posabit_upgrades_small_menu_feed_to_venue_inventory(monkeypatch, tmp_pa
     assert rows[0]["Product Name*"] == "SKU 0"
 
 
-def test_posabit_prefers_menu_feed_when_explicitly_requested(monkeypatch):
+def test_posabit_prefers_menu_feed_when_explicitly_requested(monkeypatch, tmp_path):
     posabit_client._posabit_product_rows_cache.clear()
     posabit_client._posabit_product_rows_cache_time.clear()
     monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
     monkeypatch.setenv("POSABIT_MENU_FEED_KEY_BOTHELL", "feed-bothell")
     monkeypatch.setenv("POSABIT_PREFER_MENU_FEED", "1")
     monkeypatch.delenv("POSABIT_USE_VENUE_INVENTORIES", raising=False)
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
 
     def fake_http_get(url, token, timeout=30, query_params=None):
         return {
@@ -302,3 +303,123 @@ def test_posabit_store_feed_key_accepts_common_web_aliases(monkeypatch):
     cfg = _get_config("AGT_Bothell")
     assert cfg["feed_key"] == "feed-bothell"
     assert cfg["effective_token"] == "demo-token"
+
+
+def test_posabit_venue_inventory_fetches_all_pages(monkeypatch):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.delenv("POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY", raising=False)
+
+    from urllib.parse import parse_qs, urlparse
+
+    def fake_http_get(url, token, timeout=30, query_params=None):
+        page = int(parse_qs(urlparse(url).query).get("page", ["1"])[0])
+        pages = {
+            1: {"name": "Page One", "active": True, "quantity_on_hand": "1.0", "product_family": "Flower"},
+            2: {"name": "Page Two", "active": True, "quantity_on_hand": "2.0", "product_family": "Flower"},
+            3: {"name": "Page Three", "active": True, "quantity_on_hand": "3.0", "product_family": "Flower"},
+        }
+        sku = pages[page]
+        return {
+            "total_records": 3,
+            "current_page": page,
+            "total_pages": 3,
+            "per_page": 1,
+            "inventory": [sku],
+        }
+
+    monkeypatch.setattr("src.core.data.posabit_client._http_get", fake_http_get)
+    rows = posabit_client.get_venue_inventories_as_product_rows()
+    names = {row["Product Name*"] for row in rows}
+    assert names == {"Page One", "Page Two", "Page Three"}
+
+
+def test_posabit_keeps_larger_cache_when_live_fetch_is_partial(monkeypatch, tmp_path):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
+
+    import json
+    disk_path = tmp_path / "posabit_products.json"
+    disk_path.write_text(
+        json.dumps([{"Product Name*": f"Cached SKU {i}", "Product Type*": "Flower"} for i in range(400)]),
+        encoding="utf-8",
+    )
+
+    live_rows = [{"Product Name*": f"Partial SKU {i}", "Product Type*": "Flower"} for i in range(260)]
+    monkeypatch.setattr(
+        "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
+        lambda token=None: live_rows,
+    )
+
+    rows = get_menu_feed_as_product_rows(force_refresh=True)
+    assert len(rows) == 400
+    assert rows[0]["Product Name*"] == "Cached SKU 0"
+
+
+def test_web_available_tags_slims_posabit_payload(client, monkeypatch):
+    with client.session_transaction() as sess:
+        sess['data_source'] = 'posabit'
+        sess['selected_store'] = 'AGT_Bothell'
+        sess.pop('file_path', None)
+        sess.pop('default_file_loaded', None)
+
+    fat_row = {
+        "Product Name*": "Live POS Item",
+        "Product Type*": "Flower",
+        "unused_api_blob": "x" * 50,
+        "internal_debug": {"nested": True},
+    }
+    class _EmptyExcel:
+        df = None
+
+    monkeypatch.setattr('src.core.data.posabit_client.is_posabit_configured', lambda: True)
+    monkeypatch.setattr('src.core.data.posabit_client.is_posabit_products_enabled', lambda: False)
+    monkeypatch.setattr(
+        'src.core.data.posabit_client.get_menu_feed_as_product_rows',
+        lambda store_name=None, force_refresh=False: [fat_row],
+    )
+    monkeypatch.setattr('src.core.data.posabit_client.get_cached_product_rows', lambda store_name=None: None)
+    monkeypatch.setattr('src.core.data.posabit_client.is_incomplete_posabit_catalog', lambda rows: False)
+    monkeypatch.setattr('app.get_session_excel_processor', lambda: _EmptyExcel())
+    monkeypatch.setattr('app.get_excel_processor', lambda: _EmptyExcel())
+
+    resp = client.get('/api/web/available-tags?nocache=1')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['source'] == 'posabit'
+    assert data['tags'][0]['Product Name*'] == 'Live POS Item'
+    assert 'unused_api_blob' not in data['tags'][0]
+    assert 'internal_debug' not in data['tags'][0]
+
+
+def test_web_available_tags_uses_posabit_even_when_excel_is_loaded(client, monkeypatch):
+    with client.session_transaction() as sess:
+        sess['data_source'] = 'posabit'
+        sess['selected_store'] = 'AGT_Bothell'
+        sess['file_path'] = '/tmp/old.xlsx'
+
+    class _LoadedExcel:
+        df = type('DF', (), {'empty': False})()
+        def get_available_tags(self):
+            return [{"Product Name*": "Excel Item", "Product Type*": "Flower"}]
+
+    monkeypatch.setattr('src.core.data.posabit_client.is_posabit_configured', lambda: True)
+    monkeypatch.setattr('src.core.data.posabit_client.is_posabit_products_enabled', lambda: False)
+    monkeypatch.setattr(
+        'src.core.data.posabit_client.get_menu_feed_as_product_rows',
+        lambda store_name=None, force_refresh=False: [{"Product Name*": "POS Item", "Product Type*": "Flower"}] * 300,
+    )
+    monkeypatch.setattr('src.core.data.posabit_client.get_cached_product_rows', lambda store_name=None: None)
+    monkeypatch.setattr('app.get_session_excel_processor', lambda: _LoadedExcel())
+    monkeypatch.setattr('app.get_excel_processor', lambda: _LoadedExcel())
+
+    resp = client.get('/api/web/available-tags?nocache=1')
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['source'] == 'posabit'
+    assert data['total_count'] == 300
+    assert data['tags'][0]['Product Name*'] == 'POS Item'

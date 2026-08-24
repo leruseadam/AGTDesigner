@@ -250,21 +250,24 @@
                 }
             }
 
-            // OPTIMIZED: Try direct /api/available-tags FIRST (it's faster than /api/initial-data)
+            // OPTIMIZED: Try direct available-tags FIRST (it's faster than /api/initial-data)
             // Then fall back to /api/initial-data if needed
-            console.log('⚡ Trying fast /api/available-tags endpoint first...');
+            const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
+                window.location.hostname.includes('agtpricetags.com') ||
+                (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+            const fastTagsEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
+            const fastTagsTimeoutMs = isWebClient ? 90000 : 30000;
+            console.log(`⚡ Trying fast ${fastTagsEndpoint} endpoint first...`);
             let timeoutId = null;
             try {
-                // CRITICAL FIX: Increased timeout to 30 seconds for large files
-                // Large Excel files can take time to process, especially on first load
                 const controller = new AbortController();
                 timeoutId = setTimeout(() => {
                     controller.abort();
-                    console.warn('⚠️ /api/available-tags timeout after 30 seconds, falling back...');
-                }, 30000);
+                    console.warn(`⚠️ ${fastTagsEndpoint} timeout after ${fastTagsTimeoutMs / 1000} seconds, falling back...`);
+                }, fastTagsTimeoutMs);
                 
                 // Use fast_load=1 and allow cache — POSaBit-aligned tags are cached server-side (300s TTL)
-                const quickResponse = await fetch('/api/available-tags?fast_load=1', {
+                const quickResponse = await fetch(`${fastTagsEndpoint}?fast_load=1`, {
                     signal: controller.signal
                 });
                 if (timeoutId) {
@@ -305,7 +308,13 @@
                     }
 
                     if (quickData && quickData.tags && Array.isArray(quickData.tags) && quickData.tags.length > 0) {
-                        console.log(`✅ Fast load successful: ${quickData.tags.length} tags from /api/available-tags`);
+                        const looksIncomplete = quickData.catalog_complete === false ||
+                            (String(quickData.source || '').includes('posabit') && quickData.tags.length < 250);
+                        if (looksIncomplete) {
+                            console.warn(`⚠️ Fast load returned truncated catalog (${quickData.tags.length} tags) - continuing to full fetch`);
+                            throw new Error('Incomplete POSaBit catalog');
+                        }
+                        console.log(`✅ Fast load successful: ${quickData.tags.length} tags from ${fastTagsEndpoint}`);
 
                         // Save to cache for next time
                         if (this.saveAvailableTagsToCache) {
