@@ -316,13 +316,19 @@ def test_posabit_configured_when_token_present_without_menu_feed_key(monkeypatch
 
 def test_posabit_disk_cache_save_is_atomic(tmp_path, monkeypatch):
     monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
-    rows = [{"Product Name*": f"SKU {i}", "Product Type*": "Flower"} for i in range(300)]
+    rows = [{
+        "Product Name*": f"SKU {i}",
+        "Product Type*": "Flower",
+        "unused_api_blob": "drop-me",
+    } for i in range(300)]
     posabit_client._save_disk_cache(rows)
     path = tmp_path / "posabit_products.json"
     assert path.exists()
     assert not (tmp_path / "posabit_products.json.tmp").exists()
     loaded = posabit_client._json.loads(path.read_text(encoding="utf-8"))
     assert len(loaded) == 300
+    assert "Product Name*" in loaded[0]
+    assert "unused_api_blob" not in loaded[0]
 
 
 def test_posabit_venue_inventory_fetches_all_pages(monkeypatch):

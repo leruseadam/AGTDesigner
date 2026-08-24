@@ -155,7 +155,7 @@ def _merge_doh_from_posabit_sources(row: Dict[str, Any], *sources: Any) -> None:
 # Cache for product list (keyed by store so switching store uses correct feed key). TTL in seconds.
 _posabit_product_rows_cache: Dict[str, List[Dict[str, Any]]] = {}
 _posabit_product_rows_cache_time: Dict[str, float] = {}
-POSABIT_PRODUCTS_CACHE_TTL = int(os.environ.get("POSABIT_PRODUCTS_CACHE_TTL", "300"))  # 5 min default
+POSABIT_PRODUCTS_CACHE_TTL = int(os.environ.get("POSABIT_PRODUCTS_CACHE_TTL", "900"))  # 15 min default
 
 # Disk cache for POSaBit products — survives server restarts; per-store file when store_name provided.
 import json as _json
@@ -163,6 +163,30 @@ import pathlib as _pathlib
 
 _DISK_CACHE_DIR = _pathlib.Path(__file__).parent.parent.parent.parent / "uploads" / "cache"
 _DISK_CACHE_TTL = int(os.environ.get("POSABIT_DISK_CACHE_TTL", "86400"))  # 24 hour default
+_DISK_CACHE_KEEP_FIELDS = frozenset({
+    "Product Name*", "ProductName",
+    "Product Type*", "ProductType",
+    "Lineage", "Lineage*", "canonical_lineage", "currentLineage", "sovereign_lineage", "lineage",
+    "Product Brand", "ProductBrand", "productBrand", "Brand",
+    "Vendor", "Vendor*", "Vendor/Supplier*", "Vendor/Supplier", "ProductVendor", "vendor",
+    "Weight*", "Weight", "CombinedWeight", "weight",
+    "Price*", "Price", "price",
+    "DOH", "doh", "DOH Compliant", "DOH Compliant (Yes/No)",
+    "THC test result", "CBD test result", "Ratio",
+    "Product Strain", "ProductStrain",
+    "Description", "Source",
+    "Manifest Ref No", "manifest_ref_no", "Lot Number", "lot_number",
+    "Internal Product Identifier",
+})
+
+
+def _slim_product_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    slimmed: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        slimmed.append({k: v for k, v in row.items() if k in _DISK_CACHE_KEEP_FIELDS})
+    return slimmed
 
 
 def _store_slug(store_name: Optional[str]) -> str:
@@ -372,10 +396,11 @@ def _save_disk_cache(rows: List[Dict[str, Any]], store_name: Optional[str] = Non
             except Exception:
                 pass
         path.parent.mkdir(parents=True, exist_ok=True)
+        slim_rows = _slim_product_rows(rows)
         tmp_path = path.with_name(path.name + ".tmp")
-        tmp_path.write_text(_json.dumps(rows, default=str), encoding="utf-8")
+        tmp_path.write_text(_json.dumps(slim_rows, default=str), encoding="utf-8")
         os.replace(tmp_path, path)
-        logger.info(f"POSaBit disk cache saved: {len(rows)} products for {_store_slug(store_name)}")
+        logger.info(f"POSaBit disk cache saved: {len(slim_rows)} products for {_store_slug(store_name)}")
     except Exception as e:
         logger.warning(f"POSaBit disk cache save failed: {e}")
 

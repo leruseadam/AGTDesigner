@@ -6670,13 +6670,7 @@ const TagManager = {
                 // Use multiple timeouts to ensure badges appear even if DOH enrichment is delayed
                 setTimeout(() => {
                     this.refreshAllDohBadges();
-                }, 100); // Immediate refresh
-                setTimeout(() => {
-                    this.refreshAllDohBadges();
-                }, 300); // Second refresh
-                setTimeout(() => {
-                    this.refreshAllDohBadges();
-                }, 600); // Third refresh
+                }, 200);
             });
         });
         
@@ -6758,9 +6752,7 @@ const TagManager = {
             // CRITICAL FIX: Refresh DOH badges after filters are applied
             // Use requestAnimationFrame to ensure DOM is fully updated before refreshing badges
             requestAnimationFrame(() => {
-                setTimeout(() => this.refreshAllDohBadges(), 50);
-                setTimeout(() => this.refreshAllDohBadges(), 200);
-                setTimeout(() => this.refreshAllDohBadges(), 500);
+                setTimeout(() => this.refreshAllDohBadges(), 150);
             });
         };
 
@@ -7042,13 +7034,7 @@ const TagManager = {
             requestAnimationFrame(() => {
                 setTimeout(() => {
                     this.refreshAllDohBadges();
-                }, 100); // First refresh - small delay to allow DOH enrichment to complete
-                setTimeout(() => {
-                    this.refreshAllDohBadges();
-                }, 300); // Second refresh - catch any late-enriched tags
-                setTimeout(() => {
-                    this.refreshAllDohBadges();
-                }, 600); // Third refresh - final catch-all
+                }, 150);
             });
             
             // CRITICAL FIX: Verify brand and DOH filters were populated after rebuild
@@ -12466,14 +12452,16 @@ const TagManager = {
             if (this._liteTagsRendered || (Array.isArray(this.state.tags) && this.state.tags.length > 0)) {
                 return;
             }
-
-            verboseLog('Prefetching lite available tags for instant first render...');
-            const controller = new AbortController();
-            // Web: allow slightly longer — lite can still return quickly from POS disk/memory cache
             const isWebPrefetch = window.location.hostname.includes('pythonanywhere.com') ||
                 window.location.hostname.includes('agtpricetags.com') ||
                 (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
-            const litePrefetchMs = isWebPrefetch ? 8000 : 3000;
+            if (isWebPrefetch) {
+                return;
+            }
+
+            verboseLog('Prefetching lite available tags for instant first render...');
+            const controller = new AbortController();
+            const litePrefetchMs = 3000;
             const timeoutId = setTimeout(() => controller.abort(), litePrefetchMs);
 
             const response = await fetch(`/api/available-tags-lite?t=${Date.now()}`, {
@@ -14948,12 +14936,17 @@ const TagManager = {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
 
-            // Always pull fresh catalog from the API after instant cache paint so new products
-            // (e.g. POSaBit) appear on every page load without requiring Reset Cache.
-            this._suppressActionSplash = true;
-            this.fetchAndUpdateAvailableTags()
-                .catch(err => console.warn('Background tag sync after cache hydrate failed (non-critical):', err))
-                .finally(() => { this._suppressActionSplash = false; });
+            // Catalog is already on screen. Refresh quietly later so first paint
+            // isn't competing with another 2k-product request.
+            if (!this._backgroundCatalogSyncTimer) {
+                this._backgroundCatalogSyncTimer = setTimeout(() => {
+                    this._backgroundCatalogSyncTimer = null;
+                    this._suppressActionSplash = true;
+                    this.fetchAndUpdateAvailableTags()
+                        .catch(err => console.warn('Background tag sync after cache hydrate failed (non-critical):', err))
+                        .finally(() => { this._suppressActionSplash = false; });
+                }, 30000);
+            }
 
             // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();

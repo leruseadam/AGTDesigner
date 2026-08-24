@@ -7807,11 +7807,8 @@
       });
     }
   </script>
-  <!-- ⚡ PERFORMANCE: Load performance optimizer first -->
-  <script src="{{ url_for('static', filename='js/performance.js') }}?v={{ cache_bust }}" defer></script>
-  
-  <!-- ⚡ PERFORMANCE: Fast page load optimization -->
-  <script src="{{ url_for('static', filename='js/fast-page-load.js') }}?v={{ cache_bust }}"></script>
+  <!-- performance.js is already loaded in <head> -->
+  <script src="{{ url_for('static', filename='js/fast-page-load.js') }}?v={{ cache_bust }}" defer></script>
   
   <!-- CRITICAL: Load main.js with error handling -->
   <script>

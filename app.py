@@ -2149,10 +2149,9 @@ def add_performance_headers(response):
     elif request.path.startswith('/api/'):
         if response.status_code == 200:
             # Special handling for tag endpoints - longer cache for faster reloads
-            if request.path in ['/api/available-tags', '/api/selected-tags']:
-                # 5 minutes cache for tag endpoints - allows fast reloads while keeping data fresh
-                # Browser will cache responses and serve from cache on reload for faster page loads
-                response.headers['Cache-Control'] = 'private, max-age=300, must-revalidate'
+            if request.path in ['/api/available-tags', '/api/web/available-tags', '/api/selected-tags']:
+                # 15 minutes for tag endpoints so refresh hits cache instead of rebuilding 2k products
+                response.headers['Cache-Control'] = 'private, max-age=900, must-revalidate'
             else:
                 # 2 minutes for other API responses
                 response.headers['Cache-Control'] = 'private, max-age=120, must-revalidate'
@@ -12904,6 +12903,30 @@ def _slim_tags(tags):
     """Strip redundant/duplicate fields from each tag to reduce JSON payload size."""
     return [{k: v for k, v in tag.items() if k in _TAG_KEEP_FIELDS} for tag in tags]
 
+
+def _majority_have_lineage(tags, min_ratio=0.5):
+    if not tags:
+        return False
+    with_lineage = 0
+    for tag in tags:
+        if not isinstance(tag, dict):
+            continue
+        if tag.get('Lineage') or tag.get('canonical_lineage') or tag.get('Lineage*') or tag.get('sovereign_lineage'):
+            with_lineage += 1
+    return with_lineage >= max(1, int(len(tags) * min_ratio))
+
+
+def _warm_web_posabit_cache(cache_key, tags, store_name):
+    """Align POSaBit tags in the background so the next request is instant and DB-accurate."""
+    try:
+        from src.core.data.posabit_client import is_incomplete_posabit_catalog
+        aligned = _quick_align_tags_lineage(tags, store_name) if store_name else tags
+        aligned = _enforce_nonclassic_lineage_rules(aligned)
+        if aligned and not is_incomplete_posabit_catalog(aligned):
+            cache.set(cache_key, aligned, timeout=1800)
+    except Exception as warm_err:
+        logging.debug(f"WEB POSaBit cache warm skipped: {warm_err}")
+
 @app.route('/api/available-tags', methods=['GET'])
 def get_available_tags():
     store_name = None
@@ -12951,7 +12974,8 @@ def get_available_tags():
                     try:
                         store_name_align = get_current_store_name(allow_fallback=True)
                         if fast_load:
-                            safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
+                            if not _majority_have_lineage(safe_posabit_tags):
+                                safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
                         else:
                             safe_posabit_tags = _align_tags_with_db_lineage(
                                 safe_posabit_tags, store_name_align,
@@ -13327,7 +13351,8 @@ def get_available_tags():
                         try:
                             store_name_align = get_current_store_name(allow_fallback=True)
                             if fast_load:
-                                safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
+                                if not _majority_have_lineage(safe_posabit_tags):
+                                    safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
                             else:
                                 safe_posabit_tags = _align_tags_with_db_lineage(
                                     safe_posabit_tags, store_name_align,
@@ -18145,30 +18170,24 @@ def get_web_available_tags():
                         catalog_complete = not is_incomplete_posabit_catalog(safe_posabit_tags)
                         if catalog_complete:
                             try:
-                                cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=300)
+                                cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=1800)
                             except Exception:
                                 pass
-                            store_for_align = store_for_posabit
-                            tags_for_align = safe_posabit_tags
-                            cache_key_for_align = _web_pb_cache_key
-
-                            def _align_web_posabit_later():
+                            if store_for_posabit:
                                 try:
-                                    aligned = _quick_align_tags_lineage(
-                                        [dict(t) for t in tags_for_align if isinstance(t, dict)],
-                                        store_for_align,
-                                    )
-                                    aligned = _enforce_nonclassic_lineage_rules(aligned)
-                                    cache.set(cache_key_for_align, aligned, timeout=300)
-                                except Exception as align_err:
-                                    logging.debug("WEB: background POSaBit align skipped: %s", align_err)
-
-                            if store_for_align:
-                                threading.Thread(
-                                    target=_align_web_posabit_later,
-                                    daemon=True,
-                                    name="web-posabit-align",
-                                ).start()
+                                    import threading as _web_align_threading
+                                    _web_align_threading.Thread(
+                                        target=_warm_web_posabit_cache,
+                                        args=(
+                                            _web_pb_cache_key,
+                                            [dict(t) for t in safe_posabit_tags if isinstance(t, dict)],
+                                            store_for_posabit,
+                                        ),
+                                        daemon=True,
+                                        name="posabit-web-align",
+                                    ).start()
+                                except Exception:
+                                    pass
                         else:
                             logging.warning(
                                 "WEB: not caching incomplete POSaBit catalog (%s tags)",
