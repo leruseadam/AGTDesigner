@@ -182,13 +182,12 @@ class FastGenerationEngine:
                     or ""
                 )
             )[:80]
-            discount = _clean_lineage_for_cache(str(r.get('Discount', r.get('discount', '')) or ""))[:16]
-            parts.append(f"{name}||{ptype}||{lineage}||{group_key}||{price}||{wt}||{discount}")
+            parts.append(f"{name}||{ptype}||{lineage}||{group_key}||{price}||{wt}")
         parts.append(f"TEMPLATE||{template_type}")
         parts.append(f"SCALE||{scale_factor}")
         # IMPORTANT: Bump cache version whenever lineage/coloring logic changes
         # so stale DOCX generations (old CBD coloring rules) are not reused.
-        parts.append("CACHE_VERSION||V11_DISCOUNT_INLINE_IMAGE")
+        parts.append("CACHE_VERSION||V9_DISK_KEY_PRICE_WEIGHT")
         cache_str = '\n'.join(parts)
         return hashlib.md5(cache_str.encode('utf-8')).hexdigest()
     

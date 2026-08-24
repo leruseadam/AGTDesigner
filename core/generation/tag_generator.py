@@ -40,38 +40,6 @@ from src.core.constants import (
     LINEAGE_COLOR_MAP
 )
 
-
-def _get_lane_image_width(orientation, lane_name):
-    """Compute an image width (in Mm) for a given lane using the font scheme.
-
-    This uses the lane's configured max font size as a heuristic and converts
-    points -> mm approximately (1pt ~= 0.352778 mm). Caps are applied to keep
-    image widths in a practical range similar to existing defaults.
-    """
-    try:
-        if orientation in ("mini", "miniroll"):
-            scheme = FONT_SCHEME_MINI
-        elif orientation == 'vertical':
-            scheme = FONT_SCHEME_VERTICAL
-        else:
-            scheme = FONT_SCHEME_HORIZONTAL
-
-        lane = scheme.get(lane_name) or scheme.get('DOH') or {'max': 10}
-        pt = lane.get('max', 10)
-        mm_val = float(pt) * 0.352778
-
-        # Practical caps to keep image sizes reasonable
-        if orientation in ("mini", "miniroll"):
-            mm_val = max(4.0, min(mm_val, 10.0))
-        elif orientation == 'vertical':
-            mm_val = max(6.0, min(mm_val, 14.0))
-        else:
-            mm_val = max(8.0, min(mm_val, 16.0))
-
-        return Mm(mm_val)
-    except Exception:
-        return Mm(10)
-
 # Performance optimization: disable debug logging in production
 DEBUG_ENABLED = False
 
@@ -145,7 +113,6 @@ PLACEHOLDER_MARKERS = {
     "Price": ("PRICE_START", "PRICE_END"),
     "Lineage": ("LINEAGE_START", "LINEAGE_END"),
     "DOH": ("{{Label1.DOH}}", ""),
-    "Discount": ("{{Label1.Discount}}", ""),
     "Ratio_or_THC_CBD": ("RATIO_START", "RATIO_END"),
     "THC_CBD": ("THC_CBD_START", "THC_CBD_END"),
     "ProductName": ("PRODUCTNAME_START", "PRODUCTNAME_END"),
@@ -1046,24 +1013,24 @@ def process_chunk(args):
                 logger.info(f"✅ DOH DECISION: Product '{product_name}' - NO DOH image (value: '{doh_value}' or '{raw_doh}')")
             elif doh_value in ["YES", "DOH", "THC", "CBD"]:
                 # Map DOH value to appropriate image
-                    if doh_value == "CBD" or (doh_value == "YES" and product_type.startswith('high cbd')):
-                        # Use High CBD image
-                        high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
-                        if DEBUG_ENABLED:
-                            logger.debug(f"Using HighCBD image: {high_cbd_image_path}")
-                        label_data["DOH"] = InlineImage(tpl, high_cbd_image_path, width=_get_lane_image_width(orientation, 'DOH'))
-                    elif doh_value == "THC":
-                        # Use High THC image
-                        high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
-                        if DEBUG_ENABLED:
-                            logger.debug(f"Using HighTHC image: {high_thc_image_path}")
-                        label_data["DOH"] = InlineImage(tpl, high_thc_image_path, width=_get_lane_image_width(orientation, 'DOH'))
-                    else:
-                        # Use regular DOH image
-                        doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
-                        if DEBUG_ENABLED:
-                            logger.debug(f"Using DOH image: {doh_image_path}")
-                        label_data["DOH"] = InlineImage(tpl, doh_image_path, width=_get_lane_image_width(orientation, 'DOH'))
+                if doh_value == "CBD" or (doh_value == "YES" and product_type.startswith('high cbd')):
+                    # Use High CBD image
+                    high_cbd_image_path = resource_path(os.path.join("templates", "HighCBD.png"))
+                    if DEBUG_ENABLED:
+                        logger.debug(f"Using HighCBD image: {high_cbd_image_path}")
+                    label_data["DOH"] = InlineImage(tpl, high_cbd_image_path, width=image_width)
+                elif doh_value == "THC":
+                    # Use High THC image
+                    high_thc_image_path = resource_path(os.path.join("templates", "HighTHC.png"))
+                    if DEBUG_ENABLED:
+                        logger.debug(f"Using HighTHC image: {high_thc_image_path}")
+                    label_data["DOH"] = InlineImage(tpl, high_thc_image_path, width=image_width)
+                else:
+                    # Use regular DOH image
+                    doh_image_path = resource_path(os.path.join("templates", "DOH.png"))
+                    if DEBUG_ENABLED:
+                        logger.debug(f"Using DOH image: {doh_image_path}")
+                    label_data["DOH"] = InlineImage(tpl, doh_image_path, width=image_width)
                     logger.info(f"✅ DOH DECISION: Product '{product_name}' - Added DOH.png")
                 if DEBUG_ENABLED:
                     logger.debug(f"Created DOH image with width: {image_width}")
@@ -1071,25 +1038,6 @@ def process_chunk(args):
                 label_data["DOH"] = ""
                 if DEBUG_ENABLED:
                     logger.debug(f"Skipping DOH image - value is '{doh_value}' (not DOH/THC/CBD)")
-            
-            # Handle Discount badge (e.g., 50%) - session overrides or DB may set 'Discount' on the row
-            try:
-                discount_raw = str(row.get('Discount', '') or row.get('discount', '') or '').strip()
-                if discount_raw:
-                    # Only support 50% for now
-                    if discount_raw in ['50%', '50']:
-                        # Use explicit template path for the 50% badge (user-specified)
-                        discount_image_path = '/Users/adamcordova/Desktop/labelMaker_ QR copy final/src/core/generation/templates/50percent.png'
-                        label_data["Discount"] = InlineImage(tpl, discount_image_path, width=_get_lane_image_width(orientation, 'Discount'))
-                        if DEBUG_ENABLED:
-                            logger.debug(f"Added Discount image for '{product_name}': {discount_image_path}")
-                    else:
-                        # Unknown discount values: leave blank
-                        label_data["Discount"] = ""
-                else:
-                    label_data["Discount"] = ""
-            except Exception as disc_e:
-                logger.warning(f"Could not attach discount image for '{product_name}': {disc_e}")
                 
             # --- Wrap all fields with markers ---
             # Updated price mapping to use correct field names
