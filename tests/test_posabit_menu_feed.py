@@ -31,7 +31,7 @@ def test_available_tags_prefers_live_posabit_feed_over_stale_cache(client, monke
 
     monkeypatch.setattr('src.core.data.posabit_client.is_posabit_configured', lambda: True)
     monkeypatch.setattr('src.core.data.posabit_client.is_posabit_products_enabled', lambda: False)
-    monkeypatch.setattr('src.core.data.posabit_client.get_menu_feed_as_product_rows', lambda store_name=None: [{"Product Name*": "Fresh Item", "Product Type*": "Flower"}])
+    monkeypatch.setattr('src.core.data.posabit_client.get_menu_feed_as_product_rows', lambda store_name=None, force_refresh=False: [{"Product Name*": "Fresh Item", "Product Type*": "Flower"}])
     monkeypatch.setattr('src.core.data.posabit_client.get_cached_product_rows', lambda store_name=None: [{"Product Name*": "Old Item", "Product Type*": "Flower"}])
 
     resp = client.get('/api/available-tags')
@@ -85,6 +85,37 @@ def test_posabit_item_active_states_reject_known_inactive_values():
     assert _is_active_item({"state": "archived"}) is False
     assert _is_active_item({"state": "paused"}) is False
     assert _is_active_item({"active": False}) is False
+
+
+def test_posabit_prefers_live_api_over_disk_cache(monkeypatch, tmp_path):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
+
+    disk_path = tmp_path / "posabit_products.json"
+    disk_path.write_text('[{"Product Name*": "Stale Item", "Product Type*": "Flower"}]', encoding="utf-8")
+
+    def fake_http_get(url, token, timeout=30, query_params=None):
+        return {
+            "menu_feed": {
+                "menu_groups": [{
+                    "name": "Featured",
+                    "menu_items": [{
+                        "name": "Fresh Item",
+                        "state": "active",
+                        "prices": [{"price_cents": 1999, "unit": "1", "unit_type": "g"}],
+                    }],
+                }]
+            }
+        }
+
+    monkeypatch.setattr("src.core.data.posabit_client._http_get", fake_http_get)
+
+    rows = get_menu_feed_as_product_rows(force_refresh=True)
+    assert len(rows) == 1
+    assert rows[0]["Product Name*"] == "Fresh Item"
 
 
 def test_posabit_store_feed_key_accepts_common_web_aliases(monkeypatch):

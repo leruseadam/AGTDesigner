@@ -2630,6 +2630,15 @@ class LabelMakerApp:
             threaded=True  # Enable threading for better performance
         )
 # === SESSION-BASED HELPERS ===
+def _is_posabit_default_source():
+    """Return True only when POSaBit is the default data source and no session Excel file is active."""
+    try:
+        from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+        return bool(is_posabit_configured() or is_posabit_products_enabled())
+    except Exception:
+        return False
+
+
 def get_session_excel_processor():
     """Get ExcelProcessor instance for the current session with proper error handling."""
     session_file_path = None  # Initialize to prevent variable scoping errors
@@ -2682,17 +2691,26 @@ def get_session_excel_processor():
                     if hasattr(g.excel_processor, '_invalidate_caches'):
                         g.excel_processor._invalidate_caches()
             
-            # When POSaBit is the active data source, ignore any Excel file in session
+            # Source precedence: an uploaded Excel file wins unless the user explicitly selected POSaBit.
+            # Blank or stale session state should not silently default back to POSaBit while a valid file exists.
             _data_source = session.get('data_source', '')
-            _posabit_is_source = False
-            if not _data_source:
-                try:
-                    from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
-                    _posabit_is_source = is_posabit_configured() or is_posabit_products_enabled()
-                except Exception:
-                    pass
+            session_file_path = session.get('file_path')
+            persisted_session_file = None
+            try:
+                if session_file_path and os.path.exists(session_file_path):
+                    persisted_session_file = session_file_path
+                elif session_file_path:
+                    # If the file path is stale, still treat it as a valid Excel signal until proven absent.
+                    persisted_session_file = session_file_path
+            except Exception:
+                pass
+
+            if _data_source == 'posabit':
+                _posabit_is_source = True
+            elif _data_source == 'excel':
+                _posabit_is_source = False
             else:
-                _posabit_is_source = (_data_source == 'posabit')
+                _posabit_is_source = not bool(persisted_session_file) and _is_posabit_default_source()
 
             # CRITICAL FIX: Check if we have an uploaded file in session
             session_file_path = None if _posabit_is_source else session.get('file_path')
@@ -5875,16 +5893,21 @@ def get_current_file():
     """Get the current uploaded file information from session"""
     try:
         selected_source = session.get('data_source', '')
+        file_path = session.get('file_path')
+
         posabit_selected = selected_source == 'posabit'
         excel_selected = selected_source == 'excel'
-        if not selected_source:
+
+        if not selected_source and file_path and os.path.exists(file_path):
+            posabit_selected = False
+            excel_selected = True
+        elif not selected_source:
             try:
                 from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
                 posabit_selected = bool(is_posabit_configured() or is_posabit_products_enabled())
             except Exception:
                 posabit_selected = False
 
-        file_path = session.get('file_path')
         uploaded_filename = session.get('uploaded_filename', '')
         upload_timestamp = session.get('upload_timestamp', 0)
 
@@ -6097,8 +6120,12 @@ def api_posabit_config():
         )
         store_name = get_current_store_name(allow_fallback=True)
         cfg = _get_config(store_name)
-        default_source = 'posabit' if is_posabit_configured() else 'excel'
-        data_source = session.get('data_source', default_source)
+        has_session_file = bool(session.get('file_path'))
+        if not session.get('data_source') and has_session_file and os.path.exists(session.get('file_path')):
+            default_source = 'excel'
+        else:
+            default_source = 'posabit' if is_posabit_configured() else 'excel'
+        data_source = session.get('data_source') or default_source
         return jsonify({
             'data_source': data_source,
             'use_products': is_posabit_products_enabled(),
@@ -6137,16 +6164,13 @@ def api_posabit_refresh_cache():
     try:
         from src.core.data.posabit_client import (
             is_posabit_configured, is_posabit_products_enabled,
-            get_menu_feed_as_product_rows, _save_disk_cache,
-            _posabit_product_rows_cache as _cur_cache
+            get_menu_feed_as_product_rows, clear_cache,
         )
-        import src.core.data.posabit_client as _pb
         if not (is_posabit_configured() or is_posabit_products_enabled()):
             return jsonify({'ok': False, 'message': 'POSaBit not configured'}), 400
-        # Force bypass in-process cache to get fresh data
-        _pb._posabit_product_rows_cache = None
-        _pb._posabit_product_rows_cache_time = 0
-        rows = get_menu_feed_as_product_rows()
+        store_name = get_current_store_name(allow_fallback=True)
+        clear_cache(store_name=store_name)
+        rows = get_menu_feed_as_product_rows(store_name=store_name, force_refresh=True)
         count = len(rows)
         return jsonify({'ok': True, 'count': count, 'message': f'Cache refreshed: {count} products'})
     except Exception as e:
@@ -12838,8 +12862,16 @@ def get_available_tags():
     try:
         from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
         selected_source = session.get('data_source', '')
-        default_source = 'posabit' if (is_posabit_configured() or is_posabit_products_enabled()) else 'excel'
-        effective_source = selected_source or default_source
+        session_file_path = session.get('file_path')
+        if selected_source == 'excel':
+            effective_source = 'excel'
+        elif selected_source == 'posabit':
+            effective_source = 'posabit'
+        elif session_file_path and os.path.exists(session_file_path):
+            effective_source = 'excel'
+        else:
+            default_source = 'posabit' if (is_posabit_configured() or is_posabit_products_enabled()) else 'excel'
+            effective_source = default_source
 
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
@@ -12857,7 +12889,10 @@ def get_available_tags():
             try:
                 from src.core.data.posabit_client import get_cached_product_rows, get_menu_feed_as_product_rows
                 store_for_posabit = get_current_store_name(allow_fallback=True)
-                posabit_rows = get_menu_feed_as_product_rows(store_name=store_for_posabit)
+                posabit_rows = get_menu_feed_as_product_rows(
+                    store_name=store_for_posabit,
+                    force_refresh=nocache,
+                )
                 if posabit_rows:
                     safe_posabit_tags = make_json_safe(_slim_tags(posabit_rows))
                     try:
@@ -13209,30 +13244,14 @@ def get_available_tags():
                 )
                 if is_posabit_configured() or is_posabit_products_enabled():
                     store_for_posabit = get_current_store_name(allow_fallback=True)
-                    cached_rows = get_cached_product_rows(store_name=store_for_posabit)
-                    if cached_rows:
-                        logging.info(f"📦 Serving {len(cached_rows)} POSaBit products from cache")
-                        safe_posabit_tags = make_json_safe(_slim_tags(cached_rows))
-                        # Use fast alignment on cache hit (avoids full strain batch)
-                        try:
-                            store_name_align = get_current_store_name(allow_fallback=True)
-                            safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
-                        except Exception as align_err:
-                            logging.warning(f"POSaBit tag lineage alignment skipped: {align_err}")
-                        safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
-                        return jsonify({
-                            'tags': safe_posabit_tags,
-                            'total_count': len(safe_posabit_tags),
-                            'source': 'posabit',
-                            'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
-                        }), 200
-
-                    # Cache is cold — direct synchronous fetch (no thread; PA kills daemon threads)
                     posabit_rows = None
                     _posabit_auth_failed = False
                     try:
                         from src.core.data.posabit_client import PosabitAuthError as _PosabitAuthError2
-                        posabit_rows = get_menu_feed_as_product_rows()
+                        posabit_rows = get_menu_feed_as_product_rows(
+                            store_name=store_for_posabit,
+                            force_refresh=nocache,
+                        )
                     except _PosabitAuthError2 as _auth_err2:
                         logging.error(f"POSaBit: 401 Unauthorized — falling back to database.")
                         _posabit_auth_failed = True
@@ -13249,16 +13268,32 @@ def get_available_tags():
                         except Exception:
                             pass
                         safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
-                        try:
-                            cache.set(_posabit_flask_cache_key, safe_posabit_tags, timeout=300)
-                        except Exception:
-                            pass
                         return jsonify({
                             'tags': safe_posabit_tags,
                             'total_count': len(safe_posabit_tags),
                             'source': 'posabit',
                             'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
                         }), 200
+
+                    cached_rows = get_cached_product_rows(store_name=store_for_posabit)
+                    if cached_rows:
+                        logging.info(f"📦 Serving {len(cached_rows)} POSaBit products from cache fallback")
+                        safe_posabit_tags = make_json_safe(_slim_tags(cached_rows))
+                        # Use fast alignment on cache hit (avoids full strain batch)
+                        try:
+                            store_name_align = get_current_store_name(allow_fallback=True)
+                            safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
+                        except Exception as align_err:
+                            logging.warning(f"POSaBit tag lineage alignment skipped: {align_err}")
+                        safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
+                        return jsonify({
+                            'tags': safe_posabit_tags,
+                            'total_count': len(safe_posabit_tags),
+                            'source': 'posabit',
+                            'message': f'POSaBit cache fallback ({len(safe_posabit_tags)} products)'
+                        }), 200
+
+                    # Cache is cold — already attempted live fetch above
                     # POSaBit failed or empty — fall through to DB below
                     logging.info("📦 POSaBit unavailable — falling back to database products")
             except Exception as posabit_err:
@@ -13379,7 +13414,7 @@ def get_available_tags():
                 logging.warning(f"Cached tags stale-check failed: {stale_check_err}")
 
         # Respect nocache fully: only use file cache when nocache is not requested
-        if not cached_tags and fast_load and session_file_path and not nocache and not bypass_cache_for_lineage:
+        if not cached_tags and fast_load and session_file_path and not nocache and not has_lineage_updates:
             import hashlib
             cache_version = TAGS_CACHE_VERSION
             file_cache_key = f"tags_file_{cache_version}_{hashlib.sha256(session_file_path.encode()).hexdigest()}"
@@ -17988,38 +18023,16 @@ def get_web_available_tags():
                         }))
                         return compress_response(resp)
 
-                    cached_rows = get_cached_product_rows(store_name=store_for_posabit)
-                    if cached_rows:
-                        logging.info(f"WEB: Serving {len(cached_rows)} POSaBit products from cache")
-                        safe_posabit_tags = make_json_safe(cached_rows)
-                        try:
-                            if store_for_posabit:
-                                safe_posabit_tags = _align_tags_with_db_lineage(
-                                    safe_posabit_tags,
-                                    store_for_posabit,
-                                    skip_if_aligned=False,
-                                    force_overwrite=True,
-                                )
-                        except Exception:
-                            pass
-                        try:
-                            cache.set(_web_pb_cache_key, safe_posabit_tags, timeout=300)
-                        except Exception:
-                            pass
-                        resp = make_response(jsonify({
-                            'tags': safe_posabit_tags,
-                            'total_count': len(safe_posabit_tags),
-                            'source': 'posabit'
-                        }))
-                        return compress_response(resp)
-
-                    # Cache cold — direct synchronous fetch (no thread; PA kills daemon threads)
+                    cached_rows = None
                     _web_cold_rows = None
                     try:
                         from src.core.data.posabit_client import PosabitAuthError as _PosabitAuthError
-                        logging.error(f"WEB POSaBit: starting cold fetch for store={store_for_posabit!r}")
-                        _web_cold_rows = get_menu_feed_as_product_rows(store_name=store_for_posabit)
-                        logging.error(f"WEB POSaBit: cold fetch returned {len(_web_cold_rows) if _web_cold_rows else 0} rows")
+                        logging.info(f"WEB POSaBit: fetching live menu for store={store_for_posabit!r}")
+                        _web_cold_rows = get_menu_feed_as_product_rows(
+                            store_name=store_for_posabit,
+                            force_refresh=nocache,
+                        )
+                        logging.info(f"WEB POSaBit: live fetch returned {len(_web_cold_rows) if _web_cold_rows else 0} rows")
                     except _PosabitAuthError as _auth_e:
                         logging.error(f"WEB POSaBit: 401 Unauthorized — token is invalid or expired. Update POSABIT_API_TOKEN in PA WSGI config.")
                         return jsonify({
@@ -18028,7 +18041,14 @@ def get_web_available_tags():
                             'message': 'POSaBit API token is invalid or expired (401). Update POSABIT_API_TOKEN in PythonAnywhere WSGI configuration.',
                         }), 200
                     except Exception as _e:
-                        logging.error(f"WEB cold POSaBit fetch EXCEPTION: {type(_e).__name__}: {_e}")
+                        logging.error(f"WEB POSaBit live fetch EXCEPTION: {type(_e).__name__}: {_e}")
+
+                    if not _web_cold_rows:
+                        cached_rows = get_cached_product_rows(store_name=store_for_posabit)
+                        if cached_rows:
+                            logging.info(f"WEB: Serving {len(cached_rows)} POSaBit products from cache fallback")
+                            _web_cold_rows = cached_rows
+
                     if _web_cold_rows:
                         safe_posabit_tags = make_json_safe(_web_cold_rows)
                         try:

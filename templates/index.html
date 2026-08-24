@@ -1961,6 +1961,7 @@
                                         <span class="text-white-50 small">POSaBit:</span>
                                         <span id="posabitStatusText" class="small text-white">—</span>
                                         <button type="button" class="btn btn-sm btn-outline-info" id="posabitVerifyBtn" title="Test API and show product count" onclick="window.runPosabitVerify(this)">Verify connection</button>
+                                        <button type="button" class="btn btn-sm btn-outline-warning" id="posabitRefreshBtn" title="Refresh live POSaBit menu cache" onclick="window.refreshPosabitMenu(this)">Refresh menu</button>
                                       </div>
                                       <p class="text-white-50 small mt-1 mb-0">Use the main page filter bar (Vendor, Brand, Product Type, etc.) to filter the product list.</p>
                                     </div>
@@ -2428,11 +2429,46 @@
                 if (btn) { btn.disabled = false; btn.textContent = 'Verify connection'; }
               });
             };
+            window.refreshPosabitMenu = function(btn) {
+              var statusEl = document.getElementById('posabitStatusText');
+              if (statusEl) statusEl.textContent = 'Refreshing…';
+              if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+              fetch('/api/posabit/refresh-cache', { method: 'POST', credentials: 'same-origin' })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                  if (data && data.ok) {
+                    if (statusEl) statusEl.textContent = 'Refreshed — ' + (data.count || 0) + ' products';
+                    if (statusEl) statusEl.style.color = '#4ade80';
+                    if (typeof window.location !== 'undefined') {
+                      setTimeout(function() { window.location.reload(); }, 250);
+                    }
+                  } else {
+                    if (statusEl) statusEl.textContent = (data && data.message) || 'Refresh failed';
+                    if (statusEl) statusEl.style.color = '#f87171';
+                  }
+                })
+                .catch(function() {
+                  if (statusEl) {
+                    statusEl.textContent = 'Refresh failed';
+                    statusEl.style.color = '#f87171';
+                  }
+                })
+                .finally(function() {
+                  if (btn) { btn.disabled = false; btn.textContent = 'Refresh menu'; }
+                });
+            };
             // Delegated handler so Verify works when button is inside dynamically filled modal
             document.addEventListener('click', function(e) {
               var btn = e.target.id === 'posabitVerifyBtn' ? e.target : (e.target.closest && e.target.closest('#posabitVerifyBtn'));
               if (btn && typeof window.runPosabitVerify === 'function') {
                 window.runPosabitVerify(btn);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+              }
+              var refreshBtn = e.target.id === 'posabitRefreshBtn' ? e.target : (e.target.closest && e.target.closest('#posabitRefreshBtn'));
+              if (refreshBtn && typeof window.refreshPosabitMenu === 'function') {
+                window.refreshPosabitMenu(refreshBtn);
                 e.preventDefault();
                 e.stopPropagation();
                 return;

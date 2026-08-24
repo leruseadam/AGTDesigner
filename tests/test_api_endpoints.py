@@ -81,6 +81,33 @@ class TestStatusEndpoint:
         with client.session_transaction() as sess:
             assert sess['data_source'] == 'excel'
 
+    def test_uploaded_excel_file_takes_precedence_over_default_posabit(self, client, tmp_path):
+        """A valid uploaded Excel file should remain the active source even when the session source is blank."""
+        excel_path = tmp_path / 'AGT_Bothell_test.xlsx'
+        excel_path.write_bytes(b'not really an excel file')
+
+        with client.session_transaction() as sess:
+            sess['selected_store'] = 'AGT_Bothell'
+            sess['file_path'] = str(excel_path)
+            sess['uploaded_filename'] = 'AGT_Bothell_test.xlsx'
+            sess['upload_timestamp'] = 12345
+            sess.pop('data_source', None)
+
+        with patch('src.core.data.posabit_client.is_posabit_configured', return_value=True), \
+             patch('src.core.data.posabit_client.is_posabit_products_enabled', return_value=False):
+            response = client.get('/api/current-file')
+            config_response = client.get('/api/posabit/config')
+
+        assert response.status_code == 200
+        current = response.get_json()
+        assert current['filename'] == 'AGT_Bothell_test.xlsx'
+        assert current['has_file'] is True
+        assert current['posabit_active'] is False
+
+        assert config_response.status_code == 200
+        config = config_response.get_json()
+        assert config['data_source'] == 'excel'
+
     def test_status_endpoint_exists(self, client):
         """Test that status endpoint exists and returns 200."""
         response = client.get('/api/status')

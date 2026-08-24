@@ -197,17 +197,9 @@ def _load_disk_cache(store_name: Optional[str] = None) -> Optional[List[Dict[str
 
 
 def _save_disk_cache(rows: List[Dict[str, Any]], store_name: Optional[str] = None) -> None:
-    """Persist POSaBit products to disk cache for this store. Never overwrites a larger cache with fewer products."""
+    """Persist POSaBit products to disk cache for this store."""
     path = _disk_cache_path(store_name)
     try:
-        if path.exists():
-            try:
-                existing = _json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(existing, list) and len(existing) > len(rows):
-                    logger.info(f"POSaBit disk cache: keeping {len(existing)} products (not overwriting with {len(rows)})")
-                    return
-            except Exception:
-                pass
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_json.dumps(rows, default=str), encoding="utf-8")
         logger.info(f"POSaBit disk cache saved: {len(rows)} products for {_store_slug(store_name)}")
@@ -842,35 +834,12 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
     return rows
 
 
-def get_menu_feed_as_product_rows(
+def _fetch_live_menu_feed_rows(
     feed_key: Optional[str] = None,
     token: Optional[str] = None,
     store_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Fetch POSaBit product list and return rows with app column names.
-    When store_name is set, uses that store's menu key (POSABIT_MENU_FEED_KEY_<STORE>) — no key displayed in UI.
-    Uses one of two API connections:
-    - Menu feed (default): GET /v1/menu_feeds/{feed_key} — requires POSABIT_MENU_FEED_KEY or per-store key.
-    - Venue inventories: GET /v2/venue/inventories — no feed key; uses venue API token only.
-    Set POSABIT_USE_VENUE_INVENTORIES=1 to use venue inventories instead of menu feed.
-    If menu feed returns 0 products, falls back to venue inventories automatically.
-    Result is cached per store for POSABIT_PRODUCTS_CACHE_TTL seconds (default 300).
-    """
-    global _posabit_product_rows_cache, _posabit_product_rows_cache_time
-    cache_key = _store_slug(store_name)
-    now = time.time()
-    if cache_key in _posabit_product_rows_cache and (now - _posabit_product_rows_cache_time.get(cache_key, 0)) < POSABIT_PRODUCTS_CACHE_TTL:
-        cached = _posabit_product_rows_cache[cache_key]
-        logger.info("POSaBit product list: serving %d rows from in-process cache (store=%s)", len(cached), cache_key)
-        return cached
-
-    disk_rows = _load_disk_cache(store_name)
-    if disk_rows:
-        _posabit_product_rows_cache[cache_key] = disk_rows
-        _posabit_product_rows_cache_time[cache_key] = now
-        return disk_rows
-
+    """Fetch product rows from POSaBit APIs (menu feed, with venue inventory fallback)."""
     cfg = _get_config(store_name)
     tok = (token or cfg.get("effective_token") or cfg["token"]).strip()
     force_venue_inventories = os.environ.get("POSABIT_FORCE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes")
@@ -885,9 +854,6 @@ def get_menu_feed_as_product_rows(
     if use_venue_inventories and not key:
         rows = get_venue_inventories_as_product_rows(token)
         if rows:
-            _posabit_product_rows_cache[cache_key] = rows
-            _posabit_product_rows_cache_time[cache_key] = time.time()
-            _save_disk_cache(rows, store_name)
             return rows
         logger.warning("POSaBit venue inventories returned 0 products; trying menu feed as fallback")
 
@@ -944,11 +910,57 @@ def get_menu_feed_as_product_rows(
         if fallback:
             logger.info("POSaBit: using venue inventories as fallback (menu feed had 0 products)")
             rows = fallback
-    _posabit_product_rows_cache[cache_key] = rows
-    _posabit_product_rows_cache_time[cache_key] = time.time()
-    if rows:
-        _save_disk_cache(rows, store_name)
     return rows
+
+
+def get_menu_feed_as_product_rows(
+    feed_key: Optional[str] = None,
+    token: Optional[str] = None,
+    store_name: Optional[str] = None,
+    force_refresh: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Fetch POSaBit product list and return rows with app column names.
+    When store_name is set, uses that store's menu key (POSABIT_MENU_FEED_KEY_<STORE>) — no key displayed in UI.
+    Uses one of two API connections:
+    - Menu feed (default): GET /v1/menu_feeds/{feed_key} — requires POSABIT_MENU_FEED_KEY or per-store key.
+    - Venue inventories: GET /v2/venue/inventories — no feed key; uses venue API token only.
+    Set POSABIT_USE_VENUE_INVENTORIES=1 to use venue inventories instead of menu feed.
+    If menu feed returns 0 products, falls back to venue inventories automatically.
+    Live API is always preferred; disk cache is only used when the API is unavailable or empty.
+    In-process results are cached per store for POSABIT_PRODUCTS_CACHE_TTL seconds (default 300).
+    """
+    global _posabit_product_rows_cache, _posabit_product_rows_cache_time
+    cache_key = _store_slug(store_name)
+    now = time.time()
+    if (
+        not force_refresh
+        and cache_key in _posabit_product_rows_cache
+        and (now - _posabit_product_rows_cache_time.get(cache_key, 0)) < POSABIT_PRODUCTS_CACHE_TTL
+    ):
+        cached = _posabit_product_rows_cache[cache_key]
+        logger.info("POSaBit product list: serving %d rows from in-process cache (store=%s)", len(cached), cache_key)
+        return cached
+
+    rows = _fetch_live_menu_feed_rows(feed_key=feed_key, token=token, store_name=store_name)
+    if rows:
+        _posabit_product_rows_cache[cache_key] = rows
+        _posabit_product_rows_cache_time[cache_key] = time.time()
+        _save_disk_cache(rows, store_name)
+        return rows
+
+    disk_rows = _load_disk_cache(store_name)
+    if disk_rows:
+        logger.info(
+            "POSaBit product list: API unavailable/empty; serving %d rows from disk cache (store=%s)",
+            len(disk_rows),
+            cache_key,
+        )
+        _posabit_product_rows_cache[cache_key] = disk_rows
+        _posabit_product_rows_cache_time[cache_key] = now
+        return disk_rows
+
+    return []
 
 
 def get_manifests_as_inventory_transfer_items(token: Optional[str] = None) -> List[Dict[str, Any]]:
