@@ -395,6 +395,57 @@ def _normalize_posabit_product_type(raw_product_type: str, item_name: str, fallb
     return raw or cat or "Uncategorized"
 
 
+def _candidate_store_feed_keys(store_name: Optional[str]) -> List[str]:
+    """Return all likely env var names for a POSaBit store menu-feed key.
+
+    Web deployments frequently set keys using the plain venue name (BOTHELL) or
+    the app store key (AGT_BOTHELL), while the runtime store name may be the UI
+    value (AGT_Bothell). Try all the common variants so the menu feed works in
+    both local and deployed environments.
+    """
+    candidates: List[str] = []
+    if not store_name:
+        return candidates
+
+    normalized = (store_name or "").strip()
+    if not normalized:
+        return candidates
+
+    parts = []
+    for token in re.split(r"[^A-Za-z0-9]+", normalized):
+        if token:
+            parts.append(token.upper())
+    aliases = set()
+    for view in [
+        "_".join(parts),
+        "_".join(parts).replace("AGT_", ""),
+        normalized.upper().replace(" ", "_"),
+        normalized.upper().replace(" ", "").replace("-", "_"),
+    ]:
+        if view:
+            aliases.add(view)
+            aliases.add(view.replace("__", "_"))
+
+    # Keep explicit AGT_* aliases while also accepting stripped venue names like BOTHELL.
+    for slug in sorted(aliases):
+        candidates.append(f"POSABIT_MENU_FEED_KEY_{slug}")
+        if slug.startswith("AGT_"):
+            candidates.append(f"POSABIT_MENU_FEED_KEY_{slug[len('AGT_'):]}")
+
+    # Also accept the common raw venue name without any AGT prefix.
+    raw_name = normalized.upper().replace("AGT_", "").replace(" ", "_").replace("-", "_")
+    if raw_name:
+        candidates.append(f"POSABIT_MENU_FEED_KEY_{raw_name}")
+
+    seen = set()
+    ordered: List[str] = []
+    for name in candidates:
+        if name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    return ordered
+
+
 def _get_config(store_name: Optional[str] = None) -> Dict[str, str]:
     """Read POSaBit config from environment. When store_name is set, use that store's menu feed key (POSABIT_MENU_FEED_KEY_<STORE>)."""
     base = os.environ.get("POSABIT_API_BASE_URL", POSABIT_PRODUCTION_BASE).rstrip("/")
@@ -403,12 +454,11 @@ def _get_config(store_name: Optional[str] = None) -> Dict[str, str]:
     effective_token = order_pad_token if order_pad_token else token
     feed_key = os.environ.get("POSABIT_MENU_FEED_KEY", "").strip()
     # Per-store key: when user selects a store, switch to that store's menu key (no display of key).
-    if store_name:
-        slug = (store_name or "").upper().replace(" ", "_")
-        if slug:
-            store_key = os.environ.get(f"POSABIT_MENU_FEED_KEY_{slug}", "").strip()
-            if store_key and not store_key.lower().startswith("your_") and "-" in store_key:
-                feed_key = store_key
+    for env_name in _candidate_store_feed_keys(store_name):
+        store_key = os.environ.get(env_name, "").strip()
+        if store_key and not store_key.lower().startswith("your_") and "-" in store_key:
+            feed_key = store_key
+            break
     # If still no feed_key, pick first non-placeholder per-venue key.
     if not feed_key:
         try:

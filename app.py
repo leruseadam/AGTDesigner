@@ -6063,18 +6063,21 @@ def api_posabit_config():
     """Return POSaBit integration config (no secrets)."""
     try:
         from src.core.data.posabit_client import (
+            _get_config,
             is_posabit_configured,
             is_posabit_products_enabled,
             is_posabit_manifests_enabled,
         )
+        store_name = get_current_store_name(allow_fallback=True)
+        cfg = _get_config(store_name)
         default_source = 'posabit' if is_posabit_configured() else 'excel'
         data_source = session.get('data_source', default_source)
         return jsonify({
             'data_source': data_source,
             'use_products': is_posabit_products_enabled(),
             'use_manifests': is_posabit_manifests_enabled(),
-            'has_token': bool(os.environ.get('POSABIT_ORDER_PAD_TOKEN') or os.environ.get('POSABIT_API_TOKEN')),
-            'has_feed_key': bool(os.environ.get('POSABIT_MENU_FEED_KEY')),
+            'has_token': bool(cfg.get('effective_token') or cfg.get('token')),
+            'has_feed_key': bool(cfg.get('feed_key')),
             'posabit_configured': is_posabit_configured(),
         })
     except Exception as e:
