@@ -95,10 +95,7 @@
             let posabitActive = false;
             let currentFileJson = null;
             try {
-                const fileController = new AbortController();
-                const fileTimeout = setTimeout(() => fileController.abort(), 800);
-                const fileResponse = await fetch('/api/current-file', { signal: fileController.signal });
-                clearTimeout(fileTimeout);
+                const fileResponse = await fetch('/api/current-file');
                 if (fileResponse.ok) {
                     currentFileJson = await fileResponse.json();
                     if (currentFileJson && currentFileJson.success) {
@@ -253,49 +250,13 @@
                 }
             }
 
-            // OPTIMIZED: Serve cached lite tags first so the web UI paints immediately.
+            // OPTIMIZED: Try direct available-tags FIRST (it's faster than /api/initial-data)
+            // Then fall back to /api/initial-data if needed
             const isWebClient = window.location.hostname.includes('pythonanywhere.com') ||
                 window.location.hostname.includes('agtpricetags.com') ||
                 (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
-            try {
-                const liteController = new AbortController();
-                const liteTimeout = setTimeout(() => liteController.abort(), 4000);
-                const liteResponse = await fetch(`/api/available-tags-lite?t=${Date.now()}`, {
-                    signal: liteController.signal
-                });
-                clearTimeout(liteTimeout);
-                if (liteResponse.ok) {
-                    const liteData = await liteResponse.json();
-                    if (liteData && Array.isArray(liteData.tags) && liteData.tags.length >= 250) {
-                        console.log(`⚡ Lite cache paint: ${liteData.tags.length} tags`);
-                        this.state.tags = [...liteData.tags];
-                        this.state.originalTags = [...liteData.tags];
-                        if (this.saveAvailableTagsToCache) {
-                            this.saveAvailableTagsToCache(liteData.tags);
-                        }
-                        if (this._updateAvailableTags) {
-                            this._updateAvailableTags(liteData.tags, null);
-                        }
-                        if (this.hideActionSplash) {
-                            this.hideActionSplash();
-                        }
-                        if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
-                            AppLoadingSplash.stopAutoAdvance();
-                            AppLoadingSplash.complete();
-                        }
-                        Promise.allSettled([
-                            this.fetchAndUpdateSelectedTags ? this.fetchAndUpdateSelectedTags() : Promise.resolve(),
-                            this.fetchAndPopulateFilters ? this.fetchAndPopulateFilters() : Promise.resolve()
-                        ]).catch(err => console.warn('⚠️ Background load error (non-critical):', err));
-                        return;
-                    }
-                }
-            } catch (liteErr) {
-                console.warn('⚠️ Lite tag prefetch skipped:', liteErr && liteErr.message ? liteErr.message : liteErr);
-            }
-
             const fastTagsEndpoint = isWebClient ? '/api/web/available-tags' : '/api/available-tags';
-            const fastTagsTimeoutMs = isWebClient ? 8000 : 15000;
+            const fastTagsTimeoutMs = isWebClient ? 20000 : 15000;
             console.log(`⚡ Trying fast ${fastTagsEndpoint} endpoint first...`);
             let timeoutId = null;
             try {
@@ -337,21 +298,43 @@
 
                     // POSaBit cache is warming — retry after a few seconds
                     if (quickData && quickData.source === 'posabit-loading') {
-                        const retryAfter = (quickData.retry_after || 5) * 1000;
-                        console.log(`⏳ POSaBit inventory loading, retrying in ${retryAfter/1000}s...`);
-                        await new Promise(res => setTimeout(res, retryAfter));
-                        // Retry by re-entering the fast-load path
-                        if (this.loadInitialData) {
-                            return this.loadInitialData();
+                        const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
+                        if (cachedTags && cachedTags.length > 0) {
+                            console.log(`⚡ POSaBit still loading - showing ${cachedTags.length} cached tags`);
+                            this.state.tags = [...cachedTags];
+                            this.state.originalTags = [...cachedTags];
+                            this.state.hydratedFromCache = true;
+                            if (this._updateAvailableTags) {
+                                this._updateAvailableTags(cachedTags, null);
+                            }
+                            if (this.hideActionSplash) this.hideActionSplash();
+                            if (typeof AppLoadingSplash !== 'undefined' && AppLoadingSplash.isVisible) {
+                                AppLoadingSplash.stopAutoAdvance();
+                                AppLoadingSplash.complete();
+                            }
+                            return;
                         }
+                        this._posabitLoadingRetries = (this._posabitLoadingRetries || 0) + 1;
+                        if (this._posabitLoadingRetries <= 3) {
+                            const retryAfter = (quickData.retry_after || 3) * 1000;
+                            console.log(`⏳ POSaBit inventory loading, retry ${this._posabitLoadingRetries}/3 in ${retryAfter/1000}s...`);
+                            await new Promise(res => setTimeout(res, retryAfter));
+                            return this.checkForExistingData();
+                        }
+                        console.warn('⚠️ POSaBit loading retries exhausted');
                     }
 
                     if (quickData && quickData.tags && Array.isArray(quickData.tags) && quickData.tags.length > 0) {
                         const looksIncomplete = quickData.catalog_complete === false ||
                             (String(quickData.source || '').includes('posabit') && quickData.tags.length < 250);
                         if (looksIncomplete) {
-                            console.warn(`⚠️ Fast load returned truncated catalog (${quickData.tags.length} tags) - continuing to full fetch`);
-                            throw new Error('Incomplete POSaBit catalog');
+                            const cachedTags = this.loadAvailableTagsFromCache ? this.loadAvailableTagsFromCache() : null;
+                            if (cachedTags && cachedTags.length > quickData.tags.length) {
+                                console.warn(`⚠️ Fast load returned truncated catalog (${quickData.tags.length}); using larger cache (${cachedTags.length})`);
+                                quickData.tags = cachedTags;
+                            } else {
+                                console.warn(`⚠️ Fast load returned truncated catalog (${quickData.tags.length} tags) - showing it rather than a blank list`);
+                            }
                         }
                         console.log(`✅ Fast load successful: ${quickData.tags.length} tags from ${fastTagsEndpoint}`);
 

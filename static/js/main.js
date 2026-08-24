@@ -1642,12 +1642,12 @@ const AppLoadingSplash = {
         if (this._maxWaitTimer) {
             clearTimeout(this._maxWaitTimer);
         }
-        // Last resort if something hangs — never keep the web UI behind a 2-minute splash
+        // Last resort if a hung network resource blocks `load` forever
         this._maxWaitTimer = setTimeout(() => {
-            console.warn('⚡ Splash max wait (4s) — forcing unlock');
+            console.warn('⚡ Splash max wait (120s) — forcing unlock');
             this._maxWaitTimer = null;
             this.emergencyHide();
-        }, 4000);
+        }, 120000);
         
         const splash = document.getElementById('appLoadingSplash');
         const mainContent = document.getElementById('mainContent');
@@ -1760,7 +1760,7 @@ const AppLoadingSplash = {
             verboseLog('Splash screen hidden');
         };
 
-        runHide();
+        this._whenDocumentFullyLoaded(runHide);
     },
 
     // Auto-advance steps for visual feedback
@@ -2193,6 +2193,7 @@ const TagManager = {
      */
     cacheHasProperLineage(tags) {
         if (!Array.isArray(tags) || tags.length === 0) return false;
+        if (this.isDatabaseOnlyMode() && tags.length >= 250) return true;
         const withLineage = tags.filter(t => {
             if (!t || typeof t !== 'object') return false;
             const L = (t.manual_lineage || t.sovereign_lineage || t.canonical_lineage || t.currentLineage || t.Lineage || t.lineage || t['Lineage*'] || '').toString().trim();
@@ -13186,6 +13187,16 @@ const TagManager = {
                     verboseLog('✅ Using cached tags as fallback for invalid response format');
                     return true;
                 }
+                if (Array.isArray(this.state.tags) && this.state.tags.length > 0) {
+                    this._fetchingAvailableTags = false;
+                    verboseLog('✅ Keeping currently displayed tags after invalid response');
+                    if (this.hideActionSplash) this.hideActionSplash();
+                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                    return true;
+                }
                 // CRITICAL: Reset flag before clearing tags
                 this._fetchingAvailableTags = false;
                 // Clear existing tags if no new data
@@ -13201,6 +13212,16 @@ const TagManager = {
             }
             
             if (tags.length === 0) {
+                if (Array.isArray(this.state.tags) && this.state.tags.length > 0) {
+                    console.warn('Backend returned empty tags - keeping currently displayed catalog');
+                    this._fetchingAvailableTags = false;
+                    if (this.hideActionSplash) this.hideActionSplash();
+                    if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                        AppLoadingSplash.stopAutoAdvance();
+                        AppLoadingSplash.complete();
+                    }
+                    return true;
+                }
                 // Check if this is an error response with a message
                 if (responseData.error || responseData.message) {
                     const errorMsg = responseData.error || responseData.message;
@@ -13429,6 +13450,22 @@ const TagManager = {
             // This ensures TagManager state ALWAYS reflects database lineage, not Excel lineage
             const stateTagsWithDbLineage = tags; // Already normalized above, no need for another pass
             
+            const currentCount = Array.isArray(this.state.tags) ? this.state.tags.length : 0;
+            if (
+                currentCount >= 250 &&
+                tags.length < Math.floor(currentCount * 0.85) &&
+                String(responseData?.source || '').includes('posabit')
+            ) {
+                console.warn(`Skipping smaller POSaBit catalog (${tags.length} < ${currentCount})`);
+                this._fetchingAvailableTags = false;
+                if (this.hideActionSplash) this.hideActionSplash();
+                if (AppLoadingSplash && AppLoadingSplash.isVisible) {
+                    AppLoadingSplash.stopAutoAdvance();
+                    AppLoadingSplash.complete();
+                }
+                return true;
+            }
+
             // Clear existing state and set new data
             this.state.tags = [...stateTagsWithDbLineage];
             this.state.originalTags = [...stateTagsWithDbLineage]; // Store original tags for validation
@@ -14911,13 +14948,12 @@ const TagManager = {
                 console.log('✅ Filters already populated from cache, skipping API call');
             }
 
-            // Refresh the catalog after the UI is interactive so page load stays fast.
+            // Always pull fresh catalog from the API after instant cache paint so new products
+            // (e.g. POSaBit) appear on every page load without requiring Reset Cache.
             this._suppressActionSplash = true;
-            setTimeout(() => {
-                this.fetchAndUpdateAvailableTags()
-                    .catch(err => console.warn('Background tag sync after cache hydrate failed (non-critical):', err))
-                    .finally(() => { this._suppressActionSplash = false; });
-            }, 2500);
+            this.fetchAndUpdateAvailableTags()
+                .catch(err => console.warn('Background tag sync after cache hydrate failed (non-critical):', err))
+                .finally(() => { this._suppressActionSplash = false; });
 
             // Continue with rest of initialization (filters, etc.)
             this._continueInitWithoutSplash();
@@ -14945,7 +14981,7 @@ const TagManager = {
             setTimeout(() => {
                 const hasTags = this.state.tags && this.state.tags.length > 0;
                 const hasRenderedTags = document.getElementById('availableTags')?.querySelectorAll('.tag-item').length > 0;
-                if (!hasTags && !hasRenderedTags) {
+                if (!hasTags && !hasRenderedTags && !this._fetchingAvailableTags && !this._checkingExistingData) {
                     console.warn('⚠️ Tags not loaded after checkForExistingData, attempting direct fetch (background, suppress splash)...');
                     this._suppressActionSplash = true;
                     this.fetchAndUpdateAvailableTags().catch(e => {
@@ -21482,14 +21518,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Show splash screen immediately (but don't load tags yet - wait for store selection)
-    const alreadyHasTags = typeof TagManager !== 'undefined' &&
-        TagManager.state && Array.isArray(TagManager.state.tags) && TagManager.state.tags.length > 0;
-    if (alreadyHasTags) {
-        AppLoadingSplash.complete();
-    } else {
-        AppLoadingSplash.show();
-        AppLoadingSplash.updateProgress(10, 'Initializing application...');
-    }
+    AppLoadingSplash.show();
+    AppLoadingSplash.updateProgress(10, 'Initializing application...');
 
     // DO NOT call TagManager.init() here - it will be called after store selection
     // in templates/index.html via checkStoreRequired() callback

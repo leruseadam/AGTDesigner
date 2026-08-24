@@ -227,9 +227,18 @@ def _disk_cache_age_seconds(store_name: Optional[str] = None) -> Optional[float]
 def _schedule_background_refresh(store_name: Optional[str] = None) -> None:
     """Refresh the live catalog without blocking the current request."""
     cache_key = _store_slug(store_name)
+    lock_path = _DISK_CACHE_DIR / "posabit_refresh.lock"
     with _refresh_lock:
         if cache_key in _refresh_in_flight:
             return
+        try:
+            _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            if lock_path.exists() and (time.time() - lock_path.stat().st_mtime) < 120:
+                logger.info("POSaBit: skipping background refresh; another worker is already refreshing")
+                return
+            lock_path.write_text(str(os.getpid()), encoding="utf-8")
+        except Exception as lock_err:
+            logger.debug("POSaBit refresh lock skipped: %s", lock_err)
         _refresh_in_flight.add(cache_key)
 
     def _run():
@@ -242,6 +251,11 @@ def _schedule_background_refresh(store_name: Optional[str] = None) -> None:
         finally:
             with _refresh_lock:
                 _refresh_in_flight.discard(cache_key)
+            try:
+                if lock_path.exists():
+                    lock_path.unlink()
+            except Exception:
+                pass
 
     threading.Thread(target=_run, daemon=True, name=f"posabit-refresh-{cache_key}").start()
 
@@ -304,7 +318,15 @@ def _load_disk_cache(store_name: Optional[str] = None) -> Optional[List[Dict[str
             if age > _DISK_CACHE_TTL:
                 logger.info(f"POSaBit disk cache expired ({path.name}, {age:.0f}s old, TTL={_DISK_CACHE_TTL}s)")
                 continue
-            rows = _json.loads(path.read_text(encoding="utf-8"))
+            try:
+                rows = _json.loads(path.read_text(encoding="utf-8"))
+            except Exception as parse_err:
+                time.sleep(0.05)
+                try:
+                    rows = _json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    logger.warning(f"POSaBit disk cache load failed for {path.name}: {parse_err}")
+                    continue
             if not isinstance(rows, list) or not rows:
                 continue
             if _is_incomplete_product_cache(rows):
@@ -350,7 +372,9 @@ def _save_disk_cache(rows: List[Dict[str, Any]], store_name: Optional[str] = Non
             except Exception:
                 pass
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_json.dumps(rows, default=str), encoding="utf-8")
+        tmp_path = path.with_name(path.name + ".tmp")
+        tmp_path.write_text(_json.dumps(rows, default=str), encoding="utf-8")
+        os.replace(tmp_path, path)
         logger.info(f"POSaBit disk cache saved: {len(rows)} products for {_store_slug(store_name)}")
     except Exception as e:
         logger.warning(f"POSaBit disk cache save failed: {e}")
@@ -1447,15 +1471,13 @@ def _parse_thc_cbd(measure: Any) -> str:
 
 
 def is_posabit_configured() -> bool:
-    """True if POSaBit API token (or Order Pad token) is set and either menu feed key or venue-inventories mode (can use as product source)."""
+    """True if a POSaBit API token is set and a product source is available."""
     cfg = _get_config()
     if not cfg.get("effective_token"):
         return False
     if cfg.get("feed_key"):
         return True
-    if os.environ.get("POSABIT_USE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes"):
-        return True
-    return False
+    return _prefer_venue_inventories()
 
 
 def is_posabit_products_enabled() -> bool:

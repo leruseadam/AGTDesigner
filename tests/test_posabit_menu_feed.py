@@ -305,6 +305,26 @@ def test_posabit_store_feed_key_accepts_common_web_aliases(monkeypatch):
     assert cfg["effective_token"] == "demo-token"
 
 
+def test_posabit_configured_when_token_present_without_menu_feed_key(monkeypatch):
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.delenv("POSABIT_MENU_FEED_KEY", raising=False)
+    monkeypatch.delenv("POSABIT_MENU_FEED_KEY_BOTHELL", raising=False)
+    monkeypatch.delenv("POSABIT_PREFER_MENU_FEED", raising=False)
+    monkeypatch.delenv("POSABIT_USE_VENUE_INVENTORIES", raising=False)
+    assert posabit_client.is_posabit_configured() is True
+
+
+def test_posabit_disk_cache_save_is_atomic(tmp_path, monkeypatch):
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
+    rows = [{"Product Name*": f"SKU {i}", "Product Type*": "Flower"} for i in range(300)]
+    posabit_client._save_disk_cache(rows)
+    path = tmp_path / "posabit_products.json"
+    assert path.exists()
+    assert not (tmp_path / "posabit_products.json.tmp").exists()
+    loaded = posabit_client._json.loads(path.read_text(encoding="utf-8"))
+    assert len(loaded) == 300
+
+
 def test_posabit_venue_inventory_fetches_all_pages(monkeypatch):
     posabit_client._posabit_product_rows_cache.clear()
     posabit_client._posabit_product_rows_cache_time.clear()
