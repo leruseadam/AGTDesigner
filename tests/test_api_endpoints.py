@@ -108,6 +108,26 @@ class TestStatusEndpoint:
         config = config_response.get_json()
         assert config['data_source'] == 'excel'
 
+    def test_posabit_data_source_switch_uses_posabit_tags_with_excel_in_session(self, client, tmp_path):
+        excel_path = tmp_path / 'AGT_Bothell_test.xlsx'
+        excel_path.write_bytes(b'not really an excel file')
+
+        with client.session_transaction() as sess:
+            sess['selected_store'] = 'AGT_Bothell'
+            sess['file_path'] = str(excel_path)
+            sess['uploaded_filename'] = 'AGT_Bothell_test.xlsx'
+            sess['data_source'] = 'posabit'
+
+        with patch('src.core.data.posabit_client.is_posabit_configured', return_value=True), \
+             patch('src.core.data.posabit_client.is_posabit_products_enabled', return_value=False), \
+             patch('src.core.data.posabit_client.get_menu_feed_as_product_rows', return_value=[{'Product Name*': 'Live POS Item', 'Product Type*': 'Flower'}]):
+            response = client.get('/api/available-tags')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['source'] == 'posabit'
+        assert data['tags'][0]['Product Name*'] == 'Live POS Item'
+
     def test_status_endpoint_exists(self, client):
         """Test that status endpoint exists and returns 200."""
         response = client.get('/api/status')

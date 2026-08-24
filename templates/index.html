@@ -2429,6 +2429,56 @@
                 if (btn) { btn.disabled = false; btn.textContent = 'Verify connection'; }
               });
             };
+            window.switchToPosabitSource = function() {
+              var indicator = document.getElementById('dataSourceIndicator');
+              var barIndicator = document.getElementById('dataSourceIndicatorBar');
+              var links = [document.getElementById('dataSourceSettingsLink'), document.getElementById('dataSourceSettingsLinkBar')];
+              links.forEach(function(link) {
+                if (link) {
+                  link.disabled = true;
+                  link.classList.add('disabled');
+                }
+              });
+              return fetch('/api/posabit/data-source', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ source: 'posabit' })
+              })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                  if (!data || !data.success) {
+                    throw new Error((data && data.error) || 'Could not switch to POSaBit');
+                  }
+                  if (indicator) {
+                    indicator.textContent = 'POSaBit';
+                    indicator.style.color = '#4ade80';
+                  }
+                  if (barIndicator) {
+                    barIndicator.textContent = 'POSaBit';
+                    barIndicator.style.color = '#4ade80';
+                  }
+                  var cb = document.getElementById('posabitDataSource');
+                  if (cb) cb.checked = true;
+                  try {
+                    if (window.TagManager && typeof TagManager.clearAvailableTagsCache === 'function') {
+                      TagManager.clearAvailableTagsCache();
+                    }
+                  } catch (e) {}
+                  window.location.reload();
+                })
+                .catch(function(err) {
+                  alert(err && err.message ? err.message : 'Could not switch to POSaBit. Open Data & Analytics settings to verify POSaBit configuration.');
+                })
+                .finally(function() {
+                  links.forEach(function(link) {
+                    if (link) {
+                      link.disabled = false;
+                      link.classList.remove('disabled');
+                    }
+                  });
+                });
+            };
             window.refreshPosabitMenu = function(btn) {
               var statusEl = document.getElementById('posabitStatusText');
               if (statusEl) statusEl.textContent = 'Refreshing…';
@@ -2526,18 +2576,25 @@
                     barIndicator.textContent = data.data_source === 'posabit' ? 'POSaBit' : 'Excel';
                     barIndicator.style.color = data.data_source === 'posabit' ? '#4ade80' : '#a084e8';
                   }
-                  function openPosabitSettings(e) {
+                  function handleDataSourceLinkClick(e) {
                     if (e) e.preventDefault();
-                    if (typeof showProductDatabaseManager === 'function') showProductDatabaseManager({ scrollToPosabit: true });
+                    var current = (indicator && indicator.textContent) ? indicator.textContent.trim() : 'Excel';
+                    if (current.toLowerCase() === 'excel' && typeof window.switchToPosabitSource === 'function') {
+                      window.switchToPosabitSource();
+                      return;
+                    }
+                    if (typeof showProductDatabaseManager === 'function') {
+                      showProductDatabaseManager({ scrollToPosabit: true });
+                    }
                   }
                   if (link && !link.dataset.listenerAdded) {
                     link.dataset.listenerAdded = '1';
-                    link.addEventListener('click', openPosabitSettings);
+                    link.addEventListener('click', handleDataSourceLinkClick);
                   }
                   var linkBar = document.getElementById('dataSourceSettingsLinkBar');
                   if (linkBar && !linkBar.dataset.listenerAdded) {
                     linkBar.dataset.listenerAdded = '1';
-                    linkBar.addEventListener('click', openPosabitSettings);
+                    linkBar.addEventListener('click', handleDataSourceLinkClick);
                   }
                 })
                 .catch(() => {
@@ -2547,19 +2604,26 @@
                   if (indicator) indicator.textContent = 'Excel';
                   const barIndicator = document.getElementById('dataSourceIndicatorBar');
                   if (barIndicator) barIndicator.textContent = 'Excel';
-                  function openPosabitSettings(e) {
+                  function handleDataSourceLinkClick(e) {
                     if (e) e.preventDefault();
-                    if (typeof showProductDatabaseManager === 'function') showProductDatabaseManager({ scrollToPosabit: true });
+                    var current = (indicator && indicator.textContent) ? indicator.textContent.trim() : 'Excel';
+                    if (current.toLowerCase() === 'excel' && typeof window.switchToPosabitSource === 'function') {
+                      window.switchToPosabitSource();
+                      return;
+                    }
+                    if (typeof showProductDatabaseManager === 'function') {
+                      showProductDatabaseManager({ scrollToPosabit: true });
+                    }
                   }
                   const link = document.getElementById('dataSourceSettingsLink');
                   if (link && !link.dataset.listenerAdded) {
                     link.dataset.listenerAdded = '1';
-                    link.addEventListener('click', openPosabitSettings);
+                    link.addEventListener('click', handleDataSourceLinkClick);
                   }
                   const linkBar = document.getElementById('dataSourceSettingsLinkBar');
                   if (linkBar && !linkBar.dataset.listenerAdded) {
                     linkBar.dataset.listenerAdded = '1';
-                    linkBar.addEventListener('click', openPosabitSettings);
+                    linkBar.addEventListener('click', handleDataSourceLinkClick);
                   }
                 });
             }
@@ -6020,7 +6084,7 @@
                     <div class="d-flex align-items-center gap-2" id="dataSourceIndicatorWrap">
                       <span class="store-label">Data source:</span>
                       <span id="dataSourceIndicator" class="current-store-display" style="color: #a084e8;">Excel</span>
-                      <a href="#" class="btn btn-sm btn-outline-secondary" id="dataSourceSettingsLink" title="POSaBit API &amp; Excel/API source">API / POSaBit</a>
+                      <a href="#" class="btn btn-sm btn-outline-secondary" id="dataSourceSettingsLink" title="Switch to POSaBit menu (opens settings when already on POSaBit)">API / POSaBit</a>
                     </div>
                   </div>
                 </div>

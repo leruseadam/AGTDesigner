@@ -6149,8 +6149,13 @@ def api_posabit_data_source():
         if source not in ('posabit', 'excel'):
             return jsonify({'error': 'source must be "posabit" or "excel"'}), 400
         session['data_source'] = source
-        if source == 'posabit':
-            session.pop('default_file_loaded', None)
+        session.pop('default_file_loaded', None)
+        try:
+            clear_available_tags_cache(reason=f'data_source_switch_{source}')
+            cache.delete(get_session_cache_key('available_tags'))
+            cache.delete(get_session_cache_key('selected_tags'))
+        except Exception as cache_err:
+            logging.debug(f"Could not clear tag caches on data-source switch: {cache_err}")
         session.modified = True
         return jsonify({'success': True, 'data_source': source})
     except Exception as e:
@@ -12933,6 +12938,13 @@ def get_available_tags():
                     }), 200
             except Exception as posabit_err:
                 logging.warning(f"POSaBit source override in available-tags failed: {posabit_err}")
+            return jsonify({
+                'tags': [],
+                'total_count': 0,
+                'source': 'posabit-loading',
+                'message': 'POSaBit inventory is loading or unavailable. Try Refresh menu in settings.',
+                'retry_after': 5
+            }), 200
         
         # CRITICAL: When explicitly asking for fresh data, clear caches up front
         # Do not clear cache on every prefer_db request; this caused repeated full rebuilds.
