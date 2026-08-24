@@ -128,6 +128,61 @@ class TestStatusEndpoint:
         assert data['source'] == 'posabit'
         assert data['tags'][0]['Product Name*'] == 'Live POS Item'
 
+    def test_switch_to_posabit_clears_excel_file_state(self, client, tmp_path):
+        """Switching back to POSaBit should clear the stale Excel upload from session state."""
+        excel_path = tmp_path / 'AGT_Bothell_test.xlsx'
+        excel_path.write_bytes(b'not really an excel file')
+
+        with client.session_transaction() as sess:
+            sess['selected_store'] = 'AGT_Bothell'
+            sess['file_path'] = str(excel_path)
+            sess['uploaded_filename'] = 'AGT_Bothell_test.xlsx'
+            sess['upload_timestamp'] = 12345
+            sess['data_source'] = 'excel'
+
+        with patch('src.core.data.posabit_client.is_posabit_configured', return_value=True), \
+             patch('src.core.data.posabit_client.is_posabit_products_enabled', return_value=False):
+            switch_response = client.post('/api/posabit/data-source', json={'source': 'posabit'})
+            current_response = client.get('/api/current-file')
+
+        assert switch_response.status_code == 200
+        assert switch_response.get_json()['success'] is True
+
+        with client.session_transaction() as sess:
+            assert sess['data_source'] == 'posabit'
+            assert sess.get('file_path') is None
+            assert sess.get('uploaded_filename') in (None, '')
+
+        current = current_response.get_json()
+        assert current['filename'] == 'POSaBit / API'
+        assert current['posabit_active'] is True
+        assert current['file_path'] is None
+
+    def test_posabit_source_falls_back_to_excel_when_posabit_is_not_configured(self, client, tmp_path):
+        """A stale POSaBit session value must not blank the app if the live POSaBit integration is missing."""
+        excel_path = tmp_path / 'AGT_Bothell_test.xlsx'
+        excel_path.write_bytes(b'not really an excel file')
+
+        with client.session_transaction() as sess:
+            sess['selected_store'] = 'AGT_Bothell'
+            sess['data_source'] = 'posabit'
+            sess['file_path'] = str(excel_path)
+            sess['uploaded_filename'] = 'AGT_Bothell_test.xlsx'
+            sess['upload_timestamp'] = 12345
+
+        with patch('src.core.data.posabit_client.is_posabit_configured', return_value=False), \
+             patch('src.core.data.posabit_client.is_posabit_products_enabled', return_value=False):
+            current_response = client.get('/api/current-file')
+            config_response = client.get('/api/posabit/config')
+
+        current = current_response.get_json()
+        assert current['filename'] == 'AGT_Bothell_test.xlsx'
+        assert current['file_path'] == str(excel_path)
+        assert current['posabit_active'] is False
+
+        config = config_response.get_json()
+        assert config['data_source'] == 'excel'
+
     def test_status_endpoint_exists(self, client):
         """Test that status endpoint exists and returns 200."""
         response = client.get('/api/status')

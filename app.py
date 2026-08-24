@@ -2639,6 +2639,30 @@ def _is_posabit_default_source():
         return False
 
 
+def _has_active_posabit_source() -> bool:
+    """True only when the runtime actually has a usable POSaBit configuration."""
+    try:
+        from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+        return bool(is_posabit_configured() or is_posabit_products_enabled())
+    except Exception:
+        return False
+
+
+def _effective_data_source_for_session() -> str:
+    """Return the effective source after honoring config validity and valid uploaded Excel files."""
+    selected_source = session.get('data_source', '')
+    session_file_path = session.get('file_path')
+    has_posabit = _has_active_posabit_source()
+
+    if selected_source == 'excel':
+        return 'excel'
+    if selected_source == 'posabit':
+        return 'posabit' if has_posabit else 'excel'
+    if session_file_path and os.path.exists(session_file_path):
+        return 'excel'
+    return 'posabit' if has_posabit else 'excel'
+
+
 def get_session_excel_processor():
     """Get ExcelProcessor instance for the current session with proper error handling."""
     session_file_path = None  # Initialize to prevent variable scoping errors
@@ -5894,19 +5918,16 @@ def get_current_file():
     try:
         selected_source = session.get('data_source', '')
         file_path = session.get('file_path')
+        has_posabit = _has_active_posabit_source()
 
-        posabit_selected = selected_source == 'posabit'
+        posabit_selected = selected_source == 'posabit' and has_posabit
         excel_selected = selected_source == 'excel'
 
         if not selected_source and file_path and os.path.exists(file_path):
             posabit_selected = False
             excel_selected = True
         elif not selected_source:
-            try:
-                from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
-                posabit_selected = bool(is_posabit_configured() or is_posabit_products_enabled())
-            except Exception:
-                posabit_selected = False
+            posabit_selected = has_posabit
 
         uploaded_filename = session.get('uploaded_filename', '')
         upload_timestamp = session.get('upload_timestamp', 0)
@@ -6120,19 +6141,26 @@ def api_posabit_config():
         )
         store_name = get_current_store_name(allow_fallback=True)
         cfg = _get_config(store_name)
-        has_session_file = bool(session.get('file_path'))
-        if not session.get('data_source') and has_session_file and os.path.exists(session.get('file_path')):
-            default_source = 'excel'
+        has_session_file = bool(session.get('file_path')) and os.path.exists(session.get('file_path'))
+        has_posabit = bool(is_posabit_configured() or is_posabit_products_enabled())
+
+        selected_source = session.get('data_source', '')
+        if selected_source == 'excel':
+            data_source = 'excel'
+        elif selected_source == 'posabit' and has_posabit:
+            data_source = 'posabit'
+        elif has_session_file:
+            data_source = 'excel'
         else:
-            default_source = 'posabit' if is_posabit_configured() else 'excel'
-        data_source = session.get('data_source') or default_source
+            data_source = 'posabit' if has_posabit else 'excel'
+
         return jsonify({
             'data_source': data_source,
             'use_products': is_posabit_products_enabled(),
             'use_manifests': is_posabit_manifests_enabled(),
             'has_token': bool(cfg.get('effective_token') or cfg.get('token')),
             'has_feed_key': bool(cfg.get('feed_key')),
-            'posabit_configured': is_posabit_configured(),
+            'posabit_configured': has_posabit,
         })
     except Exception as e:
         logging.warning(f"POSaBit config: {e}")
@@ -6148,14 +6176,25 @@ def api_posabit_data_source():
         source = data.get('source', '')
         if source not in ('posabit', 'excel'):
             return jsonify({'error': 'source must be "posabit" or "excel"'}), 400
-        session['data_source'] = source
-        session.pop('default_file_loaded', None)
+
+        if source == 'posabit':
+            session.pop('file_path', None)
+            session.pop('uploaded_filename', None)
+            session.pop('upload_timestamp', None)
+            session.pop('file_store', None)
+            session.pop('default_file_loaded', None)
+            session.pop('lineage_update_timestamp', None)
+            session['data_source'] = 'posabit'
+        else:
+            session['data_source'] = 'excel'
+
         try:
             clear_available_tags_cache(reason=f'data_source_switch_{source}')
             cache.delete(get_session_cache_key('available_tags'))
             cache.delete(get_session_cache_key('selected_tags'))
         except Exception as cache_err:
             logging.debug(f"Could not clear tag caches on data-source switch: {cache_err}")
+
         session.modified = True
         return jsonify({'success': True, 'data_source': source})
     except Exception as e:

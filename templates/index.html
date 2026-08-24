@@ -2429,10 +2429,14 @@
                 if (btn) { btn.disabled = false; btn.textContent = 'Verify connection'; }
               });
             };
-            window.switchToPosabitSource = function() {
+            window.switchDataSource = function(source) {
+              if (source !== 'posabit' && source !== 'excel') {
+                return Promise.reject(new Error('Invalid data source'));
+              }
               var indicator = document.getElementById('dataSourceIndicator');
               var barIndicator = document.getElementById('dataSourceIndicatorBar');
               var links = [document.getElementById('dataSourceSettingsLink'), document.getElementById('dataSourceSettingsLinkBar')];
+              var label = source === 'posabit' ? 'POSaBit' : 'Excel';
               links.forEach(function(link) {
                 if (link) {
                   link.disabled = true;
@@ -2443,23 +2447,23 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
-                body: JSON.stringify({ source: 'posabit' })
+                body: JSON.stringify({ source: source })
               })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                   if (!data || !data.success) {
-                    throw new Error((data && data.error) || 'Could not switch to POSaBit');
+                    throw new Error((data && data.error) || ('Could not switch to ' + label));
                   }
                   if (indicator) {
-                    indicator.textContent = 'POSaBit';
-                    indicator.style.color = '#4ade80';
+                    indicator.textContent = label;
+                    indicator.style.color = source === 'posabit' ? '#4ade80' : '#a084e8';
                   }
                   if (barIndicator) {
-                    barIndicator.textContent = 'POSaBit';
-                    barIndicator.style.color = '#4ade80';
+                    barIndicator.textContent = label;
+                    barIndicator.style.color = source === 'posabit' ? '#4ade80' : '#a084e8';
                   }
                   var cb = document.getElementById('posabitDataSource');
-                  if (cb) cb.checked = true;
+                  if (cb) cb.checked = source === 'posabit';
                   try {
                     if (window.TagManager && typeof TagManager.clearAvailableTagsCache === 'function') {
                       TagManager.clearAvailableTagsCache();
@@ -2468,7 +2472,7 @@
                   window.location.reload();
                 })
                 .catch(function(err) {
-                  alert(err && err.message ? err.message : 'Could not switch to POSaBit. Open Data & Analytics settings to verify POSaBit configuration.');
+                  alert(err && err.message ? err.message : ('Could not switch to ' + label + '.'));
                 })
                 .finally(function() {
                   links.forEach(function(link) {
@@ -2478,6 +2482,15 @@
                     }
                   });
                 });
+            };
+            window.switchToPosabitSource = function() {
+              return window.switchDataSource('posabit');
+            };
+            window.toggleDataSource = function() {
+              var indicator = document.getElementById('dataSourceIndicator');
+              var current = (indicator && indicator.textContent) ? indicator.textContent.trim() : 'Excel';
+              var next = current.toLowerCase() === 'excel' ? 'posabit' : 'excel';
+              return window.switchDataSource(next);
             };
             window.refreshPosabitMenu = function(btn) {
               var statusEl = document.getElementById('posabitStatusText');
@@ -2576,25 +2589,22 @@
                     barIndicator.textContent = data.data_source === 'posabit' ? 'POSaBit' : 'Excel';
                     barIndicator.style.color = data.data_source === 'posabit' ? '#4ade80' : '#a084e8';
                   }
-                  function handleDataSourceLinkClick(e) {
-                    if (e) e.preventDefault();
-                    var current = (indicator && indicator.textContent) ? indicator.textContent.trim() : 'Excel';
-                    if (current.toLowerCase() === 'excel' && typeof window.switchToPosabitSource === 'function') {
-                      window.switchToPosabitSource();
-                      return;
-                    }
-                    if (typeof showProductDatabaseManager === 'function') {
-                      showProductDatabaseManager({ scrollToPosabit: true });
-                    }
-                  }
-                  if (link && !link.dataset.listenerAdded) {
-                    link.dataset.listenerAdded = '1';
-                    link.addEventListener('click', handleDataSourceLinkClick);
+                  if (link) {
+                    link.onclick = function(e) {
+                      if (e) e.preventDefault();
+                      if (typeof window.toggleDataSource === 'function') {
+                        window.toggleDataSource();
+                      }
+                    };
                   }
                   var linkBar = document.getElementById('dataSourceSettingsLinkBar');
-                  if (linkBar && !linkBar.dataset.listenerAdded) {
-                    linkBar.dataset.listenerAdded = '1';
-                    linkBar.addEventListener('click', handleDataSourceLinkClick);
+                  if (linkBar) {
+                    linkBar.onclick = function(e) {
+                      if (e) e.preventDefault();
+                      if (typeof window.toggleDataSource === 'function') {
+                        window.toggleDataSource();
+                      }
+                    };
                   }
                 })
                 .catch(() => {
@@ -2604,26 +2614,23 @@
                   if (indicator) indicator.textContent = 'Excel';
                   const barIndicator = document.getElementById('dataSourceIndicatorBar');
                   if (barIndicator) barIndicator.textContent = 'Excel';
-                  function handleDataSourceLinkClick(e) {
-                    if (e) e.preventDefault();
-                    var current = (indicator && indicator.textContent) ? indicator.textContent.trim() : 'Excel';
-                    if (current.toLowerCase() === 'excel' && typeof window.switchToPosabitSource === 'function') {
-                      window.switchToPosabitSource();
-                      return;
-                    }
-                    if (typeof showProductDatabaseManager === 'function') {
-                      showProductDatabaseManager({ scrollToPosabit: true });
-                    }
-                  }
                   const link = document.getElementById('dataSourceSettingsLink');
-                  if (link && !link.dataset.listenerAdded) {
-                    link.dataset.listenerAdded = '1';
-                    link.addEventListener('click', handleDataSourceLinkClick);
+                  if (link) {
+                    link.onclick = function(e) {
+                      if (e) e.preventDefault();
+                      if (typeof window.toggleDataSource === 'function') {
+                        window.toggleDataSource();
+                      }
+                    };
                   }
                   const linkBar = document.getElementById('dataSourceSettingsLinkBar');
-                  if (linkBar && !linkBar.dataset.listenerAdded) {
-                    linkBar.dataset.listenerAdded = '1';
-                    linkBar.addEventListener('click', handleDataSourceLinkClick);
+                  if (linkBar) {
+                    linkBar.onclick = function(e) {
+                      if (e) e.preventDefault();
+                      if (typeof window.toggleDataSource === 'function') {
+                        window.toggleDataSource();
+                      }
+                    };
                   }
                 });
             }
@@ -6084,7 +6091,7 @@
                     <div class="d-flex align-items-center gap-2" id="dataSourceIndicatorWrap">
                       <span class="store-label">Data source:</span>
                       <span id="dataSourceIndicator" class="current-store-display" style="color: #a084e8;">Excel</span>
-                      <a href="#" class="btn btn-sm btn-outline-secondary" id="dataSourceSettingsLink" title="Switch to POSaBit menu (opens settings when already on POSaBit)">API / POSaBit</a>
+                      <a href="#" class="btn btn-sm btn-outline-secondary" id="dataSourceSettingsLink" title="Switch between POSaBit and Excel" onclick="event.preventDefault(); if (typeof window.toggleDataSource === 'function') window.toggleDataSource();">API / POSaBit</a>
                     </div>
                   </div>
                 </div>
