@@ -873,9 +873,16 @@ def get_menu_feed_as_product_rows(
 
     cfg = _get_config(store_name)
     tok = (token or cfg.get("effective_token") or cfg["token"]).strip()
+    force_venue_inventories = os.environ.get("POSABIT_FORCE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes")
     use_venue_inventories = os.environ.get("POSABIT_USE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes")
+    key = (feed_key or cfg["feed_key"]).strip()
 
-    if use_venue_inventories:
+    # Prefer the menu feed when a valid feed key is configured. The venue inventory API is a
+    # fallback when the menu feed key is missing or intentionally forced via env for a special case.
+    if key and tok and not force_venue_inventories:
+        use_venue_inventories = False
+
+    if use_venue_inventories and not key:
         rows = get_venue_inventories_as_product_rows(token)
         if rows:
             _posabit_product_rows_cache[cache_key] = rows
@@ -884,7 +891,6 @@ def get_menu_feed_as_product_rows(
             return rows
         logger.warning("POSaBit venue inventories returned 0 products; trying menu feed as fallback")
 
-    key = (feed_key or cfg["feed_key"]).strip()
     if not key or not tok:
         if use_venue_inventories:
             logger.warning("POSaBit: venue inventories had 0 products and menu feed key/token missing")
