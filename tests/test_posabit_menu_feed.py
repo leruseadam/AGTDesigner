@@ -41,16 +41,38 @@ def test_available_tags_prefers_live_posabit_feed_over_stale_cache(client, monke
     assert data['tags'][0]['Product Name*'] == 'Fresh Item'
 
 
-def test_posabit_prefers_menu_feed_over_venue_inventory_when_feed_key_exists(monkeypatch):
+def test_posabit_use_venue_inventories_when_env_set(monkeypatch):
     posabit_client._posabit_product_rows_cache.clear()
     posabit_client._posabit_product_rows_cache_time.clear()
     monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
     monkeypatch.setenv("POSABIT_MENU_FEED_KEY_BOTHELL", "feed-bothell")
     monkeypatch.setenv("POSABIT_USE_VENUE_INVENTORIES", "1")
     monkeypatch.delenv("POSABIT_FORCE_VENUE_INVENTORIES", raising=False)
+    monkeypatch.delenv("POSABIT_PREFER_MENU_FEED", raising=False)
+
+    monkeypatch.setattr(
+        "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
+        lambda token=None: [{"Product Name*": "inventory item"}],
+    )
+    monkeypatch.setattr(
+        "src.core.data.posabit_client._http_get",
+        lambda *args, **kwargs: {"menu_feed": {"menu_groups": []}},
+    )
+
+    rows = get_menu_feed_as_product_rows(store_name="AGT_Bothell")
+    assert len(rows) == 1
+    assert rows[0]["Product Name*"] == "inventory item"
+
+
+def test_posabit_upgrades_small_menu_feed_to_venue_inventory(monkeypatch):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
+    monkeypatch.delenv("POSABIT_USE_VENUE_INVENTORIES", raising=False)
+    monkeypatch.delenv("POSABIT_PREFER_MENU_FEED", raising=False)
 
     def fake_http_get(url, token, timeout=30, query_params=None):
-        assert url.endswith("/feed-bothell") or "/v2/venue/inventories" in url
         return {
             "menu_feed": {
                 "menu_groups": [{
@@ -58,14 +80,51 @@ def test_posabit_prefers_menu_feed_over_venue_inventory_when_feed_key_exists(mon
                     "menu_items": [{
                         "name": "Menu item 1",
                         "state": "active",
-                        "prices": [{"price": 1999}],
+                        "prices": [{"price_cents": 1999, "unit": "1", "unit_type": "g"}],
+                    }],
+                }]
+            }
+        }
+
+    venue_rows = [{"Product Name*": f"SKU {i}", "Product Type*": "Flower"} for i in range(300)]
+    monkeypatch.setattr("src.core.data.posabit_client._http_get", fake_http_get)
+    monkeypatch.setattr(
+        "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
+        lambda token=None: venue_rows,
+    )
+
+    rows = get_menu_feed_as_product_rows(force_refresh=True)
+    assert len(rows) == 300
+    assert rows[0]["Product Name*"] == "SKU 0"
+
+
+def test_posabit_prefers_menu_feed_when_explicitly_requested(monkeypatch):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.setenv("POSABIT_MENU_FEED_KEY_BOTHELL", "feed-bothell")
+    monkeypatch.setenv("POSABIT_PREFER_MENU_FEED", "1")
+    monkeypatch.delenv("POSABIT_USE_VENUE_INVENTORIES", raising=False)
+
+    def fake_http_get(url, token, timeout=30, query_params=None):
+        return {
+            "menu_feed": {
+                "menu_groups": [{
+                    "name": "Featured",
+                    "menu_items": [{
+                        "name": "Menu item 1",
+                        "state": "active",
+                        "prices": [{"price_cents": 1999}],
                     }],
                 }]
             }
         }
 
     monkeypatch.setattr("src.core.data.posabit_client._http_get", fake_http_get)
-    monkeypatch.setattr("src.core.data.posabit_client.get_venue_inventories_as_product_rows", lambda token=None: [{"Product Name*": "inventory item"}])
+    monkeypatch.setattr(
+        "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
+        lambda token=None: [{"Product Name*": "inventory item"}],
+    )
 
     rows = get_menu_feed_as_product_rows(store_name="AGT_Bothell")
     assert len(rows) == 1

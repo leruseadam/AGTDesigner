@@ -22,8 +22,12 @@ Set these in your environment (e.g. `.env` or server config). **Do not commit se
 | `POSABIT_ORDER_PAD_TOKEN` | No | Order Pad integration token (from Settings > Integrations in app.posabit.com). When set, used for menu feed and venue inventories instead of `POSABIT_API_TOKEN`. |
 | `POSABIT_API_BASE_URL` | No | Base URL. Default: `https://app.posabit.com/api`. Use `https://staging-app.posabit.com/api` for staging. |
 | `POSABIT_MENU_FEED_KEY` | For products (menu feed) | Menu feed UUID. Omit if using venue inventories only. |
-| `POSABIT_USE_VENUE_INVENTORIES` | No | Set to `1`, `true`, or `yes` to load products from **GET /v2/venue/inventories** (no feed key required). If unset and menu feed returns 0 products, this is tried automatically as fallback. |
+| `POSABIT_USE_VENUE_INVENTORIES` | No | Set to `1`, `true`, or `yes` to load products from **GET /v2/venue/inventories** first (full inventory; recommended for label maker). |
+| `POSABIT_PREFER_MENU_FEED` | No | Set to `1`/`true` to keep menu-feed-only behavior (typically ~100–200 menu-listed items). |
+| `POSABIT_VENUE_INVENTORY_FALLBACK_THRESHOLD` | No | When menu feed returns fewer than this many rows (default `250`), auto-fetch venue inventories if larger. |
+| `POSABIT_MAX_PRODUCTS` | No | Max venue inventory rows to load (default `10000`; set `0` for no cap). |
 | `POSABIT_VENUE_INVENTORY_INCLUDE_INACTIVE` | No | When using venue inventories: set to `1`/`true` to include inactive SKUs. Default: active only. |
+| `POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY` | No | When using venue inventories: set to `1`/`true` to include SKUs with zero quantity on hand. Default: in-stock only. |
 | `USE_POSABIT_PRODUCTS` | No | Set to `1`, `true`, or `yes` to use POSaBit as the product source instead of Excel. |
 | `USE_POSABIT_MANIFESTS` | No | Set to `1`, `true`, or `yes` to allow loading manifests from POSaBit in the UI. |
 

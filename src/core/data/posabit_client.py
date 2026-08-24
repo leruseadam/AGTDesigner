@@ -818,11 +818,11 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
     except Exception:
         max_pages = 50
     # Safety/perf guard: venue inventories can be extremely large (tens of thousands of SKUs).
-    # To keep the UI responsive, stop once we've collected enough filtered rows.
+    # To keep the UI responsive, stop once we've collected enough filtered rows (0 = no cap).
     try:
-        max_rows = int(float(os.environ.get("POSABIT_MAX_PRODUCTS", "3500") or "3500"))
+        max_rows = int(float(os.environ.get("POSABIT_MAX_PRODUCTS", "10000") or "10000"))
     except Exception:
-        max_rows = 3500
+        max_rows = 10000
     include_inactive = os.environ.get("POSABIT_VENUE_INVENTORY_INCLUDE_INACTIVE", "").strip().lower() in ("1", "true", "yes")
     include_zero_qty = os.environ.get("POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY", "").strip().lower() in ("1", "true", "yes")
     while page <= max_pages:
@@ -851,33 +851,89 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
     return rows
 
 
+def _parse_menu_feed_response(data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert a POSaBit menu_feed JSON payload into app product rows."""
+    if not data:
+        return []
+    menu = data.get("menu_feed") or data
+    groups = menu.get("menu_groups") or []
+    if not groups and isinstance(menu, dict):
+        logger.warning(
+            "POSaBit menu feed: no menu_groups in response; top-level keys: %s; "
+            "ensure the menu feed in app.posabit.com uses the 'Active' product list and has categories with items.",
+            list(menu.keys())[:20],
+        )
+    rows: List[Dict[str, Any]] = []
+    for group in groups:
+        category_name = (group.get("name") or "").strip() or "Uncategorized"
+        items = group.get("menu_items") or []
+        for item in items:
+            if not _is_active_item(item):
+                continue
+            prices = item.get("prices") or []
+            if not prices:
+                rows.append(_menu_item_to_product_row(item, None, category_name))
+            else:
+                for p in prices:
+                    rows.append(_menu_item_to_product_row(item, p, category_name))
+    logger.info("POSaBit menu feed: loaded %d product rows", len(rows))
+    return rows
+
+
+def _venue_inventory_fallback_threshold() -> int:
+    try:
+        return int(float(os.environ.get("POSABIT_VENUE_INVENTORY_FALLBACK_THRESHOLD", "250") or "250"))
+    except Exception:
+        return 250
+
+
+def _maybe_upgrade_menu_feed_with_venue_inventory(
+    menu_rows: List[Dict[str, Any]],
+    token: Optional[str],
+) -> List[Dict[str, Any]]:
+    """
+    Menu feeds only include menu-listed items (often ~100-200 SKUs).
+    When the menu feed looks incomplete, pull the full venue inventory instead.
+    """
+    prefer_menu_feed = os.environ.get("POSABIT_PREFER_MENU_FEED", "").strip().lower() in ("1", "true", "yes")
+    if prefer_menu_feed:
+        return menu_rows
+    threshold = _venue_inventory_fallback_threshold()
+    if len(menu_rows) >= threshold:
+        return menu_rows
+    venue_rows = get_venue_inventories_as_product_rows(token)
+    if len(venue_rows) > len(menu_rows):
+        logger.info(
+            "POSaBit: menu feed had %d rows; using venue inventories (%d rows)",
+            len(menu_rows),
+            len(venue_rows),
+        )
+        return venue_rows
+    return menu_rows
+
+
 def _fetch_live_menu_feed_rows(
     feed_key: Optional[str] = None,
     token: Optional[str] = None,
     store_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Fetch product rows from POSaBit APIs (menu feed, with venue inventory fallback)."""
+    """Fetch product rows from POSaBit APIs (venue inventory and/or menu feed)."""
     cfg = _get_config(store_name)
     tok = (token or cfg.get("effective_token") or cfg["token"]).strip()
     force_venue_inventories = os.environ.get("POSABIT_FORCE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes")
     use_venue_inventories = os.environ.get("POSABIT_USE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes")
+    prefer_menu_feed = os.environ.get("POSABIT_PREFER_MENU_FEED", "").strip().lower() in ("1", "true", "yes")
     key = (feed_key or cfg["feed_key"]).strip()
 
-    # Prefer the menu feed when a valid feed key is configured. The venue inventory API is a
-    # fallback when the menu feed key is missing or intentionally forced via env for a special case.
-    if key and tok and not force_venue_inventories:
-        use_venue_inventories = False
-
-    if use_venue_inventories and not key:
+    if (use_venue_inventories or force_venue_inventories) and not prefer_menu_feed:
         rows = get_venue_inventories_as_product_rows(token)
         if rows:
             return rows
         logger.warning("POSaBit venue inventories returned 0 products; trying menu feed as fallback")
 
     if not key or not tok:
-        if use_venue_inventories:
-            logger.warning("POSaBit: venue inventories had 0 products and menu feed key/token missing")
-            return []
+        if use_venue_inventories or force_venue_inventories:
+            return get_venue_inventories_as_product_rows(token)
         logger.warning("POSaBit menu feed: missing POSABIT_MENU_FEED_KEY or POSABIT_API_TOKEN/POSABIT_ORDER_PAD_TOKEN")
         return []
 
@@ -896,38 +952,14 @@ def _fetch_live_menu_feed_rows(
         v2_url = f"{api_base}/{tok}/v2/menu_feeds/{key}"
         logger.info("POSaBit v1 menu feed returned 401; trying v2 venue-scoped menu feed")
         data = _http_get(v2_url, tok, query_params=query_params)
-    if not data:
-        return []
-
-    menu = data.get("menu_feed") or data
-    groups = menu.get("menu_groups") or []
-    if not groups and isinstance(menu, dict):
-        logger.warning(
-            "POSaBit menu feed: no menu_groups in response; top-level keys: %s; "
-            "ensure the menu feed in app.posabit.com uses the 'Active' product list and has categories with items.",
-            list(menu.keys())[:20],
-        )
-
-    rows: List[Dict[str, Any]] = []
-    for group in groups:
-        category_name = (group.get("name") or "").strip() or "Uncategorized"
-        items = group.get("menu_items") or []
-        for item in items:
-            if not _is_active_item(item):
-                continue
-            prices = item.get("prices") or []
-            if not prices:
-                rows.append(_menu_item_to_product_row(item, None, category_name))
-            else:
-                for p in prices:
-                    rows.append(_menu_item_to_product_row(item, p, category_name))
-    logger.info(f"POSaBit menu feed: loaded {len(rows)} product rows")
-    if len(rows) == 0:
+    rows = _parse_menu_feed_response(data)
+    if not rows:
         fallback = get_venue_inventories_as_product_rows(token)
         if fallback:
             logger.info("POSaBit: using venue inventories as fallback (menu feed had 0 products)")
-            rows = fallback
-    return rows
+            return fallback
+        return []
+    return _maybe_upgrade_menu_feed_with_venue_inventory(rows, token)
 
 
 def get_menu_feed_as_product_rows(
@@ -941,9 +973,10 @@ def get_menu_feed_as_product_rows(
     When store_name is set, uses that store's menu key (POSABIT_MENU_FEED_KEY_<STORE>) — no key displayed in UI.
     Uses one of two API connections:
     - Menu feed (default): GET /v1/menu_feeds/{feed_key} — requires POSABIT_MENU_FEED_KEY or per-store key.
-    - Venue inventories: GET /v2/venue/inventories — no feed key; uses venue API token only.
-    Set POSABIT_USE_VENUE_INVENTORIES=1 to use venue inventories instead of menu feed.
-    If menu feed returns 0 products, falls back to venue inventories automatically.
+    - Venue inventories: GET /v2/venue/inventories — full paginated inventory (thousands of SKUs).
+    Set POSABIT_USE_VENUE_INVENTORIES=1 to use venue inventories first.
+    When the menu feed returns fewer than POSABIT_VENUE_INVENTORY_FALLBACK_THRESHOLD rows (default 250),
+    venue inventories are fetched automatically and used if they contain more products.
     Live API is always preferred; disk cache is only used when the API is unavailable or empty.
     In-process results are cached per store for POSABIT_PRODUCTS_CACHE_TTL seconds (default 300).
     """
