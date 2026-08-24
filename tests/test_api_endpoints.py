@@ -42,6 +42,27 @@ def client():
 
 class TestStatusEndpoint:
     """Tests for /api/status endpoint."""
+
+    def test_posabit_source_ignores_excel_session_file(self, client, tmp_path):
+        """POSaBit source should win over any stale Excel session file."""
+        excel_path = tmp_path / 'AGT_Bothell_test.xlsx'
+        excel_path.write_bytes(b'not really an excel file')
+
+        with client.session_transaction() as sess:
+            sess['data_source'] = 'posabit'
+            sess['file_path'] = str(excel_path)
+            sess['uploaded_filename'] = 'AGT_Bothell_test.xlsx'
+
+        with patch('src.core.data.posabit_client.is_posabit_configured', return_value=True), \
+             patch('src.core.data.posabit_client.is_posabit_products_enabled', return_value=False):
+            response = client.get('/api/current-file')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['has_file'] is True
+        assert data['filename'] == 'POSaBit / API'
+        assert data['file_path'] is None
+        assert data['posabit_active'] is True
     
     def test_status_endpoint_exists(self, client):
         """Test that status endpoint exists and returns 200."""

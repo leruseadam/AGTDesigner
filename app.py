@@ -5873,83 +5873,100 @@ def upload_status():
 def get_current_file():
     """Get the current uploaded file information from session"""
     try:
+        selected_source = session.get('data_source', '')
+        posabit_selected = selected_source == 'posabit'
+        excel_selected = selected_source == 'excel'
+        if not selected_source:
+            try:
+                from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+                posabit_selected = bool(is_posabit_configured() or is_posabit_products_enabled())
+            except Exception:
+                posabit_selected = False
+
         file_path = session.get('file_path')
         uploaded_filename = session.get('uploaded_filename', '')
         upload_timestamp = session.get('upload_timestamp', 0)
-        
-        # If session doesn't have a file_path, try persisted .last_upload.json as a read-only fallback
-        if not file_path:
-            try:
-                persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
-                if os.path.exists(persistence_file):
-                    last_upload = _robust_load_persistent_json(persistence_file)
-                    if last_upload:
-                        candidate = _sanitize_persisted_path(last_upload.get('file_path'))
-                        if candidate and os.path.exists(candidate):
-                            file_path = os.path.normpath(candidate)
-                            uploaded_filename = last_upload.get('filename', uploaded_filename)
-                            upload_timestamp = last_upload.get('timestamp', upload_timestamp)
-                            logging.info(f"ℹ️ get_current_file: using persisted upload {file_path}")
-            except Exception as e:
-                logging.debug(f"get_current_file: could not read persisted upload: {e}")
 
-        # Check if file exists
-        file_exists = False
-        if file_path:
-            file_exists = os.path.exists(file_path)
-            if not file_exists:
-                # File doesn't exist, try to recover from uploads directory
-                # Look for the most recent file that matches the filename pattern
-                if uploaded_filename:
-                    try:
-                        uploads_dir = UPLOADS_DIR
-                        if os.path.exists(uploads_dir):
-                            # Find files matching the uploaded filename pattern
-                            import glob
-                            pattern = os.path.join(uploads_dir, f'*_{uploaded_filename}')
-                            matching_files = glob.glob(pattern)
-                            if matching_files:
-                                # Get the most recent file
-                                matching_files.sort(key=os.path.getmtime, reverse=True)
-                                recovered_file = matching_files[0]
-                                file_age = time.time() - os.path.getmtime(recovered_file)
-                                # Only recover if file is less than 2 hours old
-                                if file_age < 7200:
-                                    file_path = recovered_file
-                                    file_exists = True
-                                    # Restore session data
-                                    session['file_path'] = file_path
-                                    session['uploaded_filename'] = uploaded_filename
-                                    session['upload_timestamp'] = int(os.path.getmtime(recovered_file))
-                                    session.modified = True
-                                    logging.info(f"✅ RECOVERED file from disk: {file_path} (age: {file_age:.0f}s)")
-                                    
-                                    # CRITICAL: Force reload of the recovered file into processor
-                                    try:
-                                        processor = get_excel_processor()
-                                        if processor:
-                                            # Force reload by clearing the last loaded file
-                                            processor._last_loaded_file = None
-                                            success = processor.load_file(file_path)
-                                            if success:
-                                                processor._last_loaded_file = file_path
-                                                logging.info(f"✅ Successfully loaded recovered file into processor")
-                                            else:
-                                                logging.warning(f"⚠️  Failed to load recovered file into processor")
-                                    except Exception as load_error:
-                                        logging.warning(f"Error loading recovered file: {load_error}")
-                                else:
-                                    logging.info(f"File too old to recover: {recovered_file} (age: {file_age:.0f}s)")
-                    except Exception as recover_error:
-                        logging.warning(f"Error recovering file: {recover_error}")
-                
+        # If the user explicitly selected POSaBit, ignore any stale Excel file in the session.
+        if posabit_selected:
+            file_path = None
+            uploaded_filename = ''
+            upload_timestamp = 0
+            file_exists = False
+        else:
+            # If session doesn't have a file_path, try persisted .last_upload.json as a read-only fallback
+            if not file_path:
+                try:
+                    persistence_file = os.path.join(UPLOADS_DIR, '.last_upload.json')
+                    if os.path.exists(persistence_file):
+                        last_upload = _robust_load_persistent_json(persistence_file)
+                        if last_upload:
+                            candidate = _sanitize_persisted_path(last_upload.get('file_path'))
+                            if candidate and os.path.exists(candidate):
+                                file_path = os.path.normpath(candidate)
+                                uploaded_filename = last_upload.get('filename', uploaded_filename)
+                                upload_timestamp = last_upload.get('timestamp', upload_timestamp)
+                                logging.info(f"ℹ️ get_current_file: using persisted upload {file_path}")
+                except Exception as e:
+                    logging.debug(f"get_current_file: could not read persisted upload: {e}")
+
+            # Check if file exists
+            file_exists = False
+            if file_path:
+                file_exists = os.path.exists(file_path)
                 if not file_exists:
-                    # File doesn't exist and couldn't be recovered, clear session
-                    session.pop('file_path', None)
-                    session.pop('uploaded_filename', None)
-                    session.pop('upload_timestamp', None)
-                    logging.info(f"File from session no longer exists: {file_path}")
-        
+                    # File doesn't exist, try to recover from uploads directory
+                    # Look for the most recent file that matches the filename pattern
+                    if uploaded_filename:
+                        try:
+                            uploads_dir = UPLOADS_DIR
+                            if os.path.exists(uploads_dir):
+                                # Find files matching the uploaded filename pattern
+                                import glob
+                                pattern = os.path.join(uploads_dir, f'*_{uploaded_filename}')
+                                matching_files = glob.glob(pattern)
+                                if matching_files:
+                                    # Get the most recent file
+                                    matching_files.sort(key=os.path.getmtime, reverse=True)
+                                    recovered_file = matching_files[0]
+                                    file_age = time.time() - os.path.getmtime(recovered_file)
+                                    # Only recover if file is less than 2 hours old
+                                    if file_age < 7200:
+                                        file_path = recovered_file
+                                        file_exists = True
+                                        # Restore session data
+                                        session['file_path'] = file_path
+                                        session['uploaded_filename'] = uploaded_filename
+                                        session['upload_timestamp'] = int(os.path.getmtime(recovered_file))
+                                        session.modified = True
+                                        logging.info(f"✅ RECOVERED file from disk: {file_path} (age: {file_age:.0f}s)")
+                                        
+                                        # CRITICAL: Force reload of the recovered file into processor
+                                        try:
+                                            processor = get_excel_processor()
+                                            if processor:
+                                                # Force reload by clearing the last loaded file
+                                                processor._last_loaded_file = None
+                                                success = processor.load_file(file_path)
+                                                if success:
+                                                    processor._last_loaded_file = file_path
+                                                    logging.info(f"✅ Successfully loaded recovered file into processor")
+                                                else:
+                                                    logging.warning(f"⚠️  Failed to load recovered file into processor")
+                                        except Exception as load_error:
+                                            logging.warning(f"Error loading recovered file: {load_error}")
+                                    else:
+                                        logging.info(f"File too old to recover: {recovered_file} (age: {file_age:.0f}s)")
+                        except Exception as recover_error:
+                            logging.warning(f"Error recovering file: {recover_error}")
+                    
+                    if not file_exists:
+                        # File doesn't exist and couldn't be recovered, clear session
+                        session.pop('file_path', None)
+                        session.pop('uploaded_filename', None)
+                        session.pop('upload_timestamp', None)
+                        logging.info(f"File from session no longer exists: {file_path}")
+
         # Check if processor has data
         has_data = False
         row_count = 0
@@ -5961,7 +5978,7 @@ def get_current_file():
                     row_count = len(processor.df)
             except Exception as e:
                 logging.warning(f"Error checking processor data: {e}")
-        
+
         # If no Excel file, check if POSaBit is configured — treat as "has file" so UI loads tags
         posabit_active = False
         if not file_exists:
@@ -5970,6 +5987,15 @@ def get_current_file():
                 posabit_active = is_posabit_configured() or is_posabit_products_enabled()
             except Exception:
                 pass
+
+        # If the user selected POSaBit, force the UI to read the POSaBit source instead of a stale Excel file.
+        if posabit_selected and posabit_active:
+            file_exists = False
+            file_path = None
+            uploaded_filename = 'POSaBit / API'
+            upload_timestamp = 0
+            has_data = False
+            row_count = 0
 
         return jsonify({
             'success': True,
@@ -12809,6 +12835,11 @@ def get_available_tags():
     store_name = None
     cache_store_name = 'global'
     try:
+        from src.core.data.posabit_client import is_posabit_configured, is_posabit_products_enabled
+        selected_source = session.get('data_source', '')
+        default_source = 'posabit' if (is_posabit_configured() or is_posabit_products_enabled()) else 'excel'
+        effective_source = selected_source or default_source
+
         # Optional: respect nocache flag to bypass cached results
         nocache = request.args.get('nocache') in ('1', 'true', 'True')
         prefer_db = request.args.get('prefer_db') in ('1', 'true', 'True')
@@ -12818,6 +12849,48 @@ def get_available_tags():
             fast_load = True
         else:
             fast_load = fast_load_arg in ('1', 'true', 'True')
+
+        # If the user explicitly selected POSaBit, prefer the POSaBit product list over any stale Excel file.
+        if effective_source == 'posabit' and (is_posabit_configured() or is_posabit_products_enabled()):
+            try:
+                from src.core.data.posabit_client import get_cached_product_rows, get_menu_feed_as_product_rows
+                store_for_posabit = get_current_store_name(allow_fallback=True)
+                cached_rows = get_cached_product_rows(store_name=store_for_posabit)
+                if cached_rows:
+                    safe_posabit_tags = make_json_safe(_slim_tags(cached_rows))
+                    try:
+                        store_name_align = get_current_store_name(allow_fallback=True)
+                        safe_posabit_tags = _quick_align_tags_lineage(safe_posabit_tags, store_name_align)
+                    except Exception:
+                        pass
+                    safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
+                    return jsonify({
+                        'tags': safe_posabit_tags,
+                        'total_count': len(safe_posabit_tags),
+                        'source': 'posabit',
+                        'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
+                    }), 200
+
+                posabit_rows = get_menu_feed_as_product_rows(store_name=store_for_posabit)
+                if posabit_rows:
+                    safe_posabit_tags = make_json_safe(_slim_tags(posabit_rows))
+                    try:
+                        store_name_align = get_current_store_name(allow_fallback=True)
+                        safe_posabit_tags = _align_tags_with_db_lineage(
+                            safe_posabit_tags, store_name_align,
+                            skip_if_aligned=False, force_overwrite=True
+                        )
+                    except Exception:
+                        pass
+                    safe_posabit_tags = _enforce_nonclassic_lineage_rules(safe_posabit_tags)
+                    return jsonify({
+                        'tags': safe_posabit_tags,
+                        'total_count': len(safe_posabit_tags),
+                        'source': 'posabit',
+                        'message': f'Live POSaBit inventory ({len(safe_posabit_tags)} products)'
+                    }), 200
+            except Exception as posabit_err:
+                logging.warning(f"POSaBit source override in available-tags failed: {posabit_err}")
         
         # CRITICAL: When explicitly asking for fresh data, clear caches up front
         # Do not clear cache on every prefer_db request; this caused repeated full rebuilds.
