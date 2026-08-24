@@ -1,6 +1,7 @@
 """
 Comprehensive tests for API endpoints.
 """
+import io
 import pytest
 import json
 from unittest.mock import Mock, MagicMock, patch
@@ -64,6 +65,22 @@ class TestStatusEndpoint:
         assert data['file_path'] is None
         assert data['posabit_active'] is True
     
+    def test_excel_upload_sets_session_source_to_excel(self, client):
+        """An Excel upload should flip the session source back to Excel even when POSaBit is configured."""
+        with client.session_transaction() as sess:
+            sess['selected_store'] = 'AGT_Bothell'
+            sess['data_source'] = 'posabit'
+
+        response = client.post(
+            '/upload',
+            data={'file': (io.BytesIO(b'not really excel yet'), 'AGT_Bothell_test.xlsx')},
+            content_type='multipart/form-data',
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        with client.session_transaction() as sess:
+            assert sess['data_source'] == 'excel'
+
     def test_status_endpoint_exists(self, client):
         """Test that status endpoint exists and returns 200."""
         response = client.get('/api/status')

@@ -3713,6 +3713,7 @@ def upload_file():
         session['uploaded_filename'] = file.filename
         session['upload_timestamp'] = timestamp
         session['file_store'] = selected_store  # Store which store this file belongs to
+        session['data_source'] = 'excel'
         session.modified = True
         
         # CRITICAL: Force session save immediately

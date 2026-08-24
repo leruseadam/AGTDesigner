@@ -1,7 +1,10 @@
+import src.core.data.posabit_client as posabit_client
 from src.core.data.posabit_client import _get_config, _is_active_item, get_menu_feed_as_product_rows
 
 
 def test_posabit_prefers_menu_feed_over_venue_inventory_when_feed_key_exists(monkeypatch):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
     monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
     monkeypatch.setenv("POSABIT_MENU_FEED_KEY_BOTHELL", "feed-bothell")
     monkeypatch.setenv("POSABIT_USE_VENUE_INVENTORIES", "1")
@@ -47,6 +50,7 @@ def test_posabit_item_active_states_reject_known_inactive_values():
 
 def test_posabit_store_feed_key_accepts_common_web_aliases(monkeypatch):
     monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.delenv("POSABIT_ORDER_PAD_TOKEN", raising=False)
     monkeypatch.setenv("POSABIT_MENU_FEED_KEY_BOTHELL", "feed-bothell")
     monkeypatch.delenv("POSABIT_MENU_FEED_KEY", raising=False)
     monkeypatch.delenv("POSABIT_MENU_FEED_KEY_AGT_BOTHELL", raising=False)
