@@ -153,8 +153,12 @@ def test_posabit_falls_back_to_disk_when_live_api_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
     monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
 
+    import json
     disk_path = tmp_path / "posabit_products.json"
-    disk_path.write_text('[{"Product Name*": "Cached Item", "Product Type*": "Flower"}]', encoding="utf-8")
+    disk_path.write_text(
+        json.dumps([{"Product Name*": "Cached Item", "Product Type*": "Flower"}] * 300),
+        encoding="utf-8",
+    )
 
     def failing_http_get(url, token, timeout=30, query_params=None):
         raise ConnectionError("POSaBit unreachable")
@@ -162,7 +166,7 @@ def test_posabit_falls_back_to_disk_when_live_api_fails(monkeypatch, tmp_path):
     monkeypatch.setattr("src.core.data.posabit_client._http_get", failing_http_get)
 
     rows = get_menu_feed_as_product_rows(force_refresh=True)
-    assert len(rows) == 1
+    assert len(rows) == 300
     assert rows[0]["Product Name*"] == "Cached Item"
 
 
@@ -195,6 +199,28 @@ def test_posabit_prefers_live_api_over_disk_cache(monkeypatch, tmp_path):
     rows = get_menu_feed_as_product_rows(force_refresh=True)
     assert len(rows) == 1
     assert rows[0]["Product Name*"] == "Fresh Item"
+
+
+def test_posabit_ignores_small_disk_cache(monkeypatch, tmp_path):
+    posabit_client._posabit_product_rows_cache.clear()
+    posabit_client._posabit_product_rows_cache_time.clear()
+    monkeypatch.setenv("POSABIT_API_TOKEN", "demo-token")
+    monkeypatch.setenv("POSABIT_MENU_FEED_KEY", "feed-default")
+    monkeypatch.setattr(posabit_client, "_DISK_CACHE_DIR", tmp_path)
+
+    import json
+    disk_path = tmp_path / "posabit_products.json"
+    small_cache = [{"Product Name*": f"Old Menu Item {i}", "Product Type*": "Flower"} for i in range(127)]
+    disk_path.write_text(json.dumps(small_cache), encoding="utf-8")
+
+    venue_rows = [{"Product Name*": f"SKU {i}", "Product Type*": "Flower"} for i in range(400)]
+    monkeypatch.setattr(
+        "src.core.data.posabit_client.get_venue_inventories_as_product_rows",
+        lambda token=None: venue_rows,
+    )
+
+    rows = get_menu_feed_as_product_rows(force_refresh=True)
+    assert len(rows) == 400
 
 
 def test_posabit_store_feed_key_accepts_common_web_aliases(monkeypatch):

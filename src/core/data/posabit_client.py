@@ -178,6 +178,42 @@ def _disk_cache_path(store_name: Optional[str]) -> _pathlib.Path:
     return _DISK_CACHE_DIR / name
 
 
+def _prefer_menu_feed_only() -> bool:
+    return os.environ.get("POSABIT_PREFER_MENU_FEED", "").strip().lower() in ("1", "true", "yes")
+
+
+def _prefer_venue_inventories() -> bool:
+    """
+    Label Maker needs the full venue inventory (thousands of SKUs), not the menu feed (~100-200 items).
+    Default is venue inventories unless explicitly overridden.
+    """
+    if _prefer_menu_feed_only():
+        return False
+    use_venue = os.environ.get("POSABIT_USE_VENUE_INVENTORIES", "1").strip().lower()
+    if use_venue in ("0", "false", "no"):
+        return False
+    return True
+
+
+def _posabit_request_timeout(default: int = 30) -> int:
+    try:
+        env_timeout = os.environ.get("POSABIT_HTTP_TIMEOUT", "").strip()
+        if env_timeout:
+            return int(float(env_timeout))
+    except Exception:
+        pass
+    return default
+
+
+def _is_incomplete_product_cache(rows: Optional[List[Dict[str, Any]]]) -> bool:
+    """Menu-feed-sized caches (~127 items) are not valid full-inventory caches for this app."""
+    if not rows:
+        return True
+    if _prefer_menu_feed_only():
+        return False
+    return len(rows) < _venue_inventory_fallback_threshold()
+
+
 def _load_disk_cache(store_name: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Load POSaBit products from disk cache for this store if it exists and is fresh."""
     slug = _store_slug(store_name)
@@ -200,6 +236,13 @@ def _load_disk_cache(store_name: Optional[str] = None) -> Optional[List[Dict[str
             rows = _json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(rows, list) or not rows:
                 continue
+            if _is_incomplete_product_cache(rows):
+                logger.info(
+                    "POSaBit disk cache ignored: only %d products in %s (likely stale menu feed)",
+                    len(rows),
+                    path.name,
+                )
+                continue
             logger.info(
                 "POSaBit disk cache hit: %d products for %s via %s (%.0fs old)",
                 len(rows),
@@ -215,6 +258,12 @@ def _load_disk_cache(store_name: Optional[str] = None) -> Optional[List[Dict[str
 
 def _save_disk_cache(rows: List[Dict[str, Any]], store_name: Optional[str] = None) -> None:
     """Persist POSaBit products to disk cache for this store."""
+    if _is_incomplete_product_cache(rows):
+        logger.info(
+            "POSaBit disk cache not saved: only %d products (menu feed sized; waiting for full venue inventory)",
+            len(rows),
+        )
+        return
     path = _disk_cache_path(store_name)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -827,7 +876,7 @@ def get_venue_inventories_as_product_rows(token: Optional[str] = None) -> List[D
     include_zero_qty = os.environ.get("POSABIT_VENUE_INVENTORY_INCLUDE_ZERO_QUANTITY", "").strip().lower() in ("1", "true", "yes")
     while page <= max_pages:
         url = f"{url_template}?page={page}&per_page={per_page}"
-        data = _http_get(url, tok)
+        data = _http_get(url, tok, timeout=_posabit_request_timeout(120))
         if not data:
             break
         inventory = data.get("inventory") or []
@@ -920,19 +969,17 @@ def _fetch_live_menu_feed_rows(
     """Fetch product rows from POSaBit APIs (venue inventory and/or menu feed)."""
     cfg = _get_config(store_name)
     tok = (token or cfg.get("effective_token") or cfg["token"]).strip()
-    force_venue_inventories = os.environ.get("POSABIT_FORCE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes")
-    use_venue_inventories = os.environ.get("POSABIT_USE_VENUE_INVENTORIES", "").strip().lower() in ("1", "true", "yes")
-    prefer_menu_feed = os.environ.get("POSABIT_PREFER_MENU_FEED", "").strip().lower() in ("1", "true", "yes")
     key = (feed_key or cfg["feed_key"]).strip()
 
-    if (use_venue_inventories or force_venue_inventories) and not prefer_menu_feed:
+    if _prefer_venue_inventories():
         rows = get_venue_inventories_as_product_rows(token)
         if rows:
+            logger.info("POSaBit: loaded %d products from venue inventories", len(rows))
             return rows
         logger.warning("POSaBit venue inventories returned 0 products; trying menu feed as fallback")
 
     if not key or not tok:
-        if use_venue_inventories or force_venue_inventories:
+        if _prefer_venue_inventories():
             return get_venue_inventories_as_product_rows(token)
         logger.warning("POSaBit menu feed: missing POSABIT_MENU_FEED_KEY or POSABIT_API_TOKEN/POSABIT_ORDER_PAD_TOKEN")
         return []
@@ -974,9 +1021,8 @@ def get_menu_feed_as_product_rows(
     Uses one of two API connections:
     - Menu feed (default): GET /v1/menu_feeds/{feed_key} — requires POSABIT_MENU_FEED_KEY or per-store key.
     - Venue inventories: GET /v2/venue/inventories — full paginated inventory (thousands of SKUs).
-    Set POSABIT_USE_VENUE_INVENTORIES=1 to use venue inventories first.
-    When the menu feed returns fewer than POSABIT_VENUE_INVENTORY_FALLBACK_THRESHOLD rows (default 250),
-    venue inventories are fetched automatically and used if they contain more products.
+    Set POSABIT_PREFER_MENU_FEED=1 to use the menu feed only (~100-200 menu-listed items).
+    Venue inventories are used by default for the full product catalog.
     Live API is always preferred; disk cache is only used when the API is unavailable or empty.
     In-process results are cached per store for POSABIT_PRODUCTS_CACHE_TTL seconds (default 300).
     """
